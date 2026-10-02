@@ -109,7 +109,7 @@ export default function SmsSetup() {
 
                   {rights.canEdit && (
                     <div className="flex justify-end">
-                      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
+                      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
                         {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                         Save Configuration
                       </Button>
@@ -134,7 +134,7 @@ export default function SmsSetup() {
                 {form.isActive && isConfigured ? "Gateway Active" : form.isActive ? "Incomplete Config" : "Gateway Inactive"}
               </p>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
+            <p className="text-[0.6875rem] text-muted-foreground leading-relaxed">
               {form.isActive && isConfigured
                 ? `Using ${form.provider || "configured provider"} · Sender: ${form.senderId || "—"}`
                 : form.isActive
@@ -159,7 +159,7 @@ export default function SmsSetup() {
                 <span className="w-1.5 h-1.5 rounded-full bg-primary/50 shrink-0 mt-1.5" />
                 <div>
                   <p className="text-xs font-medium text-foreground">{name}</p>
-                  <p className="text-[11px] text-muted-foreground">{note}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">{note}</p>
                 </div>
               </div>
             ))}
@@ -178,7 +178,7 @@ export default function SmsSetup() {
                 "No spaces or special characters",
                 "Avoid generic words (PROMO, ALERT)",
               ].map((rule) => (
-                <li key={rule} className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                <li key={rule} className="flex items-start gap-1.5 text-[0.6875rem] text-muted-foreground">
                   <span className="text-primary mt-0.5">·</span> {rule}
                 </li>
               ))}

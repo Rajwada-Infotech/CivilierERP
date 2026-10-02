@@ -274,7 +274,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                 transition: "margin-left 250ms cubic-bezier(0.4, 0, 0.2, 1)",
               }}
             >
-              {/* Page-curve wrapper: 8px top gap + rounded-tl to mirror strip/sidebar shape */}
+              {/* Page-curve wrapper: 8px top gap + rounded-tl to mirror strip/sidebar shape.
+                  The inner content box clips sideways overflow (overflow-x: clip
+                  keeps position: sticky working) so an over-wide element can
+                  never push the whole page sideways under the fixed sidebars;
+                  wide tables scroll inside their own containers instead. */}
               <div
                 className={
                   !effectiveIsHome && !isMobile ? "pt-2 min-h-[calc(100vh-56px)]" : ""
@@ -283,8 +287,8 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                 <div
                   className={
                     !effectiveIsHome && !isMobile
-                      ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background"
-                      : "p-4 md:p-6 transition-opacity duration-300"
+                      ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background min-w-0 overflow-x-clip"
+                      : "p-4 md:p-6 transition-opacity duration-300 min-w-0 overflow-x-clip"
                   }
                   style={{ opacity: moduleSwitching ? 0 : 1 }}
                 >

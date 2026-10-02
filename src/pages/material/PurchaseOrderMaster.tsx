@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
+import { downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
 import { printStatusLabel } from "@/utils/printStatus";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
@@ -59,6 +60,7 @@ import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
 import { projectCompanyIds, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   Plus,
@@ -86,8 +88,10 @@ import {
   Truck,
   Link2,
   Printer,
+  FileDown,
   Receipt,
   ChevronDown,
+  ChevronRight,
   CalendarDays,
   FilePenLine,
   Package,
@@ -113,6 +117,8 @@ import {
 import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
 const PO_TEMPLATE_COLUMNS = [
@@ -376,7 +382,7 @@ const StatusChip: React.FC<{ status: string }> = ({ status }) => {
   const cfg = getStatusConfig(status);
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${cfg.cls}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold border ${cfg.cls}`}
     >
       {cfg.icon}
       {status}
@@ -472,6 +478,11 @@ const PurchaseOrderMaster: React.FC = () => {
   const [page, setPage] = useState(1);
   const limit = 10;
   const [poTypeFilter, setPoTypeFilter] = useState<string>(""); // "" = All
+  // Same collapsible-by-project pattern as Material Request's own list —
+  // stays at the top level rather than inside a conditionally-called
+  // helper, same Rules-of-Hooks reasoning as the other list-view state here.
+  const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Record<string, boolean>>({});
+  const [projectFilter, setProjectFilter] = useState<string>("");
 
   // ── Doc number state ──────────────────────────────────────────────────────
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
@@ -646,13 +657,14 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
-    queryKey: ["purchase-orders", page, limit, poTypeFilter],
+    queryKey: ["purchase-orders", page, limit, poTypeFilter, projectFilter],
     queryFn: () =>
       getPurchaseOrders({
         page,
         limit,
         poType: poTypeFilter || undefined,
         includeShortClosed: true,
+        projectId: projectFilter ? Number(projectFilter) : undefined,
       }),
   });
 
@@ -1544,6 +1556,196 @@ const PurchaseOrderMaster: React.FC = () => {
     );
   }, [listData, searchQuery]);
 
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: poApprovalTrails, isLoading: poApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "PurchaseOrders",
+    filteredList.map((r: any) => r._id),
+  );
+
+  // Grouped by Project, same collapsible pattern Material Request's own
+  // list uses — groups.set() on first appearance preserves the order rows
+  // arrive in, and the list is already newest-first (server sort), so a
+  // project's group lands wherever its most recently created PO would.
+  const groupedByProject = useMemo(() => {
+    const groups = new Map<string, { key: string; projectName: string | null; rows: any[] }>();
+    for (const r of filteredList) {
+      const key = r.projectName || "no-project";
+      if (!groups.has(key)) {
+        groups.set(key, { key, projectName: r.projectName || null, rows: [] });
+      }
+      groups.get(key)!.rows.push(r);
+    }
+    return Array.from(groups.values());
+  }, [filteredList]);
+
+  // Extracted from the DataTable JSX below so it can be rendered once per
+  // project group instead of duplicated — not memoized since it was
+  // recomputed every render as an inline literal before this too.
+  const poColumns = [
+    {
+      id: "poNumber",
+      accessorFn: (row: any) => row.poNumber || row.docNo,
+      header: "PO No",
+      size: 130,
+      cell: ({ row }: any) => {
+        const item = row.original;
+        return (
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+              {item.poNumber || item.docNo || "—"}
+            </span>
+            {item.poType === "WO_PO" && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                WO-PO
+              </span>
+            )}
+            {item.poType === "Direct" && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                Direct
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: "poDate",
+      accessorKey: "poDate",
+      header: "Date",
+      size: 90,
+      meta: { className: "hidden sm:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>
+      ),
+    },
+    {
+      id: "supplierName",
+      accessorKey: "supplierName",
+      header: "Supplier",
+      size: 130,
+      meta: { className: "hidden sm:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm font-medium">{String(getValue() || "—")}</span>
+      ),
+    },
+    {
+      id: "companyName",
+      accessorKey: "companyName",
+      header: "Company",
+      size: 120,
+      meta: { className: "hidden md:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
+      ),
+    },
+    {
+      id: "projectName",
+      accessorKey: "projectName",
+      header: "Project / Site",
+      size: 130,
+      meta: { className: "hidden lg:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
+      ),
+    },
+    {
+      id: "effectiveMRDocNo",
+      accessorKey: "effectiveMRDocNo",
+      header: "MR Ref",
+      size: 100,
+      meta: { className: "hidden lg:table-cell" },
+      cell: ({ getValue }: any) => {
+        const v = getValue() as string | null;
+        return v ? (
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-mono font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+            {v}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        );
+      },
+    },
+    {
+      id: "totalAmount",
+      accessorKey: "totalAmount",
+      header: "Amount",
+      size: 100,
+      meta: { className: "hidden sm:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm font-semibold">{fmt(getValue() as number)}</span>
+      ),
+    },
+    {
+      id: "status",
+      accessorKey: "status",
+      header: "Status",
+      size: 140,
+      meta: { className: "hidden sm:table-cell" },
+      cell: ({ row }: any) => (
+        <div className="flex flex-col items-start gap-1">
+          <ApprovalStatusChain
+            table="PurchaseOrders"
+            recordId={row.original._id}
+            fallback={<StatusChip status={row.original.status} />}
+            preloaded={poApprovalTrails.get(String(row.original._id)) ?? null}
+            preloadedLoading={poApprovalTrailsLoading}
+          />
+        </div>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      size: 120,
+      cell: ({ row }: any) => {
+        const item = row.original;
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <ApprovalActions
+              status={item.status}
+              recordId={item._id}
+              endpoint="/api/purchase-orders"
+              submitOnly
+              onSuccess={(action) => handleApprovalSuccess(item._id, action)}
+            />
+            <button data-row-view
+              onClick={async () => {
+                setViewingTab("details");
+                try {
+                  const full = await getPurchaseOrderById(item._id);
+                  setViewingPO(full);
+                } catch {
+                  setViewingPO(item);
+                }
+              }}
+              className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+              title="View details"
+            >
+              <Eye size={15} />
+            </button>
+            <button
+              onClick={() => handleGeneratePdf(item)}
+              className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+              title="Generate PDF"
+            >
+              <FileDown size={15} />
+            </button>
+            {rights.canDelete && (
+              <button
+                onClick={() => handleDelete(item._id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                title="Delete this order"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
+        );
+      },
+    },
+  ] as ColumnDef<any, unknown>[];
+
   // ── Computed totals ───────────────────────────────────────────────────────
   const { subtotal, totalCgst, totalSgst, totalIgst, totalTax, grandTotal } =
     useMemo(() => {
@@ -2222,6 +2424,109 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
     };
   };
 
+  // Downloads a .pdf for a PO, built from the same fields as
+  // handlePrintFromPreview above (Supplier/Company/Project, Order Items,
+  // tax breakdown, Remarks). `poIn` is whatever triggered this — a grid
+  // row (list query, no LineItems) or the already-fully-loaded preview
+  // panel (viewingPO, has LineItems/POItems) — so it always refetches the
+  // full record when LineItems/POItems isn't already present, the same
+  // way the Eye/view click above does, otherwise Order Items would be
+  // silently missing from a PDF generated straight from the grid.
+  const handleGeneratePdf = async (poIn: any) => {
+    const toastId = toast.loading("Generating PDF...");
+    let po = poIn;
+    const id = poIn._id ?? poIn.PurchaseOrderID ?? poIn.purchaseOrderId;
+    if (!Array.isArray(poIn.LineItems) && !Array.isArray(poIn.POItems) && id) {
+      try {
+        po = await getPurchaseOrderById(id);
+      } catch {
+        // fall back to whatever was passed in — PDF still generates,
+        // just without the Order Items section.
+      }
+    }
+
+    const supplierName = po.SupplierName ?? po.supplierName ?? "—";
+    const companyName = po.CompanyName ?? po.companyName ?? "—";
+    const projectName = po.ProjectName ?? po.projectName ?? "—";
+    const poNumber = po.PurchaseOrderNo ?? po.poNumber ?? "—";
+    const poDate = po.PODate ?? po.poDate ?? "";
+    const expectedDate = po.ExpectedDeliveryDate ?? "";
+    const poStatus = po.Status ?? po.status ?? "Draft";
+    const remarks = po.Remarks ?? po.remarks ?? "";
+    const payTerms = po.PaymentTerms ?? po.paymentTerms ?? "";
+
+    const lineItemsArr: any[] = Array.isArray(po.LineItems)
+      ? po.LineItems
+      : Array.isArray(po.POItems)
+        ? po.POItems
+        : [];
+
+    const itemFields = lineItemsArr.map((li: any, i: number) => {
+      const name = li.ItemName ?? li.itemName ?? li.Description ?? "—";
+      const qty = Number(li.Quantity ?? li.quantity ?? 0);
+      const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
+      const rate = Number(li.Rate ?? li.rate ?? 0);
+      const tax = Number(li.TaxPct ?? li.gstRate ?? li.tax ?? 0);
+      const amt = Number(li.LineAmount ?? li.amount ?? qty * rate);
+      return {
+        label: `${i + 1}. ${name}`,
+        value: `${qty.toLocaleString("en-IN")} ${unit} × ${fmt(rate)}${tax > 0 ? ` (+${tax}% GST)` : ""} = ${fmt(amt)}`,
+      };
+    });
+
+    const grandTotal = Number(po.TotalAmount ?? po.totalAmount ?? 0);
+    const subtotalVal = lineItemsArr.reduce(
+      (s: number, li: any) => s + Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0),
+      0,
+    );
+    let totalCgstVal = 0;
+    let totalSgstVal = 0;
+    let totalIgstVal = 0;
+    for (const li of lineItemsArr) {
+      const base = Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0);
+      totalCgstVal += (base * Number(li.CgstRate ?? li.cgstRate ?? 0)) / 100;
+      totalSgstVal += (base * Number(li.SgstRate ?? li.sgstRate ?? 0)) / 100;
+      totalIgstVal += (base * Number(li.IgstRate ?? li.igstRate ?? 0)) / 100;
+    }
+
+    const sections = [
+      {
+        title: "Overview",
+        fields: [
+          { label: "Supplier", value: supplierName },
+          { label: "Company", value: companyName },
+          { label: "Project / Site", value: projectName },
+          { label: "PO Date", value: poDate ? fmtDate(poDate) : "—" },
+          { label: "Expected Delivery", value: expectedDate ? fmtDate(expectedDate) : "—" },
+          { label: "Payment Terms", value: payTerms || "—" },
+        ],
+      },
+      ...(itemFields.length > 0 ? [{ title: `Order Items (${itemFields.length})`, fields: itemFields }] : []),
+      {
+        title: "Totals",
+        fields: [
+          { label: "Subtotal (excl. GST)", value: fmt(subtotalVal) },
+          ...(totalCgstVal > 0 ? [{ label: "CGST", value: fmt(totalCgstVal) }] : []),
+          ...(totalSgstVal > 0 ? [{ label: "SGST", value: fmt(totalSgstVal) }] : []),
+          ...(totalIgstVal > 0 ? [{ label: "IGST", value: fmt(totalIgstVal) }] : []),
+          { label: "Grand Total", value: fmt(grandTotal) },
+        ],
+      },
+      ...(remarks ? [{ title: "Remarks", fields: [{ label: "Remarks", value: remarks }] }] : []),
+    ];
+
+    downloadMasterPreviewPdf({
+      title: String(poNumber),
+      subtitle: "Purchase Order",
+      code: String(poNumber),
+      status: String(poStatus),
+      sections,
+      filename: `${String(poNumber).replace(/[^\w-]+/g, "_")}.pdf`,
+    })
+      .then(() => toast.success("PDF downloaded", { id: toastId }))
+      .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+  };
+
   // ── Auto-fetch details for preview pop-out ────────────────────────────────
   useEffect(() => {
     if (!viewingPO) {
@@ -2544,7 +2849,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? (
                   <Loader2Icon size={13} className="animate-spin" />
@@ -2558,7 +2863,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
               {rights.canCreate && (
                 <button
                   onClick={goToCreate}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
                 >
                   <Plus size={13} />
                   New Purchase Order
@@ -2579,17 +2884,34 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       {totalRecords} record{totalRecords !== 1 ? "s" : ""}
                     </p>
                   </div>
-                  <div className="relative w-full sm:w-64">
-                    <Search
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                    />
-                    <Input
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search PO number, supplier…"
-                      className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
-                    />
+                  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <div className="relative w-full sm:w-64">
+                      <Search
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                      <Input
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search PO number, supplier…"
+                        className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                      />
+                    </div>
+                    <select
+                      value={projectFilter}
+                      onChange={(e) => {
+                        setProjectFilter(e.target.value);
+                        setPage(1);
+                      }}
+                      className="h-9 w-full sm:w-48 px-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
+                    >
+                      <option value="">All projects</option>
+                      {allProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -2607,7 +2929,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       }}
                       className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                         poTypeFilter === tab.value
-                          ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm"
+                          ? "btn-module text-white border-transparent shadow-sm"
                           : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"
                       }`}
                     >
@@ -2618,163 +2940,53 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <DataTable
-                data={filteredList}
-                loading={isLoading}
-                searchable={false}
-                paginated={false}
-                emptyMessage="No purchase orders found. Click 'New PO' to create one."
-                columns={[
-                  {
-                    id: "poNumber",
-                    accessorFn: (row: any) => row.poNumber || row.docNo,
-                    header: "PO No",
-                    size: 130,
-                    cell: ({ row }: any) => {
-                      const item = row.original;
-                      return (
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                            {item.poNumber || item.docNo || "—"}
-                          </span>
-                          {item.poType === "WO_PO" && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                              WO-PO
-                            </span>
-                          )}
-                          {item.poType === "Direct" && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                              Direct
-                            </span>
-                          )}
-                        </div>
-                      );
-                    },
-                  },
-                  {
-                    id: "poDate",
-                    accessorKey: "poDate",
-                    header: "Date",
-                    size: 90,
-                    meta: { className: "hidden sm:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>
-                    ),
-                  },
-                  {
-                    id: "supplierName",
-                    accessorKey: "supplierName",
-                    header: "Supplier",
-                    size: 130,
-                    meta: { className: "hidden sm:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm font-medium">{String(getValue() || "—")}</span>
-                    ),
-                  },
-                  {
-                    id: "companyName",
-                    accessorKey: "companyName",
-                    header: "Company",
-                    size: 120,
-                    meta: { className: "hidden md:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
-                    ),
-                  },
-                  {
-                    id: "projectName",
-                    accessorKey: "projectName",
-                    header: "Project / Site",
-                    size: 130,
-                    meta: { className: "hidden lg:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
-                    ),
-                  },
-                  {
-                    id: "effectiveMRDocNo",
-                    accessorKey: "effectiveMRDocNo",
-                    header: "MR Ref",
-                    size: 100,
-                    meta: { className: "hidden lg:table-cell" },
-                    cell: ({ getValue }: any) => {
-                      const v = getValue() as string | null;
-                      return v ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-                          {v}
+              {isLoading ? (
+                <div className="flex items-center justify-center py-14 text-sm text-muted-foreground">
+                  Loading…
+                </div>
+              ) : filteredList.length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-10">
+                  No purchase orders found. Click 'New PO' to create one.
+                </p>
+              ) : (
+                groupedByProject.map((group) => {
+                  const collapsed = !!collapsedProjectGroups[group.key];
+                  return (
+                    <div key={group.key} className="border-b border-border last:border-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCollapsedProjectGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))
+                        }
+                        className="w-full flex items-center gap-2.5 px-4 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+                      >
+                        {collapsed ? (
+                          <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                        )}
+                        <Building2 size={13} className="text-primary shrink-0" />
+                        <span className="text-sm font-heading font-semibold text-foreground">
+                          {group.projectName || "No Project"}
                         </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      );
-                    },
-                  },
-                  {
-                    id: "totalAmount",
-                    accessorKey: "totalAmount",
-                    header: "Amount",
-                    size: 100,
-                    meta: { className: "hidden sm:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm font-semibold">{fmt(getValue() as number)}</span>
-                    ),
-                  },
-                  {
-                    id: "status",
-                    accessorKey: "status",
-                    header: "Status",
-                    size: 140,
-                    meta: { className: "hidden sm:table-cell" },
-                    cell: ({ row }: any) => (
-                      <div className="flex flex-col items-start gap-1">
-                        <ApprovalStatusChain table="PurchaseOrders" recordId={row.original._id} />
-                      </div>
-                    ),
-                  },
-                  {
-                    id: "actions",
-                    header: "Actions",
-                    size: 120,
-                    cell: ({ row }: any) => {
-                      const item = row.original;
-                      return (
-                        <div className="flex items-center justify-end gap-1">
-                          <ApprovalActions
-                            status={item.status}
-                            recordId={item._id}
-                            endpoint="/api/purchase-orders"
-                            submitOnly
-                            onSuccess={(action) => handleApprovalSuccess(item._id, action)}
-                          />
-                          <button
-                            onClick={async () => {
-                              setViewingTab("details");
-                              try {
-                                const full = await getPurchaseOrderById(item._id);
-                                setViewingPO(full);
-                              } catch {
-                                setViewingPO(item);
-                              }
-                            }}
-                            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
-                            title="View details"
-                          >
-                            <Eye size={15} />
-                          </button>
-                          {rights.canDelete && (
-                            <button
-                              onClick={() => handleDelete(item._id)}
-                              className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
-                              title="Delete this order"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    },
-                  },
-                ] as ColumnDef<any, unknown>[]}
-              />
+                        <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                          {group.rows.length} order{group.rows.length !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+                      {!collapsed && (
+                        <DataTable
+                          data={group.rows}
+                          searchable={false}
+                          paginated={false}
+                          emptyMessage="No purchase orders found."
+                          getRowId={(r: any) => String(r._id)}
+                          columns={poColumns}
+                        />
+                      )}
+                    </div>
+                  );
+                })
+              )}
               {/* Pagination */}
               <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
                 <span>
@@ -3012,7 +3224,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
 
         {/* ── PO Preview Modal ─────────────────────────────────────────────── */}
         {viewingPO && (
-          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 bw-modal-topmost">
+          <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 bw-modal-topmost">
             <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
               {/* Modal header */}
               <div className="sticky top-0 bg-card z-10 border-b border-border">
@@ -3029,7 +3241,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       <StatusChip status={viewingPO.Status} />
                     )}
                   </div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">
                     Purchase Order
                   </p>
                 </div>
@@ -3039,6 +3251,12 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
                   >
                     <Printer size={13} /><span className="hidden sm:inline">Print</span>
+                  </button>
+                  <button
+                    onClick={() => handleGeneratePdf(viewingPO)}
+                    className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+                  >
+                    <FileDown size={13} /><span className="hidden sm:inline">Generate PDF</span>
                   </button>
                   {rights.canEdit && viewingPO.Status !== "Short Closed" && (
                     <button
@@ -3051,7 +3269,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         setViewingPO(null);
                         if (item) goToEdit(item);
                       }}
-                      className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+                      className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold btn-module shadow-sm transition"
                     >
                       <FilePenLine size={13} /><span className="hidden sm:inline">Edit</span>
                     </button>
@@ -3089,7 +3307,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
               <div className="p-5 space-y-5">
                 {/* Order details grid */}
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
                     <FileText size={10} className="text-emerald-500" /> Order
                     Details
                   </p>
@@ -3170,7 +3388,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         key={label}
                         className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
                       >
-                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                        <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                           {label}
                         </p>
                         <p
@@ -3188,7 +3406,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     viewingPO.SourceWDDocNo) && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {(viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo) && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[0.625rem] font-semibold text-blue-600 dark:text-blue-400">
                           <Link2 size={9} /> MR: {viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo}
                           {!viewingPO.SourceMRDocNo && viewingPO.EffectiveMRDocNo && (
                             <span className="opacity-60 font-normal">(via Quotation)</span>
@@ -3196,12 +3414,12 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         </span>
                       )}
                       {viewingPO.SourceWODocNo && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-[10px] font-semibold text-purple-600 dark:text-purple-400">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-[0.625rem] font-semibold text-purple-600 dark:text-purple-400">
                           <Link2 size={9} /> WO: {viewingPO.SourceWODocNo}
                         </span>
                       )}
                       {viewingPO.SourceWDDocNo && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#ffe2021a] border border-amber-500/20 text-[0.625rem] font-semibold text-amber-600 dark:text-amber-400">
                           <Link2 size={9} /> WD: {viewingPO.SourceWDDocNo}
                         </span>
                       )}
@@ -3210,7 +3428,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   {/* Payment Terms */}
                   {(viewingPO.PaymentTerms ?? viewingPO.paymentTerms) && (
                     <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">
                         Payment Terms / T&C
                       </p>
                       <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
@@ -3239,7 +3457,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         <dl className="space-y-1.5 text-xs">
                           {viewingPOSupplier.LHeadAddress && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Address
                               </dt>
                               <dd className="text-foreground font-medium mt-0.5">
@@ -3249,7 +3467,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           )}
                           {viewingPOSupplier.LHeadContactPerson && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Contact
                               </dt>
                               <dd className="text-foreground font-medium mt-0.5">
@@ -3259,7 +3477,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           )}
                           {viewingPOSupplier.LHeadPhone && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Phone
                               </dt>
                               <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
@@ -3273,7 +3491,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           )}
                           {viewingPOSupplier.LHeadEmail && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Email
                               </dt>
                               <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
@@ -3287,10 +3505,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           )}
                           {viewingPOSupplier.LGST && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 GSTIN
                               </dt>
-                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                              <dd className="font-mono text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
                                 {viewingPOSupplier.LGST}
                               </dd>
                             </div>
@@ -3309,7 +3527,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           {(viewingPOCompany.address ||
                             viewingPOCompany.city) && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Address
                               </dt>
                               <dd className="text-foreground font-medium mt-0.5">
@@ -3326,7 +3544,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           )}
                           {viewingPOCompany.phone_number && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Phone
                               </dt>
                               <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
@@ -3340,7 +3558,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           )}
                           {viewingPOCompany.email && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Email
                               </dt>
                               <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
@@ -3354,10 +3572,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           )}
                           {viewingPOCompany.gst_no && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 GSTIN
                               </dt>
-                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                              <dd className="font-mono text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
                                 {viewingPOCompany.gst_no}
                               </dd>
                             </div>
@@ -3376,7 +3594,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           {(viewingPOProject.address ||
                             viewingPOProject.city) && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Delivery Address
                               </dt>
                               <dd className="text-foreground font-medium mt-0.5">
@@ -3394,7 +3612,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           )}
                           {viewingPOProject.phone_number && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 Phone
                               </dt>
                               <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1">
@@ -3408,10 +3626,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           )}
                           {viewingPOProject.gst_no && (
                             <div>
-                              <dt className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                                 GSTIN
                               </dt>
-                              <dd className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                              <dd className="font-mono text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
                                 {viewingPOProject.gst_no}
                               </dd>
                             </div>
@@ -3432,7 +3650,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   if (!lineItems.length) return null;
                   return (
                     <div>
-                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
                         <Package size={10} className="text-emerald-500" /> Order
                         Items ({lineItems.length})
                       </p>
@@ -3443,13 +3661,13 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         >
                           <thead className="bg-muted/40 border-b border-border">
                             <tr>
-                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Item / Description</th>
-                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
-                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left hidden sm:table-cell">Unit</th>
-                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Rate</th>
-                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">GST%</th>
-                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
-                              <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Received</th>
+                              <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">Item / Description</th>
+                              <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
+                              <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left hidden sm:table-cell">Unit</th>
+                              <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Rate</th>
+                              <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">GST%</th>
+                              <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
+                              <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Received</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border/50">
@@ -3503,7 +3721,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                 {/* Remarks */}
                 {(viewingPO.Remarks ?? viewingPO.remarks) && (
                   <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                       Remarks
                     </p>
                     <p className="text-xs text-foreground">
@@ -3518,7 +3736,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                 <div className="p-5 space-y-5">
                   {/* Dispatch status */}
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
                       <Truck size={10} className="text-emerald-500" /> Dispatch Status
                     </p>
                     {viewingPO.SupplierAcknowledged ? (
@@ -3529,13 +3747,13 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
                           <div>
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Supplied Date</p>
+                            <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Supplied Date</p>
                             <p className="text-sm font-medium text-foreground mt-0.5">
                               {viewingPO.SuppliedDate ? new Date(viewingPO.SuppliedDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                             </p>
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Challan Number</p>
+                            <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Challan Number</p>
                             <p className="text-sm font-medium text-foreground mt-0.5 font-mono">
                               {viewingPO.ChallanNumber || <span className="text-muted-foreground/60 font-sans italic">Not provided</span>}
                             </p>
@@ -3546,7 +3764,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             const delta = Math.round((e.getTime() - s.getTime()) / 86_400_000);
                             return (
                               <div>
-                                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Vs. Expected</p>
+                                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Vs. Expected</p>
                                 <p className={`text-sm font-medium mt-0.5 ${delta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
                                   {delta === 0 ? "On time" : delta > 0 ? `${delta}d early` : `${Math.abs(delta)}d late`}
                                 </p>
@@ -3564,7 +3782,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
 
                   {/* Chat log */}
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
                       <MessageCircle size={10} className="text-emerald-500" /> Conversation
                     </p>
                     <div className="rounded-xl border border-border overflow-hidden h-[420px] flex flex-col">
@@ -3581,7 +3799,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                 </div>
               )}
             </div>
-          </div>
+          </div></BodyPortal>
         )}
       </>
     );
@@ -3661,7 +3879,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         const item = listData.find((r) => r._id === editingId);
                         if (item) goToEdit(item);
                       }}
-                      className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-semibold transition shadow-sm"
+                      className="btn-module inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-semibold transition shadow-sm"
                     >
                       <FilePenLine size={14} /> Edit
                     </button>
@@ -3682,7 +3900,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             !isReadOnly && (
               <div className="rounded-xl border border-border bg-card p-3.5 shadow-sm">
                 <h3
-                  className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-2"
+                  className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-2"
                   title="Filter by company and project, then select an approved Material Request to auto-fill items and details."
                 >
                   <ClipboardList
@@ -3790,7 +4008,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             !isReadOnly && (
               <div className="rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-sm flex flex-wrap items-center gap-2">
                 <span
-                  className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 shrink-0"
+                  className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 shrink-0"
                   title="Enter a paid Sale Invoice doc number to link this PO to a Sale Invoice. The backend will validate that the invoice is fully paid before saving."
                 >
                   <Receipt size={11} className="text-blue-500" />
@@ -3966,7 +4184,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             {poDocNo}
                           </span>
                           {selectedFinYear && (
-                            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                            <span className="text-[0.625rem] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
                               FY {selectedFinYear}
                             </span>
                           )}
@@ -4029,7 +4247,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             {poDocNo}
                           </span>
                           {selectedFinYear && (
-                            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                            <span className="text-[0.625rem] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
                               FY {selectedFinYear}
                             </span>
                           )}
@@ -4185,8 +4403,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     size={13}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
-                  <input
-                    type="date"
+                  <DateInput
                     value={form.poDate}
                     onChange={(e) => setField("poDate", e.target.value)}
                     readOnly={isReadOnly}
@@ -4203,8 +4420,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     size={13}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
-                  <input
-                    type="date"
+                  <DateInput
                     value={form.expectedDate}
                     min={minExpectedDate || undefined}
                     onChange={(e) => setField("expectedDate", e.target.value)}
@@ -4213,7 +4429,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   />
                 </div>
                 {maxDaysOfSupply > 0 && (
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                     Earliest possible: {minExpectedDate} ({maxDaysOfSupply}-day supply lead time)
                   </p>
                 )}
@@ -4256,7 +4472,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   <dl className="space-y-2 text-sm">
                     {supplierDetails.LHeadAddress && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Address
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5">
@@ -4266,7 +4482,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {supplierDetails.LHeadContactPerson && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Contact Person
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
@@ -4277,7 +4493,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {supplierDetails.LHeadPhone && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Phone
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
@@ -4288,7 +4504,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {supplierDetails.LHeadEmail && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Email
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
@@ -4299,7 +4515,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {supplierDetails.LGST && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           GSTIN
                         </dt>
                         <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
@@ -4324,7 +4540,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   <dl className="space-y-2 text-sm">
                     {(companyDetails.address || companyDetails.city) && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Billing Address
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5">
@@ -4342,7 +4558,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {companyDetails.phone_number && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Phone
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
@@ -4353,7 +4569,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {companyDetails.email && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Email
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
@@ -4364,7 +4580,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {companyDetails.gst_no && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           GSTIN
                         </dt>
                         <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
@@ -4389,7 +4605,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   <dl className="space-y-2 text-sm">
                     {(projectDetails.address || projectDetails.city) && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Delivery Address
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5">
@@ -4407,7 +4623,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {projectDetails.phone_number && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Phone
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
@@ -4418,7 +4634,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {projectDetails.email && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           Email
                         </dt>
                         <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5">
@@ -4429,7 +4645,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     )}
                     {projectDetails.gst_no && (
                       <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                           GSTIN
                         </dt>
                         <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
@@ -4452,7 +4668,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   className="text-emerald-600 dark:text-emerald-400"
                 />
                 Item Cart
-                <span className="ml-1 inline-flex items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 min-w-[18px]">
+                <span className="ml-1 inline-flex items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.625rem] font-bold px-1.5 py-0.5 min-w-[18px]">
                   {lineItems.length}
                 </span>
               </h3>
@@ -4476,7 +4692,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             )}
 
             {hasMixedItemTypes && (
-              <div className="flex items-start gap-2 mx-5 mb-3 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-xs text-amber-700 dark:text-amber-400">
+              <div className="flex items-start gap-2 mx-5 mb-3 px-3 py-2.5 rounded-lg bg-[#ffe2021a] border border-amber-500/25 text-xs text-amber-700 dark:text-amber-400">
                 <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                 <span>
                   This cart mixes <strong>Goods</strong> and <strong>Service</strong> items — a PO can only be one or the other.
@@ -4486,7 +4702,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             )}
 
             {availableSupplyDays !== null && (
-              <p className="mx-5 mb-3 text-[11px] text-amber-600 dark:text-amber-400">
+              <p className="mx-5 mb-3 text-[0.6875rem] text-amber-600 dark:text-amber-400">
                 Only items deliverable within {availableSupplyDays} day{availableSupplyDays === 1 ? "" : "s"} are listed in the item picker.
               </p>
             )}
@@ -4498,28 +4714,28 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/10">
-                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-8">
+                    <th className="px-3 py-2.5 text-left text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider w-8">
                       #
                     </th>
-                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider min-w-[180px]">
+                    <th className="px-3 py-2.5 text-left text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider min-w-[180px]">
                       Item
                     </th>
-                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider min-w-[200px]">
+                    <th className="px-3 py-2.5 text-left text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider min-w-[200px]">
                       Description
                     </th>
-                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-24">
+                    <th className="px-3 py-2.5 text-left text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider w-24">
                       Qty
                     </th>
-                    <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-32">
+                    <th className="px-3 py-2.5 text-left text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider w-32">
                       UOM
                     </th>
-                    <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
+                    <th className="px-3 py-2.5 text-right text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider w-28">
                       Rate (₹)
                     </th>
-                    <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-32">
+                    <th className="px-3 py-2.5 text-center text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider w-32">
                       GST %
                     </th>
-                    <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
+                    <th className="px-3 py-2.5 text-right text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider w-28">
                       Amount (₹)
                     </th>
                     {!isReadOnly && <th className="px-3 py-2.5 w-10" />}
@@ -4603,7 +4819,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             />
                             {li.mrPendingQty != null && (
                               <p
-                                className={`mt-1 pb-0.5 text-[10px] leading-normal whitespace-nowrap overflow-hidden text-ellipsis ${li.quantity - li.mrPendingQty > 0.0001 ? "text-red-500" : "text-muted-foreground"}`}
+                                className={`mt-1 pb-0.5 text-[0.625rem] leading-normal whitespace-nowrap overflow-hidden text-ellipsis ${li.quantity - li.mrPendingQty > 0.0001 ? "text-red-500" : "text-muted-foreground"}`}
                               >
                                 {Math.max(0, li.mrPendingQty - li.quantity)} remaining MR
                               </p>
@@ -4648,7 +4864,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                 }
                                 if (others.length === 0) return null;
                                 return (
-                                  <p className="text-[10px] text-muted-foreground text-right mt-1">
+                                  <p className="text-[0.625rem] text-muted-foreground text-right mt-1">
                                     ≈{" "}
                                     {others
                                       .map(
@@ -4822,19 +5038,19 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       <td className="px-3 py-2 text-center">
                         {li.gstRate > 0 ? (
                           <div className="flex flex-col items-center gap-0.5">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.6875rem] font-semibold">
                               {li.gstRate}%
                             </span>
                             {li.igstRate > 0 ? (
-                              <span className="text-[10px] text-muted-foreground font-medium">
+                              <span className="text-[0.625rem] text-muted-foreground font-medium">
                                 IGST
                               </span>
                             ) : (
                               <>
-                                <span className="text-[10px] text-muted-foreground font-medium">
+                                <span className="text-[0.625rem] text-muted-foreground font-medium">
                                   CGST {li.cgstRate}%
                                 </span>
-                                <span className="text-[10px] text-muted-foreground font-medium">
+                                <span className="text-[0.625rem] text-muted-foreground font-medium">
                                   SGST {li.sgstRate}%
                                 </span>
                               </>
@@ -4860,7 +5076,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           })}
                         </span>
                         {li.taxAmount > 0 && (
-                          <span className="block text-[10px] text-muted-foreground font-normal">
+                          <span className="block text-[0.625rem] text-muted-foreground font-normal">
                             +₹
                             {li.taxAmount.toLocaleString("en-IN", {
                               minimumFractionDigits: 2,
@@ -4956,14 +5172,14 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   {tcDropdownOpen && (
                     <>
                       {/* Backdrop */}
-                      <div
+                      <BodyPortal><div
                         className="fixed inset-0 z-10"
                         onClick={() => setTcDropdownOpen(false)}
-                      />
+                      /></BodyPortal>
                       {/* Dropdown */}
                       <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
                         <div className="px-3 py-2 border-b border-border">
-                          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider">
                             Select Terms &amp; Conditions
                           </p>
                         </div>
@@ -5003,7 +5219,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                                     <span className="block text-sm font-medium text-foreground truncate">
                                       {tc.name}
                                     </span>
-                                    <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                    <span className="block text-[0.6875rem] text-muted-foreground truncate mt-0.5">
                                       {tc.terms}
                                     </span>
                                   </span>
@@ -5035,7 +5251,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     key={tc.id}
                     className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
                   >
-                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center mt-0.5">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.625rem] font-bold flex items-center justify-center mt-0.5">
                       {idx + 1}
                     </span>
                     <div className="flex-1 min-w-0">
@@ -5118,13 +5334,13 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       />
                     </div>
                     <div>
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                      <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
                         GRN
                       </p>
                       <p className="text-xs font-semibold text-foreground">
                         Goods Received
                       </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                      <p className="text-[0.625rem] text-muted-foreground mt-0.5">
                         Check GRN list for receipts against this PO
                       </p>
                     </div>
@@ -5155,7 +5371,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                      <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
                         Expense Booking
                       </p>
                       {(poChainStatus?.expenseCount ?? 0) > 0 ? (
@@ -5165,7 +5381,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             {poChainStatus!.expenseCount > 1 ? "s" : ""}
                           </p>
                           {poChainStatus?.latestExpenseDocNo && (
-                            <p className="text-[10px] font-mono text-muted-foreground mt-0.5 truncate">
+                            <p className="text-[0.625rem] font-mono text-muted-foreground mt-0.5 truncate">
                               {poChainStatus.latestExpenseDocNo}
                             </p>
                           )}
@@ -5203,7 +5419,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       />
                     </div>
                     <div>
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                      <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
                         Payment
                       </p>
                       {poChainStatus?.isPaid ? (
@@ -5213,7 +5429,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                             {poChainStatus.paymentCount > 1 ? "s" : ""}
                           </p>
                           {poChainStatus.latestPaymentAmount != null && (
-                            <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                            <p className="text-[0.625rem] font-mono text-muted-foreground mt-0.5">
                               ₹
                               {poChainStatus.latestPaymentAmount.toLocaleString(
                                 "en-IN",
@@ -5263,7 +5479,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
               );
               return (
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-                  <p className="text-[11px] text-muted-foreground hidden sm:block">
+                  <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                     {saved ? (
                       <span className="text-emerald-500 font-medium">
                         Saved!
@@ -5291,7 +5507,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     <button
                       onClick={handleSave}
                       disabled={saving || saved || !poCanSave}
-                      className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                      className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                     >
                       {saved ? (
                         <Check size={14} />

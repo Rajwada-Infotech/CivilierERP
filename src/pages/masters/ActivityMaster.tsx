@@ -57,11 +57,12 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ active }: { active: boolean }) => (
   <span
-    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${
       active
         ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
         : "bg-red-500/10 border-red-500/20 text-red-400"
@@ -123,14 +124,14 @@ const GroupRow = ({
         <span className="font-semibold text-sm text-foreground flex-1">
           {group.activity_name}
         </span>
-        <span className="px-2 py-0.5 rounded-md text-[10px] bg-violet-500/10 text-violet-400 font-mono mr-2">
+        <span className="px-2 py-0.5 rounded-md text-[0.625rem] bg-violet-500/10 text-violet-400 font-mono mr-2">
           {filtered.length} {filtered.length === 1 ? "activity" : "activities"}
         </span>
         <span className="hidden sm:block text-xs text-muted-foreground font-mono mr-3 truncate max-w-[220px]">
           {group.short_description}
         </span>
         <StatusBadge active={group.is_active} />
-        <button
+        <button data-row-view
           onClick={(e) => {
             e.stopPropagation();
             onView(group);
@@ -189,13 +190,13 @@ const GroupRow = ({
                   {activity.short_description}
                 </span>
                 {activity.hsn_code && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
                     <Hash size={9} />
                     {activity.hsn_code}
                   </span>
                 )}
                 <StatusBadge active={activity.is_active} />
-                <button
+                <button data-row-view
                   onClick={() => onView(activity)}
                   className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
                   title="View details"
@@ -593,7 +594,7 @@ const ActivityMaster: React.FC = () => {
                         ))}
                     </select>
                     {!isActivity && (
-                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
                         <Hash size={10} />
                         SAC can only be linked to an Activity, not a Group
                       </p>
@@ -634,7 +635,7 @@ const ActivityMaster: React.FC = () => {
                         ))}
                     </select>
                     {!isActivity && (
-                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
                         <Hash size={10} />
                         GL Head can only be linked to an Activity, not a Group
                       </p>
@@ -674,7 +675,7 @@ const ActivityMaster: React.FC = () => {
             <h2 className="text-base font-semibold text-foreground">
               Activities by Group
             </h2>
-            <span className="px-2 py-0.5 rounded-md text-[10px] bg-muted text-muted-foreground font-mono">
+            <span className="px-2 py-0.5 rounded-md text-[0.625rem] bg-muted text-muted-foreground font-mono">
               {groups.length} groups · {activityItems.length} activities
             </span>
           </div>
@@ -710,10 +711,10 @@ const ActivityMaster: React.FC = () => {
 
         {/* Legend */}
         <div className="flex items-center gap-4 mb-3 px-1">
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
             <Layers size={11} className="text-violet-400" /> Group
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
             <Tag size={11} className="text-teal-400" /> Activity (nested under
             its group)
           </div>
@@ -741,7 +742,7 @@ const ActivityMaster: React.FC = () => {
                 <span className="text-sm font-medium text-muted-foreground">
                   Ungrouped Activities
                 </span>
-                <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground font-mono">
+                <span className="px-1.5 py-0.5 rounded text-[0.625rem] bg-muted text-muted-foreground font-mono">
                   {ungrouped.length}
                 </span>
               </div>
@@ -759,7 +760,7 @@ const ActivityMaster: React.FC = () => {
                       {a.short_description}
                     </span>
                     <StatusBadge active={a.is_active} />
-                    <button
+                    <button data-row-view
                       onClick={() => setViewRecord(a)}
                       className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
                       title="View details"
@@ -802,7 +803,7 @@ const ActivityMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -830,7 +831,7 @@ const ActivityMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   {viewRecord.activity_type === 0
                     ? "Group Name"
                     : "Activity Name"}
@@ -840,7 +841,7 @@ const ActivityMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Short Description
                 </p>
                 <p className="text-sm text-foreground">
@@ -852,7 +853,7 @@ const ActivityMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Type
                 </p>
                 <span
@@ -871,7 +872,7 @@ const ActivityMaster: React.FC = () => {
               </div>
               {viewRecord.activity_type === 1 && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     SAC Code
                   </p>
                   {viewRecord.hsn_code ? (
@@ -888,7 +889,7 @@ const ActivityMaster: React.FC = () => {
               )}
               {viewRecord.activity_type === 1 && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     GL Head
                   </p>
                   {viewRecord.gl_head_name ? (
@@ -905,13 +906,13 @@ const ActivityMaster: React.FC = () => {
               {viewRecord.activity_type === 1 && (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
+                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
                       Items
                     </p>
                     {rights.canEdit && (
                       <button
                         onClick={() => setAddItemOpen(true)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.6875rem] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
                       >
                         <Plus size={11} /> Add Item
                       </button>
@@ -933,7 +934,7 @@ const ActivityMaster: React.FC = () => {
                             {li.itemName}
                           </span>
                           {li.uom && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
                               {li.uom}
                             </span>
                           )}
@@ -955,13 +956,13 @@ const ActivityMaster: React.FC = () => {
               {viewRecord.activity_type === 1 && (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
+                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
                       Checkpoints
                     </p>
                     {rights.canEdit && (
                       <button
                         onClick={() => setAddCheckpointOpen(true)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.6875rem] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
                       >
                         <Plus size={11} /> Add Checkpoint
                       </button>
@@ -984,12 +985,12 @@ const ActivityMaster: React.FC = () => {
                             {cp.fieldName}
                           </span>
                           {cp.minWaitDays != null && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
                               {cp.minWaitDays}d wait
                             </span>
                           )}
                           {cp.isDaily && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
                               Daily
                             </span>
                           )}
@@ -1009,14 +1010,14 @@ const ActivityMaster: React.FC = () => {
                 </div>
               )}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <StatusBadge active={viewRecord.is_active} />
               </div>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* ── Add Item dialog ── */}
@@ -1092,7 +1093,7 @@ const ActivityMaster: React.FC = () => {
                         <Package size={13} className="text-teal-400 shrink-0" />
                         <span className="flex-1 truncate">{i.M_Name}</span>
                         {i.M_UOM && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                          <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
                             {i.M_UOM}
                           </span>
                         )}
@@ -1199,7 +1200,7 @@ const ActivityMaster: React.FC = () => {
                         <Flag size={13} className="text-amber-400 shrink-0" />
                         <span className="flex-1 truncate">{c.fieldName}</span>
                         {c.minWaitDays != null && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                          <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
                             {c.minWaitDays}d wait
                           </span>
                         )}

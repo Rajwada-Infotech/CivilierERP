@@ -38,6 +38,17 @@ interface DialogContentProps extends React.ComponentPropsWithoutRef<
    *  form field inside. Undefined = the plain neutral dialog every other
    *  module uses. */
   accent?: "crm";
+  /** Pass true when this Dialog can be opened from INSIDE another
+   *  hand-rolled full-screen overlay that hardcodes a z-index above this
+   *  component's default z-[60] (e.g. ActivityDetailModal's z-[70] backdrop,
+   *  its z-[80] confirm dialog, its z-[90] photo lightbox). Without this,
+   *  the outer overlay paints on top of both this Dialog's own overlay AND
+   *  its content, since they tie/lose on z-index — the dialog is still
+   *  there and still interactive, it's just invisible under the darker
+   *  overlay sitting above it ("blacks out the screen"). z-[95] clears
+   *  every known overlay in this app except the toast layer (z-[99]+),
+   *  which must stay on top of every dialog. */
+  elevated?: boolean;
 }
 
 const ACCENT_CLASS: Record<NonNullable<DialogContentProps["accent"]>, string> = {
@@ -67,16 +78,17 @@ function containsType(node: React.ReactNode, type: unknown, depth = 0): boolean 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, hideCloseButton = false, accent, ...props }, ref) => {
+>(({ className, children, hideCloseButton = false, accent, elevated = false, ...props }, ref) => {
   const hasTitle = containsType(children, DialogTitle);
   const hasDescription = containsType(children, DialogDescription);
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay className={elevated ? "z-[95]" : undefined} />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
           "fixed left-[50%] top-[50%] z-[60] grid w-[calc(100%-2rem)] sm:w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-4 sm:p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg max-h-[90dvh] overflow-y-auto overflow-x-hidden thin-scroll",
+          elevated && "z-[95]",
           accent && ACCENT_CLASS[accent],
           className,
         )}

@@ -163,7 +163,7 @@ function PriorityBadge({ priority }: { priority: TicketPriority }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border",
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border",
         priorityBadge[priority],
       )}
     >
@@ -178,7 +178,7 @@ function StatusBadge({ status }: { status: TicketStatus }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border",
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border",
         cfg.cls,
       )}
     >
@@ -290,7 +290,7 @@ function TicketDetailDialog({
       <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden [&>button:first-of-type]:hidden">
         {/* Header — ticket id | subject | close — all in one row, no overlap possible */}
         <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border">
-          <span className="shrink-0 font-mono text-[11px] font-medium text-muted-foreground bg-muted border border-border rounded px-1.5 py-0.5">
+          <span className="shrink-0 font-mono text-[0.6875rem] font-medium text-muted-foreground bg-muted border border-border rounded px-1.5 py-0.5">
             #{t.id}
           </span>
           <h2 className="flex-1 text-sm font-semibold text-foreground leading-snug truncate">
@@ -318,13 +318,13 @@ function TicketDetailDialog({
                 <PriorityBadge priority={t.priority} />
                 <StatusBadge status={t.status} />
                 {t.assigned_to && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border bg-primary/5 text-primary border-primary/20">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border bg-primary/5 text-primary border-primary/20">
                     <UserCheck size={9} />
                     {t.assigned_to}
                   </span>
                 )}
                 {t.escalated_at && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border bg-red-50 text-red-800 border-red-200">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border bg-red-50 text-red-800 border-red-200">
                     <ShieldAlert size={9} />
                     Escalated
                   </span>
@@ -332,7 +332,7 @@ function TicketDetailDialog({
               </div>
 
               {/* Meta grid */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
                   { label: "Customer", value: t.customer_name },
                   { label: "Phone", value: t.customer_phone || "—" },
@@ -340,7 +340,7 @@ function TicketDetailDialog({
                   { label: "Created", value: fmtDate(t.created_at) },
                 ].map(({ label, value }) => (
                   <div key={label} className="rounded-lg bg-muted/50 px-3 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">
                       {label}
                     </p>
                     <p className="text-xs font-medium text-foreground">
@@ -358,7 +358,7 @@ function TicketDetailDialog({
               {/* Resolution note */}
               {t.resolution_note && (
                 <div className="rounded-lg border border-green-200 bg-green-50 px-3.5 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-green-700 mb-1">
+                  <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-green-700 mb-1">
                     Resolution
                   </p>
                   <p className="text-sm text-green-900">{t.resolution_note}</p>
@@ -372,7 +372,7 @@ function TicketDetailDialog({
 
               {t.escalated_at && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5">
-                  <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-red-700 mb-1">
+                  <p className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-widest text-red-700 mb-1">
                     <ShieldAlert size={11} />
                     Escalation
                   </p>
@@ -387,7 +387,7 @@ function TicketDetailDialog({
 
               {/* Admin workflow */}
               <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-3 space-y-2.5">
-                <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <p className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                   <Workflow size={11} />
                   Admin workflow
                 </p>
@@ -451,7 +451,7 @@ function TicketDetailDialog({
                     <div className="flex gap-2">
                       <Button
                         size="sm"
-                        className="h-8 text-xs bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90"
+                        className="h-8 text-xs btn-module shadow-sm text-white hover:opacity-90"
                         disabled={resolveMutation.isPending}
                         onClick={() => resolveMutation.mutate()}
                       >
@@ -661,17 +661,17 @@ export default function AdminTicketPanel() {
               size={15}
               className="text-muted-foreground shrink-0"
             />
-            <span className="text-[13px] font-medium text-foreground">
+            <span className="text-[0.8125rem] font-medium text-foreground">
               Support Tickets
             </span>
             {(counts?.urgent_open ?? 0) > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-800 border border-red-200">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium bg-red-50 text-red-800 border border-red-200">
                 <ShieldAlert size={9} />
                 {counts.urgent_open} urgent
               </span>
             )}
             {(counts?.escalated_open ?? 0) > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-800 border border-red-200">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium bg-red-50 text-red-800 border border-red-200">
                 <Flame size={9} />
                 {counts.escalated_open} escalated
               </span>
@@ -691,7 +691,7 @@ export default function AdminTicketPanel() {
             </button>
             <button
               onClick={() => navigate("/ticket")}
-              className="flex items-center gap-1 text-[12px] font-medium text-primary hover:underline"
+              className="flex items-center gap-1 text-[0.75rem] font-medium text-primary hover:underline"
             >
               Ticket page <ExternalLink size={10} />
             </button>
@@ -699,7 +699,7 @@ export default function AdminTicketPanel() {
         </div>
 
         {/* ── Tabs ── */}
-        <div className="grid grid-cols-4 border-b border-border">
+        <div className="grid grid-cols-2 lg:grid-cols-4 border-b border-border">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -716,14 +716,14 @@ export default function AdminTicketPanel() {
             >
               <span
                 className={cn(
-                  "block text-[22px] font-medium leading-tight tabular-nums",
+                  "block text-[1.375rem] font-medium leading-tight tabular-nums",
                   filter === tab.id ? tab.activeColor : "text-foreground",
                   statsLoading && "opacity-30",
                 )}
               >
                 {statsLoading ? "—" : tab.value}
               </span>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-[0.6875rem] text-muted-foreground">
                 {tab.label}
               </span>
             </button>
@@ -771,10 +771,10 @@ export default function AdminTicketPanel() {
                 {/* Content */}
                 <div className="flex flex-1 items-center justify-between gap-3 px-4 py-3 min-w-0">
                   <div className="min-w-0">
-                    <p className="text-[13px] font-medium text-foreground truncate leading-snug">
+                    <p className="text-[0.8125rem] font-medium text-foreground truncate leading-snug">
                       {ticket.subject}
                     </p>
-                    <div className="mt-1 flex items-center gap-2.5 flex-wrap text-[11px] text-muted-foreground">
+                    <div className="mt-1 flex items-center gap-2.5 flex-wrap text-[0.6875rem] text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <User size={9} />
                         {ticket.customer_name}
@@ -816,7 +816,7 @@ export default function AdminTicketPanel() {
 
         {pagination && pagination.totalPages > 1 && (
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border bg-muted/20">
-            <span className="text-[11px] text-muted-foreground tabular-nums">
+            <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
               Page {pagination.page} of {pagination.totalPages} - {pagination.total} total
             </span>
             <div className="flex items-center gap-1.5">

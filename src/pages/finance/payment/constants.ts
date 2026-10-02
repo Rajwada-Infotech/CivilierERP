@@ -29,7 +29,7 @@ export const MODE_STYLE: Record<
     dot: "bg-violet-500",
   },
   Card: {
-    ring: "ring-amber-500/30 bg-amber-500/10",
+    ring: "ring-amber-500/30 bg-[#ffe2021a]",
     text: "text-amber-600 dark:text-amber-400",
     dot: "bg-amber-500",
   },

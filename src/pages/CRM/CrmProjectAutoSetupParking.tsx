@@ -47,8 +47,8 @@ async function fetchStatus(projectId: string): Promise<any> {
   return r.ok ? r.json() : null;
 }
 
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background";
-const labelCls = "text-xs text-muted-foreground block mb-1";
+const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-muted/30 focus:bg-background focus:outline-none focus:ring-2 focus:ring-sky-500/30";
+const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
 const cardCls = "rounded-xl border border-border p-4 space-y-3";
 
 const CrmProjectAutoSetupParking: React.FC = () => {
@@ -299,7 +299,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
           Shown regardless of step1Done — the orphan slots exist at project
           level and need fixing even if the block tree isn't set up yet. */}
       {projectId && status && (status.orphanParkingSlotCount ?? 0) > 0 && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-600">
+        <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-4 text-sm text-sky-600">
           {status.orphanParkingSlotCount} parking slot{status.orphanParkingSlotCount === 1 ? "" : "s"} on this project{" "}
           {status.orphanParkingSlotCount === 1 ? "has" : "have"} no Block assigned and won't appear in the
           per-block totals below — assign a Block in{" "}
@@ -326,7 +326,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
                     <div className="text-xs font-semibold">{b.BlockName}</div>
                     {b.ParkingSlotCount > 0 && (
                       <button onClick={() => handleToggleExpand(b)}
-                        className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary">
+                        className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-primary">
                         {expandedBlockId === b.Id ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
                         <Lock size={9} /> {b.ParkingSlotCount} slot(s) generated — click to manage
                       </button>
@@ -362,10 +362,10 @@ const CrmProjectAutoSetupParking: React.FC = () => {
                     ))}
                     <div className="flex items-center gap-2">
                       <button onClick={() => addTemplateRow(b.Id)} className="text-xs text-primary hover:underline">+ Add Type</button>
-                      <span className="text-[11px] text-muted-foreground ml-auto">Total: {templateTotal(b.Id)} slot(s)</span>
+                      <span className="text-[0.6875rem] text-muted-foreground ml-auto">Total: {templateTotal(b.Id)} slot(s)</span>
                       {rights.canEdit && (
                         <button onClick={() => handleSaveTemplate(b.Id)} disabled={savingTemplateBlockId === b.Id}
-                          className="px-2.5 py-1 text-[11px] bg-muted rounded-lg font-medium hover:bg-muted/70 disabled:opacity-40">
+                          className="px-2.5 py-1 text-[0.6875rem] bg-muted rounded-lg font-medium hover:bg-muted/70 disabled:opacity-40">
                           Save Template
                         </button>
                       )}
@@ -400,7 +400,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
               Once all templates are fully generated the button disappears. */}
           {rights.canCreate && blocks.some((b) => templateTotal(b.Id) > (b.ParkingSlotCount || 0)) && (
             <button onClick={handleGenerate} disabled={generating}
-              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {generating ? "Generating…" : "Generate Parking Slots"}
             </button>
           )}
@@ -431,9 +431,9 @@ const ParkingSlotList: React.FC<{
 }> = ({ blockId, slots, loading, editingSlotId, editingSlot, savingSlotId, parkingTypes, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete, canEdit, canDelete }) => (
   <div className="ml-4 mt-1 space-y-1 border-l border-border pl-3">
     {loading ? (
-      <div className="text-[11px] text-muted-foreground">Loading...</div>
+      <div className="text-[0.6875rem] text-muted-foreground">Loading...</div>
     ) : (slots || []).length === 0 ? (
-      <div className="text-[11px] text-muted-foreground">No slots left in this block.</div>
+      <div className="text-[0.6875rem] text-muted-foreground">No slots left in this block.</div>
     ) : (slots || []).map((s) => {
       const lockReason = s.LockBookingNo ? `booked (${s.LockBookingNo})`
         : s.LockHoldId ? "on hold"
@@ -441,7 +441,7 @@ const ParkingSlotList: React.FC<{
         : null;
       const isEditing = editingSlotId === s.Id && editingSlot;
       return (
-        <div key={s.Id} className="flex items-center justify-between gap-2 text-[11px]">
+        <div key={s.Id} className="flex items-center justify-between gap-2 text-[0.6875rem]">
           {isEditing ? (
             <span className="grid grid-cols-[minmax(160px,1fr)_92px] gap-1 flex-1">
               <input autoFocus value={editingSlot.SlotNo}
@@ -457,7 +457,7 @@ const ParkingSlotList: React.FC<{
           <span className="font-mono">{s.SlotNo}{s.ParkingType ? ` — ${s.ParkingType}` : ""}</span>
           )}
           <span className="flex items-center gap-2">
-            {lockReason && <span className="text-amber-600 flex items-center gap-0.5"><Lock size={9} /> {lockReason}</span>}
+            {lockReason && <span className="text-sky-600 flex items-center gap-0.5"><Lock size={9} /> {lockReason}</span>}
             {isEditing ? (
               <>
                 <button onClick={() => onSave(blockId, s)} disabled={savingSlotId === s.Id}
@@ -480,7 +480,7 @@ const ParkingSlotList: React.FC<{
         </div>
       );
     })}
-    <a href="/crm/setup/parking-slot-master" className="text-[11px] text-primary hover:underline flex items-center gap-0.5">
+    <a href="/crm/setup/parking-slot-master" className="text-[0.6875rem] text-primary hover:underline flex items-center gap-0.5">
       edit details in Parking Slot Master <ExternalLink size={9} />
     </a>
   </div>

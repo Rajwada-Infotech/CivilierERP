@@ -44,13 +44,13 @@ export const MonthlyLeadTrend: React.FC = () => {
             const barH = Math.max(4, Math.round((d.count / max) * BAR_H));
             return (
               <div key={d.month} className="flex flex-col items-center gap-1 flex-1 min-w-0">
-                <span className="text-[10px] font-semibold text-primary">{d.count}</span>
+                <span className="text-[0.625rem] font-semibold text-primary">{d.count}</span>
                 <div
                   className="w-full rounded-t-sm bg-primary/70 hover:bg-primary transition-colors"
                   style={{ height: `${barH}px` }}
                   title={`${d.month}: ${d.count} leads`}
                 />
-                <span className="text-[10px] text-muted-foreground truncate">{shortMonth(d.month)}</span>
+                <span className="text-[0.625rem] text-muted-foreground truncate">{shortMonth(d.month)}</span>
               </div>
             );
           })}

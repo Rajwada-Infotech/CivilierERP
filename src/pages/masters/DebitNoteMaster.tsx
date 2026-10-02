@@ -115,7 +115,7 @@ function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: 
   };
 
   const total = items.reduce((s, it) => s + (parseFloat(it.Amount) || 0), 0);
-  const thCls = "text-left text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-2 py-1.5";
+  const thCls = "text-left text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground px-2 py-1.5";
   const inp = "w-full text-xs rounded border border-border px-2 py-1 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30";
 
   return (
@@ -260,7 +260,7 @@ function PartyInvoiceRenderer({
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+          <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
             Party Type <span className="text-destructive">*</span>
           </label>
           <div className="relative">
@@ -280,7 +280,7 @@ function PartyInvoiceRenderer({
         </div>
 
         <div>
-          <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+          <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
             Party <span className="text-destructive">*</span>
           </label>
           <div className="relative">
@@ -307,7 +307,7 @@ function PartyInvoiceRenderer({
       </div>
 
       <div>
-        <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+        <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
           Invoice <span className="text-destructive">*</span>
         </label>
         <div className="relative">
@@ -347,15 +347,15 @@ function PartyInvoiceRenderer({
       {selectedInvoice && (
         <div className="rounded-xl border border-border bg-muted/40 p-4 grid grid-cols-3 gap-3">
           <div>
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Invoice Value</p>
+            <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Invoice Value</p>
             <p className="text-sm font-mono font-semibold text-foreground">{formatINR(invoiceValue)}</p>
           </div>
           <div>
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Previous Debit</p>
+            <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Previous Debit</p>
             <p className="text-sm font-mono font-semibold text-foreground">{formatINR(previousDebit)}</p>
           </div>
           <div className="rounded-lg bg-primary/5 -m-1 p-1">
-            <p className="text-[10px] uppercase tracking-widest text-primary/80 mb-0.5 flex items-center gap-1">
+            <p className="text-[0.625rem] uppercase tracking-widest text-primary/80 mb-0.5 flex items-center gap-1">
               <IndianRupee size={9} /> Adjusted Value
             </p>
             <p className="text-sm font-mono font-bold text-primary">{formatINR(adjustedValue)}</p>
@@ -652,7 +652,7 @@ const DebitNoteMaster: React.FC = () => {
 
   const APPROVAL_STATUS_BADGE: Record<string, string> = {
     Draft: "bg-muted text-muted-foreground border-border",
-    Pending: "bg-amber-500/10 border-amber-500/20 text-amber-600",
+    Pending: "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
     Approved: "bg-green-500/10 border-green-500/20 text-green-600",
     Rejected: "bg-red-500/10 border-red-500/20 text-red-600",
     Cancelled: "bg-muted text-muted-foreground border-border line-through",
@@ -671,7 +671,7 @@ const DebitNoteMaster: React.FC = () => {
       return (
         <div className="flex flex-col gap-0.5">
           <span className="text-xs font-medium text-foreground">{g.partyLabel}</span>
-          <span className="text-[10px] text-muted-foreground">{PARTY_TYPE_LABEL[g.partyType] ?? g.partyType}</span>
+          <span className="text-[0.625rem] text-muted-foreground">{PARTY_TYPE_LABEL[g.partyType] ?? g.partyType}</span>
         </div>
       );
     },
@@ -691,7 +691,7 @@ const DebitNoteMaster: React.FC = () => {
     approvalStatus: (value: unknown, row: RecordWithId) => {
       const status = row.status === false ? "Cancelled" : String(value ?? "Draft");
       return (
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${APPROVAL_STATUS_BADGE[status] ?? APPROVAL_STATUS_BADGE.Draft}`}>
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${APPROVAL_STATUS_BADGE[status] ?? APPROVAL_STATUS_BADGE.Draft}`}>
           {status}
         </span>
       );
@@ -804,7 +804,7 @@ const DebitNoteMaster: React.FC = () => {
             <h2 className="font-heading font-semibold text-foreground text-sm">
               Quality Rejection Debit Notes
             </h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
+            <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
               Raised from Vehicle In/Out & GRN entries when part of a delivery is below the ordered grade
             </p>
           </div>
@@ -819,15 +819,15 @@ const DebitNoteMaster: React.FC = () => {
             <table className="w-full text-sm">
               <thead className="bg-muted/40">
                 <tr>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Doc No</th>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Source</th>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Supplier</th>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Item</th>
-                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">% Bad</th>
-                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
-                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Actions</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Doc No</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Source</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Supplier</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Item</th>
+                  <th className="text-right px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">% Bad</th>
+                  <th className="text-right px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
+                  <th className="text-right px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -845,12 +845,12 @@ const DebitNoteMaster: React.FC = () => {
                     <td className="px-4 py-2.5 text-xs text-foreground">{n.SupplierName ?? "—"}</td>
                     <td className="px-4 py-2.5">
                       <div className="text-xs font-medium text-foreground">{n.ItemName ?? "—"}</div>
-                      <div className="text-[10px] text-muted-foreground">
+                      <div className="text-[0.625rem] text-muted-foreground">
                         {n.RejectedQty} of {n.ReceivedQty} {n.UomName ?? ""}
                       </div>
                     </td>
                     <td className="px-4 py-2.5 text-right">
-                      <span className="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
+                      <span className="inline-flex items-center text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
                         {Number(n.PercentBad).toFixed(1)}%
                       </span>
                     </td>
@@ -859,7 +859,7 @@ const DebitNoteMaster: React.FC = () => {
                     </td>
                     <td className="px-4 py-2.5">
                       <span
-                        className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                        className={`inline-block text-[0.625rem] font-medium px-1.5 py-0.5 rounded ${
                           n.Status === "Cancelled"
                             ? "bg-muted text-muted-foreground line-through"
                             : "bg-emerald-500/10 text-emerald-600"
@@ -869,7 +869,7 @@ const DebitNoteMaster: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-right">
-                      <button
+                      <button data-row-view
                         onClick={() => setViewingQDN(n)}
                         title="View details"
                         className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -901,7 +901,7 @@ const DebitNoteMaster: React.FC = () => {
                 </div>
                 <div>
                   <h2 className="font-heading font-bold text-sm">{viewingQDN.DocNo}</h2>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
                     Quality Rejection Debit Note
                   </p>
                 </div>
@@ -925,7 +925,7 @@ const DebitNoteMaster: React.FC = () => {
                   { label: "Item", value: viewingQDN.ItemName ?? "—" },
                 ].map(({ label, value, mono }: any) => (
                   <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                     <p className={`text-xs font-semibold ${mono ? "font-mono" : ""} text-foreground`}>{value}</p>
                   </div>
                 ))}
@@ -933,19 +933,19 @@ const DebitNoteMaster: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Received</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Received</p>
                   <p className="text-xs font-semibold font-mono text-foreground">
                     {viewingQDN.ReceivedQty} {viewingQDN.UomName ?? ""}
                   </p>
                 </div>
                 <div className="px-3 py-2.5 rounded-xl bg-rose-500/5 border border-rose-500/20">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Rejected</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Rejected</p>
                   <p className="text-xs font-semibold font-mono text-rose-600">
                     {viewingQDN.RejectedQty} {viewingQDN.UomName ?? ""}
                   </p>
                 </div>
                 <div className="px-3 py-2.5 rounded-xl bg-rose-500/5 border border-rose-500/20">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">% Bad</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">% Bad</p>
                   <p className="text-xs font-semibold font-mono text-rose-600">
                     {Number(viewingQDN.PercentBad).toFixed(1)}%
                   </p>
@@ -954,13 +954,13 @@ const DebitNoteMaster: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Rate</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Rate</p>
                   <p className="text-xs font-semibold font-mono text-foreground">
                     ₹{Number(viewingQDN.Rate).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
                 <div className="px-3 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Debit Amount</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Debit Amount</p>
                   <p className="text-sm font-bold font-mono text-rose-600">
                     ₹{Number(viewingQDN.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
@@ -969,7 +969,7 @@ const DebitNoteMaster: React.FC = () => {
 
               {viewingQDN.Reason && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                     Reason
                   </p>
                   <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">

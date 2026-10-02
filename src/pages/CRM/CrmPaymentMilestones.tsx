@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -15,6 +15,7 @@ import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { DateInput } from "@/components/ui/date-input";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -31,7 +32,7 @@ const MODES_WITH_BANK = ["Cheque", "NEFT", "RTGS", "UPI", "Home Loan"];
 const FIELD =
   "w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background " +
   "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-shadow";
-const LABEL = "text-[11px] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5";
+const LABEL = "text-[0.6875rem] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5";
 const modeHasBank = (mode: string) => MODES_WITH_BANK.includes(mode);
 
 const statusColor: Record<string, string> = {
@@ -176,6 +177,12 @@ const CrmPaymentMilestones: React.FC = () => {
     queryFn: () => fetchBookings(pickerScope),
     staleTime: 5 * 60_000,
   });
+  // Open the first booking in scope by default (also after the company /
+  // project / search filter changes); the user can switch from the picker.
+  useEffect(() => {
+    const first = (bookings as any[])[0];
+    if (!selectedBookingId && first) setSp({ bookingId: String(first.Id) }, { replace: true });
+  }, [bookings, selectedBookingId, setSp]);
   const { data: milestoneData, isLoading, isError, error: milestoneError, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-milestones", selectedBookingId],
     queryFn: () => fetchMilestones(selectedBookingId),
@@ -460,16 +467,16 @@ const CrmPaymentMilestones: React.FC = () => {
             {m.MilestoneName}
             {m.DemandStatus && m.DemandStatus !== CrmStatus.PENDING && demandColor && (
               <div className="mt-0.5 flex items-center gap-1">
-                <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${demandColor}`}>
+                <span className={`text-[0.625rem] px-1.5 py-0.5 rounded border font-medium ${demandColor}`}>
                   {m.DemandStatus === "Demanded" ? `Demand Raised${m.DemandNo ? ` · ${m.DemandNo}` : ""}` : `Demand ${m.DemandStatus}`}
                 </span>
                 {m.DemandRaisedOn && (
-                  <span className="text-[10px] text-muted-foreground">{fmtDate(m.DemandRaisedOn)}</span>
+                  <span className="text-[0.625rem] text-muted-foreground">{fmtDate(m.DemandRaisedOn)}</span>
                 )}
               </div>
             )}
             {m.RequiredDocuments && (
-              <div className="text-[10px] text-muted-foreground font-normal mt-0.5 truncate max-w-[180px]" title={m.RequiredDocuments}>
+              <div className="text-[0.625rem] text-muted-foreground font-normal mt-0.5 truncate max-w-[180px]" title={m.RequiredDocuments}>
                 Docs: {m.RequiredDocuments}
               </div>
             )}
@@ -493,7 +500,7 @@ const CrmPaymentMilestones: React.FC = () => {
         <span className="font-semibold text-sm">
           {fmt(i.row.original.AmountDue)}
           {i.row.original.Percent != null && (
-            <span className="ml-1 text-[10px] font-normal text-muted-foreground">({Number(i.row.original.Percent)}%)</span>
+            <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">({Number(i.row.original.Percent)}%)</span>
           )}
         </span>
       ) },
@@ -504,7 +511,7 @@ const CrmPaymentMilestones: React.FC = () => {
           <span className="text-green-600 font-semibold text-sm">
             {fmt(m.AmountPaid)}
             {Number(m.PendingVerificationAmount) > 0 && (
-              <div className="text-[10px] text-amber-700 font-normal">
+              <div className="text-[0.625rem] text-sky-700 font-normal">
                 +{fmt(m.PendingVerificationAmount)} pending
               </div>
             )}
@@ -565,7 +572,7 @@ const CrmPaymentMilestones: React.FC = () => {
           <span className="text-xs">
             {m.PaymentMode || "—"}
             {m.DepositBankName && (
-              <div className="text-[10px] text-muted-foreground font-normal mt-0.5 truncate max-w-[110px]" title={m.DepositBankName}>{m.DepositBankName}</div>
+              <div className="text-[0.625rem] text-muted-foreground font-normal mt-0.5 truncate max-w-[110px]" title={m.DepositBankName}>{m.DepositBankName}</div>
             )}
           </span>
         );
@@ -701,7 +708,7 @@ const CrmPaymentMilestones: React.FC = () => {
               )}
               {rights.canEdit && needsResync && (
                 <button onClick={handleResyncSchedule} disabled={resyncing}
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm border border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm border border-sky-300 bg-sky-50 text-sky-700 rounded-lg hover:bg-sky-100 transition-colors disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-400">
                   <RefreshCw size={14} className={resyncing ? "animate-spin" : ""} /> {resyncing ? "Resyncing..." : "Resync Schedule"}
                 </button>
               )}
@@ -710,7 +717,7 @@ const CrmPaymentMilestones: React.FC = () => {
         </div>
 
         {needsResync && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm px-4 py-2.5 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+          <div className="rounded-lg border border-sky-300 bg-sky-50 text-sky-800 text-sm px-4 py-2.5 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-400">
             Milestone 1's amount (₹{Number(milestone1.AmountDue).toLocaleString("en-IN")}) doesn't match this booking's actual booking amount (₹{Number(booking.BookingAmount).toLocaleString("en-IN")}) — click "Resync Schedule" to fix it and redistribute the remaining milestones.
           </div>
         )}
@@ -762,7 +769,7 @@ const CrmPaymentMilestones: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Price breakdown */}
                     <div className="rounded-lg border border-border bg-muted/20 p-3">
-                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Price Breakdown</div>
+                      <div className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Price Breakdown</div>
                       <div className="space-y-1.5 text-sm">
                         <div className="flex items-baseline justify-between">
                           <span className="text-muted-foreground">Unit Value</span>
@@ -801,7 +808,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
                     {/* Collection summary */}
                     <div className="rounded-lg border border-border bg-muted/20 p-3">
-                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Collection Summary</div>
+                      <div className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Collection Summary</div>
                       <div className="space-y-1.5 text-sm">
                         <div className="flex items-baseline justify-between">
                           <span className="text-muted-foreground">Total Due</span>
@@ -838,7 +845,7 @@ const CrmPaymentMilestones: React.FC = () => {
                       </div>
                       {/* Segmented progress bar: green = collected, amber = pending approval */}
                       <div className="mt-3">
-                        <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+                        <div className="flex justify-between text-[0.6875rem] text-muted-foreground mb-1">
                           <span>Collection Progress</span>
                           <span>{collectionPct}%{pendingPct > 0 ? ` (+${pendingPct}% pending)` : ""}</span>
                         </div>
@@ -881,13 +888,13 @@ const CrmPaymentMilestones: React.FC = () => {
                     }
                     if (receipt?.Status === CrmStatus.PENDING && receipt?.RPStatus === CrmStatus.PENDING) {
                       return (
-                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs">
-                          <Hourglass size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                        <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 px-3 py-2.5 text-xs">
+                          <Hourglass size={13} className="shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
                           <div className="space-y-0.5">
-                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                            <p className="font-semibold text-sky-800 dark:text-sky-300">
                               {fmt(receipt.Amount || tokenAmt)} held — awaiting Finance approval
                             </p>
-                            <p className="text-amber-700 dark:text-amber-400">
+                            <p className="text-sky-700 dark:text-sky-400">
                               Receipt {receipt.ReceiptNo} · {pmode} · submitted to Finance (Account's Head / Admin).
                               This amount will count as paid once approved.
                             </p>
@@ -897,13 +904,13 @@ const CrmPaymentMilestones: React.FC = () => {
                     }
                     if (receipt?.Status === CrmStatus.PENDING && !receipt?.RPStatus) {
                       return (
-                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs">
-                          <Clock size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                        <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 px-3 py-2.5 text-xs">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
                           <div className="space-y-0.5">
-                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                            <p className="font-semibold text-sky-800 dark:text-sky-300">
                               {fmt(receipt.Amount || tokenAmt)} on hold — Money Receipt pending Finance submission
                             </p>
-                            <p className="text-amber-700 dark:text-amber-400">
+                            <p className="text-sky-700 dark:text-sky-400">
                               Receipt {receipt.ReceiptNo} · {pmode} · created but not yet sent to Finance for approval.
                             </p>
                           </div>
@@ -912,13 +919,13 @@ const CrmPaymentMilestones: React.FC = () => {
                     }
                     if (!receipt) {
                       return (
-                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs">
-                          <Clock size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                        <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 px-3 py-2.5 text-xs">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
                           <div className="space-y-0.5">
-                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                            <p className="font-semibold text-sky-800 dark:text-sky-300">
                               Token Received &amp; On Hold — {fmt(tokenAmt)} via {pmode}
                             </p>
-                            <p className="text-amber-700 dark:text-amber-400">
+                            <p className="text-sky-700 dark:text-sky-400">
                               Payment recorded but not yet processed. A Money Receipt is auto-generated when this booking is submitted for approval
                               ("Verify &amp; Send for Approval"). Finance approves it — only then does it count as paid.
                             </p>
@@ -946,7 +953,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 {notFullyPaid ? (
                   <div className="mb-3 rounded-lg border border-border bg-muted/10 px-3 py-2.5">
-                    <div className="flex items-center justify-between text-[11px] mb-1.5">
+                    <div className="flex items-center justify-between text-[0.6875rem] mb-1.5">
                       <span className="font-semibold text-foreground flex items-center gap-1.5">
                         <Wallet size={12} className="text-blue-600 dark:text-blue-400" /> Held on-account — will auto-settle once fully funded
                       </span>
@@ -957,12 +964,12 @@ const CrmPaymentMilestones: React.FC = () => {
                     <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                       <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (bookingOnAccountReceived / bookingGrandTotal) * 100)}%` }} />
                     </div>
-                    <div className="text-[11px] text-muted-foreground mt-1.5">
+                    <div className="text-[0.6875rem] text-muted-foreground mt-1.5">
                       No action needed — {fmt(fullPaymentShortfall)} more coming in on-account will automatically settle every eligible milestone, in order. Milestones already covered by money on hand show "Paid (on-account)" above.
                     </div>
                   </div>
                 ) : (
-                  <div className="mb-3 rounded-lg border border-border bg-muted/10 px-3 py-2 text-[11px] text-foreground flex items-center gap-1.5">
+                  <div className="mb-3 rounded-lg border border-border bg-muted/10 px-3 py-2 text-[0.6875rem] text-foreground flex items-center gap-1.5">
                     <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" /> Full booking amount is on-account — every eligible milestone auto-settles automatically, in order.
                   </div>
                 )}
@@ -985,7 +992,7 @@ const CrmPaymentMilestones: React.FC = () => {
                           <span className={`px-1.5 py-0.5 rounded-full border font-medium ${
                             p.Status === "Applied" ? "text-green-600 bg-green-50 border-green-200"
                             : p.Status === "PartiallyApplied" ? "text-blue-600 bg-blue-50 border-blue-200"
-                            : "text-orange-600 bg-orange-50 border-orange-200"
+                            : "text-sky-600 bg-sky-50 border-sky-200"
                           }`}>
                             {p.Status === "PartiallyApplied" ? "Partial" : p.Status}
                           </span>
@@ -1033,16 +1040,16 @@ const CrmPaymentMilestones: React.FC = () => {
             {editingMilestone && (
               <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-primary/80">Milestone</p>
+                  <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-primary/80">Milestone</p>
                   <p className="text-sm font-semibold text-foreground truncate">{editingMilestone.MilestoneName}</p>
                 </div>
                 <div className="flex items-center gap-6 shrink-0">
                   <div className="text-right">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Amount Due</p>
+                    <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">Amount Due</p>
                     <p className="text-sm font-semibold tabular-nums text-foreground">{fmt(editingMilestone.AmountDue)}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Balance</p>
+                    <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">Balance</p>
                     <p className={`text-lg font-bold tabular-nums ${editingBalance > 0 ? "text-primary" : "text-emerald-600 dark:text-emerald-400"}`}>
                       {fmt(editingBalance)}
                     </p>
@@ -1061,7 +1068,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 <div>
                   <label className={LABEL}>Payment Date</label>
-                  <input type="date" value={payForm.PaidDate}
+                  <DateInput value={payForm.PaidDate}
                     onChange={(e) => setPayForm((f) => ({ ...f, PaidDate: e.target.value }))}
                     className={FIELD} />
                 </div>
@@ -1075,7 +1082,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 {previewOverflow > 0 && (
                   <div className="col-span-2 sm:col-span-3">
-                    <p className="text-[11px] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5 rounded-lg bg-blue-500/10 px-2.5 py-1.5">
+                    <p className="text-[0.6875rem] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5 rounded-lg bg-blue-500/10 px-2.5 py-1.5">
                       <Wallet size={12} className="shrink-0" /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's due — will be parked to On Account if still true when approved.
                     </p>
                   </div>
@@ -1109,14 +1116,14 @@ const CrmPaymentMilestones: React.FC = () => {
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2">
                   <Landmark size={13} className="text-muted-foreground mt-0.5 shrink-0" />
-                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
                     <span className="font-medium text-foreground">Deposit bank</span> — assigned by Accounts on the Received Payment before approval.
                   </p>
                 </div>
                 {customerBank && (customerBank.BankName || customerBank.AccountNo) ? (
                   <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
-                    <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Bank on file (KYC) — reference only</p>
-                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+                    <p className="text-[0.6875rem] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Bank on file (KYC) — reference only</p>
+                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[0.6875rem]">
                       <span className="text-muted-foreground">Bank</span>
                       <span className="font-medium text-right truncate">{customerBank.BankName || "—"}</span>
                       <span className="text-muted-foreground">A/C No.</span>
@@ -1133,7 +1140,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 className="px-4 h-9 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
               <button onClick={handleRecordPayment}
                 disabled={saving}
-                className="px-5 h-9 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                className="px-5 h-9 text-sm btn-module text-white rounded-lg font-semibold hover:shadow-lg disabled:opacity-40 transition-colors">
                 {saving ? "Submitting…" : "Submit for Approval"}
               </button>
             </div>
@@ -1152,10 +1159,10 @@ const CrmPaymentMilestones: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
                   placeholder="e.g. PLC Charges" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Due Date</label>
-                  <input type="date" value={addForm.DueDate}
+                  <DateInput value={addForm.DueDate}
                     onChange={(e) => setAddForm((f) => ({ ...f, DueDate: e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
@@ -1185,7 +1192,7 @@ const CrmPaymentMilestones: React.FC = () => {
               <button onClick={() => setAddDialog(false)}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleAddMilestone} disabled={saving || !addForm.MilestoneName.trim()}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {saving ? "Adding..." : "Add Milestone"}
               </button>
             </div>
@@ -1211,7 +1218,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 <div>
                   <label className={LABEL}>Received Date</label>
-                  <input type="date" value={onAccountForm.ReceivedDate}
+                  <DateInput value={onAccountForm.ReceivedDate}
                     onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
                     className={FIELD} />
                 </div>
@@ -1249,7 +1256,7 @@ const CrmPaymentMilestones: React.FC = () => {
               </div>
               <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2">
                 <Landmark size={13} className="text-muted-foreground mt-0.5 shrink-0" />
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
                   <span className="font-medium text-foreground">Deposit bank</span> — assigned by Accounts on the Received Payment before approval.
                 </p>
               </div>
@@ -1259,7 +1266,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleDepositOnAccount}
                 disabled={saving || !onAccountForm.Amount}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {saving ? "Submitting..." : "Submit for Approval"}
               </button>
             </div>
@@ -1358,7 +1365,7 @@ const CrmPaymentMilestones: React.FC = () => {
         <Dialog open={!!waiveDialog} onOpenChange={(o) => { if (!o) setWaiveDialog(null); }}>
           <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
-              <DialogTitle className="font-heading flex items-center gap-1.5 text-amber-700">
+              <DialogTitle className="font-heading flex items-center gap-1.5 text-sky-700">
                 <AlertTriangle size={16} /> Waive Milestone
               </DialogTitle>
             </DialogHeader>
@@ -1383,7 +1390,7 @@ const CrmPaymentMilestones: React.FC = () => {
                     className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                   <button onClick={handleWaiveConfirm}
                     disabled={waiving || !waiveDialog.reason.trim()}
-                    className="px-4 py-1.5 text-sm bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-40">
+                    className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                     {waiving ? "Waiving..." : "Confirm Waive"}
                   </button>
                 </div>

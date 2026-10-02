@@ -270,7 +270,7 @@ const TdsMaster: React.FC = () => {
   const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
     status: (value) => (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${value ? "bg-green-500/10 border-green-500/20 text-green-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value ? "bg-green-500/10 border-green-500/20 text-green-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
       >
         <span
           className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value ? "bg-green-500" : "bg-red-500"}`}
@@ -284,7 +284,7 @@ const TdsMaster: React.FC = () => {
       </span>
     ),
     nature: (value) => (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border bg-blue-500/10 border-blue-500/20 text-blue-600">
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border bg-blue-500/10 border-blue-500/20 text-blue-600">
         {String(value || "—")}
       </span>
     ),
@@ -292,7 +292,7 @@ const TdsMaster: React.FC = () => {
       value ? (
         <span className="text-sm text-foreground">{String(value)}</span>
       ) : (
-        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+        <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-amber-600 dark:text-amber-400">
           <AlertTriangle size={11} /> Not linked — invoice posting will fail
         </span>
       ),
@@ -493,7 +493,7 @@ const TdsMaster: React.FC = () => {
             <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
               <button
                 onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
               >
                 Close
               </button>

@@ -101,7 +101,7 @@ function makePrefixRenderer(
     return (
       <div>
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[11px] text-muted-foreground font-heading">
+          <span className="text-[0.6875rem] text-muted-foreground font-heading">
             Mode:
           </span>
           {(["auto", "custom"] as const).map((m) => (
@@ -111,9 +111,9 @@ function makePrefixRenderer(
               onClick={() =>
                 onChange({ mode: m, customPrefix: groupVal.customPrefix })
               }
-              className={`px-2.5 py-0.5 rounded-full text-[10px] font-heading border transition-all ${
+              className={`px-2.5 py-0.5 rounded-full text-[0.625rem] font-heading border transition-all ${
                 groupVal.mode === m
-                  ? "bg-primary text-primary-foreground border-primary"
+                  ? "btn-module text-white border-primary"
                   : "bg-muted text-muted-foreground border-border hover:border-primary"
               }`}
             >
@@ -149,7 +149,7 @@ function makePrefixRenderer(
         </div>
 
         {groupVal.mode === "auto" && (
-          <p className="text-[11px] text-primary mt-1">
+          <p className="text-[0.6875rem] text-primary mt-1">
             From:{" "}
             <span className="font-semibold">
               {projectNameRef.current || "—"}
@@ -381,7 +381,7 @@ const NamedEntryTypeMaster: React.FC = () => {
       >
 
       {entryTypeOptions.length === 0 && (
-        <div className="mb-4 px-4 py-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-sm font-heading">
+        <div className="mb-4 px-4 py-3 rounded-lg border border-amber-500/30 bg-[#ffe2021a] text-amber-700 dark:text-amber-400 text-sm font-heading">
           No entry types found in Menu Master. Add entries via{" "}
           <strong>Admin → Menu Master</strong> before creating named entry
           types.

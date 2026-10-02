@@ -59,7 +59,7 @@ const statusColors: Record<string, string> = {
   Closed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   Completed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   "Fully Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+  Pending: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
   "In Progress": "bg-blue-500/10 text-blue-600 border-blue-400/20",
   Draft: "bg-muted text-muted-foreground border-border",
   Open: "bg-blue-500/10 text-blue-600 border-blue-400/20",
@@ -73,7 +73,7 @@ function StatusBadge({ status }: { status: string }) {
     statusColors[status] ?? "bg-muted text-muted-foreground border-border";
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cls}`}
     >
       {status || "Draft"}
     </span>
@@ -122,7 +122,7 @@ function StatusBreakdown({
         const pct = total > 0 ? Math.round((Number(row.Count) / total) * 100) : 0;
         return (
           <div key={row.Status}>
-            <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
+            <div className="flex justify-between text-[0.625rem] text-muted-foreground mb-0.5">
               <span>{row.Status || "Draft"}</span>
               <span className="font-medium text-foreground">{row.Count}</span>
             </div>
@@ -158,7 +158,7 @@ const DonutCard: React.FC<{
   const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
       <div
         className="flex items-center gap-2 px-4 py-3 border-b"
         style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}
@@ -257,7 +257,7 @@ const TrendCard: React.FC<{
   const { theme } = useTheme();
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
       <div
         className="flex items-center gap-2 px-4 py-3 border-b"
         style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}
@@ -338,7 +338,7 @@ const WO_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">
+      <span className="font-mono text-[0.6875rem] text-primary">
         {(getValue() as string) || "—"}
       </span>
     ),
@@ -375,7 +375,7 @@ const BOQ_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">
+      <span className="font-mono text-[0.6875rem] text-primary">
         {(getValue() as string) || "—"}
       </span>
     ),
@@ -412,7 +412,7 @@ const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">
+      <span className="font-mono text-[0.6875rem] text-primary">
         {(getValue() as string) || "—"}
       </span>
     ),
@@ -664,7 +664,7 @@ export default function EngineeringDashboard() {
                 </div>
                 <button
                   onClick={() => navigate("/engineering/work-order")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: ACCENT }}
                 >
                   View all →
@@ -703,7 +703,7 @@ export default function EngineeringDashboard() {
                 </div>
                 <button
                   onClick={() => navigate("/engineering/boq")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#3b82f6" }}
                 >
                   View all →
@@ -747,7 +747,7 @@ export default function EngineeringDashboard() {
                 </div>
                 <button
                   onClick={() => navigate("/engineering/work-done")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#10b981" }}
                 >
                   View all →

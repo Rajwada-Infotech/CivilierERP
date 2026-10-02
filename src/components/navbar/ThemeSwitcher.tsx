@@ -27,7 +27,7 @@ const ThemeOptions: React.FC<{
   onClose: () => void;
 }> = ({ currentTheme, setTheme, onClose }) => (
   <>
-    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
+    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
       Appearance
     </p>
     {(

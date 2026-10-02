@@ -109,7 +109,7 @@ function DiffCell({ before, after }: { before: number | null; after: number | nu
 function ItemsDiffTable({ entries }: { entries: ItemDiffEntry[] }) {
   return (
     <div className="rounded-lg border border-border overflow-x-auto">
-      <table className="w-full text-[11px] min-w-[420px]">
+      <table className="w-full text-[0.6875rem] min-w-[420px]">
         <thead className="bg-muted/40">
           <tr>
             <th className="text-left px-2.5 py-1.5 font-medium text-muted-foreground">Item</th>
@@ -123,7 +123,7 @@ function ItemsDiffTable({ entries }: { entries: ItemDiffEntry[] }) {
             <tr key={e.key} className="border-t border-border/60">
               <td className="px-2.5 py-1.5">
                 <div className="font-medium">{e.name}</div>
-                {e.unit && <div className="text-[10px] text-muted-foreground">{e.unit}</div>}
+                {e.unit && <div className="text-[0.625rem] text-muted-foreground">{e.unit}</div>}
               </td>
               <DiffCell before={e.before?.quantity ?? null} after={e.after?.quantity ?? null} />
               <DiffCell before={e.before?.rate ?? null} after={e.after?.rate ?? null} />
@@ -237,7 +237,7 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
       cell: ({ row }) => (
         <div className="min-w-0">
           <p className="truncate">{row.original.RefDocLabel}</p>
-          <p className="font-mono text-[11px] text-muted-foreground truncate">
+          <p className="font-mono text-[0.6875rem] text-muted-foreground truncate">
             {row.original.RefDocNo || "—"}
           </p>
         </div>
@@ -271,7 +271,7 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
       cell: ({ row }) => (
         <div className="min-w-0">
           <p className="truncate text-xs">{row.original.CreatedBy || "—"}</p>
-          <p className="text-[11px] text-muted-foreground truncate">
+          <p className="text-[0.6875rem] text-muted-foreground truncate">
             {fmtDateTime(row.original.CreatedAt)}
           </p>
         </div>

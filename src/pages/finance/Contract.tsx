@@ -25,6 +25,7 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -33,6 +34,8 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
 const inputCls =
@@ -81,11 +84,11 @@ function StatusBadge({ status }: { status: string }) {
   const cfg =
     s === "active"   ? "bg-violet-500/10 text-violet-600 border-violet-200 dark:border-violet-800" :
     s === "expired"  ? "bg-red-500/10 text-red-500 border-red-200 dark:border-red-800" :
-    s === "draft"    ? "bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-800" :
+    s === "draft"    ? "bg-[#ffe2021a] text-amber-600 border-amber-200 dark:border-amber-800" :
     s === "deleted"  ? "bg-red-900/10 text-red-400 border-red-900/20" :
                        "bg-muted text-muted-foreground border-border";
   return (
-    <span className={`inline-flex items-center text-[10px] font-heading uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold border ${cfg}`}>
+    <span className={`inline-flex items-center text-[0.625rem] font-heading uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold border ${cfg}`}>
       {status || "Draft"}
     </span>
   );
@@ -103,7 +106,7 @@ function AttachmentRow({ att, onRemove, readOnly }: { att: Attachment; onRemove:
       }
       <div className="flex-1 min-w-0">
         <p className="text-xs font-medium text-foreground truncate">{att.name}</p>
-        {att.size && <p className="text-[10px] text-muted-foreground">{(att.size / 1024).toFixed(1)} KB</p>}
+        {att.size && <p className="text-[0.625rem] text-muted-foreground">{(att.size / 1024).toFixed(1)} KB</p>}
       </div>
       <div className="flex items-center gap-1">
         <a href={att.url} target="_blank" rel="noreferrer"
@@ -233,6 +236,13 @@ export default function Contract() {
           .some((f) => f?.toLowerCase().includes(searchQ.toLowerCase())))
     ),
     [rawContracts, searchQ]
+  );
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: approvalTrails, isLoading: approvalTrailsLoading } = useApprovalTrailsBulk(
+    "Contract",
+    contracts.map((c) => c.ContractId),
   );
 
   const projects = useMemo(() => {
@@ -449,7 +459,7 @@ export default function Contract() {
         <div>
           <p className="text-sm font-medium">{row.original.CompanyName || "—"}</p>
           {row.original.ProjectName && (
-            <p className="text-[11px] text-muted-foreground">{row.original.ProjectName}</p>
+            <p className="text-[0.6875rem] text-muted-foreground">{row.original.ProjectName}</p>
           )}
         </div>
       ),
@@ -495,6 +505,8 @@ export default function Contract() {
             table="Contract"
             recordId={(row.original as ContractListItem).ContractId}
             fallback={<StatusBadge status={getValue() as string} />}
+            preloaded={approvalTrails.get(String((row.original as ContractListItem).ContractId)) ?? null}
+            preloadedLoading={approvalTrailsLoading}
           />
         </div>
       ),
@@ -507,7 +519,7 @@ export default function Contract() {
         const item = row.original as ContractListItem;
         return (
           <div className="flex items-center justify-end gap-1">
-            <button
+            <button data-row-view
               onClick={(e) => { e.stopPropagation(); openDetail(item); }}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View">
@@ -545,7 +557,7 @@ export default function Contract() {
           action={
             <button
               onClick={goToCreate}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 transition-all hover:shadow-lg hover:shadow-violet-500/20"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all hover:shadow-lg "
             >
               <Plus size={13} />
               New Contract
@@ -580,6 +592,7 @@ export default function Contract() {
                 paginated={false}
                 emptyMessage="No contracts yet. Click 'New Contract' to create one."
                 columns={columns}
+                getRowId={(r: any) => String(r.ContractId)}
               />
             </CardContent>
           </Card>
@@ -626,7 +639,7 @@ export default function Contract() {
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={saveMutation.isPending}
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-violet-500/20 transition disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg btn-module text-white text-sm font-semibold hover:shadow-lg transition disabled:opacity-50"
               >
                 {saveMutation.isPending ? "Saving…" : editingId ? "Update Contract" : "Create Contract"}
               </button>
@@ -674,11 +687,11 @@ export default function Contract() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label className={labelCls}>Doc Date</label>
-                    <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
+                    <DateInput value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Contract Date</label>
-                    <input type="date" value={form.contractDate} onChange={(e) => setField("contractDate", e.target.value)} className={inputCls} />
+                    <DateInput value={form.contractDate} onChange={(e) => setField("contractDate", e.target.value)} className={inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Financial Year</label>
@@ -753,7 +766,7 @@ export default function Contract() {
 
                   {contactPersonOpen && (
                     <>
-                      <div className="fixed inset-0 z-40" onClick={() => setContactPersonOpen(false)} />
+                      <BodyPortal><div className="fixed inset-0 z-40" onClick={() => setContactPersonOpen(false)} /></BodyPortal>
                       <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-xl overflow-hidden">
                         {/* Category tabs */}
                         <div className="flex border-b border-border">
@@ -816,7 +829,7 @@ export default function Contract() {
                       <div>
                         <p className="text-sm font-semibold text-foreground">{selectedContactDetail.name}</p>
                         <p className="text-xs text-muted-foreground mt-0.5">{selectedContactDetail.partyName}
-                          {selectedContactDetail.partyCode && <span className="ml-1.5 text-[10px] font-mono opacity-60">({selectedContactDetail.partyCode})</span>}
+                          {selectedContactDetail.partyCode && <span className="ml-1.5 text-[0.625rem] font-mono opacity-60">({selectedContactDetail.partyCode})</span>}
                         </p>
                       </div>
                       {(() => {
@@ -826,11 +839,11 @@ export default function Contract() {
                           : t === "S"
                           ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
                           : t === "C"
-                          ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                          ? "bg-[#ffe2021a] text-amber-500 border-amber-500/20"
                           : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
                         const lbl = t === "V" ? "Vendor" : t === "S" ? "Supplier" : t === "C" ? "Contractor" : "Applicant";
                         return (
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${cfg}`}>{lbl}</span>
+                          <span className={`text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${cfg}`}>{lbl}</span>
                         );
                       })()}
                     </div>
@@ -852,12 +865,12 @@ export default function Contract() {
                       )}
                       {selectedContactDetail.gst && (
                         <div className="flex items-center gap-1.5 text-muted-foreground">
-                          <span className="opacity-50 text-[10px] font-bold">GST</span> {selectedContactDetail.gst}
+                          <span className="opacity-50 text-[0.625rem] font-bold">GST</span> {selectedContactDetail.gst}
                         </div>
                       )}
                       {selectedContactDetail.pan && (
                         <div className="flex items-center gap-1.5 text-muted-foreground">
-                          <span className="opacity-50 text-[10px] font-bold">PAN</span> {selectedContactDetail.pan}
+                          <span className="opacity-50 text-[0.625rem] font-bold">PAN</span> {selectedContactDetail.pan}
                         </div>
                       )}
                     </div>
@@ -902,11 +915,11 @@ export default function Contract() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className={labelCls}>Contract Start Date</label>
-                    <input type="date" value={form.contractStartDate} onChange={(e) => setField("contractStartDate", e.target.value)} className={inputCls} />
+                    <DateInput value={form.contractStartDate} onChange={(e) => setField("contractStartDate", e.target.value)} className={inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Contract End Date</label>
-                    <input type="date" value={form.contractEndDate} onChange={(e) => setField("contractEndDate", e.target.value)} className={inputCls} />
+                    <DateInput value={form.contractEndDate} onChange={(e) => setField("contractEndDate", e.target.value)} className={inputCls} />
                   </div>
                 </div>
               </CardContent>
@@ -933,7 +946,7 @@ export default function Contract() {
                   <p className="text-sm text-muted-foreground">
                     {uploading ? "Uploading…" : "Drop files here or click to browse"}
                   </p>
-                  <p className="text-[10px] text-muted-foreground/60">Images, PDFs, Word docs — multiple files supported</p>
+                  <p className="text-[0.625rem] text-muted-foreground/60">Images, PDFs, Word docs — multiple files supported</p>
                 </div>
                 <input ref={fileRef} type="file" multiple className="hidden"
                   onChange={(e) => handleFiles(e.target.files)} />
@@ -955,10 +968,10 @@ export default function Contract() {
                     </button>
                     {tcDropdownOpen && (
                       <>
-                        <div className="fixed inset-0 z-10" onClick={() => setTcDropdownOpen(false)} />
+                        <BodyPortal><div className="fixed inset-0 z-10" onClick={() => setTcDropdownOpen(false)} /></BodyPortal>
                         <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
                           <div className="px-3 py-2 border-b border-border">
-                            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                            <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider">
                               Select Terms &amp; Conditions
                             </p>
                           </div>
@@ -976,7 +989,7 @@ export default function Contract() {
                                   </span>
                                   <span className="flex-1 min-w-0">
                                     <span className="block text-sm font-medium text-foreground truncate">{tc.name}</span>
-                                    <span className="block text-[11px] text-muted-foreground truncate mt-0.5">{tc.terms}</span>
+                                    <span className="block text-[0.6875rem] text-muted-foreground truncate mt-0.5">{tc.terms}</span>
                                   </span>
                                 </button>
                               );
@@ -999,7 +1012,7 @@ export default function Contract() {
                   <div className="space-y-2">
                     {selectedTCs.map((tc, idx) => (
                       <div key={tc.id} className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3">
-                        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-[10px] font-bold flex items-center justify-center mt-0.5">
+                        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-[0.625rem] font-bold flex items-center justify-center mt-0.5">
                           {idx + 1}
                         </span>
                         <div className="flex-1 min-w-0">
@@ -1051,7 +1064,7 @@ export default function Contract() {
               </button>
               {c.Status !== "Pending" && c.Status !== "Approved" && (
                 <button onClick={() => goToEdit(c)}
-                  className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-gradient-to-r from-violet-600 via-indigo-500 to-purple-600 text-white text-sm font-semibold hover:shadow-lg hover:shadow-violet-500/20 transition">
+                  className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg btn-module text-white text-sm font-semibold hover:shadow-lg transition">
                   Edit
                 </button>
               )}
@@ -1082,7 +1095,7 @@ export default function Contract() {
                 ["Project", c.ProjectName || "—"],
               ].map(([label, value]) => (
                 <div key={String(label)} className="rounded-xl border border-border bg-muted/10 px-4 py-3">
-                  <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">{label}</p>
+                  <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">{label}</p>
                   <div className="text-sm font-medium text-foreground">{value}</div>
                 </div>
               ))}
@@ -1096,19 +1109,19 @@ export default function Contract() {
               <CardContent className="pt-4 space-y-4">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div>
-                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Contact Person</p>
+                    <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Contact Person</p>
                     <p className="text-sm">{c.ContactPerson || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Contract Type</p>
+                    <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Contract Type</p>
                     <p className="text-sm">{c.NatureOfContract || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Contract Amount</p>
+                    <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Contract Amount</p>
                     <p className="text-sm font-semibold text-violet-600 dark:text-violet-400">{fmtAmt(c.ContractAmount)}</p>
                   </div>
                   <div className="col-span-2 sm:col-span-3">
-                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Period</p>
+                    <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Period</p>
                     <p className="text-sm">
                       {c.ContractStartDate ? fmtDate(c.ContractStartDate) : ""}
                       {c.ContractStartDate && c.ContractEndDate ? " – " : ""}
@@ -1119,13 +1132,13 @@ export default function Contract() {
                 </div>
                 {c.Reason && (
                   <div>
-                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Purpose / Description</p>
+                    <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Purpose / Description</p>
                     <p className="text-sm text-muted-foreground whitespace-pre-wrap">{c.Reason}</p>
                   </div>
                 )}
                 {c.Remarks && (
                   <div>
-                    <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Remarks</p>
+                    <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Remarks</p>
                     <p className="text-sm text-muted-foreground whitespace-pre-wrap">{c.Remarks}</p>
                   </div>
                 )}
@@ -1161,14 +1174,14 @@ export default function Contract() {
                         ["Documented (Invoiced/Booked)", fmtAmt(contractLedgerData.summary.TotalDocumented), "text-foreground"],
                       ].map(([label, value, cls]) => (
                         <div key={String(label)} className="rounded-xl border border-border bg-muted/10 px-3 py-2.5">
-                          <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">{label}</p>
+                          <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">{label}</p>
                           <p className={`text-sm font-semibold ${cls}`}>{value}</p>
                         </div>
                       ))}
                     </div>
 
                     {contractLedgerData.summary.OverBilled && (
-                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs">
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#ffe2021a] border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs">
                         <AlertTriangle size={13} className="shrink-0" />
                         Total documented against this contract exceeds its contract value — legitimate for change orders, but worth a look.
                       </div>
@@ -1183,11 +1196,11 @@ export default function Contract() {
                         <table className="w-full text-sm">
                           <thead className="bg-muted/40">
                             <tr>
-                              <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
-                              <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Type</th>
-                              <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Source</th>
-                              <th className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Remarks</th>
-                              <th className="text-right px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
+                              <th className="text-left px-3 py-2 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
+                              <th className="text-left px-3 py-2 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Type</th>
+                              <th className="text-left px-3 py-2 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Source</th>
+                              <th className="text-left px-3 py-2 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Remarks</th>
+                              <th className="text-right px-3 py-2 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border/60">
@@ -1197,10 +1210,10 @@ export default function Contract() {
                                   {fmtDate(entry.CreatedAt)}
                                 </td>
                                 <td className="px-3 py-2">
-                                  <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                                  <span className={`inline-flex items-center gap-1 text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full ${
                                     entry.Amount >= 0
                                       ? "bg-emerald-500/10 text-emerald-600"
-                                      : "bg-amber-500/10 text-amber-600"
+                                      : "bg-[#ffe2021a] text-amber-600"
                                   }`}>
                                     {entry.Amount >= 0
                                       ? <ArrowDownCircle size={11} />
@@ -1243,13 +1256,13 @@ export default function Contract() {
                     {detailParties.map((p, i) => {
                       const colorCfg =
                         p.type === "Supplier"   ? "bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-800" :
-                        p.type === "Contractor" ? "bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-800" :
+                        p.type === "Contractor" ? "bg-[#ffe2021a] text-amber-600 border-amber-200 dark:border-amber-800" :
                                                   "bg-emerald-500/10 text-emerald-600 border-emerald-200 dark:border-emerald-800";
                       const dotColor = p.type === "Supplier" ? "bg-blue-500" : p.type === "Contractor" ? "bg-amber-500" : "bg-emerald-500";
                       return (
                         <span key={i} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${colorCfg}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
-                          <span className="text-[10px] opacity-60 uppercase tracking-wider">{p.type}</span>
+                          <span className="text-[0.625rem] opacity-60 uppercase tracking-wider">{p.type}</span>
                           <span>{p.name}</span>
                         </span>
                       );

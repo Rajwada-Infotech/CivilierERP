@@ -21,6 +21,8 @@ import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { usePageRights } from "@/hooks/usePageRights";
+import { AutoInput, DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
@@ -260,15 +262,15 @@ function ParkingVcItem({
         <div className="flex-1 min-w-0">
           <span className={`text-xs leading-snug ${item.IsChecked ? "text-foreground" : "text-muted-foreground"}`}>{item.Label}</span>
           {isOpenRecheck && (
-            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400">Recheck pending</span>
+            <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400">Recheck pending</span>
           )}
           {item.Remarks && !showRemarks && (
-            <p className="text-[10px] text-muted-foreground mt-0.5 italic truncate">"{item.Remarks}"</p>
+            <p className="text-[0.625rem] text-muted-foreground mt-0.5 italic truncate">"{item.Remarks}"</p>
           )}
         </div>
         {!locked && (
           <button onClick={() => setShowRemarks((v) => !v)}
-            className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground transition-colors mt-0.5">
+            className="shrink-0 text-[0.625rem] text-muted-foreground hover:text-foreground transition-colors mt-0.5">
             {showRemarks ? "✕" : "note"}
           </button>
         )}
@@ -279,7 +281,7 @@ function ParkingVcItem({
             placeholder="Add a remark…"
             className="flex-1 text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
           <button onClick={saveRemarks} disabled={saving}
-            className="px-2 py-1 text-xs bg-primary text-primary-foreground rounded disabled:opacity-40">Save</button>
+            className="px-2 py-1 text-xs btn-module text-white rounded disabled:opacity-40">Save</button>
         </div>
       )}
     </div>
@@ -296,11 +298,11 @@ function ParkingVcSection({
   return (
     <div className="mt-3 pt-3 border-t border-border space-y-2">
       <div className="flex items-center justify-between">
-        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+        <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
           <ClipboardCheck size={12} className="text-primary" /> Verify: {sec.label}
         </h4>
         {sec.complete && (
-          <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+          <span className="flex items-center gap-1 text-[0.625rem] font-medium text-emerald-700 dark:text-emerald-400">
             <ShieldCheck size={11} /> Confirmed
           </span>
         )}
@@ -1227,7 +1229,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium">{it.ItemLabel}</span>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${
+              <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${
                 it.CheckStatus === "Checked" ? "text-emerald-700 bg-emerald-50 border-emerald-200"
                 : it.CheckStatus === "NeedsRecheck" ? "text-red-600 bg-red-50 border-red-200"
                 : "text-muted-foreground bg-muted/50 border-border"
@@ -1236,7 +1238,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               </span>
             </div>
             {it.Remarks && (
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 {it.CheckStatus === "NeedsRecheck" ? "Flagged: " : "Remark: "}{it.Remarks}
               </p>
             )}
@@ -1245,27 +1247,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 <div className="mt-1.5 space-y-1">
                   <textarea value={checklistFlagRemark} onChange={(e) => setChecklistFlagRemark(e.target.value)}
                     placeholder="What needs to be fixed? (required)" rows={2}
-                    className="w-full text-[11px] rounded border border-border px-2 py-1 bg-background" />
+                    className="w-full text-[0.6875rem] rounded border border-border px-2 py-1 bg-background" />
                   <div className="flex gap-1.5">
                     <button disabled={checklistBusyKey === it.ItemKey || !checklistFlagRemark.trim()}
                       onClick={() => fireChecklistAction(it.ItemKey, "flag", checklistFlagRemark)}
-                      className="text-[11px] px-2 py-0.5 rounded bg-red-600 text-white disabled:opacity-40">
+                      className="text-[0.6875rem] px-2 py-0.5 rounded bg-red-600 text-white disabled:opacity-40">
                       Send for Recheck
                     </button>
-                    <button onClick={() => setChecklistFlaggingKey(null)} className="text-[11px] px-2 py-0.5 rounded border border-border">
+                    <button onClick={() => setChecklistFlaggingKey(null)} className="text-[0.6875rem] px-2 py-0.5 rounded border border-border">
                       Cancel
                     </button>
                   </div>
                 </div>
               ) : (
-                <button onClick={() => setChecklistFlaggingKey(it.ItemKey)} className="mt-1 text-[10px] text-red-600 hover:underline">
+                <button onClick={() => setChecklistFlaggingKey(it.ItemKey)} className="mt-1 text-[0.625rem] text-red-600 hover:underline">
                   Flag for Recheck
                 </button>
               )
             )}
             {interactive && it.CheckStatus === "NeedsRecheck" && (
               <button onClick={() => fireChecklistAction(it.ItemKey, "resubmit")} disabled={checklistBusyKey === it.ItemKey}
-                className="mt-1 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 disabled:opacity-40">
+                className="mt-1 text-[0.625rem] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 disabled:opacity-40">
                 I've revised this — resend for recheck
               </button>
             )}
@@ -1281,10 +1283,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
               <DialogTitle className="font-heading flex items-center gap-2">
-                <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
-                  <Building2 size={13} className="text-amber-500" />
+                <span className="w-6 h-6 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center shrink-0">
+                  <Building2 size={13} className="text-sky-500" />
                 </span>
-                <span className="bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-sky-400 to-sky-500 bg-clip-text text-transparent">
                   {booking ? `${booking.BookingNo} — ${booking.ApplicantName}` : "Booking Detail"}
                 </span>
               </DialogTitle>
@@ -1307,10 +1309,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           <div className="min-w-0">
             <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Current Stage</div>
+                <div className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">Current Stage</div>
                 <div className="text-sm font-semibold">{stageLabels[currentStage] || currentStage}</div>
                 {booking.StageRemarks && (
-                  <div className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                  <div className="mt-1 rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs text-sky-800">
                     <span className="font-semibold">Correction remarks: </span>{booking.StageRemarks}
                   </div>
                 )}
@@ -1352,7 +1354,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             <BookingLifecycleBar bookingId={booking.Id} />
 
             {rejectOpen && (
-              <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60" onClick={() => !stageActioning && setRejectOpen(false)}>
+              <BodyPortal><div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60" onClick={() => !stageActioning && setRejectOpen(false)}>
                 <div className="bg-background border border-border rounded-xl p-5 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
                   <h3 className="text-sm font-semibold">Send Back for Correction</h3>
                   <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)}
@@ -1369,7 +1371,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </button>
                   </div>
                 </div>
-              </div>
+              </div></BodyPortal>
             )}
 
             {/* 2-step required flow (Unit & Value, Payment Plan — both are
@@ -1389,7 +1391,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 : latestReceipt?.Status === "Bounced"
                 ? "text-red-700 bg-red-50"
                 : latestReceipt?.Status === CrmStatus.PENDING
-                ? "text-amber-700 bg-amber-50"
+                ? "text-sky-700 bg-sky-50"
                 : "text-muted-foreground bg-muted/40";
               return (
                 <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -1441,7 +1443,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               {TABS.map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                    tab === t ? "border-amber-500 text-amber-600 dark:text-amber-400" : "border-transparent text-muted-foreground hover:text-foreground"
+                    tab === t ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}>
                   {t}
                 </button>
@@ -1450,7 +1452,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Booking" && (
               <div className="space-y-4 pt-2">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Application</label>
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30">{booking.ApplicationNo}</div>
@@ -1511,7 +1513,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 <div className="rounded-lg border border-border p-3 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">GST</p>
-                    {booking.HsnCode && <span className="text-[11px] font-mono text-muted-foreground">{booking.HsnCode} · {booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"}</span>}
+                    {booking.HsnCode && <span className="text-[0.6875rem] font-mono text-muted-foreground">{booking.HsnCode} · {booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"}</span>}
                   </div>
 
                   {/* No HsnCode with a real TotalValue means recalculateBookingGst
@@ -1578,7 +1580,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                   <div className="flex items-center justify-between border-t border-border pt-1 font-semibold">
                     <span>Total Amount</span>
-                    <span className="text-amber-600 dark:text-amber-400">{fmt(booking.GrandTotal)}</span>
+                    <span className="text-sky-600 dark:text-sky-400">{fmt(booking.GrandTotal)}</span>
                   </div>
                 </div>
 
@@ -1596,10 +1598,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-amber-600 dark:text-amber-400" /> Payment Plan</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-sky-600 dark:text-sky-400" /> Payment Plan</h3>
                     {!planEditOpen && canEdit && booking.Status !== CrmStatus.APPROVED && (
                       <button onClick={() => { setPlanEditOpen(true); setPlanEditValue(booking.PaymentPlanId != null ? String(booking.PaymentPlanId) : ""); }}
-                        className="text-xs text-amber-600 dark:text-amber-400 hover:underline shrink-0">
+                        className="text-xs text-sky-600 dark:text-sky-400 hover:underline shrink-0">
                         Edit
                       </button>
                     )}
@@ -1619,7 +1621,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           Cancel
                         </button>
                         <button onClick={handleSavePaymentPlan} disabled={planSaving}
-                          className="px-2.5 py-1 text-xs text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
+                          className="px-2.5 py-1 text-xs text-white shadow-sm btn-module rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                           {planSaving ? "Saving..." : "Save"}
                         </button>
                       </div>
@@ -1640,7 +1642,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     crmBookings.js), so this can never drift from what the
                     Book action itself is checking. */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Total Price Breakdown</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-sky-600 dark:text-sky-400" /> Total Price Breakdown</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm">
                     <div className="rounded-lg bg-muted/30 px-2.5 py-2">
                       <div className="text-xs text-muted-foreground mb-0.5">Unit Base</div>
@@ -1658,9 +1660,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <div className="text-xs text-muted-foreground mb-0.5">Extra incl. GST</div>
                       <div className="font-medium">{fmt(booking.ExtraChargesTotal)}</div>
                     </div>
-                    <div className="rounded-lg bg-amber-500/10 px-2.5 py-2">
+                    <div className="rounded-lg bg-sky-500/10 px-2.5 py-2">
                       <div className="text-xs text-muted-foreground mb-0.5">Grand Total</div>
-                      <div className="font-semibold text-amber-600 dark:text-amber-400">{fmt(grandTotal)}</div>
+                      <div className="font-semibold text-sky-600 dark:text-sky-400">{fmt(grandTotal)}</div>
                     </div>
                   </div>
                 </div>
@@ -1687,7 +1689,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   const renderGroupRows = (label: string, rows: any[]) => rows.length > 0 && (
                     <React.Fragment key={label}>
                       <tr className="bg-muted/20">
-                        <td colSpan={7} className="px-2.5 py-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{label}</td>
+                        <td colSpan={7} className="px-2.5 py-1 text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide">{label}</td>
                       </tr>
                       {rows.map((m: any) => {
                         const paid = Number(m.AmountPaid || 0);
@@ -1707,7 +1709,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           <td className="px-2.5 py-1.5 text-right font-medium">
                             {fmt(due)}
                             {due > 0 && (
-                              <div className="text-[10px] text-muted-foreground font-normal leading-tight mt-0.5">
+                              <div className="text-[0.625rem] text-muted-foreground font-normal leading-tight mt-0.5">
                                 Prin {fmt(due / (1 + (m.ExtraChargeId ? 18 : Number(booking?.UnitParkingGstRate || 0)) / 100))}<br/>
                                 GST {fmt(due - (due / (1 + (m.ExtraChargeId ? 18 : Number(booking?.UnitParkingGstRate || 0)) / 100)))}
                               </div>
@@ -1716,10 +1718,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           <td className="px-2.5 py-1.5 text-right text-emerald-700">
                             {fmt(paid)}
                             {mrForThis > 0 && (
-                              <div className="text-[10px] text-blue-600 font-normal">+{fmt(mrForThis)} on account</div>
+                              <div className="text-[0.625rem] text-blue-600 font-normal">+{fmt(mrForThis)} on account</div>
                             )}
                             {Number(m.PendingVerificationAmount) > 0 && (
-                              <div className="text-[10px] text-amber-700 font-normal">+{fmt(m.PendingVerificationAmount)} pending verification</div>
+                              <div className="text-[0.625rem] text-amber-700 font-normal">+{fmt(m.PendingVerificationAmount)} pending verification</div>
                             )}
                           </td>
                           <td className={`px-2.5 py-1.5 text-right font-semibold ${bal > 0 ? (isOverdue ? "text-red-600" : "text-amber-700") : "text-muted-foreground"}`}>
@@ -1727,15 +1729,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           </td>
                           <td className="px-2.5 py-1.5 whitespace-nowrap text-xs text-muted-foreground">
                             {m.DueDate
-                              ? <span className={isOverdue ? "text-red-600 font-medium" : ""}>{new Date(m.DueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}{isOverdue && <span className="ml-1 text-[10px]">⚠</span>}</span>
+                              ? <span className={isOverdue ? "text-red-600 font-medium" : ""}>{new Date(m.DueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}{isOverdue && <span className="ml-1 text-[0.625rem]">⚠</span>}</span>
                               : "—"}
                           </td>
                           <td className="px-2.5 py-1.5">
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
+                            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium ${
                               m.Status === CrmStatus.PAID ? "text-emerald-700 bg-emerald-50 border-emerald-200"
                                 : m.Status === "Waived" ? "text-muted-foreground bg-muted/40 border-border"
                                 : isOverdue ? "text-red-700 bg-red-50 border-red-200"
-                                : "text-amber-700 bg-amber-50 border-amber-200"
+                                : "text-sky-700 bg-sky-50 border-sky-200"
                             }`}>{isOverdue ? "Overdue" : m.Status}</span>
                             {/* Demand → Invoice flow, driven from here. A
                                 Pending milestone with a balance gets a
@@ -1747,25 +1749,25 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 every milestone including #1 (Booking Amount). */}
                             {m.Status !== CrmStatus.PAID && m.Status !== "Waived" && m.DemandStatus === CrmStatus.PENDING && bal > 0 && canRaiseDemand && (
                               <button onClick={() => raiseDemand(m.Id)} disabled={demandBusyId === m.Id}
-                                className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-primary border-primary/40 hover:bg-primary/10 disabled:opacity-40">
+                                className="ml-1 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-primary border-primary/40 hover:bg-primary/10 disabled:opacity-40">
                                 {demandBusyId === m.Id ? "Raising…" : "Raise Demand"}
                               </button>
                             )}
                             {m.DemandStatus === "Demanded" && m.Status !== CrmStatus.PAID && (
                               <>
                                 {m.DemandNo && (
-                                  <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-blue-700 bg-blue-50 border-blue-200">
+                                  <span className="ml-1 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-blue-700 bg-blue-50 border-blue-200">
                                     {m.DemandNo}
                                   </span>
                                 )}
                                 {!(invoices as any[]).some((inv: any) => inv.MilestoneId === m.Id && inv.Status !== "Void") && (
-                                  <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">
+                                  <span className="ml-1 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-sky-700 bg-sky-50 border-sky-200">
                                     Invoice Pending
                                   </span>
                                 )}
                                 {canRaiseDemand && (
                                   <button onClick={() => undoDemand(m.Id)} disabled={demandBusyId === m.Id}
-                                    className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground border-border hover:bg-muted disabled:opacity-40">
+                                    className="ml-1 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground border-border hover:bg-muted disabled:opacity-40">
                                     Undo
                                   </button>
                                 )}
@@ -1781,7 +1783,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   return (
                     <div className="rounded-xl border border-border p-4 space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Payment Breakdown</h3>
+                        <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-sky-600 dark:text-sky-400" /> Payment Breakdown</h3>
                         <span className="text-xs text-muted-foreground">
                           {fmt(totalPaid)} of {fmt(totalDue)} cleared
                           {mrOnAccount > 0 && <span className="text-blue-600"> · {fmt(mrOnAccount)} on account</span>}
@@ -1825,7 +1827,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {tab === "Payment & Invoice" && (
               <div className="space-y-3 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-amber-600 dark:text-amber-400" /> Booking Amount</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-sky-600 dark:text-sky-400" /> Booking Amount</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-emerald-700">{fmt(bookingAmountPaid)}</span></div>
@@ -1883,13 +1885,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     // State C — submitted to Finance (RPStatus = Pending)
                     if (receipt?.Status === CrmStatus.PENDING && receipt?.RPStatus === CrmStatus.PENDING) {
                       return (
-                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs mt-1">
-                          <Hourglass size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                        <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 px-3 py-2.5 text-xs mt-1">
+                          <Hourglass size={13} className="shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
                           <div className="space-y-0.5">
-                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                            <p className="font-semibold text-sky-800 dark:text-sky-300">
                               {fmt(receipt.Amount || tokenAmt)} held — awaiting Finance approval
                             </p>
-                            <p className="text-amber-700 dark:text-amber-400">
+                            <p className="text-sky-700 dark:text-sky-400">
                               Receipt {receipt.ReceiptNo} · {pmode} · submitted to Finance (Account's Head / Admin).
                               This amount will count as paid once approved.
                             </p>
@@ -1901,13 +1903,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     // State B — Money Receipt created, not yet submitted to Finance
                     if (receipt?.Status === CrmStatus.PENDING && !receipt?.RPStatus) {
                       return (
-                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs mt-1">
-                          <Clock size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                        <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 px-3 py-2.5 text-xs mt-1">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
                           <div className="space-y-0.5">
-                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                            <p className="font-semibold text-sky-800 dark:text-sky-300">
                               {fmt(receipt.Amount || tokenAmt)} on hold — Money Receipt pending Finance submission
                             </p>
-                            <p className="text-amber-700 dark:text-amber-400">
+                            <p className="text-sky-700 dark:text-sky-400">
                               Receipt {receipt.ReceiptNo} · {pmode} · created but not yet sent to Finance for approval.
                             </p>
                           </div>
@@ -1918,13 +1920,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     // State A — no receipt yet (booking still at Review / before submission)
                     if (!receipt) {
                       return (
-                        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-xs mt-1">
-                          <Clock size={13} className="shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                        <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 px-3 py-2.5 text-xs mt-1">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
                           <div className="space-y-0.5">
-                            <p className="font-semibold text-amber-800 dark:text-amber-300">
+                            <p className="font-semibold text-sky-800 dark:text-sky-300">
                               Token Received &amp; On Hold — {fmt(tokenAmt)} via {pmode}
                             </p>
-                            <p className="text-amber-700 dark:text-amber-400">
+                            <p className="text-sky-700 dark:text-sky-400">
                               Payment recorded but not yet processed. A Money Receipt is auto-generated when this booking is submitted for approval
                               ("Verify &amp; Send for Approval"). Finance approves it — only then does it count as paid.
                             </p>
@@ -1936,10 +1938,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     return null; // Approved — reflected in AmountPaid already
                   })()}
                   {bookingAmountDue <= 0 && (
-                    <p className="text-[11px] text-muted-foreground">Booking Amount not set on the payment plan — open the Payment Plan Master and set a fixed Booking Amount.</p>
+                    <p className="text-[0.6875rem] text-muted-foreground">Booking Amount not set on the payment plan — open the Payment Plan Master and set a fixed Booking Amount.</p>
                   )}
                   {bookingAmountPaidInFull && (
-                    <p className="text-[11px] text-emerald-700">Booking Amount fully paid.</p>
+                    <p className="text-[0.6875rem] text-emerald-700">Booking Amount fully paid.</p>
                   )}
                 </div>
 
@@ -1952,7 +1954,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     so a booking with none doesn't show an empty card. */}
                 {(onAccountData?.payments || []).length > 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-amber-600 dark:text-amber-400" /> On-Account Payments</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-sky-600 dark:text-sky-400" /> On-Account Payments</h3>
                     <div className="space-y-1.5">
                       {(onAccountData.payments as any[]).map((p: any) => {
                         const inv = (invoices as any[]).find((i: any) => i.OnAccountPaymentId === p.Id)
@@ -1979,23 +1981,23 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Invoiced</span>
                                 <button onClick={() => setPreviewInvoice(inv)}
-                                  className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline">
+                                  className="flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400 hover:underline">
                                   <Eye size={12} /> View
                                 </button>
                                 <button onClick={() => downloadPdf(`/api/crm/invoices/${inv.Id}/pdf`, `${inv.InvoiceNo}.pdf`)}
-                                  className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline">
+                                  className="flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400 hover:underline">
                                   <Download size={12} /> Download
                                 </button>
                               </div>
                             ) : p.Status === "Applied" || p.Status === "PartiallyApplied" ? (
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="text-[11px] text-muted-foreground italic">
+                                <span className="text-[0.6875rem] text-muted-foreground italic">
                                   Applied to milestone (invoiced there)
                                 </span>
                               </div>
                             ) : (
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border text-amber-700 bg-amber-50 border-amber-200">
+                                <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border text-sky-700 bg-sky-50 border-sky-200">
                                   Invoice Generation Pending
                                 </span>
                                 {canEdit && (
@@ -2030,9 +2032,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   && !(Number(firstMilestone?.PendingVerificationAmount) > 0)
                   && currentStage !== "Review" && moneyReceipts.length === 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-amber-600 dark:text-amber-400" /> Submit Payment for Approval</h3>
-                    <p className="text-[11px] text-muted-foreground">Creates the Money Receipt for this booking — it goes Pending until Finance/Account's Head approves it.</p>
-                    <div className="grid grid-cols-2 gap-2">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-sky-600 dark:text-sky-400" /> Submit Payment for Approval</h3>
+                    <p className="text-[0.6875rem] text-muted-foreground">Creates the Money Receipt for this booking — it goes Pending until Finance/Account's Head approves it.</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input type="number" placeholder={`Amount — Balance Due ${fmt(bookingAmountBalance)}`} value={payForm.Amount}
                         onChange={(e) => setPayForm((f) => ({ ...f, Amount: e.target.value }))}
                         className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
@@ -2040,7 +2042,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
                         {["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Card"].map((m) => <option key={m}>{m}</option>)}
                       </select>
-                      <input type="date" value={payForm.ReceivedDate} onChange={(e) => setPayForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
+                      <DateInput value={payForm.ReceivedDate} onChange={(e) => setPayForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
                         className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                       {payForm.PaymentMode === "Cheque" ? (
                         <input placeholder="Cheque No" value={payForm.TransactionRef} onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))}
@@ -2050,13 +2052,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                       ) : null}
                       {payForm.PaymentMode === "Cheque" && (
-                        <input type="date" value={payForm.ChequeDate} onChange={(e) => setPayForm((f) => ({ ...f, ChequeDate: e.target.value }))}
+                        <DateInput value={payForm.ChequeDate} onChange={(e) => setPayForm((f) => ({ ...f, ChequeDate: e.target.value }))}
                           className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                       )}
                     </div>
-                    <p className="text-[11px] text-muted-foreground">Deposit bank: assigned by Accounts on the Received Payment before approval.</p>
+                    <p className="text-[0.6875rem] text-muted-foreground">Deposit bank: assigned by Accounts on the Received Payment before approval.</p>
                     <button onClick={handleRecordPayment} disabled={paySaving}
-                      className="w-full py-2 text-sm font-medium text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
+                      className="w-full py-2 text-sm font-medium text-white shadow-sm btn-module rounded-lg hover:shadow-lg disabled:opacity-40">
                       {paySaving ? "Submitting..." : `Submit for Approval`}
                     </button>
                   </div>
@@ -2070,17 +2072,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-2">
                 {/* Pending amendments banner */}
                 {(pendingAmendments as any[]).length > 0 && (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 space-y-2">
                     <div className="flex items-center justify-between">
                       <h3 className="text-xs font-semibold flex items-center gap-1.5 text-amber-800"><ShieldAlert size={14} /> Pending Amendments ({pendingAmendments.length})</h3>
                       {isAmendmentApprover && (
-                        <a href="/admin/approval/inbox" className="text-[10px] text-amber-700 underline underline-offset-2 hover:text-amber-900">
+                        <a href="/admin/approval/inbox" className="text-[0.625rem] text-sky-700 underline underline-offset-2 hover:text-sky-900">
                           Review in Approval Inbox →
                         </a>
                       )}
                     </div>
                     {(pendingAmendments as any[]).map((a: any) => (
-                      <div key={a.Id} className="text-xs bg-white rounded-lg p-2 border border-amber-100">
+                      <div key={a.Id} className="text-xs bg-white rounded-lg p-2 border border-sky-100">
                         <span className="font-medium">{a.ChangeType === "ParkingAllotment" ? "Parking" : a.ChangeType === "ExtraCharge" ? "Extra Charge" : a.ChangeType}</span>
                         {" — "}{a.Action}
                         <span className="text-muted-foreground"> by {a.RequestedByName || "—"}</span>
@@ -2116,9 +2118,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         </div>
                       )}
                       {grandTotal > 0 && (
-                        <div className="rounded-lg border border-border bg-amber-500/10 px-3 py-2 text-xs">
+                        <div className="rounded-lg border border-border bg-sky-500/10 px-3 py-2 text-xs">
                           <span className="text-muted-foreground">Grand total: </span>
-                          <span className="font-semibold text-amber-600 dark:text-amber-400">{fmt(grandTotal)}</span>
+                          <span className="font-semibold text-sky-600 dark:text-sky-400">{fmt(grandTotal)}</span>
                         </div>
                       )}
                     </div>
@@ -2129,7 +2131,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {/* Parking */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Car size={15} className="text-amber-600 dark:text-amber-400" /> Parking Allotments</h3>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Car size={15} className="text-sky-600 dark:text-sky-400" /> Parking Allotments</h3>
                     {(parking as any[]).length > 0 && (
                       <span className="text-xs font-semibold text-foreground">
                         Total {fmt((parking as any[]).reduce((s: number, p: any) => s + Number(p.TotalAmount || 0), 0))}
@@ -2187,7 +2189,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             const gst = rate ? Math.round(effectiveRate * Number(rate.GstRate) / 100 * 100) / 100 : 0;
                             return (
                               <>
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                   <div>
                                     <label className="text-xs font-medium text-foreground block mb-1">
                                       Rate (₹){isUnrated && <span className="text-red-500 ml-0.5">*</span>}
@@ -2197,8 +2199,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                       placeholder={isUnrated ? "Enter price…" : (rate ? String(rate.Charge) : undefined)}
                                       autoFocus={isUnrated}
                                       className="w-full text-xs border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-                                    {!isUnrated && rate && <p className="text-[10px] text-muted-foreground mt-0.5">Master: {fmt(rate.Charge)}</p>}
-                                    {isUnrated && <p className="text-[10px] text-muted-foreground mt-0.5">No master rate — enter agreed price.</p>}
+                                    {!isUnrated && rate && <p className="text-[0.625rem] text-muted-foreground mt-0.5">Master: {fmt(rate.Charge)}</p>}
+                                    {isUnrated && <p className="text-[0.625rem] text-muted-foreground mt-0.5">No master rate — enter agreed price.</p>}
                                   </div>
                                   <div>
                                     <label className="text-xs font-medium text-foreground block mb-1">Qty</label>
@@ -2238,7 +2240,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <div className="flex gap-1.5">
                         {(availableParking.rates as any[])?.length > 0 && (
                           <button onClick={handleAddParkingFromDetail} disabled={chargesSaving}
-                            className="px-2.5 py-1 text-xs text-white bg-amber-500 hover:bg-amber-600 rounded font-medium disabled:opacity-40">
+                            className="px-2.5 py-1 text-xs text-white btn-module hover:shadow-lg rounded font-medium disabled:opacity-40">
                             Save
                           </button>
                         )}
@@ -2260,13 +2262,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-medium">{p.SlotNo || p.ParkingSlotNo || `Slot #${p.ParkingSlotId ?? "—"}`}</span>
                                 {p.CurrentParkingType && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40">{p.CurrentParkingType}</span>
+                                  <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40">{p.CurrentParkingType}</span>
                                 )}
                                 {/* Unit-linked parking has no independent payment status —
                                     its value is merged into the booking's milestone schedule.
                                     "With Booking" is the only honest label here; "Pending"
                                     would stay forever until 100% booking settlement. */}
-                                <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-blue-600 bg-blue-50 border-blue-200"
+                                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-blue-600 bg-blue-50 border-blue-200"
                                   title="Parking cost is included in this booking's grand total and collected via the booking's payment milestones">
                                   With Booking
                                 </span>
@@ -2290,8 +2292,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                           {/* Inline edit form — expands below the header row */}
                           {editingParkingId === p.Id ? (
-                            <div className="rounded-lg border border-amber-200 bg-amber-50/40 dark:bg-amber-950/20 p-3 space-y-3 mt-1">
-                              <div className="grid grid-cols-2 gap-3">
+                            <div className="rounded-lg border border-sky-200 bg-sky-50/40 dark:bg-sky-950/20 p-3 space-y-3 mt-1">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                   <label className="text-xs font-medium text-foreground block mb-1">Rate (₹)</label>
                                   <input
@@ -2299,9 +2301,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     value={parkingForm.RateOverride}
                                     onChange={(e) => setParkingForm((f) => ({ ...f, RateOverride: e.target.value }))}
                                     placeholder={String(p.RateSnapshot ?? "")}
-                                    className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-400"
+                                    className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-400"
                                   />
-                                  <p className="text-[10px] text-muted-foreground mt-0.5">Master rate: {fmt(p.RateSnapshot)}</p>
+                                  <p className="text-[0.625rem] text-muted-foreground mt-0.5">Master rate: {fmt(p.RateSnapshot)}</p>
                                 </div>
                                 <div>
                                   <label className="text-xs font-medium text-foreground block mb-1">Qty</label>
@@ -2309,7 +2311,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     type="number" min="1"
                                     value={parkingForm.Quantity}
                                     onChange={(e) => setParkingForm((f) => ({ ...f, Quantity: e.target.value }))}
-                                    className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-400"
+                                    className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-400"
                                   />
                                 </div>
                               </div>
@@ -2332,7 +2334,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                       </div>
                                       <div className="flex justify-between font-semibold border-t border-border pt-1 mt-1">
                                         <span>Total</span>
-                                        <span className="text-amber-700 dark:text-amber-400">{fmt(base + gst)}</span>
+                                        <span className="text-sky-700 dark:text-sky-400">{fmt(base + gst)}</span>
                                       </div>
                                     </div>
                                   );
@@ -2348,7 +2350,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               )}
                               <div className="flex gap-2">
                                 <button onClick={handleAddParking} disabled={chargesSaving}
-                                  className="px-3 py-1.5 text-xs text-white bg-amber-500 hover:bg-amber-600 rounded-lg font-medium disabled:opacity-40 transition-colors">
+                                  className="px-3 py-1.5 text-xs text-white btn-module hover:shadow-lg rounded-lg font-medium disabled:opacity-40 transition-colors">
                                   Save changes
                                 </button>
                                 <button onClick={cancelEditParking}
@@ -2377,7 +2379,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                 {/* Extra Charges */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-amber-600 dark:text-amber-400" /> Extra Charges</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} className="text-sky-600 dark:text-sky-400" /> Extra Charges</h3>
                   <div className="overflow-x-auto thin-scroll">
                     {(extras as any[]).length === 0 ? (
                       <p className="text-xs text-muted-foreground">No extra charges added yet.</p>
@@ -2403,7 +2405,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                     onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
                                     className="w-20 text-xs border border-border rounded px-1.5 py-1 bg-background" />
                                   <button onClick={handleAddExtra} disabled={chargesSaving}
-                                    className="px-2 py-1 text-xs text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded font-medium disabled:opacity-40">
+                                    className="px-2 py-1 text-xs text-white shadow-sm btn-module rounded font-medium disabled:opacity-40">
                                     Save
                                   </button>
                                   <button onClick={cancelEditExtra}
@@ -2461,7 +2463,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           onChange={(e) => setExtraForm((f) => ({ ...f, Amount: e.target.value }))}
                           className="w-32 text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                         <button onClick={handleAddExtra} disabled={chargesSaving}
-                          className="px-3 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 shrink-0">
+                          className="px-3 py-1.5 text-sm text-white shadow-sm btn-module rounded-lg font-medium hover:shadow-lg disabled:opacity-40 shrink-0">
                           {chargesSaving ? "Adding..." : "Add"}
                         </button>
                       </div>
@@ -2499,7 +2501,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       ].map((f) => (
                         <div key={f.key}>
                           <label className="text-xs text-muted-foreground block mb-1">{f.label}</label>
-                          <input type={f.type} value={(bank as any)[f.key] || ""}
+                          <AutoInput type={f.type} value={(bank as any)[f.key] || ""}
                             disabled={booking.Status === CrmStatus.APPROVED || bankLocked}
                             onChange={(e) => setBank((b) => ({ ...b, [f.key]: e.target.value }))}
                             className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background disabled:opacity-60 disabled:cursor-not-allowed" />
@@ -2514,7 +2516,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <div>
                           <p className="text-sm font-medium">Bank/KYC Details</p>
                           {bankLocked && bankVerifiedAt && (
-                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                            <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                               Verified by {bankVerifiedByName || "—"} on {new Date(bankVerifiedAt).toLocaleString()}
                             </p>
                           )}
@@ -2526,7 +2528,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             </span>
                             {canEdit && (
                               <button onClick={() => setBankLocked(false)}
-                                className="px-2 py-0.5 text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-md font-medium hover:bg-amber-100">
+                                className="px-2 py-0.5 text-xs text-sky-700 border border-sky-200 bg-sky-50 rounded-md font-medium hover:bg-sky-100">
                                 Edit
                               </button>
                             )}
@@ -2564,7 +2566,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           <ShieldCheck size={20} className={portalStatus.isActive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"} />
                         </div>
                         <div>
-                          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">Customer Portal</p>
+                          <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground">Customer Portal</p>
                           <p className={`text-sm font-bold mt-0.5 ${portalStatus.isActive ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
                             {portalStatus.isActive ? "Access Active" : "Access Deactivated"}
                           </p>
@@ -2597,9 +2599,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           <KeyRound size={13} className="text-primary shrink-0" />
                           <span>Password Status</span>
                         </div>
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[0.625rem] font-semibold border ${
                           portalStatus.mustChangePassword
-                            ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-400 dark:border-amber-700"
+                            ? "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-500/15 dark:text-sky-400 dark:border-sky-700"
                             : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-700"
                         }`}>
                           {portalStatus.mustChangePassword ? "First login pending" : "Password set by customer"}
@@ -2630,7 +2632,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     {/* Initial password hint */}
                     {portalStatus.mustChangePassword && portalStatus.maskedMobile && (
                       <div className="px-5 py-3 bg-muted/30 border-t border-border flex items-start gap-2.5 text-xs text-muted-foreground">
-                        <Hourglass size={13} className="shrink-0 mt-0.5 text-amber-500" />
+                        <Hourglass size={13} className="shrink-0 mt-0.5 text-sky-500" />
                         <p>
                           Initial password is the applicant's mobile number <span className="font-mono font-medium text-foreground">{portalStatus.maskedMobile}</span>. They'll be prompted to set a new password on first login.
                         </p>
@@ -2654,7 +2656,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <button
                         onClick={handleProvisionPortal}
                         disabled={provisioning}
-                        className="mt-2 inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold bg-primary text-primary-foreground rounded-xl shadow-sm hover:opacity-90 disabled:opacity-50 transition-all"
+                        className="mt-2 inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold btn-module text-white rounded-xl shadow-sm hover:opacity-90 disabled:opacity-50 transition-all"
                       >
                         <KeyRound size={15} />
                         {provisioning ? "Provisioning…" : "Provision Customer Portal"}
@@ -2707,11 +2709,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   <Paperclip size={12} className="text-muted-foreground shrink-0" />
                                   <span className="truncate max-w-[200px] sm:max-w-[300px]">{a.FileName}</span>
                                   {a.Source === "application" && (
-                                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">From Application</span>
+                                    <span className="shrink-0 text-[0.625rem] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">From Application</span>
                                   )}
                                 </div>
                                 {a.DocumentType && a.DocumentType !== a.Label && (
-                                  <p className="text-[11px] text-muted-foreground pl-5">{a.DocumentType}</p>
+                                  <p className="text-[0.6875rem] text-muted-foreground pl-5">{a.DocumentType}</p>
                                 )}
                               </td>
                               <td className="px-2.5 py-2 text-xs text-muted-foreground">{a.CreatedAt ? new Date(a.CreatedAt).toLocaleDateString("en-IN") : "—"}</td>
@@ -2804,7 +2806,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         const statusColor =
                           mr.Status === CrmStatus.APPROVED ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-950/40 dark:border-emerald-800"
                           : mr.Status === "Bounced" ? "text-red-700 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-950/40 dark:border-red-800"
-                          : "text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/40 dark:border-amber-800";
+                          : "text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-400 dark:bg-sky-950/40 dark:border-sky-800";
                         const pdfUrl = `/api/crm/money-receipts/${mr.Id}/pdf`;
                         return (
                           <div key={mr.Id} className="rounded-lg border border-border bg-muted/10 px-3 py-2.5 space-y-2">
@@ -2812,7 +2814,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             <div className="flex items-center justify-between gap-2 flex-wrap">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-semibold">{mr.ReceiptNo}</span>
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${statusColor}`}>
+                                <span className={`text-[0.625rem] font-medium px-1.5 py-0.5 rounded-full border ${statusColor}`}>
                                   {mr.Status}
                                 </span>
                               </div>
@@ -2828,7 +2830,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               </div>
                             </div>
                             {/* detail grid */}
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-[0.6875rem] text-muted-foreground">
                               <div><span className="font-medium text-foreground">{fmt(mr.Amount)}</span><span className="block">Amount</span></div>
                               <div><span className="font-medium text-foreground">{mr.PaymentMode || "—"}</span><span className="block">Mode</span></div>
                               <div>
@@ -2845,7 +2847,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               </div>
                             </div>
                             {mr.BouncedReason && (
-                              <p className="text-[11px] text-red-600 dark:text-red-400 flex items-center gap-1">
+                              <p className="text-[0.6875rem] text-red-600 dark:text-red-400 flex items-center gap-1">
                                 <AlertTriangle size={11} /> {mr.BouncedReason}
                               </p>
                             )}
@@ -2857,7 +2859,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 </div>
 
                 <div className="flex items-center justify-between gap-2 pt-3">
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-amber-600 dark:text-amber-400" /> Invoices</h3>
+                  <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={15} className="text-sky-600 dark:text-sky-400" /> Invoices</h3>
                   <a href={`/crm/invoices?bookingId=${bookingId}`}
                     className="px-3 py-1.5 text-xs border border-border rounded-lg font-medium hover:bg-muted">
                     Open Invoices page →
@@ -2889,7 +2891,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-border mt-4">
               {isLastTab && !mandatoryReady && booking.Status !== CrmStatus.APPROVED && pendingStepMessage && (
                 <button onClick={() => setTab(pendingStepMessage.tab)}
-                  className="flex-1 text-left text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 hover:bg-amber-100">
+                  className="flex-1 text-left text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 hover:bg-sky-100">
                   {pendingStepMessage.text}
                 </button>
               )}
@@ -3004,7 +3006,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             )}
           </div>
           {previewAttachment.CreatedAt && (
-            <p className="px-4 py-2 text-[11px] text-muted-foreground border-t border-border shrink-0">
+            <p className="px-4 py-2 text-[0.6875rem] text-muted-foreground border-t border-border shrink-0">
               Uploaded {new Date(previewAttachment.CreatedAt).toLocaleDateString("en-IN")}
               {previewAttachment.UploaderName ? ` by ${previewAttachment.UploaderName}` : ""}
             </p>
@@ -3036,7 +3038,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           />
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => { setReasonDialog(null); setReasonText(""); }} className="px-4 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button type="submit" className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">Confirm</button>
+            <button type="submit" className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg ">Confirm</button>
           </div>
         </form>
       </DialogContent>

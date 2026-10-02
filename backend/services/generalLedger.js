@@ -946,6 +946,48 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     return { posted: true };
   }
 
+  // "Merge invoices into one payment" (migration 501) — one payment
+  // settling several ExpenseBooking invoices at once, all sharing the same
+  // supplier. Posted as ONE Dr-Supplier leg PER invoice (so the GL stays
+  // traceable to each invoice's own amount, same as the Direct Expense
+  // Payment case above) + a single combined Bank/Cash credit leg for the
+  // total — the actual cash movement really is one payment, not several.
+  // No TDS leg here: see isMergedForTds's comment in newPayment.js — every
+  // invoice already carries its own, already-posted TDS.
+  const { getLinks } = require("./paymentExpenseBookingLink");
+  const mergedLinks = await getLinks(pool, sql, paymentId);
+  if (mergedLinks.length > 0) {
+    const linkSum = Math.round(mergedLinks.reduce((s, l) => s + l.allocatedAmount, 0) * 100) / 100;
+    if (Math.abs(linkSum - amount) > 0.5) {
+      return {
+        posted: false,
+        reason: `Payment ${paymentId}: merged invoice amounts (₹${linkSum.toFixed(2)}) no longer add up to the payment amount (₹${amount.toFixed(2)}) — re-save the payment before approving.`,
+      };
+    }
+    const mergedSupplierHeadId = await resolvePaymentSupplierHeadId(pool, payment);
+    if (!mergedSupplierHeadId) {
+      return { posted: false, reason: `Payment ${paymentId}: could not resolve the merged payment's supplier/party account.` };
+    }
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: payment.PDate,
+      sourceType: "NewPayment",
+      sourceId: paymentId,
+      companyId: Number.isFinite(companyId) ? companyId : null,
+      projectId: Number.isFinite(projectId) ? projectId : null,
+      createdBy: userEmail,
+      legs: [
+        ...mergedLinks.map((l) => ({
+          lHeadId: mergedSupplierHeadId,
+          debit: l.allocatedAmount,
+          narration: `${docNo} — ${l.eDocNo} (merged payment)`,
+        })),
+        { lHeadId: bankId, credit: amount, narration: `${docNo} — payment made (merged invoices)` },
+      ],
+    });
+    return { posted: true };
+  }
+
   // A standalone advance/on-account payment (no invoice, no contract — see
   // newPayment.js's matching OnAccountLedger CREDIT hook) is booked as an
   // advance ASSET, not a reduction of what we owe the party — so its Dr leg

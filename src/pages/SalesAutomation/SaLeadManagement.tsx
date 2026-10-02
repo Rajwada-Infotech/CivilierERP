@@ -451,19 +451,19 @@ const SaLeadManagement: React.FC = () => {
                     </div>
                     <div className="p-2 space-y-1.5 max-h-[calc(100vh-300px)] overflow-y-auto">
                       {stageLeads.length === 0 ? (
-                        <p className="text-[11px] text-muted-foreground text-center py-4">No leads</p>
+                        <p className="text-[0.6875rem] text-muted-foreground text-center py-4">No leads</p>
                       ) : stageLeads.map((l) => (
                         <div key={l._id} className="bg-background rounded-md border border-border p-2 space-y-1">
                           <p className="text-xs font-medium text-foreground truncate">{String(l.CustomerName)}</p>
-                          <p className="text-[10px] text-muted-foreground">{String(l.Mobile)}</p>
+                          <p className="text-[0.625rem] text-muted-foreground">{String(l.Mobile)}</p>
                           {l.Classification && (
-                            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full inline-block ${
+                            <span className={`text-[0.5625rem] font-semibold px-1.5 py-0.5 rounded-full inline-block ${
                               l.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
                               l.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
                               "bg-blue-500/10 text-blue-500"
                             }`}>{String(l.Classification)}</span>
                           )}
-                          {l.SalespersonName && <p className="text-[10px] text-muted-foreground truncate">{String(l.SalespersonName)}</p>}
+                          {l.SalespersonName && <p className="text-[0.625rem] text-muted-foreground truncate">{String(l.SalespersonName)}</p>}
                         </div>
                       ))}
                     </div>
@@ -502,7 +502,7 @@ const SaLeadManagement: React.FC = () => {
                         <td className="p-3 text-muted-foreground">{String(l.Mobile)}</td>
                         <td className="p-3 text-xs font-mono text-emerald-600">{String(l.FollowupCustomerId)}</td>
                         <td className="p-3">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600">{String(l.Status)}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600">{String(l.Status)}</span>
                         </td>
                         <td className="p-3 text-muted-foreground">{(l.SalespersonName as string) || "—"}</td>
                       </tr>
@@ -648,7 +648,7 @@ const SaLeadManagement: React.FC = () => {
               return (
                 <>
                   {auditBtn}
-                  <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-emerald-500/10 text-emerald-600">
+                  <span className="px-2 py-1 text-[0.625rem] font-medium rounded-full bg-emerald-500/10 text-emerald-600">
                     Booked
                   </span>
                 </>
@@ -669,7 +669,7 @@ const SaLeadManagement: React.FC = () => {
                   </button>
                 )}
                 {isConverted && !hasFollowup && (
-                  <span className="px-2 py-1 text-[10px] font-medium rounded-full bg-sky-500/10 text-sky-600" title="Converted — waiting for CRM staff to start an application from it">
+                  <span className="px-2 py-1 text-[0.625rem] font-medium rounded-full bg-sky-500/10 text-sky-600" title="Converted — waiting for CRM staff to start an application from it">
                     In CRM Leads Pool
                   </span>
                 )}
@@ -677,7 +677,7 @@ const SaLeadManagement: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => window.open("/crm/applications", "_blank")}
-                    className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                    className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                     title="Continue in CRM Application — unit, rate, payment plan, and admin approval all happen there now"
                   >
                     <IndianRupee size={13} />
@@ -810,7 +810,7 @@ const SaLeadManagement: React.FC = () => {
                         <td className="px-3 py-2 text-xs">{String(l.Status)}</td>
                         <td className="px-3 py-2 text-xs">
                           {l.Classification && (
-                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                            <span className={`px-1.5 py-0.5 rounded-full text-[0.625rem] font-semibold ${
                               l.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
                               l.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
                               "bg-blue-500/10 text-blue-500"
@@ -832,7 +832,7 @@ const SaLeadManagement: React.FC = () => {
             <button
               onClick={handleSubmitTransfer}
               disabled={transferLoading || transferSelectedIds.size === 0 || !transferToTLId}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold btn-module text-white disabled:opacity-40 transition-colors"
             >
               <ArrowRightLeft size={12} />
               {transferLoading ? "Submitting..." : `Submit Request (${transferSelectedIds.size} lead${transferSelectedIds.size !== 1 ? "s" : ""})`}

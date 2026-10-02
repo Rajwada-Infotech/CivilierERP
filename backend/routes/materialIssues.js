@@ -26,7 +26,7 @@ const routeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, message: {
 router.use(routeLimiter);
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition } = require("../services/approvalService");
+const { transition, writeAuditLog } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
@@ -449,7 +449,12 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
           .json({ error: "Each item must have ItemId and Quantity > 0" });
     }
 
-    const userId = req.user?.id || null;
+    // The JWT payload's field is `userId` (see users.js's login route),
+    // not `id` — this read the wrong field and stored NULL for CreatedBy
+    // on every Material Issue created before this fix (confirmed: 23/23
+    // production rows). Lines 1175/1200 in this same file already use the
+    // correct `req.user?.userId ?? req.user?.id` pattern.
+    const userId = req.user?.userId ?? req.user?.id ?? null;
     const issuedBy = req.user?.email || null;
 
     // Resolve the godown: use the one sent from the client, else fall back to main godown
@@ -688,13 +693,19 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       return res.status(404).json({ error: "Issue not found" });
 
     const { DocNo: docNo, Status: currentStatus } = existing.recordset[0];
-    if (!["Draft", "Rejected", "Approved"].includes(currentStatus)) {
+    if (!["Draft", "Pending", "Rejected", "Approved"].includes(currentStatus)) {
       return res.status(400).json({
-        error: `Cannot edit an issue with status "${currentStatus}". Only Draft, Rejected, or Approved issues can be edited.`,
+        error: `Cannot edit an issue with status "${currentStatus}". Only Draft, Pending, Rejected, or Approved issues can be edited.`,
       });
     }
     const wasApproved = currentStatus === "Approved";
     const wasRejected = currentStatus === "Rejected";
+    // Editing a Pending issue (possibly already partially approved) must
+    // restart its approval cycle in place — see materialRequests.js's
+    // identical wasPending handling for the full reasoning; can't reuse
+    // transition("Pending") here either, since it only accepts Draft/
+    // Rejected as the FROM status.
+    const wasPending = currentStatus === "Pending";
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialIssues", "IssueId", id)
       : null;
@@ -818,12 +829,22 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       }
     }
 
+    if (wasPending) {
+      try {
+        await writeAuditLog("MaterialIssues", id, 0, req.user?.role, req.user?.email || req.user?.name, "Pending", null);
+      } catch (resetErr) {
+        console.error("[material-issues] approval-cycle reset after edit failed:", resetErr.message);
+      }
+    }
+
     res.json({
       message: wasApproved
         ? "Issue updated — sent back for approval"
-        : resubmitted
-          ? "Issue updated and re-submitted for approval"
-          : "Issue updated successfully",
+        : wasPending
+          ? "Issue updated — approval restarted from level 1"
+          : resubmitted
+            ? "Issue updated and re-submitted for approval"
+            : "Issue updated successfully",
       reopenedForApproval: wasApproved,
       resubmitted,
     });

@@ -49,7 +49,7 @@ export const ActivityBrowserAnalytics: React.FC<Props> = ({ rawSessions }) => {
                   className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm"
                 >
                   <span className="font-medium">{user}</span>
-                  <Badge variant="secondary" className="text-[10px]">
+                  <Badge variant="secondary" className="text-[0.625rem]">
                     {count} actions
                   </Badge>
                 </div>
@@ -80,7 +80,7 @@ export const ActivityBrowserAnalytics: React.FC<Props> = ({ rawSessions }) => {
                   <span className="font-medium capitalize">{res}</span>
                   <Badge
                     variant="outline"
-                    className="text-[10px] border-amber-500/20 text-amber-600"
+                    className="text-[0.625rem] border-amber-500/20 text-amber-600"
                   >
                     {count} hits
                   </Badge>

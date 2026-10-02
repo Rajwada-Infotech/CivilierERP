@@ -24,6 +24,8 @@ import { useGstRates, computeUnitParkingGst, computeExtraWorkGst, fmtInr } from 
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const API = "/api/crm/applications";
 const CUSTOMER_API = "/api/crm/customers";
@@ -56,7 +58,7 @@ const statusColor: Record<string, string> = {
   Booked:    "text-indigo-600 bg-indigo-50 border-indigo-200",
   Approved:  "text-green-600 bg-green-50 border-green-200",
   Rejected:  "text-red-600 bg-red-50 border-red-200",
-  Cancelled: "text-orange-600 bg-orange-50 border-orange-200",
+  Cancelled: "text-sky-600 bg-sky-50 border-sky-200",
   Expired:   "text-slate-500 bg-slate-100 border-slate-200",
 };
 
@@ -231,8 +233,8 @@ function parseMilestones(json: string | null | undefined): MilestoneRow[] {
   } catch { return []; }
 }
 
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40 focus:border-amber-500/50";
-const labelCls = "text-xs text-muted-foreground block mb-1.5";
+const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40 focus:border-sky-500/50";
+const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
 
 // Live "cost + GST" preview shown at every point Unit/Parking/Extra Charges
 // values are picked — Application's Project/Unit and Parking steps, and
@@ -243,7 +245,7 @@ const labelCls = "text-xs text-muted-foreground block mb-1.5";
 const GstBreakdownBox: React.FC<{ unitValue: number; parkingBase: number }> = ({ unitValue, parkingBase }) => {
   const { data: rates, isLoading } = useGstRates();
   if (isLoading || !rates) {
-    return <p className="text-[11px] text-muted-foreground">Loading GST rates from HSN Master…</p>;
+    return <p className="text-[0.6875rem] text-muted-foreground">Loading GST rates from HSN Master…</p>;
   }
   const gst = computeUnitParkingGst(unitValue, parkingBase, rates);
   return (
@@ -290,7 +292,7 @@ const GstBreakdownBox: React.FC<{ unitValue: number; parkingBase: number }> = ({
         <span>Total Amount</span>
         <span>{fmtInr(gst.total)}</span>
       </div>
-      <p className="text-[10px] text-sky-600">
+      <p className="text-[0.625rem] text-sky-600">
         {gst.base <= 4500000
           ? "At or under ₹45L — 1% bracket applies."
           : "Over ₹45L — 5% bracket applies."} Crosses automatically as Parking is added or changed — never editable here.
@@ -455,7 +457,7 @@ const CoApplicantStep: React.FC<{
 
       {editingId !== null && (
         <div className="rounded-lg border border-border p-3 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Name *</label>
               <input value={draft.Name} onChange={(e) => setDraft((d: any) => ({ ...d, Name: e.target.value }))} className={inputCls} />
@@ -494,7 +496,7 @@ const CoApplicantStep: React.FC<{
             </div>
             <div>
               <label className={labelCls}>Date of Birth</label>
-              <input type="date" value={draft.DateOfBirth} onChange={(e) => setDraft((d: any) => ({ ...d, DateOfBirth: e.target.value }))} className={inputCls} />
+              <DateInput value={draft.DateOfBirth} onChange={(e) => setDraft((d: any) => ({ ...d, DateOfBirth: e.target.value }))} className={inputCls} />
             </div>
             <div>
               <label className={labelCls}>Gender</label>
@@ -539,7 +541,7 @@ const CoApplicantStep: React.FC<{
               onChange={(e) => setDraft((d: any) => ({ ...d, Address: e.target.value }))}
               className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div>
               <label className={labelCls}>City</label>
               <input value={draft.City} readOnly={sameAsApplicant}
@@ -566,7 +568,7 @@ const CoApplicantStep: React.FC<{
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={cancelEdit} className="px-3 py-1.5 text-xs border border-border rounded-md text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSave} disabled={saving}
-              className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-3 py-1.5 text-xs btn-module text-white rounded-md font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Saving..." : "Save"}
             </button>
           </div>
@@ -580,7 +582,7 @@ const CoApplicantStep: React.FC<{
           one closes (symptom: buttons like Edit stop responding). A plain
           div-based overlay sidesteps that entirely. */}
       {viewingCoApplicant && (
-        <div
+        <BodyPortal><div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
           onClick={() => setViewingCoApplicant(null)}
         >
@@ -601,7 +603,7 @@ const CoApplicantStep: React.FC<{
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
               <div><span className="text-muted-foreground">Mobile:</span> <span className="text-foreground">{viewingCoApplicant.Mobile || "—"}</span></div>
               <div><span className="text-muted-foreground">Email:</span> <span className="text-foreground">{viewingCoApplicant.Email || "—"}</span></div>
               <div><span className="text-muted-foreground">PAN:</span> <span className="text-foreground">{viewingCoApplicant.PanNo || "—"}</span></div>
@@ -627,12 +629,12 @@ const CoApplicantStep: React.FC<{
                 Edit
               </button>
               <button type="button" onClick={() => setViewingCoApplicant(null)}
-                className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90">
+                className="px-3 py-1.5 text-xs btn-module text-white rounded-md font-medium ">
                 Close
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </div>
   );
@@ -1611,7 +1613,7 @@ const CrmApplication: React.FC = () => {
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
           <div className="font-mono text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${bookingStatusColor[i.row.original.BookingStatus] || "text-muted-foreground bg-muted/50 border-border"}`}>{i.row.original.BookingStatus}</span>
+          <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium ${bookingStatusColor[i.row.original.BookingStatus] || "text-muted-foreground bg-muted/50 border-border"}`}>{i.row.original.BookingStatus}</span>
         </div>
       ) },
     { id: "unitProject", header: "Unit / Project", size: 220, enableSorting: false,
@@ -1665,7 +1667,7 @@ const CrmApplication: React.FC = () => {
   const inProcessColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
+        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline">
           {i.getValue() as string}
         </span>
       ) },
@@ -1728,8 +1730,8 @@ const CrmApplication: React.FC = () => {
                 this isn't the same as an application that was simply rejected
                 pre-booking. */}
             {r.Stage === "NotConverted" && r.BookingNo && (
-              <div className="text-[10px] text-muted-foreground font-mono">
-                {r.BookingNo} · <span className={bookingStatusColor[r.BookingStatus] ? `inline-block px-1 rounded border text-[9px] font-medium ${bookingStatusColor[r.BookingStatus]}` : ""}>{r.BookingStatus}</span>
+              <div className="text-[0.625rem] text-muted-foreground font-mono">
+                {r.BookingNo} · <span className={bookingStatusColor[r.BookingStatus] ? `inline-block px-1 rounded border text-[0.5625rem] font-medium ${bookingStatusColor[r.BookingStatus]}` : ""}>{r.BookingStatus}</span>
               </div>
             )}
           </div>
@@ -1792,7 +1794,7 @@ const CrmApplication: React.FC = () => {
                       </span>
                     ) : a.PreferredUnitId == null ? (
                       <span
-                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-amber-600 border-amber-200 bg-amber-50 font-medium"
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-sky-600 border-sky-200 bg-sky-50 font-medium"
                         title="No unit was selected in the application — edit the application and pick a unit first."
                       >
                         <AlertTriangle size={12} /> No unit selected
@@ -1863,22 +1865,22 @@ const CrmApplication: React.FC = () => {
                 210px cell) was what made this column look broken. */}
             {/* Status hint — contextual caption below the action buttons */}
             {activeStage === "InProcess" && a.Status === CrmStatus.DRAFT && (
-              <span className="flex items-center gap-1 text-[11px] text-amber-600">
+              <span className="flex items-center gap-1 text-[0.6875rem] text-sky-600">
                 <Clock size={10} /> Not submitted yet — complete the wizard and submit
               </span>
             )}
             {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId == null && (
-              <span className="flex items-center gap-1 text-[11px] text-amber-600">
+              <span className="flex items-center gap-1 text-[0.6875rem] text-sky-600">
                 <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
               </span>
             )}
             {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId != null && (
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                 <Clock size={10} /> Submitted — booking not yet created
               </span>
             )}
             {activeStage !== "InProcess" && !canCancelApplication(a) && (
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-[0.6875rem] text-muted-foreground">
                 {a.BookingNo && a.BookingStatus === CrmStatus.CANCELLED
                   ? `Booking cancelled — application closed`
                   : `${a.Status} — no further action`}
@@ -1891,14 +1893,14 @@ const CrmApplication: React.FC = () => {
 
   const glassStyle: React.CSSProperties = {
     background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    border: isDark ? "1px solid rgba(14,165,233,0.15)" : "1px solid rgba(14,165,233,0.18)",
     backdropFilter: "blur(16px) saturate(150%)",
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
     boxShadow: isDark
       ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+      : "0 4px 24px rgba(14,165,233,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
   };
-  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+  const borderColor = isDark ? "rgba(14,165,233,0.15)" : "rgba(14,165,233,0.12)";
 
   usePageRights("crm-applications");
 
@@ -1911,7 +1913,7 @@ const CrmApplication: React.FC = () => {
       action={
         canCreateApplications && (
           <button onClick={() => { resetWizard(); setDialogOpen(true); }}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
             <Plus size={14} /> New Application
           </button>
         )
@@ -1928,7 +1930,7 @@ const CrmApplication: React.FC = () => {
           <div key={label} className="rounded-xl p-3.5" style={glassStyle}>
             <div className={`w-2 h-2 rounded-full ${dot} mb-2.5`} />
             <p className="text-xl font-bold font-heading text-foreground leading-none">{value}</p>
-            <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
+            <p className="text-[0.6875rem] text-muted-foreground mt-1">{label}</p>
           </div>
         ))}
       </div>
@@ -1953,10 +1955,10 @@ const CrmApplication: React.FC = () => {
             return (
               <button key={stg} onClick={() => updateFilter(setActiveStage)(stg)}
                 className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-medium border-b-2 -mb-px transition-colors shrink-0 ${
-                  active ? "border-amber-500 text-amber-600 dark:text-amber-400" : "border-transparent text-muted-foreground hover:text-foreground"
+                  active ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}>
                 <Icon size={14} /> {stageLabel[stg]}
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${active ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-muted text-muted-foreground"}`}>
+                <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full font-semibold ${active ? "bg-sky-500/15 text-sky-600 dark:text-sky-400" : "bg-muted text-muted-foreground"}`}>
                   {stageCounts[stg]}
                 </span>
               </button>
@@ -1970,11 +1972,11 @@ const CrmApplication: React.FC = () => {
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && updateFilter(setSearch)(searchInput.trim())}
               placeholder="Search name, mobile, app no..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
           </div>
           {activeStage !== "Converted" && (
             <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
-              <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-amber-500/40">
+              <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-sky-500/40">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
@@ -2023,10 +2025,10 @@ const CrmApplication: React.FC = () => {
         <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
-              <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
-                <Building2 size={13} className="text-amber-500" />
+              <span className="w-6 h-6 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center">
+                <Building2 size={13} className="text-sky-500" />
               </span>
-              <span className="bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-sky-400 to-sky-500 bg-clip-text text-transparent">
                 New CRM Application
               </span>
               {applicationNo ? <span className="text-muted-foreground font-medium">— {applicationNo}</span> : null}
@@ -2045,14 +2047,14 @@ const CrmApplication: React.FC = () => {
               const reachable = stepNum === 1 || (applicationId != null && stepNum <= maxStepReached);
               return (
                 <React.Fragment key={label}>
-                  {i > 0 && <div className="flex-1 h-px bg-amber-500/20" />}
+                  {i > 0 && <div className="flex-1 h-px bg-sky-500/20" />}
                   <button
                     type="button"
                     onClick={() => reachable && setStep(stepNum)}
                     disabled={!reachable}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-heading font-medium transition-colors ${
                       step === stepNum
-                        ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600"
+                        ? "text-white shadow-sm btn-module "
                         : step > stepNum ? "text-green-600" : "text-muted-foreground"
                     } ${reachable ? "cursor-pointer hover:opacity-80" : "cursor-not-allowed opacity-60"}`}>
                     {step > stepNum ? <CheckCircle2 size={12} /> : <span className="w-4 text-center">{stepNum}</span>}
@@ -2074,7 +2076,7 @@ const CrmApplication: React.FC = () => {
                 <div className="flex items-center justify-between mb-1">
                   <label className={labelCls}>Customer *</label>
                   <a href="/crm/customers" target="_blank" rel="noreferrer"
-                    className="text-xs text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1">
+                    className="text-xs text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1">
                     <ExternalLink size={11} /> New Customer
                   </a>
                 </div>
@@ -2087,7 +2089,7 @@ const CrmApplication: React.FC = () => {
                 </select>
                 {selectedCustomer && (
                   <div className="mt-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-0.5">
-                    <div className="flex items-center gap-1.5 font-medium text-foreground"><IdCard size={12} className="text-amber-500" /> {selectedCustomer.CustomerName}</div>
+                    <div className="flex items-center gap-1.5 font-medium text-foreground"><IdCard size={12} className="text-sky-500" /> {selectedCustomer.CustomerName}</div>
                     <div className="text-muted-foreground">{selectedCustomer.Mobile}{selectedCustomer.Email ? ` · ${selectedCustomer.Email}` : ""}</div>
                     <div className="text-muted-foreground">PAN: {selectedCustomer.PanNo || "—"} · {selectedCustomer.Address || "No address on file"}</div>
                   </div>
@@ -2110,14 +2112,14 @@ const CrmApplication: React.FC = () => {
                     permanently disabled — a real Booking either exists or
                     is expected the moment it's Approved, so the unit pick
                     can't move anymore. */}
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3">
+                <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-heading font-semibold text-foreground block">Project / Unit (tree)</label>
                     {applicationId != null && (
                       canEditUnitSelection ? (
                         unitLocked && (
                           <button type="button" onClick={() => setUnitLocked(false)}
-                            className="text-xs text-amber-600 dark:text-amber-400 hover:underline shrink-0">
+                            className="text-xs text-sky-600 dark:text-sky-400 hover:underline shrink-0">
                             Edit
                           </button>
                         )
@@ -2128,7 +2130,7 @@ const CrmApplication: React.FC = () => {
                       )
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className={labelCls}>Company *</label>
                       <select value={form.CompanyId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
@@ -2209,7 +2211,7 @@ const CrmApplication: React.FC = () => {
                       this only needs to show the derived ₹ math itself. */}
                   {selectedUnit && (
                     <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
-                      <IndianRupee size={11} className="text-amber-500 shrink-0" />
+                      <IndianRupee size={11} className="text-sky-500 shrink-0" />
                       {form.RatePerSqFt && computedTotal ? (
                         <span>
                           {selectedUnit.AreaSqFt} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span>
@@ -2223,7 +2225,7 @@ const CrmApplication: React.FC = () => {
                   <div className="grid grid-cols-10 gap-3">
                     <div className="col-span-4 lg:col-span-4">
                       <label className={labelCls}>Date of Apply</label>
-                      <input type="date" value={form.DateOfApply} onChange={(e) => setForm((f) => ({ ...f, DateOfApply: e.target.value }))} className={inputCls} />
+                      <DateInput value={form.DateOfApply} onChange={(e) => setForm((f) => ({ ...f, DateOfApply: e.target.value }))} className={inputCls} />
                     </div>
                     <div className="col-span-3 lg:col-span-3">
                       <label className={labelCls}>Rate (₹/sqft) <span className="text-destructive">*</span></label>
@@ -2245,12 +2247,12 @@ const CrmApplication: React.FC = () => {
                       reading as dead space and tells staff what will
                       appear here. */}
                   {!form.PreferredUnitId && (
-                    <div className="rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 p-5 text-center space-y-1.5">
-                      <div className="mx-auto w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                        <Building2 size={16} className="text-amber-500" />
+                    <div className="rounded-xl border border-dashed border-sky-500/30 bg-sky-500/5 p-5 text-center space-y-1.5">
+                      <div className="mx-auto w-9 h-9 rounded-lg bg-sky-500/10 flex items-center justify-center">
+                        <Building2 size={16} className="text-sky-500" />
                       </div>
                       <p className="text-xs font-heading font-semibold text-foreground">Pick a unit to continue</p>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      <p className="text-[0.6875rem] text-muted-foreground leading-relaxed">
                         Choose the company, project and unit on the left. GST breakdown,
                         payment plan and broker options will show up here.
                       </p>
@@ -2271,7 +2273,7 @@ const CrmApplication: React.FC = () => {
                       is offered instead. Not re-selectable on the Booking
                       page — this is the one place it's chosen. */}
                   {form.PreferredUnitId && (
-                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
+                    <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 space-y-2">
                       <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
                       <select value={form.PaymentPlanId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
@@ -2281,13 +2283,13 @@ const CrmApplication: React.FC = () => {
                         ))}
                       </select>
                       {!unitTaggedPaymentPlans.length && blockTaggedPaymentPlans.length > 0 && (
-                        <p className="text-[11px] text-muted-foreground">This unit has no payment plans of its own — showing its Block's tagged plans.</p>
+                        <p className="text-[0.6875rem] text-muted-foreground">This unit has no payment plans of its own — showing its Block's tagged plans.</p>
                       )}
                       {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && projectTaggedPaymentPlans.length > 0 && (
-                        <p className="text-[11px] text-muted-foreground">This unit's Block has no payment plans of its own — showing its Project's tagged plans.</p>
+                        <p className="text-[0.6875rem] text-muted-foreground">This unit's Block has no payment plans of its own — showing its Project's tagged plans.</p>
                       )}
                       {!unitTaggedPaymentPlans.length && !blockTaggedPaymentPlans.length && !projectTaggedPaymentPlans.length && (
-                        <p className="text-[11px] text-muted-foreground">No payment plans tagged anywhere in this unit's hierarchy — showing every active plan instead.</p>
+                        <p className="text-[0.6875rem] text-muted-foreground">No payment plans tagged anywhere in this unit's hierarchy — showing every active plan instead.</p>
                       )}
 
                       {/* Brief plan breakdown — Booking is the plan's own
@@ -2297,21 +2299,21 @@ const CrmApplication: React.FC = () => {
                           Booking. Purely a preview here — nothing is saved
                           until the actual Booking is created. */}
                       {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
-                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 space-y-1">
+                        <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 space-y-1">
                           <div className="flex items-center justify-between text-xs text-muted-foreground">
                             <span>Booking</span>
                             <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
                           </div>
                           {selectedPlanMilestones.slice(1).map((m, i) => (
                             <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
-                              <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
+                              <span className="truncate pr-2">{m.name} <span className="text-[0.625rem]">({m.pct}%)</span></span>
                               <span className="font-semibold text-foreground shrink-0">
                                 {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
                               </span>
                             </div>
                           ))}
                           {!computedTotal && (
-                            <p className="text-[10px] text-muted-foreground pt-0.5">Enter Rate (₹/sqft) to see ₹ amounts for each step.</p>
+                            <p className="text-[0.625rem] text-muted-foreground pt-0.5">Enter Rate (₹/sqft) to see ₹ amounts for each step.</p>
                           )}
                         </div>
                       )}
@@ -2334,7 +2336,7 @@ const CrmApplication: React.FC = () => {
                       (maybeAutoCreateBrokerage), at which point it's split
                       into one tranche per payment milestone, each unlocking
                       as that milestone is paid — not a manual toggle here. */}
-                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3">
+                  <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 space-y-3">
                     <label className="flex items-center gap-2 text-xs font-heading font-semibold text-foreground">
                       <input type="checkbox" checked={form.ViaBroker}
                         onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
@@ -2355,35 +2357,35 @@ const CrmApplication: React.FC = () => {
                             pattern used on Purchase Orders (PurchaseOrderMaster.tsx).
                             Nothing in here is ever an editable input. */}
                         {selectedBroker && (
-                          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
+                          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
                             {selectedBroker.LHeadPhone && (
                               <div>
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
+                                <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
                                 <dd className="text-foreground font-medium mt-0.5 flex items-center gap-1.5"><Phone size={12} className="text-muted-foreground" />{selectedBroker.LHeadPhone}</dd>
                               </div>
                             )}
                             {selectedBroker.LHeadPan && (
                               <div>
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">PAN</dt>
+                                <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">PAN</dt>
                                 <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
                               </div>
                             )}
                             {selectedBroker.LHeadRera && (
                               <div>
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">RERA No.</dt>
+                                <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">RERA No.</dt>
                                 <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" />{selectedBroker.LHeadRera}</dd>
                               </div>
                             )}
                             {selectedBroker.LHeadPaymentTerms && (
                               <div>
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Payment Terms</dt>
+                                <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">Payment Terms</dt>
                                 <dd className="text-foreground font-medium mt-0.5">{selectedBroker.LHeadPaymentTerms}</dd>
                               </div>
                             )}
                           </dl>
                         )}
 
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div>
                             <label className={labelCls}>Default Rate (Preview)</label>
                             <input readOnly value={`${brokerageTierDefault}% (< 1 Cr → 2%, ≥ 1 Cr → 1%)`}
@@ -2396,7 +2398,7 @@ const CrmApplication: React.FC = () => {
                               placeholder={String(brokerageTierDefault)} className={inputCls} />
                           </div>
                         </div>
-                        <p className="text-[11px] text-muted-foreground -mt-1.5">
+                        <p className="text-[0.6875rem] text-muted-foreground -mt-1.5">
                           Only fill in the override if this specific deal needs a custom commission rate — otherwise the default above applies.
                         </p>
 
@@ -2411,7 +2413,7 @@ const CrmApplication: React.FC = () => {
                           </select>
                         </div>
 
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-[0.6875rem] text-muted-foreground">
                           {form.BrokeragePaymentPlan === "TwoPart"
                             ? "Half the commission is released as soon as the Booking Amount is paid; the other half is held until the Agreement is Executed."
                             : form.BrokeragePaymentPlan === "AgreementOnly"
@@ -2472,7 +2474,7 @@ const CrmApplication: React.FC = () => {
 
           {step === 7 && (
             <div className="space-y-4">
-              <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-2 gap-3 text-xs">
+              <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
                   <p className="text-muted-foreground mb-0.5 flex items-center gap-1"><User size={11} /> Assigned Sales Person</p>
                   <p className="font-medium text-foreground">{currentUser?.name || "—"} (you)</p>
@@ -2506,7 +2508,7 @@ const CrmApplication: React.FC = () => {
                   <p className="font-semibold text-foreground">Extra Charges</p>
                   {(detailExtraCharges as any[]).map((c: any) => (
                     <div key={c.Id} className="flex items-center justify-between text-muted-foreground">
-                      <span className="truncate pr-2">{c.Description} <span className="text-[10px]">(GST {c.GstRate}%)</span></span>
+                      <span className="truncate pr-2">{c.Description} <span className="text-[0.625rem]">(GST {c.GstRate}%)</span></span>
                       <span className="font-medium text-foreground shrink-0">₹{Number(c.TotalAmount).toLocaleString("en-IN")}</span>
                     </div>
                   ))}
@@ -2529,7 +2531,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   {selectedPlanMilestones.slice(1).map((m, i) => (
                     <div key={i} className="flex items-center justify-between text-muted-foreground">
-                      <span className="truncate pr-2">{m.name} <span className="text-[10px]">({m.pct}%)</span></span>
+                      <span className="truncate pr-2">{m.name} <span className="text-[0.625rem]">({m.pct}%)</span></span>
                       <span className="font-semibold text-foreground shrink-0">
                         {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
                       </span>
@@ -2573,7 +2575,7 @@ const CrmApplication: React.FC = () => {
                     )
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>Token Type</label>
                     <input type="text" value="Amount" readOnly disabled
@@ -2587,11 +2589,11 @@ const CrmApplication: React.FC = () => {
                       placeholder={selectedPlanBookingAmount ? String(selectedPlanBookingAmount) : undefined}
                       className={inputCls} />
                     {selectedPlanBookingAmount > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1">
+                      <p className="text-[0.6875rem] text-muted-foreground mt-1">
                         Defaults to the plan's fixed ₹{selectedPlanBookingAmount.toLocaleString("en-IN")} — change this only if the customer actually paid a different amount; anything over the fixed figure is auto-parked to On Account, not lost.
                       </p>
                     )}
-                    <p className="text-[11px] text-muted-foreground mt-1">
+                    <p className="text-[0.6875rem] text-muted-foreground mt-1">
                       This amount is held on the Booking record. A Money Receipt is auto-generated when the booking reaches the approval stage ("Verify &amp; Send for Approval") — Finance then approves it, after which it counts as paid.
                     </p>
                   </div>
@@ -2621,7 +2623,7 @@ const CrmApplication: React.FC = () => {
                       </div>
                       <div>
                         <label className={labelCls}>Cheque Date</label>
-                        <input type="date" value={form.ChequeDate} disabled={applicationId != null && (paymentLocked || !canEditUnitSelection)}
+                        <DateInput value={form.ChequeDate} disabled={applicationId != null && (paymentLocked || !canEditUnitSelection)}
                           onChange={(e) => setForm((f) => ({ ...f, ChequeDate: e.target.value }))}
                           className={inputCls} />
                       </div>
@@ -2668,43 +2670,43 @@ const CrmApplication: React.FC = () => {
               </button>
               {step === 1 && (
                 <button onClick={handleCreateAndNext} disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
                   {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 2 && (
                 <button onClick={() => advanceStep(3)}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 3 && (
                 <button onClick={() => advanceStep(4)}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 4 && (
                 <button onClick={handleBankDetailsNext} disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
                   {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 5 && (
                 <button onClick={() => advanceStep(6)}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 6 && (
                 <button onClick={() => advanceStep(7)}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all">
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 7 && (
                 <button onClick={handleFinalSave} disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
                   {saving ? "Submitting..." : hasBooking ? "Submit Edits" : "Submit Application"}
                 </button>
               )}
@@ -2754,7 +2756,7 @@ const CrmApplication: React.FC = () => {
             // reusable mini row helper
             const Row = ({ label, value, full }: { label: string; value: React.ReactNode; full?: boolean }) => (
               <div className={full ? "col-span-2" : ""}>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">{label}</p>
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mb-0.5">{label}</p>
                 <p className="text-xs font-medium text-foreground leading-snug">{value || <span className="text-muted-foreground/60 font-normal">—</span>}</p>
               </div>
             );
@@ -2767,9 +2769,9 @@ const CrmApplication: React.FC = () => {
                   <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
                     <User size={13} className="text-primary shrink-0" />
                     <span className="text-xs font-semibold uppercase tracking-wide">Applicant</span>
-                    <span className="ml-auto font-mono text-[11px] text-muted-foreground">{a.CustomerNo || ""}</span>
+                    <span className="ml-auto font-mono text-[0.6875rem] text-muted-foreground">{a.CustomerNo || ""}</span>
                   </div>
-                  <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                  <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                     <Row label="Name" value={a.ApplicantName} />
                     <Row label="PAN" value={a.PanNo} />
                     <Row label="Mobile" value={<>{a.Mobile}{a.AltMobile ? <span className="text-muted-foreground"> / {a.AltMobile}</span> : null}</>} />
@@ -2779,7 +2781,7 @@ const CrmApplication: React.FC = () => {
                   {(viewingAppCoApplicants as any[]).length > 0 && (
                     <div className="px-4 pb-3 pt-0 flex flex-wrap gap-2">
                       {(viewingAppCoApplicants as any[]).map((co: any) => (
-                        <div key={co.Id} className="flex items-center gap-1.5 text-[11px] bg-muted/60 rounded-full px-2.5 py-1">
+                        <div key={co.Id} className="flex items-center gap-1.5 text-[0.6875rem] bg-muted/60 rounded-full px-2.5 py-1">
                           <Users2 size={11} className="text-muted-foreground shrink-0" />
                           <span className="font-medium">{co.Name}</span>
                           {co.Relation && <span className="text-muted-foreground">· {co.Relation}</span>}
@@ -2796,10 +2798,10 @@ const CrmApplication: React.FC = () => {
                     <Building2 size={13} className="text-primary shrink-0" />
                     <span className="text-xs font-semibold uppercase tracking-wide">Property</span>
                     {!!a.UnitUnavailableForBooking && (
-                      <span className="ml-auto flex items-center gap-1 text-[11px] text-red-500"><XCircle size={11} /> Unit unavailable</span>
+                      <span className="ml-auto flex items-center gap-1 text-[0.6875rem] text-red-500"><XCircle size={11} /> Unit unavailable</span>
                     )}
                   </div>
-                  <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                  <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                     <Row label="Company" value={a.CompanyName} />
                     <Row label="Project" value={a.ProjectMasterName || a.InterestedProject} />
                     <Row label="Unit" value={a.PreferredUnitName || a.InterestedUnit} />
@@ -2813,7 +2815,7 @@ const CrmApplication: React.FC = () => {
                   {parkingRows.length > 0 && (
                     <div className="px-4 pb-3 flex flex-wrap gap-2">
                       {parkingRows.map((p: any) => (
-                        <span key={p.Id} className="text-[11px] bg-muted/60 rounded-full px-2.5 py-1 font-medium">
+                        <span key={p.Id} className="text-[0.6875rem] bg-muted/60 rounded-full px-2.5 py-1 font-medium">
                           {p.CurrentParkingType}{p.SlotNo ? ` — Slot ${p.SlotNo}` : p.Quantity > 1 ? ` ×${p.Quantity}` : ""}
                           {" · "}₹{((Number(p.RateSnapshot) || 0) * (Number(p.Quantity) || 1)).toLocaleString("en-IN")}
                         </span>
@@ -2865,13 +2867,13 @@ const CrmApplication: React.FC = () => {
                     {/* Payment plan milestone strip */}
                     {plan && planMilestones.length > 0 && grandTotal > 0 && (
                       <div className="pt-2 border-t border-border space-y-1">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Payment Schedule</p>
-                        <div className="flex justify-between text-[11px]">
+                        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Payment Schedule</p>
+                        <div className="flex justify-between text-[0.6875rem]">
                           <span className="text-muted-foreground">Booking (fixed)</span>
                           <span className="font-medium">₹{planBookingAmount.toLocaleString("en-IN")}</span>
                         </div>
                         {planMilestones.slice(1).map((m, i) => (
-                          <div key={i} className="flex justify-between text-[11px]">
+                          <div key={i} className="flex justify-between text-[0.6875rem]">
                             <span className="text-muted-foreground truncate pr-2">{m.name} ({m.pct}%)</span>
                             <span className="font-medium shrink-0">₹{Math.round((planRemainder * m.pct) / 100).toLocaleString("en-IN")}</span>
                           </div>
@@ -2881,9 +2883,9 @@ const CrmApplication: React.FC = () => {
                     {/* Extra work detail */}
                     {extraChargeRows.length > 0 && (
                       <div className="pt-2 border-t border-border space-y-1">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Extra Charges</p>
+                        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Extra Charges</p>
                         {extraChargeRows.map((c: any) => (
-                          <div key={c.Id} className="flex justify-between text-[11px]">
+                          <div key={c.Id} className="flex justify-between text-[0.6875rem]">
                             <span className="text-muted-foreground truncate pr-2">{c.Description}</span>
                             <span className="font-medium shrink-0">₹{Number(c.TotalAmount).toLocaleString("en-IN")}</span>
                           </div>
@@ -2894,11 +2896,11 @@ const CrmApplication: React.FC = () => {
                 </section>
 
                 {/* ── 4. Payment + Source in a 2-col row ── */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <section className="rounded-xl border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
                       <Wallet size={12} className="text-primary shrink-0" />
-                      <span className="text-[11px] font-semibold uppercase tracking-wide">Token Payment</span>
+                      <span className="text-[0.6875rem] font-semibold uppercase tracking-wide">Token Payment</span>
                     </div>
                     <div className="px-3 py-2.5 space-y-2">
                       <Row label="Token" value={
@@ -2916,7 +2918,7 @@ const CrmApplication: React.FC = () => {
                   <section className="rounded-xl border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
                       <Briefcase size={12} className="text-primary shrink-0" />
-                      <span className="text-[11px] font-semibold uppercase tracking-wide">Source</span>
+                      <span className="text-[0.6875rem] font-semibold uppercase tracking-wide">Source</span>
                     </div>
                     <div className="px-3 py-2.5 space-y-2">
                       <Row label="Source" value={a.Source} />
@@ -2935,7 +2937,7 @@ const CrmApplication: React.FC = () => {
                       <Users2 size={13} className="text-primary shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Broker</span>
                     </div>
-                    <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                    <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                       <Row label="Broker" value={a.BrokerName} />
                       <Row label="Rate" value={a.BrokerageRatePercent != null ? `${a.BrokerageRatePercent}%` : null} />
                       {a.BrokeragePaymentPlan && a.BrokeragePaymentPlan !== "OneTime" && (
@@ -2952,11 +2954,11 @@ const CrmApplication: React.FC = () => {
                       <FileText size={13} className="text-primary shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Linked Booking</span>
                       <button onClick={() => { closeApplication(); navigate(`/crm/bookings?applicationId=${a.Id}`); }}
-                        className="ml-auto text-[11px] text-primary hover:underline flex items-center gap-0.5">
+                        className="ml-auto text-[0.6875rem] text-primary hover:underline flex items-center gap-0.5">
                         Open <ChevronRight size={11} />
                       </button>
                     </div>
-                    <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                    <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                       <Row label="Booking No" value={<span className="font-mono">{booking.BookingNo}</span>} />
                       <Row label="Status" value={booking.Status} />
                       <Row label="Unit" value={[booking.ProjectName, booking.UnitNo].filter(Boolean).join(" · ")} />
@@ -2972,7 +2974,7 @@ const CrmApplication: React.FC = () => {
                       <FileText size={13} className="text-primary shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Invoices</span>
                       <a href={`/crm/invoices?bookingId=${booking.Id}`}
-                        className="ml-auto text-[11px] text-primary hover:underline flex items-center gap-0.5">
+                        className="ml-auto text-[0.6875rem] text-primary hover:underline flex items-center gap-0.5">
                         Invoices page <ChevronRight size={11} />
                       </a>
                     </div>
@@ -2986,7 +2988,7 @@ const CrmApplication: React.FC = () => {
                 {a.Notes && (
                   <section className="rounded-xl border border-border overflow-hidden">
                     <div className="px-4 py-2.5 bg-muted/40 border-b border-border">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide">Notes</span>
+                      <span className="text-[0.6875rem] font-semibold uppercase tracking-wide">Notes</span>
                     </div>
                     <p className="px-4 py-3 text-xs text-muted-foreground whitespace-pre-wrap">{a.Notes}</p>
                   </section>
@@ -3005,9 +3007,9 @@ const CrmApplication: React.FC = () => {
                           <div className="mt-1 shrink-0 w-1.5 h-1.5 rounded-full bg-primary/60" />
                           <div className="flex-1 min-w-0">
                             <span className="text-xs font-medium">{s.FromStatus ? `${s.FromStatus} → ${s.ToStatus}` : s.ToStatus}</span>
-                            {s.ActorName && <span className="text-[11px] text-muted-foreground"> · {s.ActorName}</span>}
+                            {s.ActorName && <span className="text-[0.6875rem] text-muted-foreground"> · {s.ActorName}</span>}
                           </div>
-                          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                          <span className="shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
                             {s.CreatedAt ? String(s.CreatedAt).slice(0, 16).replace("T", " ") : ""}
                           </span>
                         </div>
@@ -3058,7 +3060,7 @@ const CrmApplication: React.FC = () => {
               <button
                 onClick={() => { const id = viewingAppDetail.application.Id; closeApplication(); setTimeout(() => loadApplicationIntoWizard(id), 180); }}
                 disabled={loadingApplication}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40"
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40"
               >
                 {loadingApplication
                   ? "Loading..."
@@ -3077,7 +3079,7 @@ const CrmApplication: React.FC = () => {
           when Cancel is opened from inside the view dialog (same fix pattern
           as CoApplicant: two Radix Dialogs open at once freeze outer buttons). */}
       {cancellingApp && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+        <BodyPortal><div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
           onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}>
           <div className="bg-background border border-border rounded-xl shadow-xl w-full max-w-md p-5 space-y-4"
             onClick={(e) => e.stopPropagation()}>
@@ -3118,7 +3120,7 @@ const CrmApplication: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
       {pdfDialogApp && (
         <ApplicationFormPdfDialog
@@ -3248,7 +3250,7 @@ const BankDetailsStep: React.FC<{
             {bankSaving ? "Saving..." : "Save"}
           </button>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {[
             ["BankName", "Bank Name"], ["BranchName", "Branch"], ["AccountNo", "Account No"], ["IfscCode", "IFSC Code"],
             ["AccountHolderName", "Account Holder Name"], ["PanNo", "PAN No"], ["AadhaarNo", "Aadhaar No"],
@@ -3445,7 +3447,7 @@ const ParkingSelectionStep: React.FC<{
           )}
         </div>
         {!canEdit && wizardAppStatus === "Approved" && (
-          <p className="text-[11px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
+          <p className="text-[0.6875rem] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
             This application has been approved and a Booking has been created. To add, edit, or remove parking slots, open the Booking and go to the <strong>Parking &amp; Extra Charges</strong> tab.
           </p>
         )}
@@ -3457,7 +3459,7 @@ const ParkingSelectionStep: React.FC<{
                   {a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{displayParkingTotal(a).toLocaleString("en-IN")}
                   {a.Kind === "Hold" && (
                     <span title="Reserved — becomes a permanent allotment once this application's booking is created"
-                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-600">
+                      className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-600">
                       Held
                     </span>
                   )}
@@ -3548,7 +3550,7 @@ const ParkingSelectionStep: React.FC<{
                     <button
                       type="button"
                       onClick={() => setRateEditing(true)}
-                      className="text-[11px] text-muted-foreground hover:text-primary flex items-center gap-0.5 transition-colors"
+                      className="text-[0.6875rem] text-muted-foreground hover:text-primary flex items-center gap-0.5 transition-colors"
                       title="Override rate for this customer"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -3558,7 +3560,7 @@ const ParkingSelectionStep: React.FC<{
                     <button
                       type="button"
                       onClick={() => { setRateOverride(currentType ? String(currentType.Charge) : ""); setRateEditing(false); }}
-                      className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                      className="text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
                       title="Reset to master rate"
                     >
                       ↺ Reset
@@ -3587,17 +3589,17 @@ const ParkingSelectionStep: React.FC<{
                 </div>
               )}
               {currentType.NeedsRate && (
-                <p className="text-[11px] text-muted-foreground mt-1">
+                <p className="text-[0.6875rem] text-muted-foreground mt-1">
                   No rate is configured in Parking Rate Master — enter the agreed price manually.
                 </p>
               )}
               {!currentType.NeedsRate && rateEditing && rateOverride && Number(rateOverride) !== Number(currentType.Charge) && (
-                <p className="text-[11px] text-amber-600 mt-1">
+                <p className="text-[0.6875rem] text-sky-600 mt-1">
                   Master rate is ₹{Number(currentType.Charge).toLocaleString("en-IN")} — you're overriding to ₹{Number(rateOverride).toLocaleString("en-IN")}.
                 </p>
               )}
               {!currentType.NeedsRate && !rateEditing && (
-                <p className="text-[11px] text-muted-foreground mt-1">
+                <p className="text-[0.6875rem] text-muted-foreground mt-1">
                   Master rate. Click <span className="font-medium">Edit</span> to set a negotiated price.
                 </p>
               )}
@@ -3606,7 +3608,7 @@ const ParkingSelectionStep: React.FC<{
 
           {currentType && (
             <button onClick={handleAdd} disabled={adding || !currentType.HasSlots || !selectedSlotId}
-              className="w-full text-xs px-3 py-2 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="w-full text-xs px-3 py-2 btn-module text-white rounded-md font-medium hover:shadow-lg disabled:opacity-40">
               {adding ? "Adding..." : `Add ${currentType.ParkingType}`}
             </button>
           )}
@@ -3697,7 +3699,7 @@ const ExtraWorkSelectionStep: React.FC<{
           )}
         </div>
         {!canEdit && wizardAppStatus === "Approved" && (
-          <p className="text-[11px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
+          <p className="text-[0.6875rem] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
             This application has a Booking — add or edit extra charges from the Booking's <strong>Parking &amp; Extra Charges</strong> tab.
           </p>
         )}
@@ -3732,7 +3734,7 @@ const ExtraWorkSelectionStep: React.FC<{
             </div>
           )}
           <button onClick={handleAdd} disabled={adding || !description.trim() || !amount}
-            className="w-full text-xs px-3 py-2 bg-primary text-primary-foreground rounded-md font-medium hover:bg-primary/90 disabled:opacity-40">
+            className="w-full text-xs px-3 py-2 btn-module text-white rounded-md font-medium hover:shadow-lg disabled:opacity-40">
             {adding ? "Adding..." : "Add Extra Charges"}
           </button>
         </div>
@@ -3875,7 +3877,7 @@ const AttachmentsStep: React.FC<{
       {/* Plain div overlay — avoids nested Radix Dialog focus-trap conflict
           (this preview opens while the parent wizard Dialog is still open). */}
       {previewDoc && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+        <BodyPortal><div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
           onClick={() => setPreviewDoc(null)}>
           <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}>
@@ -3910,7 +3912,7 @@ const AttachmentsStep: React.FC<{
               )}
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </div>
   );

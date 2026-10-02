@@ -567,7 +567,7 @@ export const AppSidebar = () => {
               </motion.div>
               {/* Label */}
               <span
-                className="relative z-10 text-[11px] font-bold tracking-widest uppercase"
+                className="relative z-10 text-[0.6875rem] font-bold tracking-widest uppercase"
                 style={{ color: accentColor }}
               >
                 {header.label}
@@ -584,7 +584,7 @@ export const AppSidebar = () => {
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
           className="relative z-10 flex-1 overflow-y-auto p-2 sidebar-scroll"
         >
-          <p className="px-2 pb-2 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
+          <p className="px-2 pb-2 text-[0.625rem] font-bold uppercase tracking-widest text-sidebar-foreground/40">
             Menu
           </p>
           <SidebarNav

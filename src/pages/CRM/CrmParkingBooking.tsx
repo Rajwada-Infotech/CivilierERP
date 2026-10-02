@@ -21,6 +21,7 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { DateInput } from "@/components/ui/date-input";
 
 const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
@@ -152,7 +153,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                 Unit Booking
               </span>
             ) : (
-              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
                 {a.PaymentStatus === CrmStatus.PAID ? "Paid" : "Payment Pending"}
               </span>
             )}
@@ -231,7 +232,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                     </div>
                     <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
                       <div
-                        className={`h-1.5 rounded-full transition-all ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-amber-400" : "bg-muted-foreground/20"}`}
+                        className={`h-1.5 rounded-full transition-all ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-sky-400" : "bg-muted-foreground/20"}`}
                         style={{ width: `${Math.max(pct, 2)}%` }}
                       />
                     </div>
@@ -281,7 +282,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                       <span className="text-sm text-muted-foreground">Amount due</span>
                       <span className="text-base font-semibold">{inr(a.TotalAmount)}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
                         <select value={mode} onChange={(e) => setMode(e.target.value)}
@@ -292,7 +293,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground block mb-1">Received Date</label>
-                        <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                        <DateInput value={date} onChange={(e) => setDate(e.target.value)}
                           max={new Date().toISOString().split("T")[0]}
                           className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
                       </div>
@@ -599,18 +600,18 @@ const CrmParkingBooking: React.FC = () => {
                 <div className="flex items-center gap-1.5">
                   <div className="flex-1 bg-muted rounded-full h-1 overflow-hidden">
                     <div
-                      className={`h-1 rounded-full ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-amber-400" : "bg-muted-foreground/20"}`}
+                      className={`h-1 rounded-full ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-sky-400" : "bg-muted-foreground/20"}`}
                       style={{ width: `${Math.max(pct, 2)}%` }}
                     />
                   </div>
-                  <span className="text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
+                  <span className="text-[0.625rem] text-muted-foreground tabular-nums">{pct}%</span>
                 </div>
               )}
             </div>
           );
         }
         return (
-          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
             {a.PaymentStatus === CrmStatus.PAID ? "Paid" : "Pending"}
           </span>
         );
@@ -642,7 +643,7 @@ const CrmParkingBooking: React.FC = () => {
       action={
         <button
           onClick={() => setNewDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg transition-colors"
         >
           <Plus size={14} /> New Standalone Sale
         </button>
@@ -806,7 +807,7 @@ const CrmParkingBooking: React.FC = () => {
                 ))}
               </select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-sm font-medium block mb-1.5">Project</label>
                 <select value={form.ProjectId}
@@ -826,7 +827,7 @@ const CrmParkingBooking: React.FC = () => {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-sm font-medium block mb-1.5">Parking Type / Rate <span className="text-red-500">*</span></label>
                 <select value={form.ParkingMasterId}
@@ -865,7 +866,7 @@ const CrmParkingBooking: React.FC = () => {
               </div>
             </div>
             {form.ProjectId && ratesForScope.length === 0 && (
-              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <p className="text-xs text-sky-600 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
                 No parking rates configured for this project/block. Set them up in Parking Master before selling.
               </p>
             )}
@@ -880,7 +881,7 @@ const CrmParkingBooking: React.FC = () => {
                       onChange={(e) => setForm((f) => ({ ...f, RateOverride: e.target.value }))}
                       placeholder={String(selectedRate.Charge)}
                       className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-                    <p className="text-[11px] text-muted-foreground mt-1">
+                    <p className="text-[0.6875rem] text-muted-foreground mt-1">
                       Pre-filled with the master rate ({inr(selectedRate.Charge)}). Edit only if a different price was negotiated with this customer.
                     </p>
                   </div>
@@ -914,7 +915,7 @@ const CrmParkingBooking: React.FC = () => {
             <button
               onClick={handleCreate}
               disabled={saving || !form.ApplicationId || !form.ParkingMasterId || !form.ParkingSlotId}
-              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors"
+              className="px-4 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40 transition-colors"
             >
               {saving ? "Creating…" : "Create Allotment"}
             </button>

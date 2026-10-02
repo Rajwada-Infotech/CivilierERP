@@ -19,15 +19,16 @@ import {
   type InterviewRow,
   type InterviewStatus,
 } from "@/api/interviewApi";
+import { DateInput } from "@/components/ui/date-input";
 
-const labelCls = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const inputCls = "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
 
 const STATUS_META: Record<InterviewStatus, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-muted text-muted-foreground border-border" },
   SELECTED: { label: "Selected", className: "bg-green-500/10 text-green-600 border-green-500/30" },
   REJECTED: { label: "Rejected", className: "bg-red-500/10 text-red-600 border-red-500/30" },
-  HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 border-amber-500/30" },
+  HOLD: { label: "Hold", className: "bg-[#ffe2021a] text-amber-600 border-amber-500/30" },
 };
 
 interface FormState {
@@ -201,7 +202,7 @@ const InterviewPage: React.FC = () => {
               {/* ── Candidate detail (read-only, from Candidate Master) ── */}
               {selectedCandidate && (
                 <div className="rounded-lg border p-4" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
-                  <p className="text-[11px] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `${HR_PAYROLL_ACCENT}33` }}>
+                  <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `${HR_PAYROLL_ACCENT}33` }}>
                     Candidate Details
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs">
@@ -246,7 +247,7 @@ const InterviewPage: React.FC = () => {
                 </div>
                 <div>
                   <label className={labelCls}>Date *</label>
-                  <input type="date" className={inputCls} value={form.interviewDate} onChange={(e) => setField("interviewDate", e.target.value)} />
+                  <DateInput className={inputCls} value={form.interviewDate} onChange={(e) => setField("interviewDate", e.target.value)} />
                 </div>
               </div>
 
@@ -256,7 +257,7 @@ const InterviewPage: React.FC = () => {
               </div>
 
               <div className="flex justify-end gap-2">
-                <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity">
+                <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg btn-module text-white hover:opacity-90 transition-opacity">
                   {editingId ? "Update Interview" : "Save Interview"}
                 </button>
               </div>
@@ -268,7 +269,7 @@ const InterviewPage: React.FC = () => {
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
               <div>
                 <h3 className="font-heading font-semibold text-foreground text-sm">Interview Records</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">{rows.length} record{rows.length !== 1 ? "s" : ""}</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{rows.length} record{rows.length !== 1 ? "s" : ""}</p>
               </div>
               <ExportMenu data={exportData} columns={exportColumns} title="Interview" filename="interview" disabled={rows.length === 0} />
             </div>
@@ -276,12 +277,12 @@ const InterviewPage: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">
-                    <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Date</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
-                    <th className="px-4 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
+                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
+                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
+                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
+                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Date</th>
+                    <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -295,7 +296,7 @@ const InterviewPage: React.FC = () => {
                       <td className="px-4 py-2.5 font-mono text-xs">{r.DocNo}</td>
                       <td className="px-4 py-2.5">
                         <div className="font-medium">{r.CandidateName}</div>
-                        <div className="text-[11px] text-muted-foreground">{r.CandidateCode}</div>
+                        <div className="text-[0.6875rem] text-muted-foreground">{r.CandidateCode}</div>
                       </td>
                       <td className="px-4 py-2.5 hidden sm:table-cell">{r.CompanyName || "-"}</td>
                       <td className="px-4 py-2.5">{r.InterviewDate ? r.InterviewDate.slice(0, 10) : "-"}</td>
@@ -312,7 +313,7 @@ const InterviewPage: React.FC = () => {
                             ))}
                           </select>
                         ) : (
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${STATUS_META[r.Status]?.className}`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${STATUS_META[r.Status]?.className}`}>
                             {STATUS_META[r.Status]?.label}
                           </span>
                         )}

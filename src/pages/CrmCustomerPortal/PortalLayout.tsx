@@ -10,6 +10,7 @@ import {
   INK, VIOLET_DEEP, VIOLET, VIOLET_LIGHT, GOLD, GOLD_SOFT, PORCELAIN, SURFACE, SURFACE_ALT, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
   applyPortalAccent, getStoredPortalAccent, applyPortalMode, getStoredPortalMode, StatusPill,
 } from "./portalTheme";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const NAV_GROUPS: { label: string; items: { to: string; label: string; icon: any }[] }[] = [
   { label: "Overview", items: [
@@ -225,7 +226,7 @@ const PortalLayout: React.FC = () => {
         <Icon size={16} className="shrink-0" />
         <span className="flex-1">{label}</span>
         {!!count && (
-          <span className="text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1"
+          <span className="text-[0.625rem] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1"
             style={{ background: GOLD, color: INK }}>
             {count}
           </span>
@@ -253,7 +254,7 @@ const PortalLayout: React.FC = () => {
           </div>
           <div className="min-w-0">
             <p className="text-base font-semibold text-white leading-tight truncate" style={serif}>CivilierERP</p>
-            <p className="text-[10px] tracking-[0.12em] uppercase leading-tight" style={{ color: GOLD }}>Customer Record</p>
+            <p className="text-[0.625rem] tracking-[0.12em] uppercase leading-tight" style={{ color: GOLD }}>Customer Record</p>
           </div>
         </div>
 
@@ -276,7 +277,7 @@ const PortalLayout: React.FC = () => {
         <nav className="relative z-10 flex-1 px-3 py-5 space-y-5 overflow-y-auto">
           {NAV_GROUPS.map((group) => (
             <div key={group.label}>
-              <p className="px-3 mb-1.5 text-[10px] font-semibold tracking-[0.16em] uppercase" style={{ color: "rgba(201,162,39,0.65)" }}>
+              <p className="px-3 mb-1.5 text-[0.625rem] font-semibold tracking-[0.16em] uppercase" style={{ color: "rgba(201,162,39,0.65)" }}>
                 {group.label}
               </p>
               <div className="space-y-0.5">
@@ -293,7 +294,7 @@ const PortalLayout: React.FC = () => {
         {/* Record Card */}
         <div className="relative z-10 px-3 pb-4">
           <div className="rounded-xl p-3.5" style={{ background: "rgba(255,255,255,0.05)", border: `1px solid ${GOLD}55` }}>
-            <p className="text-[9px] font-semibold tracking-[0.18em] uppercase mb-2" style={{ color: GOLD }}>Record Holder</p>
+            <p className="text-[0.5625rem] font-semibold tracking-[0.18em] uppercase mb-2" style={{ color: GOLD }}>Record Holder</p>
             <div className="flex items-center gap-2.5 mb-2">
               <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
                 style={{ background: GOLD_SOFT, color: GOLD, border: `1px solid ${GOLD}55` }}>
@@ -302,7 +303,7 @@ const PortalLayout: React.FC = () => {
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-white truncate" style={serif}>{me?.Name || "…"}</p>
                 {selectedApp && (
-                  <p className="text-[10px] truncate" style={{ ...mono, color: "rgba(233,225,250,0.55)" }}>
+                  <p className="text-[0.625rem] truncate" style={{ ...mono, color: "rgba(233,225,250,0.55)" }}>
                     {selectedApp.ApplicationNo}
                   </p>
                 )}
@@ -325,20 +326,20 @@ const PortalLayout: React.FC = () => {
           <div className="relative">
             <Bell size={18} className="text-white/80" />
             {totalAlerts > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5"
+              <span className="absolute -top-1.5 -right-1.5 text-[0.5625rem] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5"
                 style={{ background: GOLD, color: INK }}>
                 {totalAlerts}
               </span>
             )}
           </div>
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold"
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-[0.625rem] font-bold"
             style={{ background: GOLD_SOFT, color: GOLD, border: `1px solid ${GOLD}55` }}>
             {initials(me?.Name)}
           </div>
         </div>
       </div>
       {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
+        <BodyPortal><div className="lg:hidden fixed inset-0 z-50 flex">
           <div className="w-72 flex flex-col relative overflow-hidden" style={{ background: SIDEBAR_BG }}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
               <span className="text-sm font-semibold text-white" style={serif}>Menu</span>
@@ -358,7 +359,7 @@ const PortalLayout: React.FC = () => {
             <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
               {NAV_GROUPS.map((group) => (
                 <div key={group.label}>
-                  <p className="px-3 mb-1 text-[10px] font-semibold tracking-[0.16em] uppercase" style={{ color: "rgba(201,162,39,0.65)" }}>{group.label}</p>
+                  <p className="px-3 mb-1 text-[0.625rem] font-semibold tracking-[0.16em] uppercase" style={{ color: "rgba(201,162,39,0.65)" }}>{group.label}</p>
                   {group.items.map(({ to, label, icon: Icon }) => (
                     <NavLink key={to} to={to} onClick={() => setMobileOpen(false)}>
                       {({ isActive }) => navLinkContent(to, label, Icon, isActive)}
@@ -373,7 +374,7 @@ const PortalLayout: React.FC = () => {
             </nav>
           </div>
           <div className="flex-1 bg-black/40" onClick={() => setMobileOpen(false)} />
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* ── Main content ── */}
@@ -388,7 +389,7 @@ const PortalLayout: React.FC = () => {
           <div className="relative">
             <Bell size={17} style={{ color: VIOLET_LIGHT }} />
             {totalAlerts > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5"
+              <span className="absolute -top-1.5 -right-1.5 text-[0.5625rem] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5"
                 style={{ background: GOLD, color: INK }}>
                 {totalAlerts}
               </span>

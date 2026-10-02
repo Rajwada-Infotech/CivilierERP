@@ -577,7 +577,7 @@ export default function MenuRights() {
                 </span>
                 <div className="flex items-center gap-2">
                   {selectedUser && (
-                    <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                    <span className="text-[0.625rem] font-heading px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
                       {selectedUser.role}
                     </span>
                   )}
@@ -752,7 +752,7 @@ export default function MenuRights() {
                     <span className="text-sm font-heading font-semibold text-foreground">
                       {subject === "user" ? selectedUser?.name : selectedRole?.RName}
                     </span>
-                    <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground capitalize">
+                    <span className="text-[0.625rem] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground capitalize">
                       {subject === "user"
                         ? selectedUser?.role.replace(/_/g, " ")
                         : "role baseline"}
@@ -797,10 +797,10 @@ export default function MenuRights() {
                     <button
                       key={mod}
                       onClick={() => setModuleFilter(mod)}
-                      className={`px-2.5 py-1 text-[11px] rounded-lg border whitespace-nowrap transition-colors font-medium ${
+                      className={`px-2.5 py-1 text-[0.6875rem] rounded-lg border whitespace-nowrap transition-colors font-medium ${
                         moduleFilter === mod
                           ? mod === "All"
-                            ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent font-semibold shadow-sm"
+                            ? "btn-module text-white border-transparent font-semibold shadow-sm"
                             : mod === "General"
                               ? "bg-slate-500 text-white border-slate-500 font-semibold"
                               : mod === "Finance"
@@ -810,7 +810,7 @@ export default function MenuRights() {
                                   : mod === "Engineering"
                                     ? "bg-orange-500 text-white border-orange-500 font-semibold"
                                     : mod === "Follow-Up"
-                                      ? "bg-purple-500 text-white border-purple-500 font-semibold"
+                                      ? "btn-module text-white border-purple-500 font-semibold"
                                       : mod === "Ticket"
                                         ? "bg-red-500 text-white border-red-500 font-semibold"
                                         : mod === "Sales"
@@ -819,7 +819,7 @@ export default function MenuRights() {
                                             ? "bg-cyan-500 text-white border-cyan-500 font-semibold"
                                             : mod === "Reports"
                                               ? "bg-yellow-500 text-white border-yellow-500 font-semibold"
-                                              : "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent font-semibold shadow-sm"
+                                              : "btn-module text-white border-transparent font-semibold shadow-sm"
                           : mod === "All"
                             ? "border-border bg-muted text-muted-foreground hover:bg-muted/80"
                             : mod === "General"
@@ -854,7 +854,7 @@ export default function MenuRights() {
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-muted/30 border-b border-border text-xs uppercase tracking-wide">
-                    <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground min-w-[240px]">
+                    <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground min-w-0 sm:min-w-[240px]">
                       Menu / Page
                     </th>
                     {ALL_ACTIONS.map((a) => (
@@ -894,7 +894,7 @@ export default function MenuRights() {
                         {isFirstModuleWiseGroup && (
                           <tr>
                             <td colSpan={ALL_ACTIONS.length + 2} className="px-5 pt-5 pb-1">
-                              <span className="text-[10px] font-heading font-bold uppercase tracking-[0.2em] text-muted-foreground/50">
+                              <span className="text-[0.625rem] font-heading font-bold uppercase tracking-[0.2em] text-muted-foreground/50">
                                 Module Pages
                               </span>
                             </td>
@@ -911,23 +911,23 @@ export default function MenuRights() {
                               <div className="flex items-center gap-2">
                                 {!isCrossModuleTier && (
                                   <span
-                                    className={`text-[10px] font-heading font-bold px-2 py-0.5 rounded-full border ${colorClass}`}
+                                    className={`text-[0.625rem] font-heading font-bold px-2 py-0.5 rounded-full border ${colorClass}`}
                                   >
                                     {groupModule}
                                   </span>
                                 )}
-                                <span className="text-[11px] font-heading font-semibold text-foreground uppercase tracking-wider">
+                                <span className="text-[0.6875rem] font-heading font-semibold text-foreground uppercase tracking-wider">
                                   {group}
                                 </span>
                                 {isCrossModuleTier && (
-                                  <span className="text-[10px] text-muted-foreground/50">
+                                  <span className="text-[0.625rem] text-muted-foreground/50">
                                     · every module
                                   </span>
                                 )}
                               </div>
                               <button
                                 onClick={() => toggleGroup(pages)}
-                                className={`text-[10px] px-2.5 py-0.5 rounded-full border transition-colors ${
+                                className={`text-[0.625rem] px-2.5 py-0.5 rounded-full border transition-colors ${
                                   allGroupChecked
                                     ? "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
                                     : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
@@ -960,7 +960,7 @@ export default function MenuRights() {
                                   {page.label}
                                   {isCrossModuleTier && (
                                     <span
-                                      className={`text-[9px] font-heading font-semibold px-1.5 py-0.5 rounded-full border shrink-0 ${rowColorClass}`}
+                                      className={`text-[0.5625rem] font-heading font-semibold px-1.5 py-0.5 rounded-full border shrink-0 ${rowColorClass}`}
                                     >
                                       {page.module}
                                     </span>
@@ -984,7 +984,7 @@ export default function MenuRights() {
                                         }
                                         className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-all ${
                                           checked
-                                            ? "bg-primary border-primary text-primary-foreground shadow-sm"
+                                            ? "btn-module border-primary text-white shadow-sm"
                                             : "border-border bg-muted hover:border-primary/50"
                                         }`}
                                       >
@@ -1008,7 +1008,7 @@ export default function MenuRights() {
                                   }
                                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-all ${
                                     allChecked
-                                      ? "bg-primary border-primary text-primary-foreground shadow-sm"
+                                      ? "btn-module border-primary text-white shadow-sm"
                                       : someChecked
                                         ? "bg-primary/20 border-primary/40"
                                         : "border-border bg-muted hover:border-primary/50"
@@ -1039,7 +1039,7 @@ export default function MenuRights() {
               <button
                 onClick={handleSave}
                 disabled={saving || !dirty}
-                className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50 transition-all"
+                className="btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50 transition-all"
               >
                 {saving ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />

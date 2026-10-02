@@ -65,6 +65,7 @@ import {
   Cpu,
   ListChecks,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -354,7 +355,7 @@ const ALL_REPORTS: ReportDef[] = [
   },
   {
     id: "expense-register",
-    label: "Expense Register",
+    label: "Invoice Report",
     description: "Every booked invoice/expense, with GL head and GST breakup",
     icon: Receipt,
     color: "#0d9488",
@@ -505,6 +506,8 @@ const ALL_REPORTS: ReportDef[] = [
       },
       { header: "GL Name", accessor: (r) => (r.LHeadName ?? "—") as string },
       { header: "Group", accessor: (r) => (r.GroupName ?? "—") as string },
+      { header: "Company", accessor: (r) => (r.CompanyName ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.ProjectName ?? "—") as string },
       {
         header: "Expense Type",
         accessor: (r) => (r.ExpenseType ?? "—") as string,
@@ -568,6 +571,8 @@ const ALL_REPORTS: ReportDef[] = [
         accessor: (r) => (r.JVDate ? String(r.JVDate).slice(0, 10) : "—"),
       },
       { header: "Narration", accessor: (r) => (r.Narration ?? "—") as string },
+      { header: "Company", accessor: (r) => (r.CompanyName ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.ProjectName ?? "—") as string },
       { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
       { header: "Status", accessor: "Status" },
     ],
@@ -1368,7 +1373,7 @@ const ALL_REPORTS: ReportDef[] = [
   {
     id: "tds-report",
     label: "TDS Report",
-    description: "TDS actually deducted on payments — invoice-linked & direct",
+    description: "TDS deducted on payments, plus every broker/commission payment regardless of TDS",
     icon: Percent,
     color: "#eab308",
     apiPath: "/api/reports/tds",
@@ -2206,7 +2211,7 @@ const SectionFilters: React.FC<{
     <div className="flex flex-wrap items-end gap-2.5">
       {/* Company */}
       <div className="min-w-[160px] flex-1 max-w-[210px]">
-        <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+        <label className="block text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
           Company
         </label>
         <div className="relative">
@@ -2235,7 +2240,7 @@ const SectionFilters: React.FC<{
 
       {/* Project */}
       <div className="min-w-[160px] flex-1 max-w-[210px]">
-        <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+        <label className="block text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
           Project
         </label>
         <div className="relative">
@@ -2264,7 +2269,7 @@ const SectionFilters: React.FC<{
 
       {/* Fin Year */}
       <div className="min-w-[140px] flex-1 max-w-[180px]">
-        <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+        <label className="block text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
           Financial Year
         </label>
         <div className="relative">
@@ -2294,7 +2299,7 @@ const SectionFilters: React.FC<{
       {/* Date mode + inputs */}
       <div className="flex items-end gap-2">
         <div>
-          <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+          <label className="block text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
             Date
           </label>
           <div className="flex rounded-lg border border-border overflow-hidden bg-muted/30 h-[34px]">
@@ -2303,8 +2308,8 @@ const SectionFilters: React.FC<{
                 key={m}
                 type="button"
                 onClick={() => onChange({ dateMode: m })}
-                className={`px-3 flex items-center gap-1 text-[11px] font-medium transition-all
-                  ${filters.dateMode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                className={`px-3 flex items-center gap-1 text-[0.6875rem] font-medium transition-all
+                  ${filters.dateMode === m ? "btn-module text-white" : "text-muted-foreground hover:text-foreground"}`}
               >
                 {m === "single" ? (
                   <Calendar size={10} />
@@ -2318,8 +2323,7 @@ const SectionFilters: React.FC<{
         </div>
 
         {filters.dateMode === "single" ? (
-          <input
-            type="date"
+          <DateInput
             value={filters.singleDate}
             onChange={(e) => onChange({ singleDate: e.target.value })}
             disabled={!!filters.finYearId}
@@ -2327,16 +2331,14 @@ const SectionFilters: React.FC<{
           />
         ) : (
           <div className="flex gap-1.5 items-center">
-            <input
-              type="date"
+            <DateInput
               value={filters.rangeFrom}
               onChange={(e) => onChange({ rangeFrom: e.target.value })}
               disabled={!!filters.finYearId}
               className="rounded-lg border border-border bg-background text-foreground text-xs px-2.5 py-2 h-[34px] w-[130px] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-40 transition-all"
             />
-            <span className="text-[10px] text-muted-foreground">→</span>
-            <input
-              type="date"
+            <span className="text-[0.625rem] text-muted-foreground">→</span>
+            <DateInput
               value={filters.rangeTo}
               onChange={(e) => onChange({ rangeTo: e.target.value })}
               disabled={!!filters.finYearId}
@@ -2360,13 +2362,13 @@ const SectionFilters: React.FC<{
     {/* Active chips */}
     {activeFilters.length > 0 && (
       <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-border/40">
-        <span className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider">
+        <span className="text-[0.625rem] text-muted-foreground font-heading uppercase tracking-wider">
           Active:
         </span>
         {activeFilters.map((f) => (
           <span
             key={f.label}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary border border-primary/20"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-primary/10 text-primary border border-primary/20"
           >
             {f.label}
             <button
@@ -2435,18 +2437,18 @@ const LedgerReportGroups: React.FC<{
               className="w-full flex items-center gap-2.5 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors text-left"
             >
               <span className="text-xs font-medium text-foreground truncate">{group.name}</span>
-              <span className="text-[11px] text-muted-foreground truncate hidden sm:inline">
+              <span className="text-[0.6875rem] text-muted-foreground truncate hidden sm:inline">
                 · {group.groupName}
                 {group.expenseType !== "—" && ` · ${group.expenseType}`}
               </span>
               <span className="ml-auto flex items-center gap-3 shrink-0">
-                <span className="text-[10px] tabular-nums text-emerald-600 dark:text-emerald-400">
+                <span className="text-[0.625rem] tabular-nums text-emerald-600 dark:text-emerald-400">
                   Dr {fmt(group.debit)}
                 </span>
-                <span className="text-[10px] tabular-nums text-rose-600 dark:text-rose-400">
+                <span className="text-[0.625rem] tabular-nums text-rose-600 dark:text-rose-400">
                   Cr {fmt(group.credit)}
                 </span>
-                <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                <span className="text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                   {group.rows.length} txn{group.rows.length === 1 ? "" : "s"}
                 </span>
               </span>
@@ -2454,13 +2456,15 @@ const LedgerReportGroups: React.FC<{
 
             {!collapsed && (
               <div className="overflow-x-auto bg-muted/5">
-                <table className="w-full text-xs min-w-[860px]">
+                <table className="w-full text-xs min-w-[1140px]">
                   <thead>
-                    <tr className="text-muted-foreground uppercase tracking-wide text-[10px] font-heading">
+                    <tr className="text-muted-foreground uppercase tracking-wide text-[0.625rem] font-heading">
                       <th className="text-left pl-11 pr-3 py-2">Date</th>
                       <th className="text-left px-3 py-2">Source</th>
                       <th className="text-left px-3 py-2">Doc No</th>
                       <th className="text-left px-3 py-2">Paid To</th>
+                      <th className="text-left px-3 py-2">Company</th>
+                      <th className="text-left px-3 py-2">Project</th>
                       <th className="text-left px-3 py-2">Narration</th>
                       <th className="text-right px-3 py-2">Debit</th>
                       <th className="text-right px-4 sm:px-5 py-2">Credit</th>
@@ -2482,6 +2486,12 @@ const LedgerReportGroups: React.FC<{
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-foreground max-w-[180px] truncate" title={(r.PaidTo as string) ?? ""}>
                           {(r.PaidTo as string) || "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-foreground max-w-[140px] truncate" title={(r.CompanyName as string) ?? ""}>
+                          {(r.CompanyName as string) || "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-foreground max-w-[140px] truncate" title={(r.ProjectName as string) ?? ""}>
+                          {(r.ProjectName as string) || "—"}
                         </td>
                         <td className="px-3 py-2 text-foreground max-w-[280px] truncate" title={(r.Narration as string) ?? ""}>
                           {(r.Narration as string) ?? "—"}
@@ -2824,7 +2834,7 @@ const ReportTable: React.FC<{
             {report.label}
           </span>
           {!loading && !error && !isVendorLedger && (
-            <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
+            <span className="text-[0.625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
               {rows.length} records
             </span>
           )}
@@ -2940,17 +2950,15 @@ const ReportTable: React.FC<{
 
           {isExpenseRegister && (
             <div className="flex items-center gap-1.5">
-              <input
-                type="date"
+              <DateInput
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
                 max={dateTo || undefined}
                 title="From date"
                 className="h-[30px] px-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
               />
-              <span className="text-[10px] text-muted-foreground">→</span>
-              <input
-                type="date"
+              <span className="text-[0.625rem] text-muted-foreground">→</span>
+              <DateInput
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
                 min={dateFrom || undefined}
@@ -3037,7 +3045,7 @@ const ReportTable: React.FC<{
                   key={label}
                   className="flex-1 min-w-[120px] rounded-lg border border-border bg-card px-3 py-2"
                 >
-                  <p className="text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-wider">
                     {label}
                   </p>
                   <p className="text-sm font-semibold text-foreground tabular-nums mt-0.5">
@@ -3066,13 +3074,13 @@ const ReportTable: React.FC<{
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  <th className="px-4 py-2.5 text-left text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider w-8">
+                  <th className="px-4 py-2.5 text-left text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-wider w-8">
                     #
                   </th>
                   {effectiveColumns.map((col) => (
                     <th
                       key={col.header}
-                      className="px-4 py-2.5 text-left text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"
+                      className="px-4 py-2.5 text-left text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"
                     >
                       {col.header}
                     </th>
@@ -3205,7 +3213,7 @@ const ReportTile: React.FC<{
       <p className="text-xs font-heading font-semibold text-foreground truncate leading-tight">
         {report.label}
       </p>
-      <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+      <p className="text-[0.625rem] text-muted-foreground truncate mt-0.5">
         {report.description}
       </p>
     </div>
@@ -3435,7 +3443,7 @@ const Reports: React.FC = () => {
                       {section.label}
                     </span>
                     <span
-                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                      className="text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border"
                       style={{
                         background: `${section.accent}10`,
                         color: section.accent,
@@ -3462,7 +3470,7 @@ const Reports: React.FC = () => {
                     </div>
                   ))}
                   {reports.length > 5 && (
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[0.625rem] text-muted-foreground">
                       +{reports.length - 5}
                     </span>
                   )}

@@ -18,6 +18,7 @@ import {
   getInventoryImports, createInventoryImport, deleteInventoryImport,
   type InventoryImportListItem,
 } from "@/api/fixedAssetInventoryImportApi";
+import { DateInput } from "@/components/ui/date-input";
 
 function ensureArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -236,7 +237,7 @@ export default function FixedAssetInventoryImport() {
               <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               <Check size={13} /> {saving ? "Importing…" : "Import"}
             </button>
           </div>
@@ -268,7 +269,7 @@ export default function FixedAssetInventoryImport() {
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Date *</label>
-                <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}><Boxes size={11} /> Godown *</label>
@@ -320,7 +321,7 @@ export default function FixedAssetInventoryImport() {
               placeholder="Why this item is being imported manually (e.g. original GRN unavailable)…" className={inputCls} />
           </div>
 
-          <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+          <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1.5">
             <AlertCircle size={12} className="shrink-0" />
             This creates fresh Fixed Asset Inventory exactly like a GRN receipt — it'll appear as untagged stock in FA Inventory (or auto-tag immediately if a Project Alias and Financial Year are configured) and follow the same tagging/record workflow from there.
           </p>
@@ -343,7 +344,7 @@ export default function FixedAssetInventoryImport() {
       action={
         rights.canCreate && (
           <button onClick={goToCreate}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
             <Plus size={13} /> New Import
           </button>
         )
@@ -387,7 +388,7 @@ export default function FixedAssetInventoryImport() {
               <p className="text-sm">No inventory imports yet</p>
               {rights.canCreate && (
                 <button onClick={goToCreate}
-                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
                   <Plus size={13} /> Add First Import
                 </button>
               )}
@@ -414,7 +415,7 @@ export default function FixedAssetInventoryImport() {
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(i.DocDate)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium truncate">{i.ItemName || "—"}</p>
-                        <p className="text-[11px] text-muted-foreground truncate">{i.AssetCategory || "—"}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground truncate">{i.AssetCategory || "—"}</p>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {i.CompanyName || "—"}{i.ProjectName ? ` / ${i.ProjectName}` : ""}

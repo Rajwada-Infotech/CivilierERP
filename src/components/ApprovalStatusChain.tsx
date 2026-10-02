@@ -52,7 +52,7 @@ interface TrailStep {
   workflowType?: string;
 }
 
-interface TrailData {
+export interface TrailData {
   workflowName: string | null;
   workflowType: string;
   steps: TrailStep[];
@@ -72,6 +72,25 @@ interface Props {
    *  Lets callers show a plain status pill as a graceful fallback rather
    *  than an empty cell. */
   fallback?: React.ReactNode;
+  /** Skips this component's own GET /trail fetch and renders straight from
+   *  a trail the caller already has — pass `undefined` (the default, just
+   *  omit the prop) for the normal one-fetch-per-badge behaviour, used by
+   *  single-record detail views. A LIST page with many rows should instead
+   *  batch-fetch every visible row's trail in one GET /trail/bulk call (see
+   *  useApprovalTrailsBulk) and pass each row's result here — N rows each
+   *  firing their own GET /trail was enough on its own to trip the per-user
+   *  API rate limit (seen on Material Request's ~36-row list), which this
+   *  component's own `fallback` silently masked as a plain status pill
+   *  instead of surfacing the error, making it look like the richer badge
+   *  was randomly reverting rather than being rate-limited. Pass `null`
+   *  while the bulk fetch is still in flight (shows the loading pulse) and
+   *  the resolved value (possibly still `null`, meaning no trail) once it
+   *  completes.
+   */
+  preloaded?: TrailData | null;
+  /** Shows the loading pulse while the caller's own bulk fetch (see
+   *  `preloaded`) is still in flight. Ignored when `preloaded` is omitted. */
+  preloadedLoading?: boolean;
 }
 
 function fmtDate(iso: string | null) {
@@ -105,14 +124,16 @@ function tooltipText(step: TrailStep): string {
   return label ? `${label}${when}` : step.label;
 }
 
-export function ApprovalStatusChain({ table, recordId, className, fallback = null }: Props) {
-  const [trail, setTrail] = useState<TrailData | null>(null);
-  const [loading, setLoading] = useState(false);
+export function ApprovalStatusChain({ table, recordId, className, fallback = null, preloaded, preloadedLoading = false }: Props) {
+  const isPreloaded = preloaded !== undefined;
+  const [fetchedTrail, setFetchedTrail] = useState<TrailData | null>(null);
+  const [fetchLoading, setFetchLoading] = useState(false);
 
   useEffect(() => {
+    if (isPreloaded) return; // caller already fetched this via /trail/bulk
     if (!recordId) return;
     let cancelled = false;
-    setLoading(true);
+    setFetchLoading(true);
     fetchWithAuth(
       `/api/approval-workflows/trail?module=${table}&id=${recordId}`,
     )
@@ -121,16 +142,19 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
         // A failed request (e.g. 429 from a burst of concurrent card
         // fetches) or a malformed body must not be treated as a valid
         // trail — only accept it once it actually has a steps array.
-        if (!cancelled) setTrail(data && Array.isArray(data.steps) ? data : null);
+        if (!cancelled) setFetchedTrail(data && Array.isArray(data.steps) ? data : null);
       })
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setFetchLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [table, recordId]);
+  }, [table, recordId, isPreloaded]);
+
+  const trail = isPreloaded ? preloaded : fetchedTrail;
+  const loading = isPreloaded ? preloadedLoading : fetchLoading;
 
   if (loading) {
     return (
@@ -158,7 +182,7 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
       <span
         title={tooltipText(last)}
         className={cn(
-          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold",
+          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold",
           "whitespace-nowrap",
           "bg-emerald-100 text-emerald-700 border border-emerald-200",
           "dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800",
@@ -177,7 +201,7 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
       <span
         title={tooltipText(rejectedStep)}
         className={cn(
-          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold",
+          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold",
           "whitespace-nowrap",
           "bg-red-100 text-red-700 border border-red-200",
           "dark:bg-red-950/40 dark:text-red-400 dark:border-red-800",
@@ -201,7 +225,7 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
     <span
       title={tooltipText(currentStep)}
       className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold",
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold",
         "whitespace-nowrap",
         "bg-amber-100 text-amber-700 border border-amber-200",
         "dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800",

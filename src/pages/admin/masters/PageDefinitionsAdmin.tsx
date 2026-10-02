@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -353,7 +354,7 @@ export default function PageDefinitionsAdmin() {
           <>
             Manage which pages appear in Menu Rights without a code deploy
             {isFetching && !isLoading && (
-              <span className="inline-flex items-center gap-1 ml-2 text-[10px] font-medium text-muted-foreground">
+              <span className="inline-flex items-center gap-1 ml-2 text-[0.625rem] font-medium text-muted-foreground">
                 <RefreshCw size={10} className="animate-spin" /> Syncing…
               </span>
             )}
@@ -364,7 +365,7 @@ export default function PageDefinitionsAdmin() {
           rights.canCreate && (
             <button
               onClick={openAdd}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
             >
               <Plus size={13} /> Add Page
             </button>
@@ -372,7 +373,7 @@ export default function PageDefinitionsAdmin() {
         }
       >
         {/* ── Stats ── */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {[
             { label: "Total", value: stats.total, color: "text-foreground" },
             { label: "Active", value: stats.active, color: "text-emerald-500" },
@@ -386,7 +387,7 @@ export default function PageDefinitionsAdmin() {
               key={s.label}
               className="bg-card border border-border rounded-xl px-4 py-3"
             >
-              <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wide">
+              <p className="text-[0.625rem] text-muted-foreground font-heading uppercase tracking-wide">
                 {s.label}
               </p>
               <p className={`text-xl font-heading font-bold mt-0.5 ${s.color}`}>
@@ -398,7 +399,7 @@ export default function PageDefinitionsAdmin() {
 
         {/* ── Filters ── */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative flex-1 min-w-0 sm:min-w-[200px]">
             <Search
               size={13}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -415,9 +416,9 @@ export default function PageDefinitionsAdmin() {
               <button
                 key={m}
                 onClick={() => setModuleFilter(m)}
-                className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border transition ${
+                className={`px-2.5 py-1 rounded-full text-[0.625rem] font-semibold border transition ${
                   moduleFilter === m
-                    ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent shadow-sm"
+                    ? "btn-module text-white border-transparent shadow-sm"
                     : "bg-muted text-muted-foreground border-border hover:bg-muted/70"
                 }`}
               >
@@ -438,28 +439,28 @@ export default function PageDefinitionsAdmin() {
               No page definitions found
             </div>
           ) : (
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto thin-scroll"><table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  <th className="px-4 py-2.5 text-left font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">
+                  <th className="px-4 py-2.5 text-left font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[0.625rem]">
                     Key
                   </th>
-                  <th className="px-4 py-2.5 text-left font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">
+                  <th className="px-4 py-2.5 text-left font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[0.625rem]">
                     Label
                   </th>
-                  <th className="px-4 py-2.5 text-left font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">
+                  <th className="px-4 py-2.5 text-left font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[0.625rem]">
                     Module / Group
                   </th>
-                  <th className="px-4 py-2.5 text-left font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">
+                  <th className="px-4 py-2.5 text-left font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[0.625rem]">
                     Actions
                   </th>
-                  <th className="px-4 py-2.5 text-center font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">
+                  <th className="px-4 py-2.5 text-center font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[0.625rem]">
                     Order
                   </th>
-                  <th className="px-4 py-2.5 text-center font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">
+                  <th className="px-4 py-2.5 text-center font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[0.625rem]">
                     Status
                   </th>
-                  <th className="px-4 py-2.5 text-center font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">
+                  <th className="px-4 py-2.5 text-center font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[0.625rem]">
                     Actions
                   </th>
                 </tr>
@@ -474,7 +475,7 @@ export default function PageDefinitionsAdmin() {
                       key={row.id}
                       className={`border-b border-border/40 hover:bg-muted/20 transition-colors ${!row.isActive ? "opacity-50" : ""}`}
                     >
-                      <td className="px-4 py-2.5 font-mono text-[11px] text-primary font-semibold">
+                      <td className="px-4 py-2.5 font-mono text-[0.6875rem] text-primary font-semibold">
                         {row.key}
                       </td>
                       <td className="px-4 py-2.5 text-sm font-body text-foreground">
@@ -482,11 +483,11 @@ export default function PageDefinitionsAdmin() {
                       </td>
                       <td className="px-4 py-2.5">
                         <span
-                          className={`inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full border ${colorClass}`}
+                          className={`inline-flex text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border ${colorClass}`}
                         >
                           {row.module}
                         </span>
-                        <span className="ml-1.5 text-[10px] text-muted-foreground">
+                        <span className="ml-1.5 text-[0.625rem] text-muted-foreground">
                           {row.group}
                         </span>
                       </td>
@@ -495,7 +496,7 @@ export default function PageDefinitionsAdmin() {
                           {row.actions.map((a) => (
                             <span
                               key={a}
-                              className="px-1.5 py-0.5 rounded text-[9px] bg-primary/10 text-primary font-medium capitalize"
+                              className="px-1.5 py-0.5 rounded text-[0.5625rem] bg-primary/10 text-primary font-medium capitalize"
                             >
                               {a}
                             </span>
@@ -513,7 +514,7 @@ export default function PageDefinitionsAdmin() {
                               newActive: !row.isActive,
                             })
                           }
-                          className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border transition ${
+                          className={`inline-flex px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border transition ${
                             row.isActive
                               ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20"
                               : "bg-muted text-muted-foreground border-border hover:bg-muted/70"
@@ -549,14 +550,14 @@ export default function PageDefinitionsAdmin() {
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       </AdminShell>
 
       {/* ── Add / Edit Drawer ── */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={closeDrawer}
@@ -587,7 +588,7 @@ export default function PageDefinitionsAdmin() {
             >
               {/* Page Key */}
               <div>
-                <label className="block text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                <label className="block text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
                   Page Key <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -599,7 +600,7 @@ export default function PageDefinitionsAdmin() {
                   disabled={editingId !== null} // key is immutable after create
                   className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary/30 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                 />
-                <p className="text-[10px] text-muted-foreground mt-1">
+                <p className="text-[0.625rem] text-muted-foreground mt-1">
                   Must match the route key used in permission checks. Cannot be
                   changed after creation.
                 </p>
@@ -607,7 +608,7 @@ export default function PageDefinitionsAdmin() {
 
               {/* Label */}
               <div>
-                <label className="block text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                <label className="block text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
                   Display Label <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -622,7 +623,7 @@ export default function PageDefinitionsAdmin() {
 
               {/* Module */}
               <div>
-                <label className="block text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                <label className="block text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
                   Module <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
@@ -659,7 +660,7 @@ export default function PageDefinitionsAdmin() {
 
               {/* Group */}
               <div>
-                <label className="block text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                <label className="block text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
                   Group Name <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -670,7 +671,7 @@ export default function PageDefinitionsAdmin() {
                   placeholder="e.g. Finance & Accounts"
                   className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary/30"
                 />
-                <p className="text-[10px] text-muted-foreground mt-1">
+                <p className="text-[0.625rem] text-muted-foreground mt-1">
                   Pages with the same group name are shown under the same
                   heading in Menu Rights.
                 </p>
@@ -678,7 +679,7 @@ export default function PageDefinitionsAdmin() {
 
               {/* Actions */}
               <div>
-                <label className="block text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                <label className="block text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
                   Allowed Actions <span className="text-red-500">*</span>
                 </label>
                 <div className="flex flex-wrap gap-1.5">
@@ -689,9 +690,9 @@ export default function PageDefinitionsAdmin() {
                         key={a.key}
                         type="button"
                         onClick={() => toggleAction(a.key)}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border transition ${
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.625rem] font-semibold border transition ${
                           checked
-                            ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent shadow-sm"
+                            ? "btn-module text-white border-transparent shadow-sm"
                             : "bg-muted text-muted-foreground border-border hover:bg-muted/70"
                         }`}
                       >
@@ -704,7 +705,7 @@ export default function PageDefinitionsAdmin() {
 
               {/* Sort Order */}
               <div>
-                <label className="block text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                <label className="block text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
                   Sort Order
                 </label>
                 <input
@@ -716,7 +717,7 @@ export default function PageDefinitionsAdmin() {
                   className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary/30"
                   min={1}
                 />
-                <p className="text-[10px] text-muted-foreground mt-1">
+                <p className="text-[0.625rem] text-muted-foreground mt-1">
                   Lower numbers appear first within their group.
                 </p>
               </div>
@@ -733,7 +734,7 @@ export default function PageDefinitionsAdmin() {
                 <button
                   type="submit"
                   disabled={saveMut.isPending}
-                  className="flex-1 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white py-2.5 rounded-lg text-sm font-heading disabled:opacity-60 flex items-center justify-center gap-2 transition-all"
+                  className="flex-1 btn-module shadow-sm text-white py-2.5 rounded-lg text-sm font-heading disabled:opacity-60 flex items-center justify-center gap-2 transition-all"
                 >
                   {saveMut.isPending ? (
                     <Loader2 size={14} className="animate-spin" />
@@ -749,19 +750,19 @@ export default function PageDefinitionsAdmin() {
               </div>
             </form>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* ── Delete Confirm ── */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setDeleteTarget(null)}
           />
           <div className="relative bg-card border border-border rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
             <div className="flex items-start gap-3">
-              <div className="p-2 rounded-lg bg-amber-500/10 shrink-0">
+              <div className="p-2 rounded-lg bg-[#ffe2021a] shrink-0">
                 <AlertTriangle size={16} className="text-amber-500" />
               </div>
               <div>
@@ -798,7 +799,7 @@ export default function PageDefinitionsAdmin() {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

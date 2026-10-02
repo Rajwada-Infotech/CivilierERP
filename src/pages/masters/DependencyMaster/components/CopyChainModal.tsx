@@ -120,9 +120,9 @@ export function CopyChainModal({ open, onClose, onCopy }: Props) {
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-foreground truncate">{c.alias}</p>
-                  <p className="text-[11px] text-muted-foreground truncate">{c.scopePath}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground truncate">{c.scopePath}</p>
                 </div>
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
+                <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground shrink-0">
                   {c.activityCount} step{c.activityCount === 1 ? "" : "s"}
                 </span>
               </button>

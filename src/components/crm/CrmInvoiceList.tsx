@@ -140,7 +140,7 @@ export function CrmInvoiceList({ invoices, emptyText = "No invoices generated ye
                   <td className="px-2.5 py-2 whitespace-nowrap text-xs">{inv.CreatedByName || "—"}</td>
                   <td className="px-2.5 py-2 whitespace-nowrap">
                     <button onClick={() => setPreview(inv)}
-                      className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:underline">
+                      className="flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400 hover:underline">
                       <Eye size={12} /> View
                     </button>
                   </td>

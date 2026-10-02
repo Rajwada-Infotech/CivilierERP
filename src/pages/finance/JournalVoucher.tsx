@@ -58,6 +58,7 @@ import {
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import { DateInput } from "@/components/ui/date-input";
 
 type JournalVoucherLineUI = JournalVoucherLine & { _id: string };
 const emptyLine = (): JournalVoucherLineUI => ({
@@ -70,7 +71,7 @@ const emptyLine = (): JournalVoucherLineUI => ({
 
 const STATUS_CFG: Record<string, { cls: string; dot: string; icon: React.ElementType }> = {
   Draft:    { cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",   dot: "bg-slate-400",   icon: FileText },
-  Pending:  { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",   dot: "bg-amber-400",   icon: Clock },
+  Pending:  { cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",   dot: "bg-amber-400",   icon: Clock },
   Approved: { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", dot: "bg-emerald-500", icon: CheckCircle2 },
   Rejected: { cls: "bg-rose-500/10 text-rose-600 border-rose-400/20",     dot: "bg-rose-500",    icon: AlertCircle },
 };
@@ -78,7 +79,7 @@ const STATUS_CFG: Record<string, { cls: string; dot: string; icon: React.Element
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CFG[status] ?? STATUS_CFG.Draft;
   return (
-    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border", cfg.cls)}>
+    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border", cfg.cls)}>
       <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
       {status}
     </span>
@@ -92,7 +93,7 @@ function GLBadge({ status, postedToGL }: { status: string; postedToGL?: boolean 
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border",
+        "inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border",
         postedToGL
           ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
           : "bg-rose-500/10 text-rose-600 border-rose-400/20",
@@ -480,7 +481,7 @@ export default function JournalVoucher() {
                 </div>
                 <div>
                   <p className="text-lg font-bold text-foreground leading-none">{value}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{label}</p>
                 </div>
               </div>
             ))}
@@ -542,7 +543,7 @@ export default function JournalVoucher() {
                       <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
                         {v.JVNo || `JV-${v.JVID}`}
                       </span>
-                      <span className="text-[11px] text-muted-foreground tabular-nums">{fmtDate(v.JVDate)}</span>
+                      <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtDate(v.JVDate)}</span>
                     </div>
                     <span className="font-mono text-sm font-semibold text-foreground tabular-nums shrink-0">
                       {formatINR(v.TotalAmount || 0)}
@@ -552,12 +553,12 @@ export default function JournalVoucher() {
                   {v.CompanyName && (
                     <div className="mb-1.5">
                       <p className="text-xs font-medium text-foreground">{v.CompanyName}</p>
-                      {v.ProjectName && <p className="text-[11px] text-muted-foreground">{v.ProjectName}</p>}
+                      {v.ProjectName && <p className="text-[0.6875rem] text-muted-foreground">{v.ProjectName}</p>}
                     </div>
                   )}
                   {/* Row 3: narration */}
                   {v.Narration && (
-                    <p className="text-[11px] text-muted-foreground mb-2 line-clamp-2">{v.Narration}</p>
+                    <p className="text-[0.6875rem] text-muted-foreground mb-2 line-clamp-2">{v.Narration}</p>
                   )}
                   {/* Row 4: badges + actions */}
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -656,7 +657,7 @@ export default function JournalVoucher() {
                         <>
                           <p className="text-foreground truncate max-w-[160px]">{v.CompanyName}</p>
                           {v.ProjectName && (
-                            <p className="text-[11px] text-muted-foreground truncate max-w-[160px]">{v.ProjectName}</p>
+                            <p className="text-[0.6875rem] text-muted-foreground truncate max-w-[160px]">{v.ProjectName}</p>
                           )}
                         </>
                       ) : (
@@ -726,7 +727,7 @@ export default function JournalVoucher() {
                 <DialogTitle className="text-sm font-semibold">
                   {editingId ? "Edit Journal Voucher" : "New Journal Voucher"}
                 </DialogTitle>
-                <DialogDescription className="text-[11px] mt-0.5">
+                <DialogDescription className="text-[0.6875rem] mt-0.5">
                   {editingId
                     ? "Editing an already-approved voucher reverses its GL posting and sends it back for approval."
                     : "Debit total must equal credit total before saving."}
@@ -739,7 +740,7 @@ export default function JournalVoucher() {
             {/* Header fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Company *</label>
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Company *</label>
                 <Select
                   value={companyId}
                   onValueChange={(v) => { setCompanyId(v); setProjectId(""); }}
@@ -755,7 +756,7 @@ export default function JournalVoucher() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Project</label>
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Project</label>
                 <Select
                   value={projectId}
                   onValueChange={setProjectId}
@@ -772,11 +773,11 @@ export default function JournalVoucher() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Date</label>
-                <Input type="date" value={jvDate} onChange={(e) => setJvDate(e.target.value)} />
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Date</label>
+                <DateInput value={jvDate} onChange={(e) => setJvDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Narration</label>
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Narration</label>
                 <Input value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this Journal Voucher" />
               </div>
             </div>
@@ -788,9 +789,9 @@ export default function JournalVoucher() {
                 <table className="w-full text-sm min-w-[480px]">
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
-                      <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Account Head</th>
-                      <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Debit</th>
-                      <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Credit</th>
+                      <th className="px-3 py-2 text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Account Head</th>
+                      <th className="px-3 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Debit</th>
+                      <th className="px-3 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Credit</th>
                       <th className="w-10" />
                     </tr>
                   </thead>
@@ -922,7 +923,7 @@ export default function JournalVoucher() {
                   <StatusBadge status={viewingJV.Status} />
                 </div>
                 <DialogTitle className="text-sm font-semibold mt-1.5">Journal Voucher</DialogTitle>
-                <DialogDescription className="text-[11px] mt-0.5">
+                <DialogDescription className="text-[0.6875rem] mt-0.5">
                   {fmtDate(viewingJV.JVDate)}
                   {viewingJV.CompanyName ? ` · ${viewingJV.CompanyName}` : ""}
                   {viewingJV.ProjectName ? ` · ${viewingJV.ProjectName}` : ""}
@@ -936,7 +937,7 @@ export default function JournalVoucher() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <BookOpen size={14} className="text-primary" />
-                    <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                    <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
                       Journal Entry — JV Posting
                     </span>
                   </div>
@@ -949,7 +950,7 @@ export default function JournalVoucher() {
 
                 {viewingJV.Mode && (
                   <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs space-y-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Payment Mode</p>
+                    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Payment Mode</p>
                     <p className="text-sm font-medium text-foreground">{viewingJV.Mode}</p>
                     {viewingJV.BankName && <p className="text-muted-foreground">Bank: {viewingJV.BankName}</p>}
                     {viewingJV.ChequeNo && (
@@ -965,7 +966,7 @@ export default function JournalVoucher() {
                 )}
 
                 <div className="rounded-xl border border-border overflow-hidden">
-                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[0.5625rem] sm:text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
                     <span>Ledger</span>
                     <span className="text-right">Debit (₹)</span>
                     <span className="text-right">Credit (₹)</span>
@@ -981,20 +982,20 @@ export default function JournalVoucher() {
                         <div className="flex items-center gap-2 min-w-0 pl-1">
                           <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDebit ? "bg-emerald-500" : "bg-rose-500"}`} />
                           <div className="min-w-0">
-                            <p className="text-[11px] sm:text-xs text-foreground truncate flex items-center gap-1.5">
+                            <p className="text-[0.6875rem] sm:text-xs text-foreground truncate flex items-center gap-1.5">
                               <span className="truncate">{l.LHeadName || "—"}</span>
                               {kind && (
-                                <span className={`shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
                                   kind === "Investment"
                                     ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                                 }`}>
                                   {kind}
                                 </span>
                               )}
                             </p>
                             {l.Narration && (
-                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{l.Narration}</p>
+                              <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{l.Narration}</p>
                             )}
                           </div>
                         </div>
@@ -1008,7 +1009,7 @@ export default function JournalVoucher() {
                     );
                   })}
                   <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
-                    <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                    <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
                     <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
                       {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0))}
                     </span>

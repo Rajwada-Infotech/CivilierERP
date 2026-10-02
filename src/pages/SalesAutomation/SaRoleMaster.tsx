@@ -247,8 +247,8 @@ function Toggle({
       >
         {on ? <Check size={11} strokeWidth={2.5} /> : <X size={10} strokeWidth={2} />}
       </button>
-      {isCustomGrant  && <span className="text-[8px] text-primary/70 leading-none">+grant</span>}
-      {isCustomRevoke && <span className="text-[8px] text-red-400/70 leading-none">revoked</span>}
+      {isCustomGrant  && <span className="text-[0.5rem] text-primary/70 leading-none">+grant</span>}
+      {isCustomRevoke && <span className="text-[0.5rem] text-red-400/70 leading-none">revoked</span>}
     </div>
   );
 }
@@ -451,8 +451,8 @@ function UserPermissionsTab({ users }: { users: any[] }) {
                   : "border-l-2 border-transparent"}`}
             >
               <p className="text-sm font-medium text-foreground truncate">{u.name}</p>
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">{u.email}</p>
-              <span className={`mt-1.5 inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full border
+              <p className="text-[0.625rem] text-muted-foreground truncate mt-0.5">{u.email}</p>
+              <span className={`mt-1.5 inline-block text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border
                 ${ROLE_COLORS[u.RoleName] ?? ROLE_COLORS[u.role] ?? "text-muted-foreground bg-muted/20 border-border"}`}>
                 {ROLE_LABELS[u.RoleName] ?? ROLE_LABELS[u.role] ?? u.RoleName ?? u.role}
               </span>
@@ -505,7 +505,7 @@ function UserPermissionsTab({ users }: { users: any[] }) {
                   <button
                     onClick={() => savePerms.mutate()}
                     disabled={!dirty || savePerms.isPending}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold btn-module text-white disabled:opacity-40 transition-colors"
                   >
                     <Save size={11} /> {savePerms.isPending ? "Saving…" : "Save"}
                   </button>
@@ -514,7 +514,7 @@ function UserPermissionsTab({ users }: { users: any[] }) {
             </div>
 
             {/* Legend */}
-            <div className="flex flex-wrap items-center gap-4 px-4 py-2 bg-muted/5 border-b border-border/40 text-[10px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-4 px-4 py-2 bg-muted/5 border-b border-border/40 text-[0.625rem] text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <span className="w-4 h-4 rounded bg-emerald-500/20 flex items-center justify-center"><Check size={9} className="text-emerald-400" /></span>
                 Allowed (role default)

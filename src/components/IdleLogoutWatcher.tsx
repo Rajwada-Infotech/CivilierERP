@@ -115,7 +115,7 @@ export function IdleLogoutWatcher() {
 
           {/* Depleting bar — same countdown, restated as a full-width cue
               that's still visible even if the ring goes unnoticed. */}
-          <div className="h-1 w-full bg-amber-500/10">
+          <div className="h-1 w-full bg-[#ffe2021a]">
             <div
               className="h-full bg-amber-500 transition-[width] duration-1000 ease-linear"
               style={{ width: `${progress * 100}%` }}

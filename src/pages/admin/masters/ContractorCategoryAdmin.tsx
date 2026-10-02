@@ -196,7 +196,7 @@ export default function ContractorCategoryAdmin() {
         icon={Tag}
         action={
           rights.canCreate && (
-            <button onClick={openAdd} className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all">
+            <button onClick={openAdd} className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
               <Plus className="h-3.5 w-3.5" />
               Add Category
             </button>
@@ -204,7 +204,7 @@ export default function ContractorCategoryAdmin() {
         }
       >
       {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {[
           { label: "Total", value: categories.length },
           { label: "Active", value: activeCount },
@@ -392,7 +392,7 @@ export default function ContractorCategoryAdmin() {
             <Button variant="outline" onClick={closeDialog} disabled={isSaving}>
               Cancel
             </Button>
-            <Button onClick={handleSubmit} disabled={isSaving} className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto hover:opacity-90">
+            <Button onClick={handleSubmit} disabled={isSaving} className="btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto hover:opacity-90">
               {isSaving ? "Saving…" : editing ? "Update" : "Create"}
             </Button>
           </DialogFooter>

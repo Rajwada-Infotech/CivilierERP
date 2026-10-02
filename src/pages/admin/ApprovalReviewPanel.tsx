@@ -64,7 +64,11 @@ import {
   CalendarDays,
   UserRound,
   ListChecks,
+  Printer,
+  FileDown,
 } from "lucide-react";
+import { printMasterPreview, downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
+import { toast } from "sonner";
 
 // ─── Approval chain types — matches GET /api/approval-workflows/trail ────────
 
@@ -148,14 +152,14 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-xs font-semibold text-foreground">{step.label}</p>
           <span
-            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+            className={`text-[0.5625rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
               isRejected
                 ? "bg-red-500/10 text-red-600 dark:text-red-400"
                 : isApproved
                   ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                   : isSubmitted
                     ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
             }`}
           >
             {step.status}
@@ -165,7 +169,7 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
         {step.workflowType === "parallel" && step.approvers?.length ? (
           <div className="mt-1.5 space-y-1">
             {step.approvers.map((a, i) => (
-              <div key={i} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <div key={i} className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
                 <UserCheck size={10} className="shrink-0" />
                 <span className="text-foreground font-medium">{displayName(a.name, a.email)}</span>
                 {a.role && <span className="opacity-60">· {a.role}</span>}
@@ -175,17 +179,17 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
             ))}
           </div>
         ) : step.approverEmail || step.actionAt ? (
-          <p className="text-[11px] text-muted-foreground mt-0.5">
+          <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
             {displayName(step.approverName, step.approverEmail)}
             {step.role ? ` · ${step.role}` : ""}
             {step.actionAt ? ` · ${fmtWhen(step.actionAt)}` : ""}
           </p>
         ) : (
-          <p className="text-[11px] text-muted-foreground/60 mt-0.5 italic">Awaiting action</p>
+          <p className="text-[0.6875rem] text-muted-foreground/60 mt-0.5 italic">Awaiting action</p>
         )}
 
         {step.note && (
-          <blockquote className="mt-1.5 text-[11px] text-foreground/80 italic border-l-2 border-border pl-2.5 py-0.5">
+          <blockquote className="mt-1.5 text-[0.6875rem] text-foreground/80 italic border-l-2 border-border pl-2.5 py-0.5">
             "{step.note}"
           </blockquote>
         )}
@@ -196,8 +200,8 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
 
 const FormField: React.FC<{ label: string; value: React.ReactNode; accent?: boolean }> = ({ label, value, accent }) => (
   <div className="min-w-0">
-    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">{label}</p>
-    <div className={`text-[13px] font-medium text-foreground rounded-xl px-3 py-2.5 break-words min-h-[38px] flex items-center border ${
+    <p className="text-[0.5625rem] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">{label}</p>
+    <div className={`text-[0.8125rem] font-medium text-foreground rounded-xl px-3 py-2.5 break-words min-h-[38px] flex items-center border ${
       accent ? "bg-primary/5 border-primary/20 text-primary" : "bg-muted/30 border-border/50"
     }`}>
       {value ?? <span className="text-muted-foreground/40">—</span>}
@@ -372,7 +376,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
 
   const chainSection = (
     <>
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
         <UserCheck size={11} /> Approval Chain
       </p>
       {!approvalTable ? (
@@ -381,7 +385,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             <UserCheck size={16} className="text-muted-foreground/50" />
           </div>
           <p className="text-xs font-medium text-muted-foreground">No tracked workflow</p>
-          <p className="text-[11px] text-muted-foreground/60 mt-0.5">This module's approval chain is managed directly.</p>
+          <p className="text-[0.6875rem] text-muted-foreground/60 mt-0.5">This module's approval chain is managed directly.</p>
         </div>
       ) : loadingChain ? (
         <div className="space-y-3">
@@ -399,6 +403,124 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         </div>
       )}
     </>
+  );
+
+  // Print / Generate PDF both render this same shape — see
+  // masterPreviewPrint.ts's own comment on why that matters. Built from
+  // exactly what's already on screen (Overview, line items, Details,
+  // Approval Chain) so the exported doc can never show something the
+  // reviewer didn't actually see here.
+  const previewSections = (() => {
+    const sections: { title: string; fields: { label: string; value?: string | number | boolean | null }[] }[] = [];
+
+    const overviewFields: { label: string; value?: string | number | boolean | null }[] = [
+      { label: usesRungDetail ? "Start Date" : "Date", value: fmtDate(item.RecordDate) },
+      { label: "Party", value: party },
+      ...(item.ProjectName ? [{ label: "Project", value: item.ProjectName }] : []),
+      { label: "Created By", value: item.CreatedBy || "—" },
+      usesRungDetail
+        ? { label: "End Date", value: fmtDate(rungDetail?.assignment?.endDate ?? null) }
+        : { label: "Last Modified", value: fmtDate(item.LastModified) },
+    ];
+    if (item.Module === "goods-receipt" && item.SourceTransferDocNo) {
+      overviewFields.push({ label: "Transfer Ref", value: item.SourceTransferDocNo });
+    }
+    if (item.FromGodownName) overviewFields.push({ label: "From Godown", value: item.FromGodownName });
+    if (item.ToGodownName) overviewFields.push({ label: "To Godown", value: item.ToGodownName });
+    overviewFields.push({ label: usesRungDetail ? "Total Days" : "Total Amount", value: usesRungDetail ? (rungDetail?.assignment?.days != null ? `${rungDetail.assignment.days} day${rungDetail.assignment.days === 1 ? "" : "s"}` : "—") : fmtAmount(effectiveAmount) });
+    if (!usesRungDetail && rawTdsAmount > 0) {
+      overviewFields.push({ label: `TDS Deducted${tdsPercentage != null ? ` (${tdsPercentage}%)` : ""}`, value: `- ${fmtAmount(rawTdsAmount)}` });
+      overviewFields.push({ label: "Net Payable (After TDS)", value: fmtAmount(netPayableAfterTds) });
+    }
+    sections.push({ title: "Overview", fields: overviewFields });
+
+    if (lineItems.length > 0) {
+      const itemFields = isJournalVoucher
+        ? lineItems.map((li, i) => {
+            const debit = Number(li.DebitAmount) || 0;
+            const credit = Number(li.CreditAmount) || 0;
+            return {
+              label: `${i + 1}. ${(li.LHeadName as string) || "—"}`,
+              value: debit > 0 ? `Dr ${fmtAmount(debit)}` : `Cr ${fmtAmount(credit)}`,
+            };
+          })
+        : isMaterialRequest
+          ? lineItems.map((li, i) => {
+              const name = (li.ItemName ?? li.itemName ?? "—") as string;
+              const qty = Number(li.Quantity ?? li.quantity ?? 0);
+              const uom = (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
+              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""}` };
+            })
+          : lineItems.map((li, i) => {
+              const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
+              const qty = Number(li.Quantity ?? li.quantity ?? 0);
+              const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
+              const rate = Number(li.Rate ?? li.rate ?? 0);
+              const amount = Number(li.LineAmount ?? li.AmountInclGst ?? li.amount ?? qty * rate);
+              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""} × ${fmtAmount(rate)} = ${fmtAmount(amount)}` };
+            });
+      sections.push({ title: isJournalVoucher ? "Journal Entry" : `Items (${lineItems.length})`, fields: itemFields });
+    }
+
+    if (!usesRungDetail && extraFields.length > 0) {
+      sections.push({ title: "Details", fields: extraFields.map(([k, v]) => ({ label: labelFor(k), value: formatPreviewValue(v) })) });
+    }
+
+    if (item.RejectionNote) {
+      sections.push({ title: "Rejection Note", fields: [{ label: "Note", value: item.RejectionNote }] });
+    }
+
+    if (chain && chain.steps.length > 0) {
+      sections.push({
+        title: "Approval Chain",
+        fields: chain.steps.map((step) => ({
+          label: step.label,
+          value: `${step.status}${step.approverName || step.approverEmail ? ` — ${displayName(step.approverName, step.approverEmail)}` : ""}${step.actionAt ? ` (${fmtWhen(step.actionAt)})` : ""}`,
+        })),
+      });
+    }
+
+    return sections;
+  })();
+
+  const previewTitle = item.Reference || `#${item.RecordId}`;
+  const docActions = (
+    <div className="flex items-center gap-1.5 shrink-0">
+      <button
+        onClick={() =>
+          printMasterPreview({
+            title: previewTitle,
+            subtitle: item.ModuleLabel,
+            code: item.Reference,
+            status: item.Status,
+            sections: previewSections,
+          })
+        }
+        title="Print"
+        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+      >
+        <Printer size={16} />
+      </button>
+      <button
+        onClick={() => {
+          const toastId = toast.loading("Generating PDF...");
+          downloadMasterPreviewPdf({
+            title: previewTitle,
+            subtitle: item.ModuleLabel,
+            code: item.Reference,
+            status: item.Status,
+            sections: previewSections,
+            filename: `${(item.Reference || item.RecordId || "document").replace(/[^\w-]+/g, "_")}.pdf`,
+          })
+            .then(() => toast.success("PDF downloaded", { id: toastId }))
+            .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+        }}
+        title="Generate PDF"
+        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+      >
+        <FileDown size={16} />
+      </button>
+    </div>
   );
 
   return createPortal(
@@ -433,12 +555,13 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             <Icon size={20} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-bold text-foreground truncate leading-tight">{item.ModuleLabel}</p>
-            <p className="text-[12px] text-muted-foreground font-mono truncate mt-0.5">
+            <p className="text-[0.9375rem] font-bold text-foreground truncate leading-tight">{item.ModuleLabel}</p>
+            <p className="text-[0.75rem] text-muted-foreground font-mono truncate mt-0.5">
               {item.Reference || `#${item.RecordId}`}
             </p>
           </div>
           <StatusBadge status={item.Status} />
+          {docActions}
           <button
             onClick={onClose}
             className="ml-2 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors shrink-0"
@@ -470,7 +593,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               })() }}
             >
               <div className="px-5 py-4">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                   {usesRungDetail ? "Total Days" : rawTdsAmount > 0 ? "Total Amount (Before TDS)" : "Total Amount"}
                 </p>
                 <p className="text-3xl font-bold font-heading text-foreground tabular-nums tracking-tight">
@@ -481,7 +604,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                     : fmtAmount(effectiveAmount)}
                 </p>
                 {item.Status === "Pending" && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1 font-medium">
+                  <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1 font-medium">
                     <Clock size={10} /> Awaiting your approval
                   </p>
                 )}
@@ -489,18 +612,18 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               {!usesRungDetail && rawTdsAmount > 0 && (
                 <div className="grid grid-cols-2 divide-x divide-border border-t border-border/60 bg-background/40">
                   <div className="px-5 py-3">
-                    <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                    <p className="text-[0.5625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                       TDS Deducted{tdsPercentage != null ? ` (${tdsPercentage}%)` : ""}
                     </p>
                     <p className="text-lg font-bold font-heading text-amber-600 dark:text-amber-400 tabular-nums">
                       − {fmtAmount(rawTdsAmount)}
                     </p>
                     {(tdsName || tdsNature) && (
-                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{tdsName || tdsNature}</p>
+                      <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{tdsName || tdsNature}</p>
                     )}
                   </div>
                   <div className="px-5 py-3">
-                    <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                    <p className="text-[0.5625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                       Net Payable (After TDS)
                     </p>
                     <p className="text-lg font-bold font-heading text-emerald-600 dark:text-emerald-400 tabular-nums">
@@ -513,10 +636,11 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
 
             {/* Overview — form-style fields */}
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Overview</p>
+              <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Overview</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                 <FormField label={usesRungDetail ? "Start Date" : "Date"} value={fmtDate(item.RecordDate)} />
                 <FormField label="Party" value={party} />
+                {item.ProjectName && <FormField label="Project" value={item.ProjectName} />}
                 <FormField label="Created By" value={item.CreatedBy || "—"} />
                 {usesRungDetail ? (
                   <FormField label="End Date" value={fmtDate(rungDetail?.assignment?.endDate ?? null)} />
@@ -544,7 +668,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               ) : rungDetail?.assignment ? (
                 <>
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
                       <UserRound size={10} className="text-cyan-500" /> Engineers
                     </p>
                     <div className="flex flex-wrap gap-1.5">
@@ -563,13 +687,13 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {rungDetail.assignment.labourSource && (
                       <FormField
                         label="Labour Given By"
                         value={
                           <span
-                            className={`text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.labourSource].className}`}
+                            className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.labourSource].className}`}
                           >
                             {SOURCE_META[rungDetail.assignment.labourSource].label}
                           </span>
@@ -581,7 +705,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                         label="Material Given By"
                         value={
                           <span
-                            className={`text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.materialSource].className}`}
+                            className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.materialSource].className}`}
                           >
                             {SOURCE_META[rungDetail.assignment.materialSource].label}
                           </span>
@@ -592,7 +716,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
 
                   {rungDetail.assignment.description && (
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Description</p>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Description</p>
                       <p className="text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
                         {rungDetail.assignment.description}
                       </p>
@@ -601,7 +725,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
 
                   {rungDetail.assignment.materials.length > 0 && (
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
                         <Package size={10} className="text-emerald-500" /> Materials ({rungDetail.assignment.materials.length})
                       </p>
                       <div className="rounded-xl border border-border divide-y divide-border/50">
@@ -622,7 +746,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
 
                   {rungDetail.assignment.checkpoints.length > 0 && (
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
                         <ListChecks size={10} className="text-cyan-500" /> Checkpoints ({rungDetail.assignment.checkpoints.length})
                       </p>
                       <div className="rounded-xl border border-border divide-y divide-border/50">
@@ -635,7 +759,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                             )}
                             <span className={cp.isChecked ? "text-foreground" : "text-muted-foreground"}>{cp.fieldName}</span>
                             {cp.isDaily && (
-                              <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70 flex items-center gap-1">
+                              <span className="ml-auto text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground/70 flex items-center gap-1">
                                 <CalendarDays size={10} /> Daily{cp.updateCount ? ` · ${cp.updateCount}` : ""}
                               </span>
                             )}
@@ -652,7 +776,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
 
             {item.RejectionNote && (
               <div className="rounded-lg border border-red-400/20 bg-red-500/5 px-3 py-2">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-red-500/80 mb-0.5">
+                <p className="text-[0.5625rem] font-semibold uppercase tracking-widest text-red-500/80 mb-0.5">
                   Rejection Note
                 </p>
                 <p className="text-xs text-foreground">{item.RejectionNote}</p>
@@ -662,7 +786,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             {/* Line items */}
             {lineItems.length > 0 && (
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
                   <Package size={10} className="text-emerald-500" />
                   {isJournalVoucher ? "Journal Entry" : `Items (${lineItems.length})`}
                 </p>
@@ -671,9 +795,9 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                     <table className="w-full text-xs">
                       <thead className="bg-muted/40 border-b border-border">
                         <tr>
-                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Ledger</th>
-                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Debit (₹)</th>
-                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Credit (₹)</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">Ledger</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Debit (₹)</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Credit (₹)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/50">
@@ -691,10 +815,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${debit > 0 ? "bg-emerald-500" : "bg-red-500"}`} />
                                   {(li.LHeadName as string) || "—"}
                                   {kind && (
-                                    <span className={`shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                    <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
                                       kind === "Investment"
                                         ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                        : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                        : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                                     }`}>
                                       {kind}
                                     </span>
@@ -713,7 +837,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                       </tbody>
                       <tfoot className="bg-muted/20 border-t border-border font-semibold">
                         <tr>
-                          <td className="px-3 py-2 text-[10px] uppercase tracking-widest text-muted-foreground">Total</td>
+                          <td className="px-3 py-2 text-[0.625rem] uppercase tracking-widest text-muted-foreground">Total</td>
                           <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">
                             {formatINR(lineItems.reduce((s, li) => s + (Number(li.DebitAmount) || 0), 0))}
                           </td>
@@ -746,11 +870,11 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                 <table className="w-full text-xs">
                       <thead className="bg-muted/40 border-b border-border">
                         <tr>
-                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
-                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
-                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">UOM</th>
-                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Rate</th>
-                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">UOM</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Rate</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">
                             {isInterCompanyTransfer ? "Amount (Incl. GST)" : "Amount"}
                           </th>
                         </tr>
@@ -786,7 +910,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                       {isInterCompanyTransfer && lineItems.length > 0 && (
                         <tfoot className="bg-muted/20 border-t border-border font-semibold">
                           <tr>
-                            <td colSpan={4} className="px-3 py-2 text-[10px] uppercase tracking-widest text-muted-foreground text-right">Total (Incl. GST)</td>
+                            <td colSpan={4} className="px-3 py-2 text-[0.625rem] uppercase tracking-widest text-muted-foreground text-right">Total (Incl. GST)</td>
                             <td className="px-3 py-2 text-right">{formatINR(effectiveAmount ?? 0)}</td>
                           </tr>
                         </tfoot>
@@ -801,7 +925,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                 work-allocation-engineer — its own Engineers/Materials/
                 Checkpoints sections above already cover its full record. */}
             {!usesRungDetail && <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Details</p>
+              <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Details</p>
               {loadingDetail ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {Array.from({ length: 6 }).map((_, i) => (
@@ -839,14 +963,14 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
           </div>
 
           {/* Right: approval chain, pinned — desktop only */}
-          <div className="hidden lg:block w-[340px] shrink-0 border-l border-border bg-muted/5 overflow-y-auto px-5 py-5">
+          <div className="hidden lg:block w-full sm:w-[340px] shrink-0 border-l border-border bg-muted/5 overflow-y-auto px-5 py-5">
             {chainSection}
           </div>
         </div>
 
         {/* Footer — the action bar, spanning full width */}
         <div className="shrink-0 border-t border-border px-5 sm:px-6 py-4 bg-muted/10 flex items-center justify-between gap-3">
-          <p className="text-[11px] text-muted-foreground hidden sm:block">
+          <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
             {item.Status === "Pending" ? "Review the details above before taking action." : `This record is ${item.Status.toLowerCase()}.`}
           </p>
           <ApprovalActions

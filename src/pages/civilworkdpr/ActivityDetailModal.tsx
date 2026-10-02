@@ -33,6 +33,7 @@ import {
   History,
   ShieldQuestion,
   Lock,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -48,6 +49,7 @@ import {
   getAssignmentAttempts,
   restoreCancelledActivity,
   getProgressLog,
+  getDailyLog,
   startDelayInfo,
   ASSIGNMENT_STATUS_META,
   type PhotoPhase,
@@ -55,6 +57,7 @@ import {
   type ReportedAssignment,
   type AssignmentCheckpoint,
   type AssignmentStatus,
+  type DailyLogEntry,
 } from "@/api/dependencyActivityAssignmentApi";
 import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 import {
@@ -70,8 +73,9 @@ import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
 import { useAuth } from "@/contexts/AuthContext";
+import { DateInput } from "@/components/ui/date-input";
 
-type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "history";
+type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "daily-log" | "history";
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00`);
@@ -291,6 +295,10 @@ function PhotosTab({ rungId }: { rungId: number }) {
       const note = await getGeoTag();
       const file = new File([blob], `${activeTag}-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" });
       await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
+      // Upload had no success feedback at all before this — only a failure
+      // toast existed, so a working upload and a silently-swallowed one
+      // looked identical to the user (nothing visibly happens either way).
+      toast.success(`${TAG_META[activeTag].label} photo saved.`);
       refresh();
     } catch (err: any) {
       toast.error(err.message || "Upload failed");
@@ -307,16 +315,27 @@ function PhotosTab({ rungId }: { rungId: number }) {
   const handleFilePicked = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     await carryForwardBeforeIfNeeded();
+    let succeeded = 0;
     for (const file of Array.from(files)) {
       setUploading(true);
       try {
         const note = await getGeoTag();
         await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
+        succeeded++;
       } catch (err: any) {
         toast.error(err.message || "Upload failed");
       } finally {
         setUploading(false);
       }
+    }
+    // Same missing-feedback gap as addPhoto — one summary toast for however
+    // many of the picked files actually made it, not one per file.
+    if (succeeded > 0) {
+      toast.success(
+        succeeded === 1
+          ? `${TAG_META[activeTag].label} photo saved.`
+          : `${succeeded} ${TAG_META[activeTag].label} photos saved.`,
+      );
     }
     refresh();
   };
@@ -324,12 +343,16 @@ function PhotosTab({ rungId }: { rungId: number }) {
   const openCamera = async () => {
     const ok = await camera.start();
     if (!ok) {
-      // Used to fall straight to the file picker with zero explanation —
-      // looked exactly like "the camera doesn't work" with no way to tell
-      // permission-denied from no-device from a plain HTTP (non-secure)
-      // deployment, which getUserMedia refuses outright.
+      // This used to also fire fileInputRef.current?.click() right here as
+      // a fallback — but by the time an awaited getUserMedia() call settles,
+      // the click that triggered this handler is no longer "fresh" user
+      // activation. Safari in particular silently refuses to open the file
+      // picker from a .click() that happens after an await, so the fallback
+      // looked exactly like "neither button does anything": the toast below
+      // fired, but no picker ever appeared. "Upload instead" sits right next
+      // to this button for the user to tap themselves instead of an
+      // automatic hand-off that can silently fail.
       toast.error(CAMERA_ERROR_TEXT[camera.error ?? "other"]);
-      fileInputRef.current?.click();
     }
   };
 
@@ -346,7 +369,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
               key={tag}
               type="button"
               onClick={() => setActiveTag(tag)}
-              className="flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded-full text-[0.6875rem] font-medium border transition-colors"
               style={
                 active
                   ? { background: `${meta.color}1A`, borderColor: `${meta.color}60`, color: meta.color }
@@ -392,17 +415,22 @@ function PhotosTab({ rungId }: { rungId: number }) {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground bg-background hover:bg-muted transition-colors"
             >
-              <Upload size={11} /> Upload instead
+              <Upload size={13} /> Upload instead
             </button>
           </div>
         )}
+        {/* No `capture` attribute here — on mobile browsers that forces the
+            OS straight into the camera app, skipping the gallery/file
+            picker entirely, which is exactly backwards for a button whose
+            whole point is "let me pick an existing photo instead." Desktop
+            ignores `capture` either way, which is why this only ever broke
+            on phones. */}
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           multiple
           className="hidden"
           onChange={(e) => {
@@ -426,7 +454,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
             const carriedCount = photos.filter((p) => p.note === CARRIED_FORWARD_NOTE).length;
             return (
               <div key={tag} className="pl-3 border-l-2" style={{ borderColor: `${meta.color}45` }}>
-                <p className="flex items-center gap-1 text-[10px] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
+                <p className="flex items-center gap-1 text-[0.625rem] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
                   <Icon size={10} /> {meta.label} · {photos.length}
                   {carriedCount > 0 && (
                     <span className="normal-case font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
@@ -435,7 +463,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
                   )}
                 </p>
                 {photos.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground/70 flex items-center gap-1">
+                  <p className="text-[0.6875rem] text-muted-foreground/70 flex items-center gap-1">
                     <ImageOff size={11} /> None yet
                   </p>
                 ) : (
@@ -548,7 +576,7 @@ function BlueprintTab({ rungId, roomId }: { rungId: number; roomId: number }) {
         )}
       </div>
 
-      <p className="text-[11px] text-muted-foreground text-center">
+      <p className="text-[0.6875rem] text-muted-foreground text-center">
         {rev.updatedBy ? `${rev.updatedBy} · ` : ""}
         {fmtDateTime(rev.updatedAt)}
       </p>
@@ -620,7 +648,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
         <label className="flex items-center gap-1.5 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground">
           <CalendarDays size={12} /> Date
         </label>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} w-auto`} />
+        <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} w-auto`} />
       </div>
 
       {isFetching ? (
@@ -640,7 +668,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
               <div key={row.workerId} className="flex items-center justify-between gap-3 px-3 py-2.5">
                 <div className="min-w-0">
                   <p className="text-sm text-foreground truncate">{row.workerName}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
+                  <p className="text-[0.625rem] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <select
@@ -819,12 +847,12 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
               <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
                 {cp.fieldName}
                 {cp.isDaily && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
                     <CalendarDays size={9} /> Daily
                   </span>
                 )}
                 {gate.locked && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full">
                     <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
                   </span>
                 )}
@@ -843,7 +871,7 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-0.5">{label}</p>
+      <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-0.5">{label}</p>
       <div className="text-sm text-foreground">{children}</div>
     </div>
   );
@@ -879,10 +907,10 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
             if (!delay) return null;
             return (
               <span
-                className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                   delay.tone === "on-time"
                     ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                 }`}
               >
                 {delay.label}
@@ -918,7 +946,7 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
       </Field>
 
       <div>
-        <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">Remarks</p>
+        <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">Remarks</p>
         <textarea
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
@@ -930,7 +958,7 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
         />
         {remarksMutation.isPending && (
-          <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+          <p className="text-[0.625rem] text-muted-foreground mt-1 flex items-center gap-1">
             <Loader2 size={9} className="animate-spin" /> Saving…
           </p>
         )}
@@ -1030,7 +1058,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
   return (
     <div className="px-4 py-3 border-t border-border shrink-0 bg-muted/10">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+        <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
           <TrendingUp size={11} /> Work Done
           {locked && <Lock size={10} className="text-muted-foreground/70" />}
         </span>
@@ -1061,7 +1089,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
         <button
           type="button"
           onClick={() => setShowLog((v) => !v)}
-          className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1 text-[0.625rem] font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           <History size={10} /> {showLog ? "Hide" : "Show"} update log
         </button>
@@ -1070,7 +1098,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
             type="button"
             onClick={() => commit(percent)}
             disabled={mutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[11px] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-60 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[0.6875rem] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-60 transition-colors"
           >
             {mutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
             Save
@@ -1081,13 +1109,13 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
       {showLog && (
         <div className="mt-2 rounded-lg border border-border bg-background/60 max-h-40 overflow-y-auto">
           {logLoading ? (
-            <p className="text-[11px] text-muted-foreground text-center py-3">Loading…</p>
+            <p className="text-[0.6875rem] text-muted-foreground text-center py-3">Loading…</p>
           ) : log.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground text-center py-3">No updates logged yet.</p>
+            <p className="text-[0.6875rem] text-muted-foreground text-center py-3">No updates logged yet.</p>
           ) : (
             <div className="divide-y divide-border/60">
               {log.map((entry) => (
-                <div key={entry.id} className="px-3 py-1.5 text-[11px]">
+                <div key={entry.id} className="px-3 py-1.5 text-[0.6875rem]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-foreground">
                       {entry.fromProgressPercent != null && entry.toProgressPercent != null
@@ -1150,7 +1178,7 @@ function HistoryTab({ rungId }: { rungId: number }) {
             <span className="text-sm flex items-center gap-1.5 flex-wrap text-foreground font-medium">
               Attempt {a.attemptNo}
               {a.isCurrent && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
                   Current
                 </span>
               )}
@@ -1173,6 +1201,118 @@ function HistoryTab({ rungId }: { rungId: number }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Daily Log tab ────────────────────────────────────────────────────────
+// One permanent snapshot per day this activity was reported on (see the
+// PATCH /:rungId/status route's MERGE) — newest first. Photos for a day are
+// fetched lazily on expand since most days won't be opened.
+function DailyLogDayPhotos({ rungId, logDate }: { rungId: number; logDate: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["activity-photos", rungId, logDate],
+    queryFn: () => getActivityPhotos(rungId, logDate),
+  });
+  const [lightboxPhoto, setLightboxPhoto] = useState<ActivityPhotoMeta | null>(null);
+  const all = [...(data?.before ?? []), ...(data?.after ?? [])];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-4">
+        <Loader2 size={14} className="animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (all.length === 0) {
+    return <p className="text-[0.6875rem] text-muted-foreground/70 flex items-center gap-1 py-1"><ImageOff size={11} /> No photos logged this day</p>;
+  }
+  return (
+    <>
+      <div className="flex flex-wrap gap-2 pt-1">
+        {all.map((p) => (
+          <PhotoThumb key={p.id} rungId={rungId} photo={p} onOpen={() => setLightboxPhoto(p)} onDeleted={() => {}} />
+        ))}
+      </div>
+      {lightboxPhoto && <PhotoLightbox rungId={rungId} photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />}
+    </>
+  );
+}
+
+function DailyLogTab({ rungId }: { rungId: number }) {
+  const { data: entries = [], isLoading } = useQuery({
+    queryKey: ["activity-daily-log", rungId],
+    queryFn: () => getDailyLog(rungId),
+  });
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading daily log…
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+        <CalendarClock size={22} className="text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">No daily entries logged yet — saving progress or remarks today creates one.</p>
+      </div>
+    );
+  }
+
+  const todayStr = todayIso();
+
+  return (
+    <div className="flex flex-col gap-2">
+      {entries.map((entry) => {
+        const isToday = entry.logDate === todayStr;
+        const isOpen = expanded === entry.logDate;
+        return (
+          <div key={entry.id} className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setExpanded(isOpen ? null : entry.logDate)}
+              className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-muted/30 transition-colors"
+            >
+              <div className="flex flex-col items-start shrink-0 w-24">
+                <span className="text-sm font-heading font-semibold text-foreground">
+                  {new Date(entry.logDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                </span>
+                {isToday && (
+                  <span className="text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                    Today
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-foreground truncate">{entry.remarks || <span className="text-muted-foreground italic">No remarks</span>}</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5 flex items-center gap-2">
+                  {entry.progressPercent != null && (
+                    <span className="flex items-center gap-1">
+                      <TrendingUp size={10} /> {entry.progressPercent}%
+                    </span>
+                  )}
+                  {entry.photoCount > 0 && (
+                    <span className="flex items-center gap-1">
+                      <CameraIcon size={10} /> {entry.photoCount}
+                    </span>
+                  )}
+                  {entry.updatedBy && <span>· {entry.updatedBy}</span>}
+                </p>
+              </div>
+              {isOpen ? <ChevronLeft size={14} className="rotate-90 text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+            </button>
+            {isOpen && (
+              <div className="px-3.5 pb-3 border-t border-border">
+                <DailyLogDayPhotos rungId={rungId} logDate={entry.logDate} />
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1207,7 +1347,7 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
       <button
         type="button"
         onClick={() => setConfirmOpen(true)}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-heading font-bold uppercase tracking-wide border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-heading font-bold uppercase tracking-wide border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-[#ffe2021a] transition-colors"
         title="Restore this Cancelled activity"
       >
         <ShieldQuestion size={12} /> Restore
@@ -1221,7 +1361,7 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+                <div className="w-9 h-9 rounded-xl bg-[#ffe2021a] flex items-center justify-center shrink-0">
                   <ShieldQuestion size={16} className="text-amber-600 dark:text-amber-400" />
                 </div>
                 <div>
@@ -1268,6 +1408,7 @@ const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
   { id: "photos", label: "Photos", icon: CameraIcon },
   { id: "attendance", label: "Attendance", icon: Users2 },
   { id: "checkpoints", label: "Checkpoints", icon: ListChecks },
+  { id: "daily-log", label: "Daily Log", icon: CalendarClock },
   { id: "history", label: "History", icon: History },
 ];
 
@@ -1326,7 +1467,13 @@ export default function ActivityDetailModal({
           }
         >
           <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
-            <div className="flex items-center gap-1 px-4 pt-3 border-b border-border shrink-0">
+            {/* Six tabs' worth of icon+label never fit a phone's width — this
+                used to just overflow the flex row silently (no scrollbar, no
+                affordance), clipping "Daily Log"/"History" off-screen with
+                no way to reach them. overflow-x-auto + shrink-0 makes it a
+                swipeable strip instead; thin-scroll keeps the scrollbar from
+                looking like a stray horizontal rule when it does show. */}
+            <div className="flex items-center gap-1 px-4 pt-3 border-b border-border shrink-0 overflow-x-auto thin-scroll">
               {visibleTabs.map((t) => {
                 const Icon = t.icon;
                 const active = tab === t.id;
@@ -1335,14 +1482,14 @@ export default function ActivityDetailModal({
                     key={t.id}
                     type="button"
                     onClick={() => setTab(t.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors ${
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors shrink-0 whitespace-nowrap ${
                       active ? "border-cyan-500 text-cyan-600 dark:text-cyan-400" : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Icon size={13} />
                     {t.label}
                     {t.id === "photos" && photoCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400">
+                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[0.5625rem] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400">
                         {photoCount}
                       </span>
                     )}
@@ -1357,6 +1504,7 @@ export default function ActivityDetailModal({
               {tab === "photos" && <PhotosTab rungId={row.rungId} />}
               {tab === "attendance" && <AttendanceTab rungId={row.rungId} />}
               {tab === "checkpoints" && <CheckpointsTab rungId={row.rungId} />}
+              {tab === "daily-log" && <DailyLogTab rungId={row.rungId} />}
               {tab === "history" && <HistoryTab rungId={row.rungId} />}
             </div>
 

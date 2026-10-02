@@ -196,6 +196,7 @@ router.get("/transactions", async (req, res) => {
         gle.Narration, gle.SourceType, gle.SourceId,
         ahm.LHeadId, ISNULL(ahm.DisplayName, ahm.LHeadName) AS LHeadName, ahm.LBelongsTo AS GroupId,
         ag.Name AS GroupName,
+        co.name AS CompanyName, pr.name AS ProjectName,
         np.DocNo        AS NewPaymentDocNo,
         rp.RPDocNo      AS ReceivedPaymentDocNo,
         jv.JVNo         AS JournalVoucherNo,
@@ -233,6 +234,8 @@ router.get("/transactions", async (req, res) => {
       LEFT JOIN dbo.GoodsReceiptNotes grn
         ON gle.SourceType IN ('GRN', 'GRNPosting') AND grn.GRNID = gle.SourceId
       LEFT JOIN dbo.AccountHeadMaster grnSupplier ON grnSupplier.LHeadId = grn.SupplierID
+      LEFT JOIN dbo.enterprise co ON co.id = gle.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = gle.ProjectId
       WHERE gle.IsReversed = 0
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)
@@ -276,9 +279,15 @@ router.get("/", cache("general-ledger", 300), async (req, res) => {
   try {
     const pool = getPool();
 
-    // Sanitized pagination params
+    // Sanitized pagination params — this is a bounded, human-curated chart
+    // of accounts (not an unbounded transactional log like GL entries
+    // themselves), so the cap just needs to comfortably cover "every GL
+    // head a real company has", not guard against production-scale growth.
+    // The old 100-row cap combined with the frontend's own default of 10
+    // meant the list silently stopped at whichever was smaller — see the
+    // frontend's own comment for the user-reported "caps at 10" bug.
     const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 2000);
     const offset = (page - 1) * limit;
 
     let whereClause = "WHERE lh.LHeadType = 'GL'";

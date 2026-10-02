@@ -225,7 +225,7 @@ export default function IntegrationChannelsAdmin() {
         icon={Plug}
         action={
           rights.canCreate && (
-            <Button onClick={openAdd} className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
+            <Button onClick={openAdd} className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
               <Plus className="h-4 w-4" />
               Add Channel
             </Button>
@@ -233,7 +233,7 @@ export default function IntegrationChannelsAdmin() {
         }
       >
       {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {[
           { label: "Total Channels", value: stats.total },
           { label: "Active",         value: stats.active,   className: "text-green-600" },
@@ -273,7 +273,7 @@ export default function IntegrationChannelsAdmin() {
               {search ? "No channels match your search." : "No channels found."}
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto thin-scroll"><table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/40">
                   <th className="text-left py-3 px-4 font-medium text-muted-foreground">Key</th>
@@ -325,7 +325,7 @@ export default function IntegrationChannelsAdmin() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </CardContent>
       </Card>
@@ -411,7 +411,7 @@ export default function IntegrationChannelsAdmin() {
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={saving} className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
+            <Button onClick={handleSave} disabled={saving} className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
               {saving ? "Saving…" : editing ? "Save Changes" : "Create Channel"}
             </Button>
           </DialogFooter>

@@ -38,6 +38,7 @@ import {
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Field ────────────────────────────────────────────────────────────────────
 function Field({
@@ -51,7 +52,7 @@ function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground block">
+      <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground block">
         {label}
         {required && <span className="text-red-500 ml-0.5">*</span>}
       </label>
@@ -178,7 +179,7 @@ function GodownDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex">
+    <BodyPortal><div className="fixed inset-0 z-[60] flex">
       {/* Backdrop */}
       <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
@@ -194,7 +195,7 @@ function GodownDrawer({
               <p className="text-sm font-heading font-bold text-foreground">
                 {editing ? "Edit Godown" : "New Godown"}
               </p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 {editing
                   ? `Editing ${editing.GodownName}`
                   : "Add a warehouse or storage location"}
@@ -355,7 +356,7 @@ function GodownDrawer({
           </div>
         </div>
       </div>
-    </div>
+    </div></BodyPortal>
   );
 }
 
@@ -385,7 +386,7 @@ function DeleteDialog({
   if (!godown) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4">
         <div className="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto">
           <Trash2 size={20} className="text-red-500" />
@@ -427,7 +428,7 @@ function DeleteDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div></BodyPortal>
   );
 }
 
@@ -465,11 +466,11 @@ function GodownStockPanel({
             {godown.GodownName}
           </span>
           {godown.GodownCode && (
-            <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            <span className="text-[0.625rem] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
               {godown.GodownCode}
             </span>
           )}
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-[0.6875rem] text-muted-foreground">
             — current stock
           </span>
         </div>
@@ -489,21 +490,21 @@ function GodownStockPanel({
             <span className="text-xs font-bold text-foreground">
               {items.length}
             </span>
-            <span className="text-[11px] text-muted-foreground">in stock</span>
+            <span className="text-[0.6875rem] text-muted-foreground">in stock</span>
           </div>
           <div className="flex items-center gap-1.5">
             <TrendingUp size={12} className="text-emerald-500" />
             <span className="text-xs font-bold text-foreground">
               {totalIn.toLocaleString()}
             </span>
-            <span className="text-[11px] text-muted-foreground">in</span>
+            <span className="text-[0.6875rem] text-muted-foreground">in</span>
           </div>
           <div className="flex items-center gap-1.5">
             <TrendingDown size={12} className="text-orange-500" />
             <span className="text-xs font-bold text-foreground">
               {totalOut.toLocaleString()}
             </span>
-            <span className="text-[11px] text-muted-foreground">out</span>
+            <span className="text-[0.6875rem] text-muted-foreground">out</span>
           </div>
         </div>
       )}
@@ -565,7 +566,7 @@ function GodownStockPanel({
                     {item.ItemName || item.ItemID}
                   </p>
                   {item.ItemGroupName && (
-                    <p className="text-[10px] text-muted-foreground truncate">
+                    <p className="text-[0.625rem] text-muted-foreground truncate">
                       {item.ItemGroupName}
                     </p>
                   )}
@@ -580,7 +581,7 @@ function GodownStockPanel({
                   <p className="text-xs font-bold font-mono text-emerald-600">
                     {item.ClosingStock.toLocaleString()}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[0.625rem] text-muted-foreground">
                     {item.UOMSymbol || item.UOMCode || ""}
                   </p>
                 </div>
@@ -591,7 +592,7 @@ function GodownStockPanel({
       )}
 
       {!isLoading && zeroItems.length > 0 && (
-        <p className="text-[10px] text-muted-foreground text-center pb-4">
+        <p className="text-[0.625rem] text-muted-foreground text-center pb-4">
           + {zeroItems.length} item{zeroItems.length > 1 ? "s" : ""} with zero
           stock not shown
         </p>
@@ -643,13 +644,13 @@ function GodownCard({
                   {godown.GodownName}
                 </p>
                 {!godown.IsActive && (
-                  <span className="text-[9px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium uppercase tracking-wide">
+                  <span className="text-[0.5625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium uppercase tracking-wide">
                     Inactive
                   </span>
                 )}
               </div>
               {godown.GodownCode && (
-                <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                <p className="text-[0.6875rem] font-mono text-muted-foreground mt-0.5">
                   {godown.GodownCode}
                 </p>
               )}
@@ -669,10 +670,10 @@ function GodownCard({
             </button>
             {menuOpen && (
               <>
-                <div
+                <BodyPortal><div
                   className="fixed inset-0 z-10"
                   onClick={() => setMenuOpen(false)}
-                />
+                /></BodyPortal>
                 <div className="absolute right-0 top-full mt-1 z-20 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[140px]">
                   {canEdit && (
                   <button
@@ -707,22 +708,22 @@ function GodownCard({
         {/* Meta pills */}
         <div className="flex flex-wrap gap-1.5">
           {godown.ShortDesc && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-muted text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-muted text-[0.6875rem] text-muted-foreground">
               <Tag size={9} /> {godown.ShortDesc}
             </span>
           )}
           {godown.EnterpriseName && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/10 text-[11px] text-emerald-600">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/10 text-[0.6875rem] text-emerald-600">
               <Building2 size={9} /> {godown.EnterpriseName}
             </span>
           )}
           {godown.ProjectName && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-500/10 text-[11px] text-violet-600">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-500/10 text-[0.6875rem] text-violet-600">
               <Archive size={9} /> {godown.ProjectName}
             </span>
           )}
           {godown.Location && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-500/10 text-[11px] text-orange-600">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-500/10 text-[0.6875rem] text-orange-600">
               <MapPin size={9} /> {godown.Location}
             </span>
           )}
@@ -730,7 +731,7 @@ function GodownCard({
 
         {/* Description */}
         {godown.Description && (
-          <p className="mt-3 text-[11px] text-muted-foreground leading-relaxed line-clamp-2 border-t border-border pt-3">
+          <p className="mt-3 text-[0.6875rem] text-muted-foreground leading-relaxed line-clamp-2 border-t border-border pt-3">
             {godown.Description}
           </p>
         )}

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useReminders, formatRelative, formatDate } from "@/hooks/useReminders";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 type ReminderMeta = { icon: React.ElementType; color: string };
 
@@ -65,24 +66,24 @@ export function LoginRemindersPopup() {
   if (reminders.length === 0) return null;
 
   return (
-    <div
+    <BodyPortal><div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) setDismissed(true);
       }}
     >
       <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        <div className="relative px-5 py-4 border-b border-border bg-gradient-to-br from-amber-500/10 via-card to-card">
+        <div className="relative px-5 py-4 border-b border-border bg-gradient-to-br from-[#ffe2021a] via-card to-card">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg border border-amber-500/30 bg-amber-500/10 flex items-center justify-center shrink-0">
+              <div className="w-8 h-8 rounded-lg border border-amber-500/30 bg-[#ffe2021a] flex items-center justify-center shrink-0">
                 <Notification size={15} variant="Bold" color="#f59e0b" />
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-bold text-foreground truncate">
                   Welcome back, {currentUser.name?.split(" ")[0]}
                 </p>
-                <p className="text-[11px] text-muted-foreground truncate">
+                <p className="text-[0.6875rem] text-muted-foreground truncate">
                   {reminders.length} pending alert{reminders.length === 1 ? "" : "s"} need your attention
                 </p>
               </div>
@@ -116,28 +117,28 @@ export function LoginRemindersPopup() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between gap-2 items-baseline">
-                    <span className="truncate font-bold text-[11px] text-foreground group-hover:text-primary transition-colors">
+                    <span className="truncate font-bold text-[0.6875rem] text-foreground group-hover:text-primary transition-colors">
                       {r.title}
                     </span>
                     {r.amount && (
-                      <span className="text-emerald-600 text-[11px] font-bold shrink-0">
+                      <span className="text-emerald-600 text-[0.6875rem] font-bold shrink-0">
                         ₹{r.amount.toLocaleString()}
                       </span>
                     )}
                   </div>
-                  <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                  <p className="text-[0.625rem] text-muted-foreground truncate mt-0.5">
                     {r.subtitle}
                   </p>
                   <div className="mt-1.5 flex gap-1.5 items-center flex-wrap">
                     <span
-                      className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                        overdue ? "bg-red-500/10 text-red-600" : "bg-amber-500/10 text-amber-600"
+                      className={`inline-flex items-center gap-1 text-[0.5625rem] font-bold px-1.5 py-0.5 rounded-full ${
+                        overdue ? "bg-red-500/10 text-red-600" : "bg-[#ffe2021a] text-amber-600"
                       }`}
                     >
                       <span className={`w-1 h-1 rounded-full ${overdue ? "bg-red-500" : "bg-amber-500"}`} />
                       {formatRelative(r.dueDate)}
                     </span>
-                    <span className="text-[9px] text-muted-foreground/60 font-medium">
+                    <span className="text-[0.5625rem] text-muted-foreground/60 font-medium">
                       {formatDate(r.dueDate)}
                     </span>
                   </div>
@@ -146,7 +147,7 @@ export function LoginRemindersPopup() {
             );
           })}
           {reminders.length > 8 && (
-            <p className="text-center text-[11px] text-muted-foreground py-2">
+            <p className="text-center text-[0.6875rem] text-muted-foreground py-2">
               +{reminders.length - 8} more — open the bell icon to see all
             </p>
           )}
@@ -161,7 +162,7 @@ export function LoginRemindersPopup() {
           </button>
         </div>
       </div>
-    </div>
+    </div></BodyPortal>
   );
 }
 

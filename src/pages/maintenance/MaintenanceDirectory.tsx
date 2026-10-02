@@ -91,9 +91,9 @@ export default function MaintenanceDirectory() {
               </div>
 
               <div className="text-right shrink-0 hidden sm:block">
-                <p className="text-[11px] font-mono text-muted-foreground">{c.BookingNo}</p>
+                <p className="text-[0.6875rem] font-mono text-muted-foreground">{c.BookingNo}</p>
                 {c.HandoverDate && (
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-[0.6875rem] text-muted-foreground">
                     Handed over {new Date(c.HandoverDate).toLocaleDateString("en-IN")}
                   </p>
                 )}

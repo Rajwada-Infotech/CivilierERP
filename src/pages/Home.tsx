@@ -207,11 +207,11 @@ function Bento({
             </span>
           )}
           <div className="min-w-0">
-            <span className="font-heading text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground block">
+            <span className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.16em] text-muted-foreground block">
               {title}
             </span>
             {subtitle && (
-              <span className="text-[10px] text-muted-foreground/45 block mt-0.5 normal-case tracking-normal font-normal">
+              <span className="text-[0.625rem] text-muted-foreground/45 block mt-0.5 normal-case tracking-normal font-normal">
                 {subtitle}
               </span>
             )}
@@ -261,8 +261,8 @@ function AttentionRow({ a, i, onGo }: { a: Attention; i: number; onGo: (h: strin
         <a.icon size={13} style={{ color: c }} />
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-semibold text-foreground leading-tight truncate">{a.label}</p>
-        <p className="text-[10px] text-muted-foreground/55 mt-0.5 truncate">{a.hint}</p>
+        <p className="text-[0.8125rem] font-semibold text-foreground leading-tight truncate">{a.label}</p>
+        <p className="text-[0.625rem] text-muted-foreground/55 mt-0.5 truncate">{a.hint}</p>
       </div>
       <span className="font-heading font-bold text-lg tabular-nums shrink-0" style={{ color: c }}>
         {a.count.toLocaleString("en-IN")}
@@ -292,7 +292,7 @@ function KpiPill({
     >
       <div className="flex items-center gap-1.5">
         <Icon size={11} style={{ color }} />
-        <span className="text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground/55 truncate">{label}</span>
+        <span className="text-[0.5938rem] font-medium uppercase tracking-wide text-muted-foreground/55 truncate">{label}</span>
       </div>
       <span className="font-heading font-bold text-[1.35rem] leading-none tabular-nums" style={{ color }}>
         {value == null ? (
@@ -319,8 +319,8 @@ function LiveRow({ item, onGo }: { item: LiveActivityItem; onGo: (h: string) => 
         <m.icon size={11} style={{ color: m.color }} />
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-[11.5px] font-semibold text-foreground leading-snug truncate">{item.Title}</p>
-        <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate">
+        <p className="text-[0.7188rem] font-semibold text-foreground leading-snug truncate">{item.Title}</p>
+        <p className="text-[0.625rem] text-muted-foreground/50 mt-0.5 truncate">
           <span style={{ color: m.color }}>{m.label}</span>
           {item.Subtitle ? ` · ${item.Subtitle}` : ""}
           {item.Actor ? ` · ${item.Actor}` : ""}
@@ -328,11 +328,11 @@ function LiveRow({ item, onGo }: { item: LiveActivityItem; onGo: (h: string) => 
       </div>
       <div className="flex flex-col items-end shrink-0 gap-0.5">
         {item.Amount != null && item.Amount > 0 && (
-          <span className="text-[10.5px] font-heading font-bold tabular-nums" style={{ color: m.color }}>
+          <span className="text-[0.6562rem] font-heading font-bold tabular-nums" style={{ color: m.color }}>
             {compactINR(item.Amount)}
           </span>
         )}
-        {t && <span className="text-[9.5px] text-muted-foreground/35 font-mono tabular-nums">{t}</span>}
+        {t && <span className="text-[0.5938rem] text-muted-foreground/35 font-mono tabular-nums">{t}</span>}
       </div>
     </button>
   );
@@ -385,7 +385,7 @@ function StatCard({
         </div>
       </div>
       <div>
-        <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground/55 mb-1 truncate">
+        <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground/55 mb-1 truncate">
           {label}
         </p>
         <p className="font-heading font-bold text-[1.65rem] leading-none tabular-nums" style={{ color }}>
@@ -856,7 +856,7 @@ function ProjectNetworkMap({
             <button
               key={k}
               onClick={() => setLens(k)}
-              className={`px-2.5 py-1 rounded-[7px] text-[10px] font-heading font-semibold uppercase tracking-wider transition-colors ${
+              className={`px-2.5 py-1 rounded-[7px] text-[0.625rem] font-heading font-semibold uppercase tracking-wider transition-colors ${
                 lens === k
                   ? "bg-card text-foreground shadow-sm"
                   : "text-muted-foreground/60 hover:text-muted-foreground"
@@ -885,7 +885,7 @@ function ProjectNetworkMap({
               setZoom(1);
               setSelected(null);
             }}
-            className="px-2 h-6 rounded-full border border-border/60 bg-muted/30 text-[9px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors"
+            className="px-2 h-6 rounded-full border border-border/60 bg-muted/30 text-[0.5625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors"
           >
             Reset
           </button>
@@ -1085,7 +1085,7 @@ function ProjectNetworkMap({
                   className="h-1.5 w-1.5 rounded-full"
                   style={{ background: l.c }}
                 />
-                <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50">
                   {l.t}
                 </span>
               </span>
@@ -1095,10 +1095,10 @@ function ProjectNetworkMap({
           {/* Mobile context chip — the rail is desktop-only */}
           {sel && (
             <div className="md:hidden absolute right-2 bottom-2 max-w-[62%] rounded-lg border border-border/60 bg-card/95 backdrop-blur px-2.5 py-1.5">
-              <p className="font-heading text-[11px] font-semibold text-foreground truncate">
+              <p className="font-heading text-[0.6875rem] font-semibold text-foreground truncate">
                 {sel.label}
               </p>
-              <p className="text-[9px] text-muted-foreground truncate">
+              <p className="text-[0.5625rem] text-muted-foreground truncate">
                 {sel.kind === "company"
                   ? `${sel.count} project${sel.count === 1 ? "" : "s"}`
                   : sel.project?.company || "Unassigned"}
@@ -1123,10 +1123,10 @@ function ProjectNetworkMap({
                   style={{ background: nodeFill(sel) }}
                 />
                 <div className="min-w-0">
-                  <p className="font-heading text-[11px] font-bold text-foreground leading-tight break-words">
+                  <p className="font-heading text-[0.6875rem] font-bold text-foreground leading-tight break-words">
                     {sel.label}
                   </p>
-                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground/50 mt-0.5">
+                  <p className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50 mt-0.5">
                     {sel.kind === "company" ? "Company" : sel.project?.type || "Project"}
                   </p>
                 </div>
@@ -1141,7 +1141,7 @@ function ProjectNetworkMap({
                     { l: "Active", v: String(sel.activeCount) },
                   ].map((row) => (
                     <div key={row.l} className="flex items-baseline justify-between">
-                      <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                      <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50">
                         {row.l}
                       </span>
                       <span className="font-heading text-sm font-bold text-foreground tabular-nums">
@@ -1153,15 +1153,15 @@ function ProjectNetworkMap({
               ) : (
                 <div className="flex flex-col gap-2">
                   <div>
-                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50 block">
+                    <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50 block">
                       Company
                     </span>
-                    <span className="text-[10px] text-foreground break-words">
+                    <span className="text-[0.625rem] text-foreground break-words">
                       {sel.project?.company || "Unassigned"}
                     </span>
                   </div>
                   <div className="flex items-baseline justify-between">
-                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                    <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50">
                       Team
                     </span>
                     <span className="font-heading text-sm font-bold text-foreground tabular-nums">
@@ -1169,11 +1169,11 @@ function ProjectNetworkMap({
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                    <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50">
                       Status
                     </span>
                     <span
-                      className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold"
+                      className="px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold"
                       style={{
                         background: `${sel.active ? NET.active : NET.idle}1f`,
                         color: sel.active ? NET.active : NET.idle,
@@ -1185,12 +1185,12 @@ function ProjectNetworkMap({
                   {sel.jv && (
                     <div className="rounded-md border border-border/60 px-2 py-1.5">
                       <span
-                        className="text-[9px] uppercase tracking-wider font-semibold"
+                        className="text-[0.5625rem] uppercase tracking-wider font-semibold"
                         style={{ color: NET.jv }}
                       >
                         Co-owned
                       </span>
-                      <p className="text-[9px] text-muted-foreground/70 leading-snug mt-0.5">
+                      <p className="text-[0.5625rem] text-muted-foreground/70 leading-snug mt-0.5">
                         Shared across {(sel.project?.coCompanyIds?.length ?? 0) + 1} companies
                       </p>
                     </div>
@@ -1202,7 +1202,7 @@ function ProjectNetworkMap({
             // Idle state doubles as a ranking — the reference's "influence
             // ranking", here the hubs carrying the most projects.
             <div className="p-3 flex flex-col gap-2.5">
-              <p className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground/50 font-heading font-bold">
+              <p className="text-[0.5625rem] uppercase tracking-[0.14em] text-muted-foreground/50 font-heading font-bold">
                 Busiest hubs
               </p>
               <div className="flex flex-col gap-2">
@@ -1215,10 +1215,10 @@ function ProjectNetworkMap({
                     className="text-left group"
                   >
                     <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground transition-colors truncate">
+                      <span className="text-[0.625rem] text-muted-foreground group-hover:text-foreground transition-colors truncate">
                         {netShort(h.label, 14)}
                       </span>
-                      <span className="font-heading text-[11px] font-bold text-foreground tabular-nums shrink-0">
+                      <span className="font-heading text-[0.6875rem] font-bold text-foreground tabular-nums shrink-0">
                         {h.count}
                       </span>
                     </div>
@@ -1234,7 +1234,7 @@ function ProjectNetworkMap({
                   </button>
                 ))}
               </div>
-              <p className="text-[9px] text-muted-foreground/40 leading-snug mt-auto">
+              <p className="text-[0.5625rem] text-muted-foreground/40 leading-snug mt-auto">
                 Select a node to inspect it.
               </p>
             </div>
@@ -1258,7 +1258,7 @@ function ProjectNetworkMap({
           <p className="font-heading font-bold text-lg text-foreground leading-none tabular-nums">
             <AnimatedCounter target={activeCount} />
           </p>
-          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+          <p className="text-[0.625rem] text-muted-foreground/60 uppercase tracking-widest">
             Active
           </p>
         </div>
@@ -1270,7 +1270,7 @@ function ProjectNetworkMap({
           <p className="font-heading font-bold text-lg text-muted-foreground/80 leading-none tabular-nums">
             <AnimatedCounter target={companyCount} />
           </p>
-          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+          <p className="text-[0.625rem] text-muted-foreground/60 uppercase tracking-widest">
             Companies
           </p>
         </div>
@@ -1279,7 +1279,7 @@ function ProjectNetworkMap({
           <p className="font-heading font-bold text-lg text-muted-foreground/70 leading-none tabular-nums">
             <AnimatedCounter target={total} />
           </p>
-          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+          <p className="text-[0.625rem] text-muted-foreground/60 uppercase tracking-widest">
             Total
           </p>
         </div>
@@ -1810,7 +1810,7 @@ export default function HomePage() {
           className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-2"
         >
           <HardHat size={14} className="text-primary/70 shrink-0" />
-          <span className="font-heading text-[10px] font-bold uppercase tracking-[0.24em] text-primary/55 shrink-0">
+          <span className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.24em] text-primary/55 shrink-0">
             CivilierERP
           </span>
           <span className="relative flex h-1.5 w-1.5 shrink-0">
@@ -1820,7 +1820,7 @@ export default function HomePage() {
 
           <div className="ml-auto flex items-center gap-2 shrink-0">
             {lastUpdated && (
-              <span className="text-[10px] text-muted-foreground/35 font-mono tabular-nums hidden sm:inline">
+              <span className="text-[0.625rem] text-muted-foreground/35 font-mono tabular-nums hidden sm:inline">
                 Updated {lastUpdated}
               </span>
             )}
@@ -1848,7 +1848,7 @@ export default function HomePage() {
             {greeting}, <span className="bg-gradient-to-r from-primary via-violet-400 to-cyan-400 bg-clip-text text-transparent">{firstName}.</span>
           </h1>
           <span
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-heading font-semibold uppercase tracking-wider border shrink-0"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.625rem] font-heading font-semibold uppercase tracking-wider border shrink-0"
             style={{
               background: privileged ? "hsl(var(--primary)/0.08)" : "hsl(var(--muted)/0.5)",
               borderColor: privileged ? "hsl(var(--primary)/0.25)" : "hsl(var(--border))",
@@ -1999,14 +1999,14 @@ export default function HomePage() {
                 <div className="flex flex-col items-center justify-center gap-4 p-4 h-[210px]">
                   <CircularGauge pct={woCompletionPct} />
                   <div className="w-full space-y-2">
-                    <div className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center justify-between text-[0.6875rem]">
                       <span className="text-muted-foreground">Completed</span>
                       <span className="font-heading font-semibold tabular-nums text-foreground">{(woTotal - woOpen).toLocaleString("en-IN")}</span>
                     </div>
                     <div className="h-1 rounded-full bg-muted overflow-hidden">
                       <div className="h-full rounded-full bg-primary" style={{ width: `${woCompletionPct}%` }} />
                     </div>
-                    <div className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center justify-between text-[0.6875rem]">
                       <span className="text-muted-foreground">Open</span>
                       <span className="font-heading font-semibold tabular-nums text-foreground">{woOpen.toLocaleString("en-IN")}</span>
                     </div>
@@ -2057,7 +2057,7 @@ export default function HomePage() {
                       <CheckCircle2 size={18} className="text-emerald-500" />
                     </div>
                     <p className="text-sm font-semibold text-foreground">All clear</p>
-                    <p className="text-[11px] text-muted-foreground/50">Nothing needs your action right now.</p>
+                    <p className="text-[0.6875rem] text-muted-foreground/50">Nothing needs your action right now.</p>
                   </div>
                 ) : (
                   <div className="max-h-[280px] overflow-y-auto">
@@ -2095,7 +2095,7 @@ export default function HomePage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs min-w-[640px]">
                     <thead>
-                      <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[10px] font-heading">
+                      <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[0.625rem] font-heading">
                         <th className="text-left px-4 py-2.5 font-semibold">Module</th>
                         <th className="text-left px-3 py-2.5 font-semibold">Item</th>
                         <th className="text-left px-3 py-2.5 font-semibold">By</th>
@@ -2113,13 +2113,13 @@ export default function HomePage() {
                             className="cursor-pointer hover:bg-muted/25 transition-colors"
                           >
                             <td className="px-4 py-2.5 whitespace-nowrap">
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: `${m.color}16`, color: m.color }}>
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-medium" style={{ background: `${m.color}16`, color: m.color }}>
                                 <m.icon size={10} /> {m.label}
                               </span>
                             </td>
                             <td className="px-3 py-2.5 max-w-[280px]">
                               <p className="font-semibold text-foreground truncate">{it.Title}</p>
-                              {it.Subtitle && <p className="text-[10px] text-muted-foreground/50 truncate">{it.Subtitle}</p>}
+                              {it.Subtitle && <p className="text-[0.625rem] text-muted-foreground/50 truncate">{it.Subtitle}</p>}
                             </td>
                             <td className="px-3 py-2.5 text-muted-foreground truncate max-w-[140px]">{it.Actor ?? "—"}</td>
                             <td className="px-3 py-2.5 text-right tabular-nums font-heading font-semibold" style={{ color: it.Amount ? m.color : undefined }}>
@@ -2146,7 +2146,7 @@ export default function HomePage() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs min-w-[640px]">
                       <thead>
-                        <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[10px] font-heading">
+                        <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[0.625rem] font-heading">
                           <th className="text-left px-4 py-2.5 font-semibold">Module</th>
                           <th className="text-left px-3 py-2.5 font-semibold">Reference</th>
                           <th className="text-left px-3 py-2.5 font-semibold">Date</th>
@@ -2161,7 +2161,7 @@ export default function HomePage() {
                             <td className="px-3 py-2.5 font-mono text-muted-foreground">{a.Reference}</td>
                             <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">{a.RecordDate ? new Date(a.RecordDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
                             <td className="px-3 py-2.5">
-                              <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/12 text-amber-600">{a.Status}</span>
+                              <span className="inline-flex px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-amber-500/12 text-amber-600">{a.Status}</span>
                             </td>
                             <td className="px-4 py-2.5 text-right tabular-nums font-heading font-semibold text-foreground">
                               {a.Amount != null ? compactINR(a.Amount) : "—"}
@@ -2178,7 +2178,7 @@ export default function HomePage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs min-w-[560px]">
                     <thead>
-                      <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[10px] font-heading">
+                      <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[0.625rem] font-heading">
                         <th className="text-left px-4 py-2.5 font-semibold">Task</th>
                         <th className="text-left px-3 py-2.5 font-semibold">Priority</th>
                         <th className="text-left px-3 py-2.5 font-semibold">Status</th>
@@ -2209,12 +2209,12 @@ export default function HomePage() {
           transition={{ delay: 1.2 }}
           className="mt-8 flex flex-col items-center gap-1.5"
         >
-          <div className="flex items-center gap-3 text-muted-foreground/25 text-[10px] font-heading tracking-widest uppercase">
+          <div className="flex items-center gap-3 text-muted-foreground/25 text-[0.625rem] font-heading tracking-widest uppercase">
             <div className="w-10 h-px bg-border/40" />
             <span>Civilier ERP · {new Date().getFullYear()}</span>
             <div className="w-10 h-px bg-border/40" />
           </div>
-          <span className="text-[9px] font-heading tracking-[0.2em] uppercase text-muted-foreground/20">
+          <span className="text-[0.5625rem] font-heading tracking-[0.2em] uppercase text-muted-foreground/20">
             crafted by Rajwada Infotech
           </span>
         </motion.div>

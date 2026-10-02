@@ -59,6 +59,7 @@ const ISSUES_EXPORT_COLUMNS: ExportColumn[] = [
 
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import {
   fetchNextDocNumber,
   fetchDocTypes,
@@ -67,7 +68,9 @@ import {
 import { useFinYear } from "@/contexts/FinYearContext";
 
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
 const ISSUES_TEMPLATE_COLUMNS = [
@@ -184,10 +187,10 @@ function GodownBadge({
       <Warehouse size={11} />
       {name}
       {code && (
-        <span className="font-mono text-[10px] text-emerald-600/70 dark:text-emerald-400/70">({code})</span>
+        <span className="font-mono text-[0.625rem] text-emerald-600/70 dark:text-emerald-400/70">({code})</span>
       )}
       {isMain && (
-        <span className="px-1 py-0 rounded bg-emerald-500/20 text-[9px] font-bold uppercase tracking-wider">
+        <span className="px-1 py-0 rounded bg-emerald-500/20 text-[0.5625rem] font-bold uppercase tracking-wider">
           Main
         </span>
       )}
@@ -327,6 +330,13 @@ export default function Issues() {
         status: issueStatusFilter || undefined,
       }),
   });
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: issueApprovalTrails, isLoading: issueApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "MaterialIssues",
+    (issuesData?.data || []).map((r: any) => r.IssueId),
+  );
 
   // ── Auto-select active fin year ──────────────────────────────────────────
 
@@ -612,7 +622,20 @@ export default function Issues() {
     setSaved(false);
   };
 
+  // Mirrors the backend's own check (PUT /:id in materialIssues.js) —
+  // editing a Pending (or Approved) issue restarts its approval cycle
+  // rather than being blocked.
+  const EDITABLE_STATUSES = ["Draft", "Pending", "Rejected", "Approved"];
+  const isEditableStatus = (status?: string | null) =>
+    EDITABLE_STATUSES.includes(status || "Draft");
+
   const handleEdit = (record: any) => {
+    if (!isEditableStatus(record.Status)) {
+      toast.error(
+        `Cannot edit an issue with status "${record.Status}". Only Draft, Pending, Rejected, or Approved issues can be edited.`,
+      );
+      return;
+    }
     setHeader({
       companyId: String(record.CompanyId ?? ""),
       projectId: String(record.ProjectId ?? ""),
@@ -759,7 +782,7 @@ export default function Issues() {
             <div className="min-w-0 leading-tight">
               <p className="text-xs truncate" title={name}>{name}</p>
               {row.original.GodownCode && (
-                <p className="text-[10px] text-muted-foreground font-mono truncate">
+                <p className="text-[0.625rem] text-muted-foreground font-mono truncate">
                   {row.original.GodownCode}
                 </p>
               )}
@@ -779,7 +802,7 @@ export default function Issues() {
           <span className="font-semibold">
             {row.original.ItemCount || 0}
           </span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[0.625rem] text-muted-foreground">
             ({(row.original.TotalQty || 0).toFixed(2)} units)
           </span>
         </div>
@@ -815,6 +838,9 @@ export default function Issues() {
           <ApprovalStatusChain
             table="MaterialIssues"
             recordId={row.original.IssueId}
+            fallback={<StatusBadge status={row.original.Status} />}
+            preloaded={issueApprovalTrails.get(String(row.original.IssueId)) ?? null}
+            preloadedLoading={issueApprovalTrailsLoading}
           />
         </div>
       ),
@@ -826,7 +852,7 @@ export default function Issues() {
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-2">
-          <button
+          <button data-row-view
             type="button"
             onClick={() => handleView(row.original)}
             className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
@@ -903,7 +929,7 @@ export default function Issues() {
                     setIssueStatusFilter(s);
                     setPage(1);
                   }}
-                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${issueStatusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${issueStatusFilter === s ? "btn-module text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
                 >
                   {s || "All"}
                 </button>
@@ -924,6 +950,7 @@ export default function Issues() {
                 searchable={false}
                 paginated={false}
                 emptyMessage="No material issues found. Click 'New Issue' to create one."
+                getRowId={(r: any) => String(r.IssueId)}
               />
               {totalPages > 1 && (
                 <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
@@ -1142,8 +1169,7 @@ export default function Issues() {
                     size={13}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
-                  <input
-                    type="date"
+                  <DateInput
                     value={header.date}
                     onChange={(e) => setH("date", e.target.value)}
                     className={`${inputCls} pl-8`}
@@ -1229,7 +1255,7 @@ export default function Issues() {
 
               {/* Hint: changing godown resets cart */}
               {cart.some((ci) => ci.ItemId) && (
-                <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-1">
+                <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-1">
                   <AlertTriangle size={10} />
                   Changing the godown will reset all added items
                 </p>
@@ -1435,38 +1461,22 @@ export default function Issues() {
                   >
                     {/* Row top: index + item select + remove */}
                     <div className="flex items-center gap-3 px-3 pt-3 pb-2">
-                      <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
+                      <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[0.625rem] font-bold text-muted-foreground shrink-0">
                         {idx + 1}
                       </span>
 
                       <div className="flex-1 min-w-0">
-                        <div className="relative">
-                          <select
-                            value={ci.ItemId}
-                            onChange={(e) => pickItem(ci._key, e.target.value)}
-                            className={`${selectCls} ${isOver ? "border-destructive" : ""}`}
-                          >
-                            <option value="">
-                              {loadingItems ? "Loading…" : "Select item"}
-                            </option>
-                            {(itemOptions as any[]).length === 0 ? (
-                              <option disabled value="">
-                                No items found in {selectedGodown?.name ?? "this godown"}
-                              </option>
-                            ) : (
-                              (itemOptions as any[]).map((item) => (
-                                <option key={item.M_Id} value={String(item.M_Id)}>
-                                  {item.M_Name} — Stock: {Number(item.AvailableStock).toFixed(2)}
-                                  {item.M_Group ? ` · ${item.M_Group}` : ""}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                          <ChevronDown
-                            size={13}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                          />
-                        </div>
+                        <SearchableSelect
+                          value={ci.ItemId}
+                          onChange={(v) => pickItem(ci._key, v)}
+                          placeholder={loadingItems ? "Loading…" : "Select item"}
+                          searchPlaceholder="Search items…"
+                          className={isOver ? "border-destructive" : ""}
+                          options={(itemOptions as any[]).map((item) => ({
+                            value: String(item.M_Id),
+                            label: `${item.M_Name} — Stock: ${Number(item.AvailableStock).toFixed(2)}${item.M_Group ? ` · ${item.M_Group}` : ""}`,
+                          }))}
+                        />
                       </div>
 
                       <button
@@ -1483,7 +1493,7 @@ export default function Issues() {
                     {/* Row bottom: UOM + Qty */}
                     <div className="grid grid-cols-2 gap-3 px-3 pb-3">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        <label className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                           Unit (UOM) *
                         </label>
                         <div className="relative">
@@ -1512,7 +1522,7 @@ export default function Issues() {
                       </div>
 
                       <div className="space-y-1">
-                        <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        <label className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                           Quantity *
                         </label>
                         <div className="relative">
@@ -1640,7 +1650,7 @@ export default function Issues() {
 
         {/* ── Save bar ── */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-          <p className="text-[11px] text-muted-foreground hidden sm:block">
+          <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
             {canSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : !headerIsValid ? !header.godownId ? "Select a source godown" : "Fill in the required fields to save" : "Fix cart errors above"}
           </p>
           <div className="flex items-center gap-2 sm:ml-auto">
@@ -1654,7 +1664,7 @@ export default function Issues() {
             <button
               onClick={onSave}
               disabled={!canSave || isSaving || saved}
-              className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+              className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
             >
               {saved ? <Check size={14} /> : isSaving ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={14} />}
               {saved ? "Saved!" : isSaving ? "Saving…" : editingId ? "Update Issue" : "Save Issue"}
@@ -1707,7 +1717,7 @@ export default function Issues() {
                   </h2>
                   <StatusBadge status={viewingRecord.Status || "Draft"} />
                 </div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Material Issue</p>
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Material Issue</p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
@@ -1752,10 +1762,10 @@ export default function Issues() {
                 >
                   <Printer size={13} /><span className="hidden sm:inline">Print</span>
                 </button>
-                {rights.canEdit && (
+                {rights.canEdit && isEditableStatus(viewingRecord.Status) && (
                   <button
                     onClick={() => { close(); handleEdit(viewingRecord); }}
-                    className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+                    className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold btn-module shadow-sm transition"
                   >
                     <Edit3 size={13} /><span className="hidden sm:inline">Edit</span>
                   </button>
@@ -1771,13 +1781,13 @@ export default function Issues() {
 
             {/* Detail fields */}
             <div>
-              <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+              <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
                 <FileText size={10} className="text-emerald-500" /> Issue Details
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {fields.map(({ label, value, mono }: any) => (
                   <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                     <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{value || "—"}</p>
                   </div>
                 ))}
@@ -1789,13 +1799,13 @@ export default function Issues() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {viewingRecord.Reason && (
                   <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Reason for Issue</p>
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">Reason for Issue</p>
                     <p className="text-xs text-foreground leading-relaxed">{viewingRecord.Reason}</p>
                   </div>
                 )}
                 {viewingRecord.Remarks && (
                   <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Remarks</p>
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">Remarks</p>
                     <p className="text-xs text-foreground leading-relaxed">{viewingRecord.Remarks}</p>
                   </div>
                 )}
@@ -1804,19 +1814,19 @@ export default function Issues() {
 
             {/* Items */}
             <div>
-              <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+              <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
                 <ShoppingCart size={10} className="text-emerald-500" /> Issued Items
-                <span className="ml-1 font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">{items.length}</span>
+                <span className="ml-1 font-mono text-[0.625rem] bg-muted px-1.5 py-0.5 rounded-full border border-border">{items.length}</span>
               </p>
               <div className="rounded-xl border border-border overflow-x-auto">
                 <table className="w-full text-xs" style={{ tableLayout: "auto" }}>
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
-                      <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Item</th>
-                      <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">UOM</th>
-                      <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Qty</th>
-                      <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Balance After</th>
-                      <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Remarks</th>
+                      <th className="px-4 py-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Item</th>
+                      <th className="px-4 py-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">UOM</th>
+                      <th className="px-4 py-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Qty</th>
+                      <th className="px-4 py-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Balance After</th>
+                      <th className="px-4 py-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Remarks</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
@@ -1915,7 +1925,7 @@ export default function Issues() {
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -1928,7 +1938,7 @@ export default function Issues() {
                     setEditingId(null);
                     setViewMode("form");
                   }}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
                 >
                   <Plus size={15} /> New Issue
                 </Button>

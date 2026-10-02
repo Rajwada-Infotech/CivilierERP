@@ -24,6 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DateInput } from "@/components/ui/date-input";
 
 export interface FieldDef {
   name: string;
@@ -631,7 +632,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             <h2 className="font-heading font-semibold text-foreground text-sm">
               {editingId !== null ? `Edit ${title}` : `Add ${title}`}
             </h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
+            <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
               {editingId !== null
                 ? "Modify the details below and save."
                 : !formOpen
@@ -664,7 +665,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   className={isFullWidth ? (gridCols === 3 ? "md:col-span-3" : "md:col-span-2") : ""}
                 >
                   {field.type !== "toggle" && field.type !== "section" && field.label && (
-                    <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                       {field.label}
                       {field.required && (
                         <span className="text-destructive ml-0.5">*</span>
@@ -674,7 +675,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
                   {field.type === "section" ? (
                     <div className={fields[0] === field ? "" : "pt-1 -mb-1"}>
-                      <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-foreground/80 pb-1.5 border-b border-border/70">
+                      <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-foreground/80 pb-1.5 border-b border-border/70">
                         {field.label}
                       </p>
                     </div>
@@ -712,8 +713,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         size={14}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                       />
-                      <input
-                        type="date"
+                      <DateInput
                         value={(form[field.name] as string) || ""}
                         onChange={(e) =>
                           updateField(field.name, e.target.value, field)
@@ -817,7 +817,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 : [...current, o];
                               updateField(field.name, next, field);
                             }}
-                            className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${selected ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
+                            className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${selected ? "btn-module text-white border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
                           >
                             {o}
                           </button>
@@ -827,7 +827,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   ) : null}
 
                   {errors[field.name] && (
-                    <p className="text-[11px] text-destructive mt-1">
+                    <p className="text-[0.6875rem] text-destructive mt-1">
                       {field.label} is required
                     </p>
                   )}
@@ -840,7 +840,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
         {/* Footer — actions */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-          <p className="text-[11px] text-muted-foreground hidden sm:block">
+          <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
             {canSave
               ? <span className="text-emerald-500 font-medium">Ready to save</span>
               : fields.some((f) => f.required)
@@ -877,7 +877,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               <h3 className="font-heading font-semibold text-foreground text-sm">
                 {title} Records
               </h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 {filtered.length} record{filtered.length !== 1 ? "s" : ""}
               </p>
             </div>
@@ -919,7 +919,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       <th
                         key={col.key}
                         onClick={canSort ? () => toggleSort(col.key) : undefined}
-                        className={`px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none${col.hideOnMobile ? " hidden sm:table-cell" : ""}${canSort ? " cursor-pointer hover:text-foreground transition-colors" : ""}`}
+                        className={`px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none${col.hideOnMobile ? " hidden sm:table-cell" : ""}${canSort ? " cursor-pointer hover:text-foreground transition-colors" : ""}`}
                       >
                         <span className="inline-flex items-center gap-1">
                           {col.label}
@@ -938,7 +938,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       </th>
                     );
                   })}
-                  <th className="px-4 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                  <th className="px-4 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
                     Actions
                   </th>
                 </tr>
@@ -985,7 +985,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                             columnRenderers[col.key](row[col.key], row, data)
                           ) : col.key === "status" ? (
                             <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
                                 row[col.key]
                                   ? "bg-primary/10 text-primary border-primary/20"
                                   : "bg-destructive/10 text-destructive border-destructive/20"
@@ -1007,7 +1007,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         <div className="flex items-center justify-end gap-1">
                           {deleteConfirmId === row._id ? (
                             <>
-                              <span className="text-[11px] text-muted-foreground mr-1">
+                              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                                 Confirm?
                               </span>
                               <button
@@ -1028,7 +1028,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                           ) : (
                             <>
                               {viewConfig && (
-                                <button
+                                <button data-row-view
                                   onClick={() => setViewRow(row)}
                                   className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
                                   title="View details"
@@ -1039,7 +1039,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               {onPrint && (
                                 <button
                                   onClick={() => onPrint(row)}
-                                  className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                                  className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                                   title="Print"
                                 >
                                   <Printer size={13} />
@@ -1124,7 +1124,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         : "—";
                   return (
                     <div key={key}>
-                      <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                      <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
                         {label}
                       </p>
                       {render ? (
@@ -1155,7 +1155,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               )}
               <button
                 onClick={() => setViewRow(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
               >
                 Close
               </button>

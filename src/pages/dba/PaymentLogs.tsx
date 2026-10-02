@@ -281,7 +281,7 @@ export default function PaymentLogs() {
               </div>
               <div>
                 <div className="text-lg font-bold leading-none">{s.value}</div>
-                <div className="text-[10px] text-muted-foreground mt-0.5">
+                <div className="text-[0.625rem] text-muted-foreground mt-0.5">
                   {s.label}
                 </div>
               </div>
@@ -384,15 +384,15 @@ export default function PaymentLogs() {
                   return (
                     <TableRow key={log.id} className="text-xs">
                       <TableCell>
-                        <span className="font-mono text-[10px] text-primary bg-muted px-1.5 py-0.5 rounded">
+                        <span className="font-mono text-[0.625rem] text-primary bg-muted px-1.5 py-0.5 rounded">
                           {log.txnId.slice(0, 18)}…
                         </span>
                       </TableCell>
                       <TableCell>
-                        <div className="font-medium text-[11px]">
+                        <div className="font-medium text-[0.6875rem]">
                           {log.tenantName}
                         </div>
-                        <div className="text-muted-foreground text-[10px] font-mono">
+                        <div className="text-muted-foreground text-[0.625rem] font-mono">
                           {log.tenantId}
                         </div>
                       </TableCell>
@@ -404,44 +404,44 @@ export default function PaymentLogs() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <Badge className={`text-[10px] gap-1 ${MC.color}`}>
+                        <Badge className={`text-[0.625rem] gap-1 ${MC.color}`}>
                           <MC.icon size={9} /> {MC.label}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="text-[11px]">{log.paidBy}</div>
+                        <div className="text-[0.6875rem]">{log.paidBy}</div>
                         {log.upiId && (
-                          <div className="font-mono text-[10px] text-muted-foreground">
+                          <div className="font-mono text-[0.625rem] text-muted-foreground">
                             {log.upiId}
                           </div>
                         )}
                         {log.bankRef && (
-                          <div className="font-mono text-[10px] text-muted-foreground">
+                          <div className="font-mono text-[0.625rem] text-muted-foreground">
                             {log.bankRef}
                           </div>
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="font-mono text-[10px]">
+                        <div className="font-mono text-[0.625rem]">
                           {log.paidOn}
                         </div>
-                        <div className="text-muted-foreground text-[10px]">
+                        <div className="text-muted-foreground text-[0.625rem]">
                           {log.paidAt}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="text-[11px]">{log.purpose}</div>
-                        <div className="text-muted-foreground text-[10px]">
+                        <div className="text-[0.6875rem]">{log.purpose}</div>
+                        <div className="text-muted-foreground text-[0.625rem]">
                           {log.plan} · {log.renewalPeriod}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge className={`text-[10px] gap-1 ${SC.color}`}>
+                        <Badge className={`text-[0.625rem] gap-1 ${SC.color}`}>
                           <SC.icon size={9} /> {SC.label}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
+                        <Button data-row-view
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
@@ -520,7 +520,7 @@ export default function PaymentLogs() {
                         {row.label}
                       </span>
                       <span
-                        className={`text-right ${row.mono ? "font-mono text-[10px]" : ""}`}
+                        className={`text-right ${row.mono ? "font-mono text-[0.625rem]" : ""}`}
                       >
                         {row.value}
                       </span>
@@ -574,7 +574,7 @@ export default function PaymentLogs() {
               { key: "renewal_period", label: "Renewal Period", placeholder: "Annual" },
             ].map(({ key, label, placeholder, type }) => (
               <div key={key} className="space-y-1">
-                <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</label>
+                <label className="text-[0.625rem] font-medium text-muted-foreground uppercase tracking-wide">{label}</label>
                 <Input
                   className="h-7 text-xs"
                   type={type || "text"}
@@ -585,7 +585,7 @@ export default function PaymentLogs() {
               </div>
             ))}
             <div className="space-y-1">
-              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Method</label>
+              <label className="text-[0.625rem] font-medium text-muted-foreground uppercase tracking-wide">Method</label>
               <Select value={addForm.method} onValueChange={(v) => setAddForm((p) => ({ ...p, method: v }))}>
                 <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -596,7 +596,7 @@ export default function PaymentLogs() {
               </Select>
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Status</label>
+              <label className="text-[0.625rem] font-medium text-muted-foreground uppercase tracking-wide">Status</label>
               <Select value={addForm.status} onValueChange={(v) => setAddForm((p) => ({ ...p, status: v }))}>
                 <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -607,7 +607,7 @@ export default function PaymentLogs() {
               </Select>
             </div>
             <div className="col-span-2 space-y-1">
-              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Remarks</label>
+              <label className="text-[0.625rem] font-medium text-muted-foreground uppercase tracking-wide">Remarks</label>
               <Input
                 className="h-7 text-xs"
                 placeholder="Optional notes"

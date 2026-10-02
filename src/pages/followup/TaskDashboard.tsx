@@ -36,6 +36,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DateInput } from "@/components/ui/date-input";
 
 const REPORT_API = "/api/task-performance-report";
 const ACCENT = "#0d9488";
@@ -176,7 +177,7 @@ const DonutCard: React.FC<{
   const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={cardStyle}>
+    <div className="rounded-xl overflow-hidden" style={cardStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <Icon size={11} style={{ color: ACCENT }} />
@@ -251,7 +252,7 @@ const UserPerformanceChart: React.FC<{ data: UserPerf[]; isDark: boolean; cardSt
   const { theme } = useTheme();
   const chartData = [...data].sort((a, b) => b.assigned - a.assigned).slice(0, 10);
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={cardStyle}>
+    <div className="rounded-xl overflow-hidden" style={cardStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <TrendingUp size={11} style={{ color: ACCENT }} />
@@ -303,7 +304,7 @@ const inputCls =
 function FilterField({ icon: Icon, label, children }: { icon: React.ElementType; label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <label className="block text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
+      <label className="block text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
       <div className="relative">
         <Icon size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
         {children}
@@ -486,8 +487,8 @@ const TaskDashboard: React.FC = () => {
       {/* ── Filters ──────────────────────────────────────────────────────── */}
       <div className="rounded-xl p-4" style={cardStyle}>
         <div className="flex items-center justify-between mb-3">
-          <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT }}>Filters</p>
-          <button onClick={resetFilters} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+          <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT }}>Filters</p>
+          <button onClick={resetFilters} className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors">
             <RotateCcw size={11} /> Reset
           </button>
         </div>
@@ -524,8 +525,8 @@ const TaskDashboard: React.FC = () => {
           </FilterField>
           <FilterField icon={Clock} label="Date Range">
             <div className="flex gap-1">
-              <input type="date" className={`${inputCls} pl-2`} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} />
-              <input type="date" className={`${inputCls} pl-2`} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} />
+              <DateInput className={`${inputCls} pl-2`} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} />
+              <DateInput className={`${inputCls} pl-2`} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} />
             </div>
           </FilterField>
         </div>

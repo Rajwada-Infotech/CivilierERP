@@ -226,7 +226,7 @@ const MenuTypeMaster: React.FC = () => {
         icon={LayoutList}
         action={
           rights.canCreate && (
-            <Button onClick={openCreate} size="sm" className="gap-1.5 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90">
+            <Button onClick={openCreate} size="sm" className="gap-1.5 btn-module shadow-sm text-white hover:opacity-90">
               <Plus size={15} />
               New Menu Type
             </Button>
@@ -287,7 +287,7 @@ const MenuTypeMaster: React.FC = () => {
                       variant={
                         filledCount(row) === 5 ? "default" : "secondary"
                       }
-                      className="text-[10px]"
+                      className="text-[0.625rem]"
                     >
                       {filledCount(row)}/5
                     </Badge>
@@ -340,7 +340,7 @@ const MenuTypeMaster: React.FC = () => {
           <form className="space-y-5 py-1" onSubmit={handleSubmit(submitMenuType)}>
             {/* Menu labels */}
             <div className="space-y-1">
-              <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground mb-3">
+              <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground mb-3">
                 Menu Labels
               </p>
               <div className="space-y-3">
@@ -365,7 +365,7 @@ const MenuTypeMaster: React.FC = () => {
 
             {/* Audit fields */}
             <div className="border-t pt-4 space-y-1">
-              <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground mb-3">
+              <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground mb-3">
                 Audit
               </p>
               <div className="space-y-3">
@@ -398,7 +398,7 @@ const MenuTypeMaster: React.FC = () => {
                 <X size={13} className="mr-1" />
                 Cancel
               </Button>
-              <Button type="submit" disabled={isPending} size="sm" className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90">
+              <Button type="submit" disabled={isPending} size="sm" className="btn-module shadow-sm text-white hover:opacity-90">
                 <CheckCircle2 size={13} className="mr-1" />
                 {isPending ? "Saving..." : editingId !== null ? "Update" : "Create"}
               </Button>

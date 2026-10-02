@@ -29,7 +29,7 @@ export function ProxyActionDialog({
             <UserCircle2 size={16} className="text-primary" /> {title}
           </DialogTitle>
         </DialogHeader>
-        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+        <div className="rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950/40 px-3 py-2.5 text-xs text-sky-700 dark:text-sky-400">
           <strong>Proxy action</strong> — {description} Permanently stamped as a staff-proxy record in the audit trail.
         </div>
         <div className="space-y-3">
@@ -37,7 +37,7 @@ export function ProxyActionDialog({
             <label className="text-xs font-medium text-foreground block mb-1.5">
               How did the customer communicate? <span className="text-red-500">*</span>
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {PROXY_METHODS.map((m) => (
                 <button key={m} type="button" onClick={() => setMethod(m)}
                   className={`text-xs px-3 py-2 rounded-lg border font-medium transition-colors text-left ${
@@ -64,7 +64,7 @@ export function ProxyActionDialog({
               className="w-full text-sm border border-border rounded-lg px-2 py-1.5 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[0.6875rem] text-muted-foreground">
             The customer's portal access remains active. They can still log in and view the status.
           </p>
         </div>
@@ -73,7 +73,7 @@ export function ProxyActionDialog({
           <button
             onClick={() => remarks.trim() && onConfirm(method, remarks.trim())}
             disabled={saving || !remarks.trim()}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
+            className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-semibold disabled:opacity-40">
             {saving ? "Saving..." : confirmLabel}
           </button>
         </div>

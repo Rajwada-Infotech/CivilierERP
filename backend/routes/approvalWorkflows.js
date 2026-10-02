@@ -195,43 +195,38 @@ router.delete("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"),
 
 module.exports = router;
 
-// GET /api/approval-workflows/trail?module=GoodsReceiptNotes&id=123
-// Returns the active workflow levels + audit log for a specific record.
-// Only returns the LATEST entry per level (handles resubmissions).
-router.get("/trail", authMiddleware, async (req, res) => {
-  const { module, id } = req.query;
-  if (!module || !id) {
-    return res.status(400).json({ error: "module and id are required" });
-  }
+// Map frontend module slug → { tableName, workflowModuleId }
+// tableName matches what approvalService writes to ApprovalAuditLog
+// workflowModuleId matches what ApprovalWorkflows.modules JSON array contains
+const MODULE_TABLE_MAP = {
+  GoodsReceiptNotes: { workflowId: "GRN" },
+  PurchaseOrders: { workflowId: "PurchaseOrders" },
+  WorkOrderHeader: { workflowId: "WorkOrderHeader" },
+  ExpenseBooking: { workflowId: "Expenses" },
+  NewPayment: { workflowId: "NewPayment" },
+  MaterialIssues: { workflowId: "MaterialIssues" },
+  MaterialIssueReturn: { workflowId: "MaterialIssueReturn" },
+  MaterialRequests: { workflowId: "MaterialRequests" },
+  StockTransfers: { workflowId: "StockTransfer" },
+  BOQ: { workflowId: "BOQ" },
+  WorkDone: { workflowId: "WorkDone" },
+  SaleOrders: { workflowId: "SaleOrder" },
+  VehicleInOut: { workflowId: "VehicleInOut" },
+  Contract: { workflowId: "Contract" },
+};
 
-  // Map frontend module slug → { tableName, workflowModuleId }
-  // tableName matches what approvalService writes to ApprovalAuditLog
-  // workflowModuleId matches what ApprovalWorkflows.modules JSON array contains
-  const MODULE_TABLE_MAP = {
-    GoodsReceiptNotes: { workflowId: "GRN" },
-    PurchaseOrders: { workflowId: "PurchaseOrders" },
-    WorkOrderHeader: { workflowId: "WorkOrderHeader" },
-    ExpenseBooking: { workflowId: "Expenses" },
-    NewPayment: { workflowId: "NewPayment" },
-    MaterialIssues: { workflowId: "MaterialIssues" },
-    MaterialIssueReturn: { workflowId: "MaterialIssueReturn" },
-    MaterialRequests: { workflowId: "MaterialRequests" },
-    StockTransfers: { workflowId: "StockTransfer" },
-    BOQ: { workflowId: "BOQ" },
-    WorkDone: { workflowId: "WorkDone" },
-    SaleOrders: { workflowId: "SaleOrder" },
-    VehicleInOut: { workflowId: "VehicleInOut" },
-    Contract: { workflowId: "Contract" },
-  };
-
+// Builds one record's trail payload — shared by the single-record GET
+// /trail and the bulk GET /trail/bulk below, which a list page (dozens of
+// rows, each previously firing its own GET /trail on every render) uses to
+// fetch every visible row's trail in ONE request instead of one-per-row.
+// That N+1 pattern was tripping the per-user API rate limit outright on
+// pages like Material Request (~36 rows => 36 concurrent requests, replayed
+// on every refetch) — ApprovalStatusChain's fallback prop masked it as a
+// plain "Pending"/"Approved" badge instead of an error, which is why it
+// looked like the richer badge was silently "reverting" on its own.
+async function buildApprovalTrail(pool, module, recordId) {
   const entry = MODULE_TABLE_MAP[module];
-  if (!entry) {
-    return res.status(400).json({ error: `Unknown module table: ${module}` });
-  }
-
-  try {
-    const pool = getPool();
-    const recordId = parseInt(id, 10);
+  if (!entry) return { error: `Unknown module table: ${module}` };
 
     // A CRM Refund's payout voucher is a NewPayment row routed through its
     // own single-level "CrmRefundPayment" workflow (see approvalService.js),
@@ -466,7 +461,7 @@ router.get("/trail", authMiddleware, async (req, res) => {
       actualStatus !== "Approved" &&
       (actualStatus === "Rejected" || rejectedMarkers.length > 0 || steps.some((s) => s.status === "Rejected"));
 
-    res.json({
+    return {
       workflowName: wfRow?.Name || null,
       workflowType: wfRow?.type || "sequential",
       // Includes the Level 0 Submitted/Rejected markers alongside the
@@ -478,7 +473,60 @@ router.get("/trail", authMiddleware, async (req, res) => {
       fullyApproved,
       hasRejection,
       totalLevels: steps.length,
-    });
+    };
+}
+
+// GET /api/approval-workflows/trail?module=GoodsReceiptNotes&id=123
+// Returns the active workflow levels + audit log for a specific record.
+// Only returns the LATEST entry per level (handles resubmissions).
+router.get("/trail", authMiddleware, async (req, res) => {
+  const { module, id } = req.query;
+  if (!module || !id) {
+    return res.status(400).json({ error: "module and id are required" });
+  }
+  try {
+    const pool = getPool();
+    const recordId = parseInt(id, 10);
+    const result = await buildApprovalTrail(pool, module, recordId);
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/approval-workflows/trail/bulk?module=MaterialRequests&ids=1,2,3
+// Same payload as GET /trail, but for every id in one request — a list page
+// with N rows previously fired N concurrent GET /trail calls (one per
+// ApprovalStatusChain), which on a page like Material Request (~36 rows)
+// was enough on its own to trip the per-user API rate limit; see
+// buildApprovalTrail's comment above. Capped at 200 ids per call — well
+// above any real page size, just a sanity ceiling.
+router.get("/trail/bulk", authMiddleware, async (req, res) => {
+  const { module, ids } = req.query;
+  if (!module || !ids) {
+    return res.status(400).json({ error: "module and ids are required" });
+  }
+  const idList = String(ids)
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n))
+    .slice(0, 200);
+  if (!idList.length) {
+    return res.status(400).json({ error: "ids must contain at least one valid integer" });
+  }
+
+  try {
+    const pool = getPool();
+    const out = {};
+    // Sequential, not Promise.all — this already replaces N concurrent HTTP
+    // requests (the actual rate-limit cost) with 1, so there's no pressure
+    // to also parallelize the DB round-trips, and sequential keeps this from
+    // adding its own burst of concurrent queries against the pool.
+    for (const recordId of idList) {
+      out[recordId] = await buildApprovalTrail(pool, module, recordId);
+    }
+    res.json(out);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

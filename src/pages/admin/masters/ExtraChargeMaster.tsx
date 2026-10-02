@@ -156,12 +156,12 @@ const ExtraChargeMaster: React.FC = () => {
             win.document.write(safeHtml`
               <html><head><title>Extra Charge — ${row.chargeName}</title>
               <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-              </head><body><h2>Extra Charge Type</h2><table>
+              </head><body><h2>Extra Charge Type</h2><div className="overflow-x-auto thin-scroll"><table>
                 <tr><td>Charge Name</td><td>${row.chargeName || "—"}</td></tr>
                 <tr><td>Default Amount</td><td>₹${row.defaultAmount || "0"}</td></tr>
                 <tr><td>GST %</td><td>${row.gstRate || "0"}%</td></tr>
                 <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
-              </table></body></html>
+              </table></div></body></html>
             `);
             win.document.close();
             win.print();

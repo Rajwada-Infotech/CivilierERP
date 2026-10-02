@@ -29,7 +29,7 @@ const {
   resolveDocTypeId,
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
-const { transition } = require("../services/approvalService");
+const { transition, writeAuditLog } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { poExistsForMR } = require("../utils/materialChainGuard");
@@ -329,7 +329,7 @@ router.get("/preview-next-number", authenticateToken, async (req, res) => {
     }
     if (!dtId) return res.json({ nextDocNo: null });
     const preview = await previewNextDocNumber(pool, sql, dtId);
-    res.json({ nextDocNo: preview });
+    res.json(preview);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -347,6 +347,7 @@ router.get("/", authenticateToken, async (req, res) => {
     const search = req.query.search || "";
     const statusFilter = req.query.status || ""; // exact status filter from dashboard
     const companyId = parseInt(req.query.companyId, 10) || null;
+    const projectId = parseInt(req.query.projectId, 10) || null;
 
     const request = pool.request();
     request.input("offset", sql.Int, offset);
@@ -354,6 +355,7 @@ router.get("/", authenticateToken, async (req, res) => {
     request.input("search", sql.NVarChar, `%${search}%`);
     request.input("statusFilter", sql.NVarChar, statusFilter);
     request.input("companyId", sql.Int, companyId);
+    request.input("projectId", sql.Int, projectId);
 
     const result = await request.query(`
       SELECT
@@ -397,6 +399,7 @@ router.get("/", authenticateToken, async (req, res) => {
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
         AND (@statusFilter = '' OR mr.Status = @statusFilter)
         AND (@companyId IS NULL OR mr.CompanyId = @companyId)
+        AND (@projectId IS NULL OR mr.ProjectId = @projectId)
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,
                mr.RequestDate, mr.RequiredByDate,
                mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
@@ -659,13 +662,27 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
           JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
           WHERE poi.MRItemId = mri.MRItemId
             AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
+        ), 0)
+        +
+        ISNULL((
+          SELECT SUM(icti.Quantity)
+          FROM dbo.InterCompanyTransferItems icti
+          JOIN dbo.InterCompanyTransfer ict ON ict.ICTId = icti.ICTId
+          WHERE icti.MRItemId = mri.MRItemId
+            AND ISNULL(ict.Status, '') NOT IN ('Rejected')
         ), 0) AS OrderedQty,
         (
           SELECT STRING_AGG(po2.DocNo, ', ')
           FROM dbo.PurchaseOrders po2
           WHERE po2.SourceMRId = mr.MRId
             AND ISNULL(po2.Status, '') NOT IN ('Deleted', 'Rejected')
-        ) AS LinkedPOs
+        ) AS LinkedPOs,
+        (
+          SELECT STRING_AGG(ict2.DocNo, ', ')
+          FROM dbo.InterCompanyTransfer ict2
+          WHERE ict2.SourceMRId = mr.MRId
+            AND ISNULL(ict2.Status, '') NOT IN ('Rejected')
+        ) AS LinkedICTs
       FROM dbo.MaterialRequests mr
       JOIN dbo.MaterialRequestItems mri ON mri.MRId = mr.MRId
       LEFT JOIN dbo.enterprise ec ON ec.id = mr.CompanyId
@@ -692,6 +709,7 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
           FulfilledQty: ordered,
           PendingQty: Math.max(0, requested - ordered),
           LinkedPOs: r.LinkedPOs || "",
+          LinkedICTs: r.LinkedICTs || "",
         };
       })
       .filter((r) => r.PendingQty > 0);
@@ -946,12 +964,23 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     if (!statusCheck.recordset.length)
       return res.status(404).json({ error: "Not found" });
     const currentMRStatus = statusCheck.recordset[0].Status;
-    if (!["Draft", "Approved", "Rejected"].includes(currentMRStatus))
+    if (!["Draft", "Pending", "Approved", "Rejected"].includes(currentMRStatus))
       return res.status(409).json({
-        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Approved, or Rejected requests can be edited.`,
+        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Pending, Approved, or Rejected requests can be edited.`,
       });
     const wasApproved = currentMRStatus === "Approved";
     const wasRejected = currentMRStatus === "Rejected";
+    // Editing a Pending request (possibly already partially approved) must
+    // restart its approval cycle the same way wasRejected's resubmit does —
+    // otherwise a level approved against the OLD numbers would still count
+    // toward the edited ones. Can't reuse transition("Pending") for this
+    // like the Rejected case does: it only accepts Draft/Rejected as the
+    // FROM status and throws on an already-Pending record. Instead this
+    // writes the same fresh Level=0/'Pending' audit marker transition()'s
+    // own Pending branch writes — currentCycleCutoffSql (approvalService.js)
+    // only counts approvals whose ActionAt is after the latest such marker,
+    // so this alone is what makes "approved so far" reset to zero.
+    const wasPending = currentMRStatus === "Pending";
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
       : null;
@@ -1013,7 +1042,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
               RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
               Priority=@Priority, Reason=@Reason, Remarks=@Remarks,
               Status=COALESCE(@Status, Status), UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
-          WHERE MRId=@id AND Status IN ('Draft', 'Approved', 'Rejected')
+          WHERE MRId=@id AND Status IN ('Draft', 'Pending', 'Approved', 'Rejected')
         `);
 
       // Race-condition guard: if another request approved/submitted this MR
@@ -1098,12 +1127,25 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       }
     }
 
+    // Already Pending (not via the Rejected resubmit above) — restart the
+    // approval cycle in place, same reasoning as wasRejected's comment
+    // above, just without a Status change since it's Pending already.
+    if (wasPending) {
+      try {
+        await writeAuditLog("MaterialRequests", id, 0, req.user?.role, user, "Pending", null);
+      } catch (resetErr) {
+        console.error("[material-requests] approval-cycle reset after edit failed:", resetErr.message);
+      }
+    }
+
     res.json({
       message: wasApproved
         ? "Material request updated — sent back for approval"
-        : resubmitted
-          ? "Material request updated and re-submitted for approval"
-          : "Material request updated",
+        : wasPending
+          ? "Material request updated — approval restarted from level 1"
+          : resubmitted
+            ? "Material request updated and re-submitted for approval"
+            : "Material request updated",
       reopenedForApproval: wasApproved,
       resubmitted,
     });
@@ -1220,6 +1262,88 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
         FROM dbo.MaterialRequestItems mri
         LEFT JOIN dbo.UOMMaster  u  ON u.UOMCode = mri.UOMCode
         LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(50), im.M_Id) = CONVERT(NVARCHAR(50), mri.ItemId)
+        WHERE mri.MRId = @id
+      `);
+
+    const fulfillment = await getMRItemFulfillment(pool, id);
+    const pendingByItem = new Map(fulfillment.map((f) => [f.MRItemId, f]));
+    const itemsWithPending = items.recordset
+      .map((it) => {
+        const f = pendingByItem.get(it.MRItemId);
+        return {
+          ...it,
+          OrderedQty: f?.OrderedQty ?? 0,
+          PendingQty: f ? f.PendingQty : it.Quantity,
+        };
+      })
+      .filter((it) => it.PendingQty > 0);
+
+    res.json({
+      MRId: mr.MRId,
+      DocNo: mr.DocNo,
+      CompanyId: mr.CompanyId,
+      CompanyName: mr.CompanyName,
+      ProjectId: mr.ProjectId,
+      ProjectName: mr.ProjectName,
+      FinYearId: mr.FinYearId,
+      FinYearName: mr.FinYearName,
+      Remarks: mr.Remarks,
+      items: itemsWithPending,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/create-ict-prefill ─────────────────────────────────────────────────
+// Same shape as create-po-prefill, for the Inter-Company Stock Transfer
+// form's "raise from Material Request" flow — the MR's own Company/Project
+// is what the transfer is being requested FOR, so the frontend slots it in
+// as the ICT's Receiver side (the sender company/godown — who actually has
+// the stock — is a separate pick the user still makes). Only Approved/
+// Partially Fulfilled MRs qualify, same as PO; items already reflect what's
+// still pending after any prior PO or ICT draws against this MR (see
+// getMRItemFulfillment).
+router.get("/:id/create-ict-prefill", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const header = await pool.request().input("id", sql.Int, id).query(`
+        SELECT
+          mr.MRId, mr.DocNo, mr.Status,
+          mr.CompanyId, e_co.name  AS CompanyName,
+          mr.ProjectId, e_pr.name  AS ProjectName,
+          mr.FinYearId, fy.FName AS FinYearName,
+          mr.Remarks
+        FROM dbo.MaterialRequests mr
+        LEFT JOIN dbo.enterprise      e_co ON e_co.id = mr.CompanyId
+        LEFT JOIN dbo.enterprise      e_pr ON e_pr.id = mr.ProjectId
+        LEFT JOIN dbo.FinYear         fy   ON fy.FId = mr.FinYearId
+        WHERE mr.MRId = @id
+      `);
+
+    if (!header.recordset.length)
+      return res.status(404).json({ error: "Material Request not found" });
+
+    const mr = header.recordset[0];
+    if (!["Approved", "Partially Fulfilled"].includes(mr.Status))
+      return res.status(400).json({
+        error: `MR is ${mr.Status}. Only Approved or Partially Fulfilled MRs can generate an Inter-Company Transfer.`,
+      });
+
+    const items = await pool.request().input("id", sql.Int, id).query(`
+        SELECT
+          mri.MRItemId,
+          mri.ItemId,
+          mri.ItemName,
+          mri.UOMCode,
+          u.UOMName,
+          mri.Quantity,
+          mri.Remarks
+        FROM dbo.MaterialRequestItems mri
+        LEFT JOIN dbo.UOMMaster  u  ON u.UOMCode = mri.UOMCode
         WHERE mri.MRId = @id
       `);
 

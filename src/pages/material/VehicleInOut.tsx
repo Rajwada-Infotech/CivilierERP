@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 
 const VIO_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "DocNo" },
-  { header: "Entry Time", accessor: (r) => r.EntryTime ? new Date(r.EntryTime as string).toLocaleString("en-IN") : "" },
+  { header: "Entry Time", accessor: (r) => r.EntryTime ? fmtServerDateTime(r.EntryTime as string) : "" },
   { header: "Vehicle No", accessor: "VehicleNo" },
   { header: "Supplier", accessor: "SupplierName" },
   { header: "PO Number", accessor: "PONumber" },
@@ -35,7 +35,9 @@ const VIO_EXPORT_COLUMNS: ExportColumn[] = [
 
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { ApprovalStatusChain, type TrailData } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import {
   Truck,
   Plus,
@@ -73,14 +75,18 @@ import {
   Package,
   MessageCircle,
   Printer,
+  FileDown,
 } from "lucide-react";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
+import { downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
 import { createQualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
 import { RaiseDebitNoteModal } from "@/components/quality/RaiseDebitNoteModal";
 import { usePageRights } from "@/hooks/usePageRights";
+import { DateInput, DateTimeInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
 const VEH_TEMPLATE_COLUMNS = [
@@ -109,7 +115,7 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+    <label className="block text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -150,7 +156,7 @@ function SectionTitle({
         <p className="text-xs font-semibold text-foreground tracking-wide">
           {label}
         </p>
-        {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
+        {sub && <p className="text-[0.625rem] text-muted-foreground">{sub}</p>}
       </div>
     </div>
   );
@@ -168,7 +174,7 @@ function InfoPill({
   if (!value) return null;
   return (
     <div className="flex flex-col gap-0.5 px-3 py-2 rounded-lg bg-muted/60 border border-border/60 min-w-0">
-      <span className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+      <span className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
         {label}
       </span>
       <span
@@ -291,15 +297,23 @@ function VehicleCard({
   onView,
   onEdit,
   onDelete,
+  onGeneratePdf,
   canEdit = true,
   canDelete = true,
+  approvalTrail,
+  approvalTrailLoading = false,
 }: {
   rec: any;
   onView: (r: any) => void;
   onEdit: (r: any) => void;
   onDelete: (id: number) => void;
+  onGeneratePdf: (r: any) => void;
   canEdit?: boolean;
   canDelete?: boolean;
+  /** Bulk-fetched by the parent list — see useApprovalTrailsBulk's comment
+   *  on why this card doesn't fetch its own trail per-instance. */
+  approvalTrail?: TrailData | null;
+  approvalTrailLoading?: boolean;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
@@ -309,7 +323,7 @@ function VehicleCard({
           <p className="font-mono text-sm font-bold text-foreground truncate">
             {rec.DocNo || "—"}
           </p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
+          <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
             {rec.DocDate
               ? new Date(rec.DocDate).toLocaleDateString("en-IN")
               : "—"}
@@ -319,13 +333,16 @@ function VehicleCard({
           <ApprovalStatusChain
             table="VehicleInOut"
             recordId={rec.VehicleInOutID}
+            fallback={<StatusBadge status={rec.Status} />}
+            preloaded={approvalTrail ?? null}
+            preloadedLoading={approvalTrailLoading}
           />
         </div>
       </div>
 
       {/* Attachment count */}
       {Number(rec.AttachmentCount) > 0 && (
-        <div className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+        <div className="inline-flex items-center gap-1 text-[0.625rem] text-muted-foreground">
           <Paperclip size={10} />
           {rec.AttachmentCount} attachment{rec.AttachmentCount > 1 ? "s" : ""}
         </div>
@@ -342,32 +359,29 @@ function VehicleCard({
       {/* Supplier / PO / Entry / Challan grid */}
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div className="min-w-0">
-          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
             Supplier
           </p>
           <p className="truncate">{rec.SupplierName || "—"}</p>
         </div>
         <div className="min-w-0">
-          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
             PO No
           </p>
           <p className="font-mono truncate">{rec.PONumber || "—"}</p>
         </div>
         <div className="min-w-0">
-          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
             Entry Time
           </p>
           <p className="truncate">
             {rec.EntryTime
-              ? new Date(rec.EntryTime).toLocaleString("en-IN", {
-                  dateStyle: "short",
-                  timeStyle: "short",
-                })
+              ? fmtServerDateTime(rec.EntryTime, { dateStyle: "short", timeStyle: "short" })
               : "—"}
           </p>
         </div>
         <div className="min-w-0">
-          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
             Challan No
           </p>
           <p className="truncate">{rec.ChallanNo || "—"}</p>
@@ -376,12 +390,19 @@ function VehicleCard({
 
       {/* Actions */}
       <div className="flex items-center justify-end gap-1 pt-2 border-t border-border/60">
-        <button
+        <button data-row-view
           onClick={() => onView(rec)}
           className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
           title="View"
         >
           <Eye size={15} />
+        </button>
+        <button
+          onClick={() => onGeneratePdf(rec)}
+          className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-lg transition-colors"
+          title="Generate PDF"
+        >
+          <FileDown size={15} />
         </button>
         {canEdit && (
           <button
@@ -407,8 +428,8 @@ function VehicleCard({
 }
 
 // ── Local time helpers ──────────────────────────────────────────────────────────
-// toISOString() always converts to UTC, which is wrong for <input type="date">
-// and <input type="datetime-local">: those inputs expect/display local wall-clock
+// toISOString() always converts to UTC, which is wrong for <DateInput>
+// and <DateTimeInput>: those inputs expect/display local wall-clock
 // time. Using toISOString() here made entry/exit time off by the IST offset
 // (+5:30), e.g. showing 11:08 AM when the local clock read 4:38 PM.
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -418,6 +439,23 @@ const toLocalDateInput = (d: Date) =>
 
 const toLocalDateTimeInput = (d: Date) =>
   `${toLocalDateInput(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+// ── Server-returned time helpers ──────────────────────────────────────────
+// EntryTime/ExitTime come back from the API as "...Z"-suffixed ISO strings
+// purely because Date -> JSON always appends "Z" — not because the value is
+// a true UTC instant. The backend round-trips the literal IST digits the
+// user typed through a UTC-configured Node process with no real conversion
+// (see vehicleInOut.js's parseIstDateTime comment), so the ISO string's UTC
+// component IS the intended IST wall-clock reading. Formatting it with
+// plain toLocaleString() applies the BROWSER's own local-timezone
+// conversion on top of that, double-shifting the displayed time by +5:30
+// (06:10 AM rendered as 11:40 AM). These read the UTC getters directly so
+// the literal digits typed in are what's ever shown or prefilled.
+const fmtServerDateTime = (iso: string | Date, opts?: Intl.DateTimeFormatOptions) =>
+  new Date(iso).toLocaleString("en-IN", { ...opts, timeZone: "UTC" });
+
+const toUtcDateTimeInput = (d: Date) =>
+  `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}T${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
 
 // ── Form default ───────────────────────────────────────────────────────────────
 const buildEmpty = (activeFinYear?: string) => ({
@@ -443,8 +481,14 @@ const buildEmpty = (activeFinYear?: string) => ({
 let _onView: (r: any) => void = () => {};
 let _onEdit: (r: any) => void = () => {};
 let _onDelete: (id: number) => void = () => {};
+let _onGeneratePdf: (r: any) => void = () => {};
 let _canEdit = true;
 let _canDelete = true;
+// Reassigned each render by VehicleInOut() below — see
+// useApprovalTrailsBulk's own comment for why the Status column reads from
+// this instead of firing its own per-row GET /trail.
+let _vehicleApprovalTrails = new Map<string, TrailData | null>();
+let _vehicleApprovalTrailsLoading = false;
 
 // ── List columns ──────────────────────────────────────────────────────────────
 const COLUMNS: ColumnDef<any, unknown>[] = [
@@ -455,7 +499,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5">
         <span className="font-mono text-xs font-bold">{row.original.DocNo || "—"}</span>
-        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+        <span className="text-[0.625rem] text-muted-foreground whitespace-nowrap">
           {row.original.DocDate ? new Date(row.original.DocDate).toLocaleDateString("en-IN") : ""}
         </span>
       </div>
@@ -498,7 +542,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5">
         <span className="text-xs truncate block">{row.original.CompanyName || "—"}</span>
-        <span className="text-[10px] text-muted-foreground truncate block">
+        <span className="text-[0.625rem] text-muted-foreground truncate block">
           {row.original.ProjectName || "—"}
         </span>
       </div>
@@ -513,12 +557,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
       const v = getValue() as string;
       return (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {v
-            ? new Date(v).toLocaleString("en-IN", {
-                dateStyle: "short",
-                timeStyle: "short",
-              })
-            : "—"}
+          {v ? fmtServerDateTime(v, { dateStyle: "short", timeStyle: "short" }) : "—"}
         </span>
       );
     },
@@ -543,6 +582,9 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
         <ApprovalStatusChain
           table="VehicleInOut"
           recordId={row.original.VehicleInOutID}
+          fallback={<StatusBadge status={row.original.Status} />}
+          preloaded={_vehicleApprovalTrails.get(String(row.original.VehicleInOutID)) ?? null}
+          preloadedLoading={_vehicleApprovalTrailsLoading}
         />
       </div>
     ),
@@ -556,12 +598,19 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
       return (
         <div className="flex items-center justify-end gap-3">
           <div className="flex items-center gap-2">
-            <button
+            <button data-row-view
               onClick={() => _onView(rec)}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
             >
               <Eye size={15} />
+            </button>
+            <button
+              onClick={() => _onGeneratePdf(rec)}
+              className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+              title="Generate PDF"
+            >
+              <FileDown size={15} />
             </button>
             {_canEdit && (
               <button
@@ -644,6 +693,11 @@ export default function VehicleInOut() {
   const [qualityByItem, setQualityByItem] = useState<
     Record<number, vehApi.VehicleInOutItemQuality | "">
   >({});
+
+  // Optional free-text brand per PO line item, keyed the same way as
+  // receivedQtyByItem/photoByItem/qualityByItem — reset/prefilled alongside
+  // them everywhere those are. Not mandatory.
+  const [brandByItem, setBrandByItem] = useState<Record<number, string>>({});
 
   // Quality-rejection debit note modal — raised against a single received
   // line item (VehicleInOutItemID) from the view modal.
@@ -842,6 +896,7 @@ export default function VehicleInOut() {
     setReceivedQtyByItem({});
     setPhotoByItem({});
     setQualityByItem({});
+    setBrandByItem({});
     setErrors({});
     setSearchParams(
       (prev) => {
@@ -867,6 +922,7 @@ export default function VehicleInOut() {
       setReceivedQtyByItem({});
       setPhotoByItem({});
       setQualityByItem({});
+      setBrandByItem({});
       toast.success(`Vehicle In/Out ${res.docNo} created`);
     },
     onError: (err: any) =>
@@ -886,6 +942,7 @@ export default function VehicleInOut() {
       setReceivedQtyByItem({});
       setPhotoByItem({});
       setQualityByItem({});
+      setBrandByItem({});
       toast.success("Record updated");
     },
     onError: (err: any) => toast.error(err.message || "Failed to update"),
@@ -930,9 +987,10 @@ export default function VehicleInOut() {
           receivedQty: parseFloat(raw) || 0,
           photoBase64: photoByItem[Number(poItemId)] || null,
           quality: qualityByItem[Number(poItemId)] || null,
+          brand: brandByItem[Number(poItemId)]?.trim() || null,
         }))
         .filter((it) => it.receivedQty > 0),
-    [receivedQtyByItem, photoByItem, qualityByItem],
+    [receivedQtyByItem, photoByItem, qualityByItem, brandByItem],
   );
 
   // ── Validate ──────────────────────────────────────────────────────────────────
@@ -998,6 +1056,7 @@ export default function VehicleInOut() {
     setReceivedQtyByItem({});
     setPhotoByItem({});
     setQualityByItem({});
+    setBrandByItem({});
     setEditingId(null);
     setShowForm(false);
     setErrors({});
@@ -1049,6 +1108,13 @@ export default function VehicleInOut() {
           )
         : {},
     );
+    setBrandByItem(
+      Array.isArray(full.Items)
+        ? Object.fromEntries(
+            full.Items.filter((it: any) => it.Brand).map((it: any) => [it.POItemId, it.Brand]),
+          )
+        : {},
+    );
     setForm({
       docNo: full.DocNo ?? "",
       docDate: full.DocDate ? String(full.DocDate).slice(0, 10) : "",
@@ -1064,10 +1130,10 @@ export default function VehicleInOut() {
       poNumber: full.PONumber ?? "",
       vehicleNo: full.VehicleNo ?? "",
       entryTime: full.EntryTime
-        ? toLocalDateTimeInput(new Date(full.EntryTime))
+        ? toUtcDateTimeInput(new Date(full.EntryTime))
         : "",
       exitTime: full.ExitTime
-        ? toLocalDateTimeInput(new Date(full.ExitTime))
+        ? toUtcDateTimeInput(new Date(full.ExitTime))
         : null,
       challanNo: full.ChallanNo ?? "",
       attachments: Array.isArray(full.Attachments) ? full.Attachments : [],
@@ -1173,11 +1239,11 @@ export default function VehicleInOut() {
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
     <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Entry Time</div>
-      <div style="font-size:13px;font-weight:600;">${rec.EntryTime ? new Date(rec.EntryTime).toLocaleString("en-IN") : "—"}</div>
+      <div style="font-size:13px;font-weight:600;">${rec.EntryTime ? fmtServerDateTime(rec.EntryTime) : "—"}</div>
     </div>
     <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Exit Time</div>
-      <div style="font-size:13px;font-weight:600;">${rec.ExitTime ? new Date(rec.ExitTime).toLocaleString("en-IN") : "—"}</div>
+      <div style="font-size:13px;font-weight:600;">${rec.ExitTime ? fmtServerDateTime(rec.ExitTime) : "—"}</div>
     </div>
   </div>
 
@@ -1215,6 +1281,65 @@ export default function VehicleInOut() {
       win.print();
     };
   };
+
+  // Same content as handlePrintVehicleRec above, as a downloaded .pdf
+  // instead of the browser's print dialog — built from the same fields so
+  // the two can never show different data for the same record.
+  //
+  // The list/grid row (list query's SELECT) never carries Items — only
+  // GET /:id does — so a rec passed straight from the grid's Actions
+  // column here always lacks Items. Refetch the full record so the PDF
+  // includes Received Items regardless of whether this was triggered from
+  // the grid row or the already-fully-loaded view modal.
+  const handleGeneratePdfVehicleRec = async (recIn: any) => {
+    const toastId = toast.loading("Generating PDF...");
+    let rec = recIn;
+    if (!Array.isArray(recIn.Items) && recIn.VehicleInOutID) {
+      try {
+        rec = await vehApi.getVehicleInOut(recIn.VehicleInOutID);
+      } catch {
+        // fall back to whatever was passed in — PDF still generates,
+        // just without the Items section.
+      }
+    }
+    const sections = [
+      {
+        title: "Overview",
+        fields: [
+          { label: "Company", value: rec.CompanyName || "—" },
+          { label: "Project", value: rec.ProjectName || "—" },
+          { label: "Supplier", value: rec.SupplierName || "—" },
+          { label: "PO No", value: rec.PONumber || "—" },
+          { label: "Vehicle No", value: rec.VehicleNo || "—" },
+          { label: "Challan No", value: rec.ChallanNo || "—" },
+          { label: "Entry Time", value: rec.EntryTime ? new Date(rec.EntryTime).toLocaleString("en-IN") : "—" },
+          { label: "Exit Time", value: rec.ExitTime ? new Date(rec.ExitTime).toLocaleString("en-IN") : "—" },
+        ],
+      },
+      ...(Array.isArray(rec.Items) && rec.Items.length > 0
+        ? [{
+            title: `Items (${rec.Items.length})`,
+            fields: rec.Items.map((it: any, i: number) => ({
+              label: `${i + 1}. ${it.ItemName ?? "—"}${it.Brand ? ` (${it.Brand})` : ""}${it.Quality ? ` [${it.Quality}]` : ""}`,
+              value: `${it.ReceivedQty ?? it.Quantity ?? "—"} ${it.UomName ?? ""}`.trim(),
+            })),
+          }]
+        : []),
+      ...(rec.Remarks ? [{ title: "Remarks", fields: [{ label: "Remarks", value: rec.Remarks }] }] : []),
+    ];
+
+    downloadMasterPreviewPdf({
+      title: rec.DocNo || "—",
+      subtitle: "Vehicle In/Out",
+      code: rec.DocNo,
+      status: rec.Status,
+      sections,
+      filename: `${(rec.DocNo || rec.VehicleInOutID || "vehicle-in-out").replace(/[^\w-]+/g, "_")}.pdf`,
+    })
+      .then(() => toast.success("PDF downloaded", { id: toastId }))
+      .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+  };
+  _onGeneratePdf = handleGeneratePdfVehicleRec;
 
   // ── Camera capture ───────────────────────────────────────────────────────────
   // Shared modal, two targets: capturingPoItemId set → the item's photo is
@@ -1265,6 +1390,15 @@ export default function VehicleInOut() {
       r.PONumber?.toLowerCase().includes(q)
     );
   });
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: vehicleApprovalTrails, isLoading: vehicleApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "VehicleInOut",
+    filteredRecords.map((r: any) => r.VehicleInOutID),
+  );
+  _vehicleApprovalTrails = vehicleApprovalTrails;
+  _vehicleApprovalTrailsLoading = vehicleApprovalTrailsLoading;
 
   // ── Group by linked PO — every Vehicle In/Out lot delivered against the
   // same PO now shows together instead of scattered across a flat list.
@@ -1353,7 +1487,7 @@ export default function VehicleInOut() {
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -1367,9 +1501,10 @@ export default function VehicleInOut() {
                     setReceivedQtyByItem({});
                     setPhotoByItem({});
                     setQualityByItem({});
+                    setBrandByItem({});
                     setErrors({});
                   }}
-                  className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
+                  className="btn-module inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
                 >
                   <Plus size={13} /> New Entry
                 </button>
@@ -1448,6 +1583,7 @@ export default function VehicleInOut() {
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
                           setQualityByItem({});
+                          setBrandByItem({});
                         }}
                         className={`${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
                       >
@@ -1464,7 +1600,7 @@ export default function VehicleInOut() {
                       />
                     </div>
                     {errors.companyId && (
-                      <p className="text-[10px] text-destructive mt-1">
+                      <p className="text-[0.625rem] text-destructive mt-1">
                         {errors.companyId}
                       </p>
                     )}
@@ -1499,6 +1635,7 @@ export default function VehicleInOut() {
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
                           setQualityByItem({});
+                          setBrandByItem({});
                         }}
                         className={`${inpSel} ${errors.projectId ? "border-destructive/60" : ""}`}
                       >
@@ -1515,7 +1652,7 @@ export default function VehicleInOut() {
                       />
                     </div>
                     {errors.projectId && (
-                      <p className="text-[10px] text-destructive mt-1">
+                      <p className="text-[0.625rem] text-destructive mt-1">
                         {errors.projectId}
                       </p>
                     )}
@@ -1530,8 +1667,7 @@ export default function VehicleInOut() {
                         size={13}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
-                      <input
-                        type="date"
+                      <DateInput
                         value={form.docDate}
                         readOnly
                         disabled
@@ -1653,6 +1789,7 @@ export default function VehicleInOut() {
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
                           setQualityByItem({});
+                          setBrandByItem({});
                         }}
                         className={`${inpSel} ${errors.poId ? "border-destructive/60" : ""}`}
                       >
@@ -1675,7 +1812,7 @@ export default function VehicleInOut() {
                       />
                     </div>
                     {errors.poId && (
-                      <p className="text-[10px] text-destructive mt-1">
+                      <p className="text-[0.625rem] text-destructive mt-1">
                         {errors.poId}
                       </p>
                     )}
@@ -1745,10 +1882,10 @@ export default function VehicleInOut() {
                   <div className="rounded-xl border border-border overflow-hidden">
                     <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center gap-2">
                       <Package size={13} className="text-muted-foreground" />
-                      <span className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                      <span className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
                         PO Items — Qty Received (This Lot)
                       </span>
-                      <span className="ml-auto text-[10px] text-muted-foreground">
+                      <span className="ml-auto text-[0.625rem] text-muted-foreground">
                         {loadingPOItems
                           ? "Loading…"
                           : `${poItemsRemaining.length} item${poItemsRemaining.length !== 1 ? "s" : ""}`}
@@ -1763,15 +1900,16 @@ export default function VehicleInOut() {
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="border-b border-border bg-muted/10">
-                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">#</th>
-                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Item</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Ordered</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Received So Far</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
-                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
-                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Quality</th>
-                              <th className="px-4 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">#</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Item</th>
+                              <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Ordered</th>
+                              <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Received So Far</th>
+                              <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
+                              <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Brand</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Quality</th>
+                              <th className="px-4 py-2 text-center text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border">
@@ -1843,6 +1981,21 @@ export default function VehicleInOut() {
                                       className={`w-24 px-2 py-1.5 rounded-lg border bg-background text-right font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary ${
                                         overLimit ? "border-destructive text-destructive" : "border-border"
                                       } ${it.remainingQty === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                                    />
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    <input
+                                      type="text"
+                                      value={brandByItem[it.poItemId] ?? ""}
+                                      onChange={(e) =>
+                                        setBrandByItem((prev) => ({
+                                          ...prev,
+                                          [it.poItemId]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Optional"
+                                      maxLength={100}
+                                      className="w-28 px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                                     />
                                   </td>
                                   <td className="px-4 py-2.5">
@@ -1953,7 +2106,7 @@ export default function VehicleInOut() {
                       placeholder="e.g. WB-01-AB-1234"
                     />
                     {errors.vehicleNo && (
-                      <p className="text-destructive text-[11px] mt-1 flex items-center gap-1">
+                      <p className="text-destructive text-[0.6875rem] mt-1 flex items-center gap-1">
                         <AlertCircle size={10} />
                         {errors.vehicleNo}
                       </p>
@@ -1968,15 +2121,14 @@ export default function VehicleInOut() {
                         size={13}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
-                      <input
-                        type="datetime-local"
+                      <DateTimeInput
                         value={form.entryTime}
                         onChange={(e) => pf({ entryTime: e.target.value })}
                         className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.entryTime ? "border-destructive ring-1 ring-destructive" : ""}`}
                       />
                     </div>
                     {errors.entryTime && (
-                      <p className="text-destructive text-[11px] mt-1 flex items-center gap-1">
+                      <p className="text-destructive text-[0.6875rem] mt-1 flex items-center gap-1">
                         <AlertCircle size={10} />
                         {errors.entryTime}
                       </p>
@@ -1991,8 +2143,7 @@ export default function VehicleInOut() {
                         size={13}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
-                      <input
-                        type="datetime-local"
+                      <DateTimeInput
                         value={form.exitTime ?? ""}
                         max={toLocalDateTimeInput(new Date())}
                         onChange={(e) => {
@@ -2007,7 +2158,7 @@ export default function VehicleInOut() {
                         className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                       />
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-1">
+                    <p className="text-[0.625rem] text-muted-foreground mt-1">
                       Defaults to now — backfill an earlier time, or clear if the vehicle hasn't exited yet
                     </p>
                   </div>
@@ -2026,7 +2177,7 @@ export default function VehicleInOut() {
                       placeholder="e.g. CH-20240601-001"
                     />
                     {errors.challanNo && (
-                      <p className="text-[10px] text-destructive mt-1">{errors.challanNo}</p>
+                      <p className="text-[0.625rem] text-destructive mt-1">{errors.challanNo}</p>
                     )}
                   </div>
 
@@ -2090,7 +2241,7 @@ export default function VehicleInOut() {
 
               {/* ── Actions ── */}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden mt-4 -mx-5 -mb-5">
-                <p className="hidden sm:block text-[11px] text-muted-foreground">
+                <p className="hidden sm:block text-[0.6875rem] text-muted-foreground">
                   Ready to save
                 </p>
                 <div className="flex items-center gap-2 sm:ml-auto">
@@ -2100,6 +2251,7 @@ export default function VehicleInOut() {
                       setReceivedQtyByItem({});
                       setPhotoByItem({});
                       setQualityByItem({});
+                      setBrandByItem({});
                       setEditingId(null);
                       setErrors({});
                     }}
@@ -2113,7 +2265,7 @@ export default function VehicleInOut() {
                     disabled={
                       createMut.isPending || updateMut.isPending || uploading
                     }
-                    className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                    className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                   >
                     {createMut.isPending || updateMut.isPending ? (
                       <RefreshCw size={14} className="animate-spin" />
@@ -2231,7 +2383,7 @@ export default function VehicleInOut() {
                           · {group.supplierName}
                         </span>
                       )}
-                      <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                      <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                         {group.rows.length} lot{group.rows.length !== 1 ? "s" : ""}
                       </span>
                     </button>
@@ -2249,8 +2401,11 @@ export default function VehicleInOut() {
                               onView={_onView}
                               onEdit={_onEdit}
                               onDelete={_onDelete}
+                              onGeneratePdf={_onGeneratePdf}
                               canEdit={rights.canEdit}
                               canDelete={rights.canDelete}
+                              approvalTrail={vehicleApprovalTrails.get(String(rec.VehicleInOutID)) ?? null}
+                              approvalTrailLoading={vehicleApprovalTrailsLoading}
                             />
                           ))}
                         </div>
@@ -2265,6 +2420,7 @@ export default function VehicleInOut() {
                             searchable={false}
                             paginated={false}
                             emptyMessage="No Vehicle In/Out records."
+                            getRowId={(r: any) => String(r.VehicleInOutID)}
                           />
                         </div>
                       </>
@@ -2305,7 +2461,7 @@ export default function VehicleInOut() {
         {/* VIEW MODAL                                                          */}
         {/* ═══════════════════════════════════════════════════════════════════ */}
         {viewingRec && (
-          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+          <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
             <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
               {/* Modal header */}
               <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
@@ -2313,7 +2469,7 @@ export default function VehicleInOut() {
                   <h2 className="font-heading font-bold text-base">
                     {viewingRec.DocNo || "Vehicle In/Out"}
                   </h2>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
                     Vehicle In/Out Entry
                   </p>
                 </div>
@@ -2398,7 +2554,7 @@ export default function VehicleInOut() {
                       key={label}
                       className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
                     >
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                         {label}
                       </p>
                       <p
@@ -2415,7 +2571,7 @@ export default function VehicleInOut() {
                       onClick={() => setShowPODetails(true)}
                       className="px-3 py-2.5 rounded-xl bg-blue-500/5 border border-blue-500/20 text-left hover:bg-blue-500/10 transition-colors"
                     >
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                         PO Reference
                       </p>
                       <p className="text-xs font-semibold font-mono text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
@@ -2425,7 +2581,7 @@ export default function VehicleInOut() {
                     </button>
                   ) : (
                     <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">PO Reference</p>
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">PO Reference</p>
                       <p className="text-xs text-muted-foreground">—</p>
                     </div>
                   )}
@@ -2438,22 +2594,22 @@ export default function VehicleInOut() {
                 {/* Times */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="px-3 py-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                       Entry Time
                     </p>
                     <p className="text-xs font-semibold font-mono text-emerald-600 dark:text-emerald-400">
                       {viewingRec.EntryTime
-                        ? new Date(viewingRec.EntryTime).toLocaleString("en-IN")
+                        ? fmtServerDateTime(viewingRec.EntryTime)
                         : "—"}
                     </p>
                   </div>
                   <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                       Exit Time
                     </p>
                     <p className="text-xs font-semibold font-mono text-foreground">
                       {viewingRec.ExitTime
-                        ? new Date(viewingRec.ExitTime).toLocaleString("en-IN")
+                        ? fmtServerDateTime(viewingRec.ExitTime)
                         : "Not yet exited"}
                     </p>
                   </div>
@@ -2465,16 +2621,16 @@ export default function VehicleInOut() {
                     turn out inferior on inspection). */}
                 {Array.isArray(viewingRec.Items) && viewingRec.Items.length > 0 && (
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                       Received Items
                     </p>
                     <div className="rounded-xl border border-border/50 overflow-hidden">
                       <table className="w-full text-xs">
                         <thead className="bg-muted/40">
                           <tr>
-                            <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide">Item</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide">Received</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide"></th>
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide">Item</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide">Received</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/50">
@@ -2483,13 +2639,18 @@ export default function VehicleInOut() {
                               <td className="px-3 py-2 font-medium text-foreground">
                                 <span className="inline-flex items-center gap-1.5">
                                   {it.ItemName || "—"}
+                                  {it.Brand && (
+                                    <span className="text-[0.625rem] font-normal text-muted-foreground">
+                                      ({it.Brand})
+                                    </span>
+                                  )}
                                   {it.Quality && (
                                     <span
-                                      className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide border ${
+                                      className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold uppercase tracking-wide border ${
                                         it.Quality === "Excellent"
                                           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
                                           : it.Quality === "Good"
-                                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25"
+                                            ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/25"
                                             : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25"
                                       }`}
                                     >
@@ -2510,7 +2671,7 @@ export default function VehicleInOut() {
                                       setDebitNoteReason("");
                                     }}
                                     title="Raise a debit note if part of this line was found below the ordered grade"
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[11px] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[0.6875rem] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
                                   >
                                     <FileWarning size={12} /> Debit Note
                                   </button>
@@ -2531,7 +2692,7 @@ export default function VehicleInOut() {
                 {Array.isArray(viewingRec.Attachments) &&
                 viewingRec.Attachments.length > 0 ? (
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                       Attachments ({viewingRec.Attachments.length})
                     </p>
                     <div className="flex flex-wrap gap-2">
@@ -2557,7 +2718,7 @@ export default function VehicleInOut() {
                     if (legacyPaths.length === 0) return null;
                     return (
                       <div>
-                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                        <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                           Attachments ({legacyPaths.length})
                         </p>
                         <div className="flex flex-wrap gap-2">
@@ -2596,7 +2757,7 @@ export default function VehicleInOut() {
                 {/* Remarks */}
                 {viewingRec.Remarks && (
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                       Remarks
                     </p>
                     <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
@@ -2613,6 +2774,12 @@ export default function VehicleInOut() {
                   >
                     <Printer size={13} /> Print
                   </button>
+                  <button
+                    onClick={() => handleGeneratePdfVehicleRec(viewingRec)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
+                  >
+                    <FileDown size={13} /> Generate PDF
+                  </button>
                   {rights.canEdit && (
                     <button
                       onClick={() => {
@@ -2628,7 +2795,7 @@ export default function VehicleInOut() {
               </div>
               )}
             </div>
-          </div>
+          </div></BodyPortal>
         )}
 
       {/* ── Raise Debit Note modal (quality rejection against a received line) ── */}
@@ -2651,7 +2818,7 @@ export default function VehicleInOut() {
 
       {/* ── PO Preview pop-out (above view modal) ── */}
       {showPODetails && viewingRec && (
-        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4">
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
             {/* Header */}
             <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
@@ -2664,7 +2831,7 @@ export default function VehicleInOut() {
                     {loadingPODetail ? "Loading…" : (viewingPODetail as any)?.PurchaseOrderNo || viewingRec.PONumber}
                   </h2>
                 </div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-8">Purchase Order</p>
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5 ml-8">Purchase Order</p>
               </div>
               <button
                 onClick={() => setShowPODetails(false)}
@@ -2695,7 +2862,7 @@ export default function VehicleInOut() {
                     { label: "Total Amount", value: (viewingPODetail as any).TotalAmount != null ? `₹${Number((viewingPODetail as any).TotalAmount).toLocaleString("en-IN")}` : "—" },
                   ].map(({ label, value, blue }: any) => (
                     <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                       <p className={`text-xs font-semibold truncate ${blue ? "font-mono text-blue-600 dark:text-blue-400" : "text-foreground"}`}>{value || "—"}</p>
                     </div>
                   ))}
@@ -2704,13 +2871,13 @@ export default function VehicleInOut() {
                 {/* Line items */}
                 {Array.isArray((viewingPODetail as any).LineItems) && (viewingPODetail as any).LineItems.length > 0 && (
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">Order Items</p>
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">Order Items</p>
                     <div className="rounded-xl border border-border overflow-hidden">
                       <table className="w-full text-xs" style={{ tableLayout: "fixed" }}>
                         <thead className="bg-muted/40 border-b border-border">
                           <tr>
                             {[["Description", "38%"], ["Qty", "12%"], ["Unit", "10%"], ["Rate", "15%"], ["Amount", "15%"], ["GST", "10%"]].map(([h, w]) => (
-                              <th key={h} className={`px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground ${h === "Qty" || h === "Rate" || h === "Amount" || h === "GST" ? "text-right" : "text-left"}`} style={{ width: w }}>{h}</th>
+                              <th key={h} className={`px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground ${h === "Qty" || h === "Rate" || h === "Amount" || h === "GST" ? "text-right" : "text-left"}`} style={{ width: w }}>{h}</th>
                             ))}
                           </tr>
                         </thead>
@@ -2733,7 +2900,7 @@ export default function VehicleInOut() {
 
                 {(viewingPODetail as any).Remarks && (
                   <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
                     <p className="text-xs text-foreground">{(viewingPODetail as any).Remarks}</p>
                   </div>
                 )}
@@ -2745,12 +2912,12 @@ export default function VehicleInOut() {
               </div>
             )}
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* ── Camera capture modal ── */}
       {showCamera && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+        <BodyPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
@@ -2822,7 +2989,7 @@ export default function VehicleInOut() {
 
                   {/* Multi-capture hint */}
                   {capturingPoItemId == null && form.attachments.length > 0 && (
-                    <div className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/55 text-white text-[11px] backdrop-blur-sm">
+                    <div className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/55 text-white text-[0.6875rem] backdrop-blur-sm">
                       <ImageIcon size={11} />
                       {form.attachments.length} attached
                     </div>
@@ -2855,7 +3022,7 @@ export default function VehicleInOut() {
               )}
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* Delete confirm */}

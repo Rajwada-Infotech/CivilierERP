@@ -118,7 +118,7 @@ function VendorCombo({
         ) : (
           filteredGroups.map((g) => (
             <div key={g.groupLabel}>
-              <p className="px-2.5 pt-2 pb-1 text-[10px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70">
+              <p className="px-2.5 pt-2 pb-1 text-[0.625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70">
                 {g.groupLabel}
               </p>
               {g.items.map((item) => (
@@ -270,13 +270,13 @@ export function FilterBar({
             <Search size={11} style={{ color: "#818cf8" }} />
           </div>
           <span
-            className="text-[11px] font-heading uppercase tracking-wider"
+            className="text-[0.6875rem] font-heading uppercase tracking-wider"
             style={{ color: _fbDark ? "#64748b" : "#6366f1" }}
           >
             Filter expense bookings
           </span>
           {activeCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
+            <span className="px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
               {activeCount} active
             </span>
           )}
@@ -290,7 +290,7 @@ export function FilterBar({
               onChange("year", "");
               onChange("supplier", "");
             }}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive transition-colors"
+            className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-destructive transition-colors"
           >
             <X size={10} /> Clear all
           </button>
@@ -300,7 +300,7 @@ export function FilterBar({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {dropdowns.map(({ key, label, icon: Icon, items, placeholder }) => (
           <div key={key} className="space-y-1">
-            <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+            <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
               <Icon size={9} /> {label}
             </label>
             <div className="relative">
@@ -328,7 +328,7 @@ export function FilterBar({
             and searchable (see VendorCombo above), unlike the flat native
             <select>s used for the other filters. */}
         <div className="space-y-1">
-          <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+          <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
             <Users size={9} /> Vendor
           </label>
           <VendorCombo
@@ -348,7 +348,7 @@ export function FilterBar({
               return (
                 <span
                   key={key}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
                 >
                   {val}
                   <button

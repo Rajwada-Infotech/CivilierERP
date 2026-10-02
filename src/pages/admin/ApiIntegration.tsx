@@ -251,7 +251,7 @@ export default function ApiIntegration() {
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="name"
-                    className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
                   >
                     API Name <span className="text-destructive">*</span>
                   </Label>
@@ -268,7 +268,7 @@ export default function ApiIntegration() {
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="baseUrl"
-                    className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
                   >
                     Base URL <span className="text-destructive">*</span>
                   </Label>
@@ -285,7 +285,7 @@ export default function ApiIntegration() {
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="apiKey"
-                    className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
                   >
                     API Key <span className="text-destructive">*</span>
                   </Label>
@@ -305,7 +305,7 @@ export default function ApiIntegration() {
                 <Button
                   type="submit"
                   disabled={isSaving || !newApi.name || !newApi.baseUrl || !newApi.apiKey}
-                  className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
+                  className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
                 >
                   {isSaving ? (
                     <Loader2 size={14} className="animate-spin" />
@@ -368,7 +368,7 @@ export default function ApiIntegration() {
                         <span className="text-sm font-heading font-semibold text-foreground">
                           Edit API
                         </span>
-                        <Badge className="ml-auto text-[10px] font-heading bg-primary/10 text-primary border border-primary/20 px-2">
+                        <Badge className="ml-auto text-[0.625rem] font-heading bg-primary/10 text-primary border border-primary/20 px-2">
                           Editing
                         </Badge>
                       </div>
@@ -379,7 +379,7 @@ export default function ApiIntegration() {
                         >
                           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                             <div className="space-y-1.5">
-                              <Label className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                              <Label className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">
                                 API Name
                               </Label>
                               <Input className="font-body" {...registerEditApi("name")} />
@@ -388,7 +388,7 @@ export default function ApiIntegration() {
                               )}
                             </div>
                             <div className="space-y-1.5">
-                              <Label className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                              <Label className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">
                                 Base URL
                               </Label>
                               <Input className="font-body" {...registerEditApi("baseUrl")} />
@@ -397,7 +397,7 @@ export default function ApiIntegration() {
                               )}
                             </div>
                             <div className="space-y-1.5">
-                              <Label className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                              <Label className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">
                                 API Key
                               </Label>
                               <Input
@@ -414,7 +414,7 @@ export default function ApiIntegration() {
                             <Button
                               type="submit"
                               disabled={isSaving}
-                              className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
+                              className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
                             >
                               {isSaving && <Loader2 size={14} className="animate-spin" />}
                               Save Changes
@@ -448,7 +448,7 @@ export default function ApiIntegration() {
                           </code>
                           <Badge
                             variant={api.status === "active" ? "default" : "secondary"}
-                            className="text-[10px] font-heading uppercase tracking-wide px-2 py-0.5"
+                            className="text-[0.625rem] font-heading uppercase tracking-wide px-2 py-0.5"
                           >
                             {api.status}
                           </Badge>
@@ -458,7 +458,7 @@ export default function ApiIntegration() {
                         <button
                           onClick={() => toggleStatus(api.id)}
                           disabled={isSaving}
-                          className="text-[11px] font-body text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                          className="text-[0.6875rem] font-body text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                         >
                           Toggle status
                         </button>

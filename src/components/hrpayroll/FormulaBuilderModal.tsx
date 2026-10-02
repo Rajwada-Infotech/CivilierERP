@@ -54,7 +54,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
 
         <div className="space-y-4">
           <div>
-            <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
               Formula
             </label>
             <textarea
@@ -64,13 +64,13 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
               className="w-full px-3 py-2 rounded-lg text-sm font-mono bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
               placeholder="e.g. BASIC * 40 / 100"
             />
-            <p className="text-[11px] text-muted-foreground mt-1">
+            <p className="text-[0.6875rem] text-muted-foreground mt-1">
               Click variables and operators below, or type/edit directly.
             </p>
           </div>
 
           <div>
-            <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
               Operators
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -83,7 +83,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
               Salary Heads in this structure
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -99,7 +99,7 @@ export const FormulaBuilderModal: React.FC<FormulaBuilderModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
               Reserved Variables
             </label>
             <div className="flex flex-wrap gap-1.5">

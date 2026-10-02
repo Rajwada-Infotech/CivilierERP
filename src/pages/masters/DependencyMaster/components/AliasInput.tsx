@@ -14,7 +14,7 @@ export function AliasInput({ active, value, onChange, resolvedPath }: Props) {
   return (
     <div className={`rounded-xl border p-4 transition-opacity ${active ? "border-border" : "border-dashed border-border/60 opacity-50"}`}>
       <div className="flex flex-col gap-1 mb-2">
-        <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+        <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
           <RouteIcon size={9} /> Resolved Path
         </span>
         <span className="text-xs font-mono text-foreground/80 truncate">
@@ -22,7 +22,7 @@ export function AliasInput({ active, value, onChange, resolvedPath }: Props) {
         </span>
       </div>
       <div className="flex flex-col gap-0.5">
-        <label className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+        <label className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
           <Tag size={9} /> Alias <span className="text-destructive">*</span>
         </label>
         <input

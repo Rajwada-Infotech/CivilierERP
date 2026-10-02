@@ -123,7 +123,7 @@ export function LogoFull({ className }: { className?: string }) {
           CivilierERP
         </span>
         <span
-          className="text-[10px] text-emerald-500/80 font-mono tracking-wider select-none tabular-nums"
+          className="text-[0.625rem] text-emerald-500/80 font-mono tracking-wider select-none tabular-nums"
           title={tooltip}
           aria-label={tooltip}
         >

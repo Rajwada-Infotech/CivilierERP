@@ -106,7 +106,7 @@ export function ProfileShell({
                   <span className="text-sm font-heading font-bold text-foreground leading-none">
                     {s.value}
                   </span>
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground mt-1">
+                  <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground mt-1">
                     {s.label}
                   </span>
                 </div>
@@ -175,7 +175,7 @@ export function ProfileSection({
               {title}
             </h2>
             {subtitle && (
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 {subtitle}
               </p>
             )}
@@ -220,7 +220,7 @@ interface ProfileFieldProps {
 export function ProfileField({ label, value, mono }: ProfileFieldProps) {
   return (
     <div className="space-y-1">
-      <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+      <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
         {label}
       </p>
       <p
@@ -281,7 +281,7 @@ export function PasswordForm({
     <div className="space-y-3 max-w-md">
       {(["current", "next", "confirm"] as const).map((field) => (
         <div key={field}>
-          <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
+          <label className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
             {field === "current"
               ? "Current Password"
               : field === "next"
@@ -333,10 +333,10 @@ export function PasswordForm({
         </div>
       ))}
       {pwMismatch && (
-        <p className="text-[11px] text-destructive">Passwords do not match</p>
+        <p className="text-[0.6875rem] text-destructive">Passwords do not match</p>
       )}
       {pwMatch && (
-        <p className="text-[11px] text-emerald-600 flex items-center gap-1">
+        <p className="text-[0.6875rem] text-emerald-600 flex items-center gap-1">
           <svg
             width="11"
             height="11"
@@ -354,7 +354,7 @@ export function PasswordForm({
         <button
           onClick={onSubmit}
           disabled={!pw.current || !pwMatch || isPending}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg btn-module text-white text-sm font-semibold disabled:opacity-50 transition-all"
         >
           {isPending ? (
             <svg

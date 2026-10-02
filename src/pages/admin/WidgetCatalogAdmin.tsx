@@ -170,7 +170,7 @@ function WidgetForm({
         </Button>
         <Button
           size="sm"
-          className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90"
+          className="btn-module shadow-sm text-white hover:opacity-90"
           onClick={() => onSubmit(form)}
           disabled={loading || !form.key || !form.label || !form.iconKey || !form.category}
         >
@@ -262,7 +262,7 @@ export default function WidgetCatalogAdmin() {
               Refresh
             </Button>
             {rights.canCreate && (
-              <Button size="sm" className="h-8 text-xs gap-1 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90" onClick={() => setAddOpen(true)}>
+              <Button size="sm" className="h-8 text-xs gap-1 btn-module shadow-sm text-white hover:opacity-90" onClick={() => setAddOpen(true)}>
                 <Plus size={12} /> Add widget
               </Button>
             )}
@@ -331,16 +331,16 @@ export default function WidgetCatalogAdmin() {
                 <TableBody>
                   {visible.map((w) => (
                     <TableRow key={w.key} className="text-xs">
-                      <TableCell className="font-mono text-[11px]">{w.key}</TableCell>
+                      <TableCell className="font-mono text-[0.6875rem]">{w.key}</TableCell>
                       <TableCell className="font-medium">{w.label}</TableCell>
-                      <TableCell className="text-muted-foreground font-mono text-[11px]">{w.iconKey}</TableCell>
+                      <TableCell className="text-muted-foreground font-mono text-[0.6875rem]">{w.iconKey}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px]">{w.category}</Badge>
+                        <Badge variant="outline" className="text-[0.625rem]">{w.category}</Badge>
                       </TableCell>
                       <TableCell className="text-center text-muted-foreground">{w.sortOrder}</TableCell>
                       <TableCell className="text-center">
                         <Badge
-                          className={`text-[10px] ${
+                          className={`text-[0.625rem] ${
                             w.isActive
                               ? "bg-green-500/10 text-green-700 border-green-500/30"
                               : "bg-muted/50 text-muted-foreground border-border"

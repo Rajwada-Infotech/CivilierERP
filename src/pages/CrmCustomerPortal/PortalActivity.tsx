@@ -138,8 +138,8 @@ const PortalActivity: React.FC = () => {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium" style={{ ...serif, color: TEXT }}>{e.title}</p>
-                    {e.detail && <p className="text-[12px] mt-0.5" style={{ color: TEXT_MUTED }}>{e.detail}</p>}
-                    <p className="text-[11px] mt-1" style={{ color: TEXT_FAINT }}>{fmtDateTime(e.at)}</p>
+                    {e.detail && <p className="text-[0.75rem] mt-0.5" style={{ color: TEXT_MUTED }}>{e.detail}</p>}
+                    <p className="text-[0.6875rem] mt-1" style={{ color: TEXT_FAINT }}>{fmtDateTime(e.at)}</p>
                   </div>
                   <ChevronRight size={15} className="shrink-0 mt-1" style={{ color: TEXT_FAINT }} />
                 </button>

@@ -15,7 +15,7 @@ const fmtDate = (d: string | null) =>
 
 const SOURCE_META: Record<string, { label: string; className: string }> = {
   QC: { label: "Quality Check", className: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400" },
-  APPROVAL: { label: "Approval", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+  APPROVAL: { label: "Approval", className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400" },
 };
 
 // Every activity ever sent back for rework — via QC or an Approval
@@ -63,7 +63,7 @@ export default function Amendment() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 border-b border-border bg-muted/30">
               <span className="text-sm font-heading font-semibold text-foreground">Reworked Activities</span>
-              <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rows.length}</span>
+              <span className="text-[0.6875rem] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rows.length}</span>
               <div className="relative ml-auto w-full sm:w-72">
                 <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
@@ -77,7 +77,7 @@ export default function Amendment() {
 
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-muted/30 text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+                <thead className="bg-muted/30 text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 text-left">Activity</th>
                     <th className="px-4 py-2 text-left">Location</th>
@@ -108,7 +108,7 @@ export default function Amendment() {
                         <tr key={r.assignmentId} className="hover:bg-muted/20">
                           <td className="px-4 py-3">
                             <p className="font-medium text-foreground">{r.sequenceNo}. {r.activityName}</p>
-                            <p className="text-[11px] text-muted-foreground">{r.alias}</p>
+                            <p className="text-[0.6875rem] text-muted-foreground">{r.alias}</p>
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground max-w-[220px]">
                             {r.projectName ? `${r.projectName} > ` : ""}{r.scopePath}
@@ -124,7 +124,7 @@ export default function Amendment() {
                           </td>
                           <td className="px-4 py-3 text-xs">
                             {sourceMeta ? (
-                              <span className={`inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${sourceMeta.className}`}>
+                              <span className={`inline-flex items-center gap-1 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${sourceMeta.className}`}>
                                 {r.reworkSource === "QC" ? <ShieldCheck size={10} /> : <RotateCcw size={10} />}
                                 {sourceMeta.label}
                               </span>
@@ -143,7 +143,7 @@ export default function Amendment() {
                           </td>
                           <td className="px-4 py-3 text-xs whitespace-nowrap">
                             {currentMeta ? (
-                              <span className={`text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${currentMeta.className}`}>
+                              <span className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${currentMeta.className}`}>
                                 {currentMeta.label}
                                 {r.currentAttemptNo ? ` · #${r.currentAttemptNo}` : ""}
                               </span>

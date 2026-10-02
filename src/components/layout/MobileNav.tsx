@@ -630,12 +630,14 @@ const civilWorkDprSetupItems: SetupItem[] = [
     label: "Activity Master",
     path: "/masters/activity",
     color: "text-cyan-500",
+    pageKey: "activity-master",
   },
   {
     icon: DoorOpen,
     label: "Flat Master",
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
+    pageKey: "civilworkdpr-room-master",
   },
 ];
 
@@ -999,7 +1001,7 @@ export const MobileNav: React.FC = () => {
                 <p className="font-heading font-semibold text-xs text-foreground truncate leading-tight">
                   {currentUser?.name}
                 </p>
-                <p className="text-[11px] text-muted-foreground truncate leading-tight">
+                <p className="text-[0.6875rem] text-muted-foreground truncate leading-tight">
                   {currentUser?.email}
                 </p>
               </div>
@@ -1061,7 +1063,7 @@ export const MobileNav: React.FC = () => {
                         navigate(meta.route);
                         setOpen(false);
                       }}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg flex-shrink-0 transition-all duration-200 text-[11px] font-heading font-medium border"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg flex-shrink-0 transition-all duration-200 text-[0.6875rem] font-heading font-medium border"
                       style={
                         isActive
                           ? {
@@ -1100,7 +1102,7 @@ export const MobileNav: React.FC = () => {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className="flex-1 py-1.5 rounded-md text-[11px] font-heading font-medium transition-all text-center"
+                    className="flex-1 py-1.5 rounded-md text-[0.6875rem] font-heading font-medium transition-all text-center"
                     style={
                       activeTab === tab.id
                         ? {
@@ -1159,11 +1161,11 @@ export const MobileNav: React.FC = () => {
                   </div>
 
                   {navItems.length > 0 ? (
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
+                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
                       {isAdminPage ? "Admin" : `${activeMod.label} Module`}
                     </p>
                   ) : !activeModule && !isAdminPage ? (
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
+                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
                       Select a module above to get started
                     </p>
                   ) : null}
@@ -1273,7 +1275,7 @@ export const MobileNav: React.FC = () => {
                                       {child.label}
                                     </span>
                                     {!!child.count && (
-                                      <span className="text-[10px] bg-destructive text-destructive-foreground px-1.5 py-0.5 rounded-full font-medium">
+                                      <span className="text-[0.625rem] bg-destructive text-destructive-foreground px-1.5 py-0.5 rounded-full font-medium">
                                         {child.count}
                                       </span>
                                     )}
@@ -1350,12 +1352,14 @@ export const MobileNav: React.FC = () => {
                     <>
                       <div className="flex items-center gap-2 mb-2 px-1">
                         <Settings size={13} className="text-muted-foreground" />
-                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
+                        <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
                           {setupConfig.label} Setup
                         </p>
                       </div>
                       <div className="grid grid-cols-3 gap-1.5">
-                        {setupConfig.items.map(
+                        {setupConfig.items
+                          .filter((it) => !it.pageKey || canAccessPage(it.pageKey))
+                          .map(
                           ({ icon: Icon, label, path, color }, i) => {
                             const active = location.pathname === path;
                             return (
@@ -1383,7 +1387,7 @@ export const MobileNav: React.FC = () => {
                                 >
                                   <Icon size={15} className={color} />
                                 </div>
-                                <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
+                                <span className="text-[0.625rem] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
                                   {label.replace(/ Master$/, "")}
                                 </span>
                               </button>
@@ -1408,7 +1412,7 @@ export const MobileNav: React.FC = () => {
               {/* ── Theme tab ───────────────────────────────────────────────────── */}
               {activeTab === "theme" && (
                 <div className="px-4 pt-2">
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
                     Colour theme
                   </p>
                   <div className="grid grid-cols-1 gap-2">
@@ -1471,7 +1475,7 @@ export const MobileNav: React.FC = () => {
                           </div>
                           {isSelected && (
                             <span
-                              className="text-[10px] font-heading px-2 py-1 rounded-lg"
+                              className="text-[0.625rem] font-heading px-2 py-1 rounded-lg"
                               style={{ background: `${bg}22`, color: bg }}
                             >
                               Active

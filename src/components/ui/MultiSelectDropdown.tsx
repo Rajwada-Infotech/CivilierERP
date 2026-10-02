@@ -125,7 +125,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
 
   if (!options.length) {
     return (
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-[0.6875rem] text-muted-foreground">
         {emptyMessage ?? `No ${itemNoun}s available.`}
       </p>
     );
@@ -158,13 +158,13 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
                 {shown.map((o) => (
                   <span
                     key={o.id}
-                    className="inline-flex items-center max-w-[14rem] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/25 font-heading text-[11px]"
+                    className="inline-flex items-center max-w-[14rem] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/25 font-heading text-[0.6875rem]"
                   >
                     <span className="truncate">{o.label}</span>
                   </span>
                 ))}
                 {overflow > 0 && (
-                  <span className="text-[11px] text-muted-foreground font-heading">
+                  <span className="text-[0.6875rem] text-muted-foreground font-heading">
                     +{overflow} more
                   </span>
                 )}
@@ -208,7 +208,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         }}
       >
         {note && (
-          <p className="px-3 pt-2.5 pb-1 text-[11px] text-muted-foreground">{note}</p>
+          <p className="px-3 pt-2.5 pb-1 text-[0.6875rem] text-muted-foreground">{note}</p>
         )}
 
         <div className="relative p-2 border-b border-border">
@@ -234,7 +234,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
           ) : groupedFiltered ? (
             groupedFiltered.map(([groupName, groupOptions]) => (
               <div key={groupName}>
-                <div className="sticky top-0 z-10 px-3 py-1 text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground bg-muted/60 backdrop-blur-sm">
+                <div className="sticky top-0 z-10 px-3 py-1 text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground bg-muted/60 backdrop-blur-sm">
                   {groupName}
                 </div>
                 {groupOptions.map((o) => (
@@ -250,7 +250,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         </div>
 
         <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-border bg-muted/30">
-          <span className="text-[11px] text-muted-foreground tabular-nums">
+          <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
             {liveSelected.length} of {options.length} selected
           </span>
           <div className="flex items-center gap-1.5">
@@ -258,7 +258,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
               type="button"
               onClick={toggleAllFiltered}
               disabled={filtered.length === 0}
-              className="px-2 py-1 rounded text-[11px] font-heading text-primary hover:bg-primary/10 disabled:opacity-40 transition-colors"
+              className="px-2 py-1 rounded text-[0.6875rem] font-heading text-primary hover:bg-primary/10 disabled:opacity-40 transition-colors"
             >
               {allFilteredSelected
                 ? search
@@ -272,7 +272,7 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
               <button
                 type="button"
                 onClick={() => onChange([])}
-                className="px-2 py-1 rounded text-[11px] font-heading text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                className="px-2 py-1 rounded text-[0.6875rem] font-heading text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
               >
                 Clear
               </button>
@@ -309,7 +309,7 @@ const OptionRow: React.FC<{ option: MultiSelectOption; selected: boolean; onTogg
       {selected && <Check size={11} strokeWidth={3} />}
     </span>
     <span className="flex-1 min-w-0 truncate text-foreground">{option.label}</span>
-    {option.hint && <span className="shrink-0 text-[11px] text-muted-foreground">{option.hint}</span>}
+    {option.hint && <span className="shrink-0 text-[0.6875rem] text-muted-foreground">{option.hint}</span>}
   </button>
 );
 

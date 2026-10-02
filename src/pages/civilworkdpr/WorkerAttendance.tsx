@@ -46,6 +46,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DateInput } from "@/components/ui/date-input";
 
 export const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
@@ -106,7 +107,21 @@ export function AddWorkerDialog({
 
   const { data: contractors = [] } = useQuery({
     queryKey: ["worker-attendance-contractors"],
-    queryFn: () => fetchWithAuth("/api/account-head/options?type=C").then((r) => r.json().catch(() => [])),
+    // Never let a non-array reach the <select>'s own .map() below — the old
+    // `.then((r) => r.json().catch(() => []))` never checked r.ok, so any
+    // error response (a JSON body of {error: "..."}, not an array) parsed
+    // fine and got treated as the options list. `contractors.map` then
+    // threw during render with no local error boundary, which the route's
+    // own RouteErrorBoundary caught by replacing the whole page with
+    // ErrorPage — a near-black full-screen fallback in this app's dark
+    // theme, which is what looked like "Add Worker crashes and blacks out
+    // the screen."
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/account-head/options?type=C");
+      if (!r.ok) return [];
+      const body = await r.json().catch(() => []);
+      return Array.isArray(body) ? body : [];
+    },
     enabled: open,
     staleTime: 5 * 60 * 1000,
   });
@@ -152,7 +167,12 @@ export function AddWorkerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      {/* elevated: this dialog can be opened from inside ActivityDetailModal's
+          own z-[70] backdrop, which otherwise paints over this Dialog's
+          default z-[60] overlay+content — the dialog was still there and
+          still worked, it was just invisible under the darker overlay
+          ("blacks out the screen"). Harmless when opened standalone. */}
+      <DialogContent className="max-w-md" elevated>
         <DialogHeader>
           <DialogTitle className="font-heading text-base">Select Worker</DialogTitle>
         </DialogHeader>
@@ -191,7 +211,7 @@ export function AddWorkerDialog({
                       className="accent-cyan-600"
                     />
                     <span className="flex-1 truncate">{w.name}</span>
-                    <span className="text-[10px] text-muted-foreground">{already ? "Already added" : w.contractorName}</span>
+                    <span className="text-[0.625rem] text-muted-foreground">{already ? "Already added" : w.contractorName}</span>
                   </label>
                 );
               })
@@ -208,7 +228,7 @@ export function AddWorkerDialog({
           </button>
 
           <div className="pt-3 border-t border-border/60 space-y-2">
-            <p className="text-[10px] font-heading uppercase tracking-wide text-muted-foreground">Worker not listed? Create new</p>
+            <p className="text-[0.625rem] font-heading uppercase tracking-wide text-muted-foreground">Worker not listed? Create new</p>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -233,7 +253,7 @@ export function AddWorkerDialog({
                 inputMode="numeric"
                 className={inputCls}
               />
-              <p className="text-[10px] text-muted-foreground mt-1">
+              <p className="text-[0.625rem] text-muted-foreground mt-1">
                 Used to recognize this worker if they're re-added later — the record itself is auto-removed after 4 months with no attendance.
               </p>
             </div>
@@ -313,15 +333,15 @@ function WorkerHistoryDialog({
           <div className="grid grid-cols-3 gap-2 text-center">
             <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 py-2">
               <p className="text-lg font-semibold text-emerald-700 dark:text-emerald-400">{counts.P}</p>
-              <p className="text-[10px] text-muted-foreground">Present</p>
+              <p className="text-[0.625rem] text-muted-foreground">Present</p>
             </div>
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 py-2">
               <p className="text-lg font-semibold text-red-700 dark:text-red-400">{counts.A}</p>
-              <p className="text-[10px] text-muted-foreground">Absent</p>
+              <p className="text-[0.625rem] text-muted-foreground">Absent</p>
             </div>
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 py-2">
+            <div className="rounded-lg border border-amber-500/30 bg-[#ffe2021a] py-2">
               <p className="text-lg font-semibold text-amber-700 dark:text-amber-400">{counts.H}</p>
-              <p className="text-[10px] text-muted-foreground">Half Day</p>
+              <p className="text-[0.625rem] text-muted-foreground">Half Day</p>
             </div>
           </div>
 
@@ -339,10 +359,10 @@ function WorkerHistoryDialog({
                     <p className="text-xs font-medium text-foreground">
                       {new Date(d.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", weekday: "short" })}
                     </p>
-                    {d.activityLabel && <p className="text-[10px] text-muted-foreground truncate">{d.activityLabel}</p>}
-                    {d.remarks && <p className="text-[10px] text-muted-foreground truncate italic">— {d.remarks}</p>}
+                    {d.activityLabel && <p className="text-[0.625rem] text-muted-foreground truncate">{d.activityLabel}</p>}
+                    {d.remarks && <p className="text-[0.625rem] text-muted-foreground truncate italic">— {d.remarks}</p>}
                   </div>
-                  <span className={`text-[10px] font-medium px-2 py-1 rounded-full border shrink-0 ${STATUS_CLS[d.status]}`}>
+                  <span className={`text-[0.625rem] font-medium px-2 py-1 rounded-full border shrink-0 ${STATUS_CLS[d.status]}`}>
                     {STATUS_LABEL[d.status]}
                   </span>
                 </div>
@@ -403,7 +423,7 @@ export const WorkerAttendanceLogGroups: React.FC<{
               key={mode}
               type="button"
               onClick={() => setGroupBy(mode)}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md text-[0.6875rem] font-medium transition-colors ${
                 groupBy === mode ? "bg-cyan-600 text-white" : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -447,7 +467,7 @@ export const WorkerAttendanceLogGroups: React.FC<{
                   {group.sublabel && (
                     <span className="text-xs text-muted-foreground truncate">· {group.sublabel}</span>
                   )}
-                  <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                  <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
                     {group.rows.length} entr{group.rows.length === 1 ? "y" : "ies"}
                   </span>
                 </button>
@@ -458,13 +478,13 @@ export const WorkerAttendanceLogGroups: React.FC<{
                       <div key={row.id} className="flex items-center justify-between gap-3 pl-11 pr-4 sm:pr-5 py-2">
                         <div className="min-w-0">
                           <p className="text-xs text-foreground truncate">{row.workerName}</p>
-                          <p className="text-[10px] text-muted-foreground truncate">
+                          <p className="text-[0.625rem] text-muted-foreground truncate">
                             {groupBy === "date"
                               ? `${row.activityLabel}${row.projectName ? ` · ${row.projectName}` : ""}`
                               : new Date(row.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                           </p>
                         </div>
-                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${STATUS_CLS[row.status]}`}>
+                        <span className={`text-[0.625rem] font-medium px-2 py-0.5 rounded-full border shrink-0 ${STATUS_CLS[row.status]}`}>
                           {STATUS_LABEL[row.status]}
                         </span>
                       </div>
@@ -657,7 +677,7 @@ const WorkerAttendance: React.FC = () => {
         <div className="rounded-xl border border-border bg-muted/30 p-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div>
-              <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
+              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <HardHat size={11} /> Company
               </label>
               <select value={companyId} onChange={(e) => handleCompanyChange(e.target.value)} className={filterInputCls}>
@@ -668,7 +688,7 @@ const WorkerAttendance: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
+              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <Building2 size={11} /> Project
               </label>
               <select
@@ -684,7 +704,7 @@ const WorkerAttendance: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
+              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <Layers size={11} /> Floor
               </label>
               <select
@@ -700,7 +720,7 @@ const WorkerAttendance: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
+              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <ClipboardList size={11} /> Activity
               </label>
               <select
@@ -716,10 +736,10 @@ const WorkerAttendance: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
+              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
                 <CalendarDays size={11} /> Date
               </label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={filterInputCls} />
+              <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={filterInputCls} />
             </div>
           </div>
 
@@ -742,7 +762,7 @@ const WorkerAttendance: React.FC = () => {
               <ListChecks size={15} className="text-muted-foreground shrink-0" />
               <div className="min-w-0">
                 <p className="text-sm font-heading font-semibold text-foreground">Recent Attendance Log</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                   Select a Company, Project and Activity above to mark attendance — meanwhile, here's what's already been recorded.
                 </p>
               </div>
@@ -768,7 +788,7 @@ const WorkerAttendance: React.FC = () => {
                 )}
                 <div className="min-w-0">
                   <p className="text-sm font-heading font-semibold text-foreground truncate">{selectedActivity?.label ?? "—"}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                     {attendanceRows.length} Worker{attendanceRows.length === 1 ? "" : "s"} Allocated
                   </p>
                 </div>
@@ -797,7 +817,7 @@ const WorkerAttendance: React.FC = () => {
                     <div key={row.workerId} className="flex items-center justify-between gap-3 px-4 sm:px-5 py-2.5">
                       <div className="min-w-0">
                         <p className="text-sm text-foreground truncate">{row.workerName}</p>
-                        <p className="text-[10px] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
+                        <p className="text-[0.625rem] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <select

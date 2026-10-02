@@ -231,7 +231,7 @@ export default function SupplierLogin() {
             <div className="w-9 h-9 rounded-full bg-emerald-400/20 flex items-center justify-center text-sm font-bold text-emerald-300">RG</div>
             <div>
               <p className="text-xs font-semibold text-white">"Reduced our quotation time by 60%"</p>
-              <p className="text-[10px] text-white/40 mt-0.5">Rajwada Group · Procurement Head</p>
+              <p className="text-[0.625rem] text-white/40 mt-0.5">Rajwada Group · Procurement Head</p>
             </div>
           </div>
         </motion.div>
@@ -344,7 +344,7 @@ export default function SupplierLogin() {
                 </motion.form>
 
                 <div className="mt-5 text-center">
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[0.6875rem] text-slate-400">
                     Not a supplier?{" "}
                     <button onClick={() => navigate("/login")} className="text-emerald-600 font-medium hover:text-emerald-700 transition-colors">
                       Go to main login

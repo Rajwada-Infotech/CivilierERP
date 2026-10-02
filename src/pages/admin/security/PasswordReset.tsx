@@ -145,9 +145,9 @@ function ResetDialog({
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
-              <p className="text-[11px] text-muted-foreground truncate">{user?.email}</p>
+              <p className="text-[0.6875rem] text-muted-foreground truncate">{user?.email}</p>
               {user?.role && (
-                <span className={`inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${getRoleStyle(user.role).bg} ${getRoleStyle(user.role).text} ${getRoleStyle(user.role).border}`}>
+                <span className={`inline-flex items-center mt-1 px-1.5 py-0.5 rounded text-[0.625rem] font-medium border ${getRoleStyle(user.role).bg} ${getRoleStyle(user.role).text} ${getRoleStyle(user.role).border}`}>
                   {roleLabel(user.role)}
                 </span>
               )}
@@ -160,7 +160,7 @@ function ResetDialog({
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground">Set new password</p>
-              <p className="text-[11px] text-muted-foreground">Must be at least 6 characters</p>
+              <p className="text-[0.6875rem] text-muted-foreground">Must be at least 6 characters</p>
             </div>
           </div>
         </div>
@@ -169,7 +169,7 @@ function ResetDialog({
         <div className="px-6 py-5 space-y-4">
           {/* New Password */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
               New Password
             </label>
             <div className="relative">
@@ -193,7 +193,7 @@ function ResetDialog({
             {/* Live length hint — shows as soon as they've typed something
                 too short, instead of only failing silently on submit. */}
             {newPassword && newPassword.length < 6 && (
-              <p className="flex items-center gap-1.5 text-[11px] font-medium text-amber-500">
+              <p className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-amber-500">
                 <AlertCircle size={11} />
                 {6 - newPassword.length} more character{6 - newPassword.length === 1 ? "" : "s"} needed
               </p>
@@ -210,7 +210,7 @@ function ResetDialog({
                     />
                   ))}
                 </div>
-                <p className={`text-[10px] font-medium ${
+                <p className={`text-[0.625rem] font-medium ${
                   strength.score <= 1 ? "text-red-500" :
                   strength.score <= 2 ? "text-amber-500" :
                   strength.score <= 3 ? "text-blue-500" : "text-emerald-500"
@@ -223,7 +223,7 @@ function ResetDialog({
 
           {/* Confirm Password */}
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
               Confirm Password
             </label>
             <div className="relative">
@@ -252,7 +252,7 @@ function ResetDialog({
 
             {/* Match indicator */}
             {confirmPassword && (
-              <div className={`flex items-center gap-1.5 text-[11px] font-medium ${matches ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+              <div className={`flex items-center gap-1.5 text-[0.6875rem] font-medium ${matches ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
                 {matches ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
                 {matches ? "Passwords match" : "Passwords do not match"}
               </div>
@@ -272,8 +272,8 @@ function ResetDialog({
           <button
             onClick={handleReset}
             disabled={!canSubmit}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-heading font-semibold rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${
-              canSubmit && !loading ? "animate-breathe" : ""
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-heading font-semibold rounded-xl btn-module shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${
+ canSubmit && !loading ? "animate-breathe" : ""
             }`}
           >
             {loading ? (
@@ -313,7 +313,7 @@ function UserCard({
           <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${grad} flex items-center justify-center shrink-0 shadow-sm`}>
             <span className="text-sm font-bold text-white">{initials}</span>
           </div>
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 mt-0.5 ${
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border shrink-0 mt-0.5 ${
             user.isActive
               ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20 dark:text-emerald-400"
               : "bg-red-500/10 text-red-500 border-red-400/20"
@@ -326,11 +326,11 @@ function UserCard({
         {/* Name / email */}
         <div className="mb-3">
           <p className="font-semibold text-sm text-foreground truncate leading-tight">{user.name}</p>
-          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{user.email}</p>
+          <p className="text-[0.6875rem] text-muted-foreground truncate mt-0.5">{user.email}</p>
         </div>
 
         {/* Role badge */}
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border mb-4 ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}>
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[0.625rem] font-medium border mb-4 ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}>
           {roleLabel(user.role)}
         </span>
 
@@ -421,7 +421,7 @@ export default function PasswordReset() {
       >
 
         {/* ── Stats row ── */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {[
             { icon: Users,     label: "Total Users",    value: allUsers.length,  color: "text-blue-500",    bg: "bg-blue-500/10"    },
             { icon: UserCheck, label: "Active",         value: activeCount,      color: "text-emerald-500", bg: "bg-emerald-500/10" },
@@ -433,7 +433,7 @@ export default function PasswordReset() {
               </div>
               <div>
                 <p className="text-lg font-bold text-foreground leading-none">{value}</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{label}</p>
               </div>
             </div>
           ))}
@@ -498,7 +498,7 @@ export default function PasswordReset() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))]">
               {filtered.map((user) => (
                 <UserCard
                   key={user.id}

@@ -30,7 +30,7 @@ function DailyToggle({ on, onChange, disabled }: { on: boolean; onChange: (v: bo
       disabled={disabled}
       onClick={() => onChange(!on)}
       title={on ? "Daily update: ON — Work Allocation shows a calendar and camera" : "Daily update: OFF"}
-      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] font-semibold transition-colors disabled:opacity-50 ${
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[0.625rem] font-semibold transition-colors disabled:opacity-50 ${
         on
           ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
           : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -122,12 +122,12 @@ function CheckpointRow({
       <span className="flex items-center gap-2 text-sm text-foreground">
         {checkpoint.fieldName}
         {checkpoint.minWaitDays != null && checkpoint.minWaitDays > 0 && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+          <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full">
             <Timer size={9} /> {checkpoint.minWaitDays}d wait
           </span>
         )}
         {checkpoint.isDaily && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+          <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
             <CalendarDays size={9} /> Daily
           </span>
         )}
@@ -205,7 +205,7 @@ export default function WorkCheckpointMaster() {
                   <ListChecks size={14} className="text-cyan-600 dark:text-cyan-400" />
                   Checkpoints
                 </span>
-                <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+                <span className="text-[0.625rem] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
                   {isLoading ? "…" : checkpoints.length}
                 </span>
               </div>
@@ -249,7 +249,7 @@ export default function WorkCheckpointMaster() {
                           type="button"
                           onClick={handleAdd}
                           disabled={adding || !newField.trim()}
-                          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 disabled:opacity-50 transition-all"
+                          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:opacity-90 disabled:opacity-50 transition-all"
                         >
                           <Plus size={13} /> Add
                         </button>

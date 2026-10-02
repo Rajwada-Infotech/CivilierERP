@@ -125,7 +125,7 @@ const CrmMilestoneMaster: React.FC = () => {
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => { resetForm(); setDialogOpen(true); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
           <Plus size={14} /> New Milestone
         </button>
         </div>
@@ -171,7 +171,7 @@ const CrmMilestoneMaster: React.FC = () => {
             <div className={`flex items-center justify-between rounded-lg border border-border px-3 py-2 ${locked ? "opacity-70" : ""}`}>
               <div>
                 <div className="text-xs font-medium text-foreground">Status</div>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   {isActive ? "Active — offered in the payment plan step picker." : "Inactive — hidden from the picker, kept for history."}
                 </p>
               </div>
@@ -194,7 +194,7 @@ const CrmMilestoneMaster: React.FC = () => {
               <>
                 <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                 <button onClick={handleSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                   {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
                 </button>
               </>

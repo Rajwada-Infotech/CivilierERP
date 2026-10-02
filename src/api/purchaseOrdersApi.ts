@@ -192,9 +192,10 @@ export const getPurchaseOrders = (
     poType?: string;
     fyId?: number;
     includeShortClosed?: boolean;
+    projectId?: number;
   } = {},
 ) => {
-  const { page = 1, limit = 10, poType, fyId, includeShortClosed } = query;
+  const { page = 1, limit = 10, poType, fyId, includeShortClosed, projectId } = query;
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
@@ -202,6 +203,7 @@ export const getPurchaseOrders = (
   if (poType) params.set("poType", poType);
   if (fyId) params.set("fyId", String(fyId));
   if (includeShortClosed) params.set("includeShortClosed", "1");
+  if (projectId) params.set("projectId", String(projectId));
   return fetchWithAuth(`/purchase-orders?${params.toString()}`)
     .then((r) => handleResponse<POListResponse>(r))
     .then((r: any): POListResponse => {

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { DateInput } from "@/components/ui/date-input";
 
 const API = "/api/crm/payments";
 
@@ -95,17 +96,17 @@ const modeColor: Record<string, string> = {
 // Ties each row's left accent bar + the KPI tiles to one shared palette, so
 // the ledger and the stat cards read as the same system at a glance.
 const statusAccent: Record<DepositStatus, string> = {
-  Unapplied: "#d97706",
+  Unapplied: "#0284c7",
   PartiallyApplied: "#2563eb",
   Applied: "#059669",
 };
 
 function StatusChip({ s }: { s: DepositStatus }) {
   if (s === "Applied")
-    return <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-700 dark:text-emerald-300 whitespace-nowrap"><CheckCircle2 size={9} />Applied</span>;
+    return <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-700 dark:text-emerald-300 whitespace-nowrap"><CheckCircle2 size={9} />Applied</span>;
   if (s === "PartiallyApplied")
-    return <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/30 dark:border-blue-700 dark:text-blue-300 whitespace-nowrap"><SplitSquareHorizontal size={9} />Partial</span>;
-  return <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/30 dark:border-amber-700 dark:text-amber-300 whitespace-nowrap"><Clock size={9} />Unapplied</span>;
+    return <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded-full border bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/30 dark:border-blue-700 dark:text-blue-300 whitespace-nowrap"><SplitSquareHorizontal size={9} />Partial</span>;
+  return <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded-full border bg-sky-50 border-sky-200 text-sky-700 dark:bg-sky-950/30 dark:border-sky-700 dark:text-sky-300 whitespace-nowrap"><Clock size={9} />Unapplied</span>;
 }
 
 // ── Adjust Dialog ─────────────────────────────────────────────────────────────
@@ -177,21 +178,21 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
         <div className="space-y-3 pt-1">
 
           {/* Deposit strip */}
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
             {[
               { label: "Deposited", val: formatINR(deposit.Amount), cls: "border-border bg-muted/20 text-foreground" },
               { label: "Applied",   val: formatINR(deposit.AppliedAmount), cls: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400" },
               { label: "Available", val: formatINR(deposit.AvailableBalance), cls: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/20 dark:text-blue-400" },
             ].map(({ label, val, cls }) => (
               <div key={label} className={`rounded-lg border px-2.5 py-1.5 text-center ${cls}`}>
-                <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">{label}</div>
-                <div className="font-bold text-[13px]">{val}</div>
+                <div className="text-[0.5625rem] text-muted-foreground uppercase tracking-wide mb-0.5">{label}</div>
+                <div className="font-bold text-[0.8125rem]">{val}</div>
               </div>
             ))}
           </div>
 
           {/* Booking context */}
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground border border-border rounded-lg px-2.5 py-1.5 bg-muted/10">
+          <div className="flex flex-wrap items-center gap-2 text-[0.6875rem] text-muted-foreground border border-border rounded-lg px-2.5 py-1.5 bg-muted/10">
             <Building2 size={11} />
             <span className="font-medium text-foreground">{deposit.ApplicantName}</span>
             <span>·</span>
@@ -202,7 +203,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
 
           {notFullyPaid && (
             <div className="rounded-lg border border-border bg-muted/10 px-2.5 py-2">
-              <div className="flex items-center justify-between text-[11px] mb-1.5">
+              <div className="flex items-center justify-between text-[0.6875rem] mb-1.5">
                 <span className="font-semibold text-foreground flex items-center gap-1.5">
                   <Wallet size={11} className="text-blue-600 dark:text-blue-400" /> Held on-account — auto-settles once fully funded
                 </span>
@@ -213,7 +214,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
               <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                 <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (bookingOnAccountReceived / bookingGrandTotal) * 100)}%` }} />
               </div>
-              <div className="text-[11px] text-muted-foreground mt-1.5">
+              <div className="text-[0.6875rem] text-muted-foreground mt-1.5">
                 No action needed — ₹{fullPaymentShortfall.toLocaleString("en-IN")} more coming in on-account will automatically settle every eligible milestone, in order. Manual Apply below is a fallback only.
               </div>
             </div>
@@ -245,19 +246,19 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
                       {sel && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-primary" />}
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[9px] text-muted-foreground font-mono">#{m.MilestoneNo}</span>
-                          <span className="text-[13px] font-medium">{m.MilestoneName}</span>
-                          {overdue && <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-700">Overdue</span>}
+                          <span className="text-[0.5625rem] text-muted-foreground font-mono">#{m.MilestoneNo}</span>
+                          <span className="text-[0.8125rem] font-medium">{m.MilestoneName}</span>
+                          {overdue && <span className="text-[0.5625rem] px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-700">Overdue</span>}
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="text-[13px] font-semibold text-amber-600">{formatINR(due)} due</div>
-                          <div className="text-[9px] text-muted-foreground">of {formatINR(m.AmountDue)}</div>
+                          <div className="text-[0.8125rem] font-semibold text-amber-600">{formatINR(due)} due</div>
+                          <div className="text-[0.5625rem] text-muted-foreground">of {formatINR(m.AmountDue)}</div>
                         </div>
                       </div>
                       <div className="h-1 rounded-full bg-muted overflow-hidden">
                         <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, pct)}%` }} />
                       </div>
-                      {m.DueDate && <div className="text-[9px] text-muted-foreground mt-1 flex items-center gap-1"><CalendarDays size={9} />Due {fd(m.DueDate)}</div>}
+                      {m.DueDate && <div className="text-[0.5625rem] text-muted-foreground mt-1 flex items-center gap-1"><CalendarDays size={9} />Due {fd(m.DueDate)}</div>}
                     </button>
                   );
                 })}
@@ -269,7 +270,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
           {selId !== null && (
             <div>
               <label className="text-xs font-medium block mb-1.5">
-                Amount to Apply <span className="text-muted-foreground font-normal text-[11px]">(blank = apply full {formatINR(maxAmt)})</span>
+                Amount to Apply <span className="text-muted-foreground font-normal text-[0.6875rem]">(blank = apply full {formatINR(maxAmt)})</span>
               </label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
@@ -290,7 +291,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
             ) : (
               <button onClick={apply} disabled={selId == null || busy}
                 title="This booking is fully funded and should auto-settle — use this only as a manual fallback"
-                className="px-3.5 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
+                className="px-3.5 py-1.5 text-sm rounded-lg btn-module text-white hover:shadow-lg disabled:opacity-50 flex items-center gap-2">
                 {busy ? <><Loader2 size={13} className="animate-spin" />Applying…</> : <><ArrowRightLeft size={13} />Apply Manually</>}
               </button>
             )}
@@ -323,7 +324,7 @@ function MilestoneSubTable({ bookingId, deposit }: { bookingId: number; deposit:
   return (
     <div className="px-4 py-3 space-y-2.5">
       {/* Deposit meta row */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.6875rem] text-muted-foreground">
         {deposit.PaymentMode && <span className="flex items-center gap-1"><CreditCard size={10} />{deposit.PaymentMode}</span>}
         {deposit.TransactionRef && <span className="flex items-center gap-1"><ReceiptText size={10} />Ref: <span className="font-mono text-foreground">{deposit.TransactionRef}</span></span>}
         {deposit.DepositBankName && <span className="flex items-center gap-1"><Building2 size={10} />{deposit.DepositBankName}</span>}
@@ -334,7 +335,7 @@ function MilestoneSubTable({ bookingId, deposit }: { bookingId: number; deposit:
       {/* Payment schedule — horizontal card strip */}
       {ms.length > 0 && (
         <>
-          <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+          <div className="text-[0.625rem] uppercase tracking-wide font-semibold text-muted-foreground">
             Payment Schedule — {deposit.BookingNo}
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-0.5 px-0.5">
@@ -349,27 +350,27 @@ function MilestoneSubTable({ bookingId, deposit }: { bookingId: number; deposit:
                 <div key={m.Id}
                   className="shrink-0 w-[168px] rounded-lg border border-border bg-card px-2.5 py-2">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[9px] font-mono text-muted-foreground">#{m.MilestoneNo}</span>
+                    <span className="text-[0.5625rem] font-mono text-muted-foreground">#{m.MilestoneNo}</span>
                     {m.Status === "Paid"
-                      ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">Paid</span>
+                      ? <span className="text-[0.5625rem] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">Paid</span>
                       : m.Status === "Waived"
-                      ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Waived</span>
+                      ? <span className="text-[0.5625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Waived</span>
                       : virtuallyCovered
-                      ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" title="Money is on-account for this milestone; auto-settles once fully funded">Paid (on-account)</span>
+                      ? <span className="text-[0.5625rem] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" title="Money is on-account for this milestone; auto-settles once fully funded">Paid (on-account)</span>
                       : overdue
-                      ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">Overdue</span>
-                      : <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">Pending</span>}
+                      ? <span className="text-[0.5625rem] px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">Overdue</span>
+                      : <span className="text-[0.5625rem] px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">Pending</span>}
                   </div>
-                  <div className="text-[12px] font-medium truncate mb-1.5" title={m.MilestoneName}>{m.MilestoneName}</div>
+                  <div className="text-[0.75rem] font-medium truncate mb-1.5" title={m.MilestoneName}>{m.MilestoneName}</div>
                   <div className="h-1 rounded-full bg-muted overflow-hidden mb-1">
                     <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }} />
                   </div>
-                  <div className="flex justify-between text-[10px] font-mono">
+                  <div className="flex justify-between text-[0.625rem] font-mono">
                     <span className="text-emerald-600 dark:text-emerald-400">{formatINR(paid)}</span>
-                    <span className={bal > 0 ? "text-amber-600 font-semibold" : "text-muted-foreground"}>{bal > 0 ? formatINR(bal) : "—"}</span>
+                    <span className={bal > 0 ? "text-sky-600 font-semibold" : "text-muted-foreground"}>{bal > 0 ? formatINR(bal) : "—"}</span>
                   </div>
                   {m.DueDate && (
-                    <div className={`text-[9px] mt-1 flex items-center gap-1 ${overdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>
+                    <div className={`text-[0.5625rem] mt-1 flex items-center gap-1 ${overdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>
                       <CalendarDays size={9} />{fd(m.DueDate)}
                     </div>
                   )}
@@ -378,11 +379,11 @@ function MilestoneSubTable({ bookingId, deposit }: { bookingId: number; deposit:
             })}
           </div>
           {s && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] pt-0.5 border-t border-border/60 pt-2">
-              <span className="text-muted-foreground uppercase tracking-wide text-[9px] font-semibold">Total</span>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.6875rem] pt-0.5 border-t border-border/60 pt-2">
+              <span className="text-muted-foreground uppercase tracking-wide text-[0.5625rem] font-semibold">Total</span>
               <span className="font-mono font-bold">{formatINR(s.totalDue)} due</span>
               <span className="font-mono font-bold text-emerald-600">{formatINR(s.totalPaid)} paid</span>
-              {s.balance > 0 && <span className="font-mono font-bold text-amber-600">{formatINR(s.balance)} balance</span>}
+              {s.balance > 0 && <span className="font-mono font-bold text-sky-600">{formatINR(s.balance)} balance</span>}
             </div>
           )}
         </>
@@ -505,7 +506,7 @@ export default function CrmOnAccount() {
         {summary && (
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
             <CrmGlassCard
-              label="Total Received" icon={BadgeIndianRupee} accentColor="#f59e0b"
+              label="Total Received" icon={BadgeIndianRupee} accentColor="#0ea5e9"
               value={formatINR(summary.TotalReceived)} sub={`${summary.TotalCount} deposits`}
             />
             <CrmGlassCard
@@ -557,15 +558,15 @@ export default function CrmOnAccount() {
               {["Cash","Cheque","NEFT","RTGS","UPI","IMPS","Online"].map((m) => <option key={m}>{m}</option>)}
             </select>
 
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+            <DateInput value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
               className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+            <DateInput value={dateTo} onChange={(e) => setDateTo(e.target.value)}
               className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
 
             <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
 
             <button onClick={runSearch}
-              className="h-8 flex items-center gap-1.5 px-3 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90">
+              className="h-8 flex items-center gap-1.5 px-3 rounded-lg btn-module text-white text-sm hover:shadow-lg ">
               <Filter size={12} />Search
             </button>
             {hasFilters && (
@@ -585,15 +586,15 @@ export default function CrmOnAccount() {
               <thead className="bg-muted/40 border-b border-border sticky top-0 z-10 backdrop-blur">
                 <tr>
                   <th className="w-6" />
-                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Date</th>
-                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Receipt / Ref</th>
-                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Customer & Booking</th>
-                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Mode</th>
-                  <th className="px-2.5 py-2 text-right text-[10px] uppercase tracking-wide font-semibold text-emerald-600">CR Deposited</th>
-                  <th className="px-2.5 py-2 text-right text-[10px] uppercase tracking-wide font-semibold text-amber-600">DR Applied</th>
-                  <th className="px-2.5 py-2 text-right text-[10px] uppercase tracking-wide font-semibold text-blue-600">Balance</th>
-                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Status</th>
-                  <th className="px-2.5 py-2 text-center text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Action</th>
+                  <th className="px-2.5 py-2 text-left text-[0.625rem] uppercase tracking-wide font-semibold text-muted-foreground">Date</th>
+                  <th className="px-2.5 py-2 text-left text-[0.625rem] uppercase tracking-wide font-semibold text-muted-foreground">Receipt / Ref</th>
+                  <th className="px-2.5 py-2 text-left text-[0.625rem] uppercase tracking-wide font-semibold text-muted-foreground">Customer & Booking</th>
+                  <th className="px-2.5 py-2 text-left text-[0.625rem] uppercase tracking-wide font-semibold text-muted-foreground">Mode</th>
+                  <th className="px-2.5 py-2 text-right text-[0.625rem] uppercase tracking-wide font-semibold text-emerald-600">CR Deposited</th>
+                  <th className="px-2.5 py-2 text-right text-[0.625rem] uppercase tracking-wide font-semibold text-sky-600">DR Applied</th>
+                  <th className="px-2.5 py-2 text-right text-[0.625rem] uppercase tracking-wide font-semibold text-blue-600">Balance</th>
+                  <th className="px-2.5 py-2 text-left text-[0.625rem] uppercase tracking-wide font-semibold text-muted-foreground">Status</th>
+                  <th className="px-2.5 py-2 text-center text-[0.625rem] uppercase tracking-wide font-semibold text-muted-foreground">Action</th>
                 </tr>
               </thead>
 
@@ -626,24 +627,24 @@ export default function CrmOnAccount() {
 
                         {/* Date */}
                         <td className="px-2.5 py-2 whitespace-nowrap">
-                          <div className="text-[12px] font-mono">{fd(d.ReceivedDate)}</div>
-                          <div className="text-[9px] text-muted-foreground">{new Date(d.ReceivedDate).toLocaleDateString("en-IN", { weekday: "short" })}</div>
+                          <div className="text-[0.75rem] font-mono">{fd(d.ReceivedDate)}</div>
+                          <div className="text-[0.5625rem] text-muted-foreground">{new Date(d.ReceivedDate).toLocaleDateString("en-IN", { weekday: "short" })}</div>
                         </td>
 
                         {/* Receipt */}
                         <td className="px-2.5 py-2">
-                          <div className="font-mono text-[12px] font-semibold text-primary">
+                          <div className="font-mono text-[0.75rem] font-semibold text-primary">
                             {d.ReceiptNo || <span className="text-muted-foreground font-normal italic">Pending</span>}
                           </div>
                           {d.TransactionRef && (
-                            <div className="text-[9px] text-muted-foreground font-mono mt-0.5 truncate max-w-[130px]">{d.TransactionRef}</div>
+                            <div className="text-[0.5625rem] text-muted-foreground font-mono mt-0.5 truncate max-w-[130px]">{d.TransactionRef}</div>
                           )}
                         </td>
 
                         {/* Customer & Booking */}
                         <td className="px-2.5 py-2 max-w-[220px]">
-                          <div className="font-medium text-[13px] truncate">{d.ApplicantName}</div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                          <div className="font-medium text-[0.8125rem] truncate">{d.ApplicantName}</div>
+                          <div className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">
                             <span className="font-mono">{d.BookingNo}</span>
                             {d.ProjectName && <> · {d.ProjectName}</>}
                             {d.UnitNo && <> · {d.UnitNo}</>}
@@ -653,13 +654,13 @@ export default function CrmOnAccount() {
                         {/* Mode */}
                         <td className="px-2.5 py-2">
                           {d.PaymentMode
-                            ? <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${cls}`}>{d.PaymentMode}</span>
+                            ? <span className={`text-[0.625rem] font-medium px-2 py-0.5 rounded-full ${cls}`}>{d.PaymentMode}</span>
                             : <span className="text-muted-foreground text-xs">—</span>}
                         </td>
 
                         {/* CR */}
                         <td className="px-2.5 py-2 text-right">
-                          <div className="font-semibold text-[13px] text-emerald-700 dark:text-emerald-400 font-mono">{formatINR(d.Amount)}</div>
+                          <div className="font-semibold text-[0.8125rem] text-emerald-700 dark:text-emerald-400 font-mono">{formatINR(d.Amount)}</div>
                           <div className="mt-1 h-1 w-20 ml-auto rounded-full bg-muted overflow-hidden">
                             <div className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-emerald-500" : pct > 0 ? "bg-blue-500" : "bg-muted-foreground/20"}`}
                               style={{ width: `${Math.min(100, pct)}%` }} />
@@ -667,14 +668,14 @@ export default function CrmOnAccount() {
                         </td>
 
                         {/* DR */}
-                        <td className="px-2.5 py-2 text-right font-mono text-[13px]">
+                        <td className="px-2.5 py-2 text-right font-mono text-[0.8125rem]">
                           {d.AppliedAmount > 0
-                            ? <span className="text-amber-600 dark:text-amber-400 font-semibold">{formatINR(d.AppliedAmount)}</span>
+                            ? <span className="text-sky-600 dark:text-sky-400 font-semibold">{formatINR(d.AppliedAmount)}</span>
                             : <span className="text-muted-foreground">—</span>}
                         </td>
 
                         {/* Balance */}
-                        <td className="px-2.5 py-2 text-right font-mono text-[13px]">
+                        <td className="px-2.5 py-2 text-right font-mono text-[0.8125rem]">
                           {d.AvailableBalance > 0
                             ? <span className="font-bold text-blue-700 dark:text-blue-400">{formatINR(d.AvailableBalance)}</span>
                             : <span className="text-muted-foreground">—</span>}
@@ -688,7 +689,7 @@ export default function CrmOnAccount() {
                           <div className="flex items-center justify-center gap-1.5">
                             {canEdit && d.Status !== "Applied" && (
                               <button onClick={() => setAdjusting(d)}
-                                className="text-[11px] px-2 py-1 rounded-lg border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 font-medium transition-colors whitespace-nowrap">
+                                className="text-[0.6875rem] px-2 py-1 rounded-lg border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 font-medium transition-colors whitespace-nowrap">
                                 Adjust
                               </button>
                             )}
@@ -719,12 +720,12 @@ export default function CrmOnAccount() {
               {deposits.length > 0 && (
                 <tfoot className="border-t-2 border-border bg-muted/30">
                   <tr>
-                    <td colSpan={5} className="px-2.5 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    <td colSpan={5} className="px-2.5 py-2 text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide">
                       Page Total ({deposits.length} entries)
                     </td>
-                    <td className="px-2.5 py-2 text-right font-mono font-bold text-[13px] text-emerald-700 dark:text-emerald-400">{formatINR(pageCR)}</td>
-                    <td className="px-2.5 py-2 text-right font-mono font-bold text-[13px] text-amber-600 dark:text-amber-400">{pageDR > 0 ? formatINR(pageDR) : "—"}</td>
-                    <td className="px-2.5 py-2 text-right font-mono font-bold text-[13px] text-blue-700 dark:text-blue-400">{pageBAL > 0 ? formatINR(pageBAL) : "—"}</td>
+                    <td className="px-2.5 py-2 text-right font-mono font-bold text-[0.8125rem] text-emerald-700 dark:text-emerald-400">{formatINR(pageCR)}</td>
+                    <td className="px-2.5 py-2 text-right font-mono font-bold text-[0.8125rem] text-sky-600 dark:text-sky-400">{pageDR > 0 ? formatINR(pageDR) : "—"}</td>
+                    <td className="px-2.5 py-2 text-right font-mono font-bold text-[0.8125rem] text-blue-700 dark:text-blue-400">{pageBAL > 0 ? formatINR(pageBAL) : "—"}</td>
                     <td colSpan={2} />
                   </tr>
                 </tfoot>

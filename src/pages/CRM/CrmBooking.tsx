@@ -32,6 +32,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
+import { DateInput } from "@/components/ui/date-input";
 
 const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
@@ -48,9 +49,9 @@ const TOKEN_TYPES = ["Percentage", "Amount"];
 // Shared field styling for the New Booking dialog's restructured 2-column
 // layout — same amber-focus-ring convention as the New Application wizard's
 // inputCls/labelCls (CrmApplication.tsx).
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40";
+const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-muted/30 focus:bg-background focus:outline-none focus:ring-2 focus:ring-sky-500/30";
 const inputClsDisabled = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed";
-const labelCls = "text-xs text-muted-foreground block mb-1";
+const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
 
 const statusColor: Record<string, string> = {
   Pending:   "text-orange-600 bg-orange-50 border-orange-200",
@@ -176,8 +177,8 @@ function getNextStep(b: any): NextStep {
   // HasWelcomeCall means Outcome = 'Welcomed' specifically (see crmBookings.js
   // BOOKING_SELECT) -- a logged call with any other outcome must NOT satisfy
   // this, since that's not what unblocks Agreement auto-creation either.
-  if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-amber-500 border-amber-200 bg-amber-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
-  if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
+  if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-sky-500 border-sky-200 bg-sky-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
+  if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
   // Milestone 1 (Booking Amount) must actually be Paid before Agreement prep
   // can succeed (validateAgreementPreparationPrerequisites in
   // crmWorkflowGuards.js hard-blocks on exactly this) — checked here too so
@@ -185,17 +186,17 @@ function getNextStep(b: any): NextStep {
   // booking as ineligible. No separate "already has an agreement" carve-out
   // needed: a booking that already has one necessarily cleared this already.
   if (!b.AgreementId && b.Milestone1Status !== CrmStatus.PAID && !b.Milestone1VirtuallyCovered) {
-    return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
+    return { label: "Payments", color: "text-sky-700 border-sky-200 bg-sky-50", path: `/crm/payments?bookingId=${b.Id}` };
   }
   // Agreement sub-stages: draft → senior approval → customer approval → date negotiation → date approval → executed
   if (!b.AgreementId || b.SeniorApprovalStatus !== CrmStatus.APPROVED || b.CustomerApprovalStatus !== CrmStatus.APPROVED) {
-    return { label: "Agreement", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+    return { label: "Agreement", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
   if (!b.AgreementDate) {
-    return { label: "Agreement Date", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+    return { label: "Agreement Date", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
   if (b.DateApprovalStatus !== CrmStatus.APPROVED) {
-    return { label: "Date Approval", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+    return { label: "Date Approval", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
   if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
   // Post-agreement lifecycle — mirrors GET /:id/lifecycle's own step order
@@ -204,7 +205,7 @@ function getNextStep(b: any): NextStep {
   // moment payments+agreement cleared, long before the booking's actual
   // journey (possession, sale deed, registry) had even started.
   if (!b.AgreementRegistered) {
-    return { label: "Agreement Registration", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+    return { label: "Agreement Registration", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
   if (!b.NocIssued) return { label: "NOC", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/noc?bookingId=${b.Id}` };
   if (!b.HandoverDone) return { label: "Handover", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/handover` };
@@ -567,7 +568,7 @@ const CrmBooking: React.FC = () => {
   const bookingColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 115,
       cell: (i) => (
-        <button onClick={() => openBooking(i.row.original.Id)} className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
+        <button onClick={() => openBooking(i.row.original.Id)} className="font-mono text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline">
           {i.row.original.BookingNo}
         </button>
       ) },
@@ -610,7 +611,7 @@ const CrmBooking: React.FC = () => {
           <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
             <div className="font-semibold">{fmt(grand)}</div>
             {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
-              <div className="text-[10px] text-muted-foreground">
+              <div className="text-[0.625rem] text-muted-foreground">
                 Unit {fmt(b.TotalValue)}
                 {b.UnitGstAmount > 0 && ` + Unit GST ${fmt(b.UnitGstAmount)}`}
                 {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
@@ -623,10 +624,10 @@ const CrmBooking: React.FC = () => {
                   <div className="h-full bg-emerald-500 transition-all" style={{ width: `${clearedPct}%` }} />
                   <div className="h-full bg-blue-400 transition-all" style={{ width: `${onAccPct}%` }} />
                 </div>
-                <div className="flex gap-2 text-[9px]">
+                <div className="flex gap-2 text-[0.5625rem]">
                   {cleared > 0 && <span className="text-emerald-600">✓ {fmt(cleared)}</span>}
                   {onAcc > 0 && <span className="text-blue-600">⬡ {fmt(onAcc)}</span>}
-                  {outstanding > 0 && <span className="text-amber-600">○ {fmt(outstanding)}</span>}
+                  {outstanding > 0 && <span className="text-sky-600">○ {fmt(outstanding)}</span>}
                 </div>
               </div>
             )}
@@ -642,7 +643,7 @@ const CrmBooking: React.FC = () => {
           <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
             <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[b.Status] || ""}`}>{b.Status}</span>
             {b.IsFrozen && (
-              <div className="flex items-center gap-1 text-[10px] font-medium text-red-600 dark:text-red-400">
+              <div className="flex items-center gap-1 text-[0.625rem] font-medium text-red-600 dark:text-red-400">
                 <Lock size={10} /> Frozen
               </div>
             )}
@@ -687,7 +688,7 @@ const CrmBooking: React.FC = () => {
                 <span className="text-xs text-muted-foreground">Ready for Marketing Head Approval</span>
               ) : (
                 <button onClick={() => openBooking(b.Id)}
-                  className="text-xs px-2 py-1 rounded-md border text-amber-600 border-amber-200 bg-amber-50 font-medium flex items-center gap-1">
+                  className="text-xs px-2 py-1 rounded-md border text-sky-600 border-sky-200 bg-sky-50 font-medium flex items-center gap-1">
                   Review Checklist Incomplete <ChevronRight size={12} />
                 </button>
               )
@@ -705,6 +706,8 @@ const CrmBooking: React.FC = () => {
             {/* Non-sequential utility actions — not part of the linear
                 flow, so they live in an overflow menu instead of competing
                 with the one active step. */}
+            {/* Row click opens this (see data-row-view in main.tsx) */}
+            <button type="button" data-row-view onClick={() => openBooking(b.Id)} aria-label="View details" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">
@@ -718,27 +721,27 @@ const CrmBooking: React.FC = () => {
                 {(welcomeCallReached || bankDetailsReached || agreementReached || paymentsReached) && (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-[11px] font-medium text-muted-foreground">Jump to Stage</DropdownMenuLabel>
+                    <DropdownMenuLabel className="text-[0.6875rem] font-medium text-muted-foreground">Jump to Stage</DropdownMenuLabel>
                   </>
                 )}
                 {welcomeCallReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)} className="gap-2">
-                    <Phone size={14} className="text-amber-500" /> Welcome Call
+                    <Phone size={14} className="text-sky-500" /> Welcome Call
                   </DropdownMenuItem>
                 )}
                 {bankDetailsReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)} className="gap-2">
-                    <Landmark size={14} className="text-amber-600" /> Bank Details
+                    <Landmark size={14} className="text-sky-600" /> Bank Details
                   </DropdownMenuItem>
                 )}
                 {agreementReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)} className="gap-2">
-                    <FileSignature size={14} className="text-orange-500" /> Agreement
+                    <FileSignature size={14} className="text-sky-500" /> Agreement
                   </DropdownMenuItem>
                 )}
                 {paymentsReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)} className="gap-2">
-                    <IndianRupee size={14} className="text-amber-600" /> Payments
+                    <IndianRupee size={14} className="text-sky-600" /> Payments
                   </DropdownMenuItem>
                 )}
                 {b.Status !== CrmStatus.CANCELLED && b.DeedStatus !== "Registered" && (canRequestCancellation || canEdit) && (
@@ -773,14 +776,14 @@ const CrmBooking: React.FC = () => {
 
   const glassStyle: React.CSSProperties = {
     background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    border: isDark ? "1px solid rgba(14,165,233,0.15)" : "1px solid rgba(14,165,233,0.18)",
     backdropFilter: "blur(16px) saturate(150%)",
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
     boxShadow: isDark
       ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+      : "0 4px 24px rgba(14,165,233,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
   };
-  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+  const borderColor = isDark ? "rgba(14,165,233,0.15)" : "rgba(14,165,233,0.12)";
 
   usePageRights("crm-bookings");
 
@@ -795,7 +798,7 @@ const CrmBooking: React.FC = () => {
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           {canEdit && (
             <button onClick={() => { setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); setDialogOpen(true); }}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
               <Plus size={14} /> New Booking
             </button>
           )}
@@ -812,10 +815,10 @@ const CrmBooking: React.FC = () => {
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
               placeholder="Search name, booking no, unit... (Enter to search)"
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
           </div>
           <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
-            <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-amber-500/40">
+            <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-sky-500/40">
               <SelectValue placeholder="All Statuses" />
             </SelectTrigger>
             <SelectContent>
@@ -846,7 +849,7 @@ const CrmBooking: React.FC = () => {
         <DialogContent accent="crm" className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-3">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="flex items-center gap-2 text-base font-heading font-bold">
-              <Building2 size={16} className="text-amber-500" /> New Booking
+              <Building2 size={16} className="text-sky-500" /> New Booking
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
@@ -869,7 +872,7 @@ const CrmBooking: React.FC = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               {/* ── LEFT: Unit / Project + Pricing ── */}
               <div className="rounded-lg border border-border p-2.5 space-y-2.5">
-                <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Unit / Project</p>
+                <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">Unit / Project</p>
                 <div>
                   <label className={labelCls}>
                     Unit * {unitLockedFromApp ? "(from Application — already selected)" : "(from Unit Master — mandatory)"}
@@ -891,14 +894,14 @@ const CrmBooking: React.FC = () => {
                         </SelectContent>
                       </Select>
                       {appPreferredUnitId != null && !appPreferredUnitAvailable && (
-                        <p className="text-[11px] text-amber-600 mt-1">
+                        <p className="text-[0.6875rem] text-sky-600 mt-1">
                           This Application's preferred unit is no longer available — select a different one.
                         </p>
                       )}
                     </>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   <div>
                     <label className={labelCls}>Project</label>
                     <input type="text" value={form.ProjectName} readOnly disabled
@@ -918,7 +921,7 @@ const CrmBooking: React.FC = () => {
                       className={inputClsDisabled} />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   <div>
                     <label className={labelCls}>Inclusive Saleable Area (sq ft)</label>
                     <input type="text" value={form.AreaSqFt} readOnly disabled
@@ -940,7 +943,7 @@ const CrmBooking: React.FC = () => {
                   </div>
                 </div>
                 {form.TotalValue && (
-                  <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-[11px] text-emerald-700">
+                  <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-[0.6875rem] text-emerald-700">
                     Milestone payment schedule (7 stages) will be auto-generated from total value of ₹{Number(form.TotalValue).toLocaleString("en-IN")}
                   </div>
                 )}
@@ -948,11 +951,11 @@ const CrmBooking: React.FC = () => {
 
               {/* ── RIGHT: Booking / Payment ── */}
               <div className="rounded-lg border border-border p-2.5 space-y-2.5">
-                <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Booking & Payment</p>
+                <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">Booking & Payment</p>
                 <div className="grid grid-cols-1 sm:grid-cols-[1.3fr_1fr_0.9fr] gap-2.5">
                   <div>
                     <label className={labelCls}>Booking Date</label>
-                    <input type="date" value={form.BookingDate}
+                    <DateInput value={form.BookingDate}
                       onChange={(e) => setForm((f) => ({ ...f, BookingDate: e.target.value }))}
                       className={inputCls} />
                   </div>
@@ -989,7 +992,7 @@ const CrmBooking: React.FC = () => {
                       || "Default 7-stage split"}
                     className={inputClsDisabled} />
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className={labelCls}>Payment Mode</label>
                     {form.ApplicationId && form.PaymentMode ? (
@@ -1007,10 +1010,10 @@ const CrmBooking: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Deposited To</label>
-                    <p className="text-[11px] text-muted-foreground pt-2">Assigned by Accounts on the Received Payment before approval.</p>
+                    <p className="text-[0.6875rem] text-muted-foreground pt-2">Assigned by Accounts on the Received Payment before approval.</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className={labelCls}>
                       Booking Amount (₹) {selectedPlan ? "(Plan)" : ""}
@@ -1056,7 +1059,7 @@ const CrmBooking: React.FC = () => {
               Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
               {saving ? "Creating..." : "Create Booking"}
             </button>
           </div>

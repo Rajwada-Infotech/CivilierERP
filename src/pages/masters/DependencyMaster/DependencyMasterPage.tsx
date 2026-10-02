@@ -48,7 +48,7 @@ function StatTile({
       </div>
       <div>
         <p className="text-lg font-heading font-bold text-foreground leading-none">{value}</p>
-        <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">{label}</p>
+        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mt-1">{label}</p>
       </div>
     </div>
   );

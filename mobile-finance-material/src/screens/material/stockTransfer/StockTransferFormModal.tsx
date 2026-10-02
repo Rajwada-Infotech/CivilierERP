@@ -89,16 +89,20 @@ export function StockTransferFormModal({ visible, onClose }: { visible: boolean;
   );
   const itemMap = useMemo(() => new Map(availableItems.map((i) => [i.itemId, i])), [availableItems]);
 
-  // Auto-select the project's own godown when both company+project narrow to a single match.
+  // Auto-select the project's own godown once a project is picked — matched
+  // on projectId alone, not company+project. A project merely tagged to a
+  // company (not owned by it — see web's StockTransfer.tsx projectGodown
+  // comment) has its godown listed under the OWNING company, so requiring
+  // both to match made a tagged project's godown invisible here.
   useEffect(() => {
-    if (!form.companyId || !form.projectId) return;
-    const matches = godowns.filter((g) => (!g.companyId || String(g.companyId) === form.companyId) && (!g.projectId || String(g.projectId) === form.projectId));
+    if (!form.projectId) return;
+    const matches = godowns.filter((g) => String(g.projectId ?? "") === form.projectId);
     if (matches.length === 1 && form.fromGodownId !== String(matches[0].id)) {
       setForm((f) => ({ ...f, fromGodownId: String(matches[0].id), fromGodownName: matches[0].name }));
       setCart([blankCartItem()]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.companyId, form.projectId, godowns]);
+  }, [form.projectId, godowns]);
 
   const handleFromGodownChange = (id: string, name: string) => {
     setForm((f) => ({ ...f, fromGodownId: id, fromGodownName: name, toGodownId: f.toGodownId === id ? "" : f.toGodownId, toGodownName: f.toGodownId === id ? "" : f.toGodownName }));
@@ -170,8 +174,16 @@ export function StockTransferFormModal({ visible, onClose }: { visible: boolean;
 
   const companyOptions: PickerOption[] = companies.map((c) => ({ key: c.id, label: c.name }));
   const projectOptions: PickerOption[] = projects.map((p) => ({ key: p.id, label: p.name }));
+  // Once a project is picked, its godown is the unambiguous match regardless
+  // of which company it's filed under — same reasoning as the auto-select
+  // effect above. Company alone only narrows the list before a project is
+  // chosen.
   const fromGodownOptions: PickerOption[] = godowns
-    .filter((g) => (!form.companyId || !g.companyId || String(g.companyId) === form.companyId) && (!form.projectId || !g.projectId || String(g.projectId) === form.projectId))
+    .filter((g) =>
+      form.projectId
+        ? !g.projectId || String(g.projectId) === form.projectId
+        : !form.companyId || !g.companyId || String(g.companyId) === form.companyId,
+    )
     .map((g) => ({ key: String(g.id), label: g.name, sublabel: g.code ?? undefined }));
   const toGodownOptions: PickerOption[] = fromGodownOptions.filter((o) => o.key !== form.fromGodownId);
   const itemOptions: PickerOption[] = availableItems.map((i) => ({ key: i.itemId, label: i.itemName, sublabel: `Available: ${i.available.toFixed(2)} ${i.uom}` }));

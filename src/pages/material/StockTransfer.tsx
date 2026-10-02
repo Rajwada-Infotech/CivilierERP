@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { createPortal } from "react-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   ArrowRight,
@@ -47,12 +47,24 @@ import {
   type TransferGRNSummary,
 } from "@/api/grnApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { getApprovedMRList, getICTMRPrefill, type ApprovedMRSummary } from "@/api/materialRequestApi";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
+
+// Rate is stored to 4 decimal places (InterCompanyTransferItems.Rate) and
+// Amount is computed from that full-precision value server-side — showing
+// Rate capped to 2dp via fmtNum made "Rate × Qty" visibly not reconcile
+// with the printed Excl. GST/Total (e.g. a weighted-average rate like
+// 241.525 printed as "241.53"), which read as the GST calc "not adding
+// up" even though the underlying numbers were always correct.
+const fmtRate = (n: number) =>
+  new Intl.NumberFormat("en-IN", { maximumFractionDigits: 4 }).format(n ?? 0);
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString("en-IN", {
@@ -69,6 +81,11 @@ interface TItem {
   uom: string;
   availableQty: number;
   remarks: string;
+  /** Set when this line came from a Material Request (inter-company only) —
+   *  the source MaterialRequestItems row. */
+  mrItemId?: number | null;
+  /** Cap for this line's quantity — what's still pending on that MR item. */
+  mrPendingQty?: number | null;
 }
 
 interface AvailableItem {
@@ -297,6 +314,7 @@ function ItemSearchRow({
 
   const qtyNum = parseFloat(item.qty) || 0;
   const overLimit = qtyNum > item.availableQty && item.availableQty > 0;
+  const overMrPending = item.mrPendingQty != null && qtyNum - item.mrPendingQty > 0.0001;
 
   return (
     <div
@@ -367,12 +385,12 @@ function ItemSearchRow({
                       <p className="text-xs font-medium text-foreground truncate">
                         {a.itemName}
                       </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                      <p className="text-[0.625rem] text-muted-foreground mt-0.5">
                         {a.uom}
                       </p>
                     </div>
                     <span
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
+                      className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
                         a.available > 0
                           ? "bg-emerald-500/10 text-emerald-600"
                           : "bg-red-500/10 text-red-500"
@@ -392,7 +410,7 @@ function ItemSearchRow({
       {/* Available badge */}
       <div className="col-span-1 flex items-center h-9">
         {item.itemId && (
-          <span className="text-[10px] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
+          <span className="text-[0.625rem] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
             {fmtNum(item.availableQty)}
           </span>
         )}
@@ -409,12 +427,17 @@ function ItemSearchRow({
           placeholder="Qty"
           disabled={!item.itemId}
           className={`w-full px-2 py-2 rounded-lg border text-xs text-foreground bg-background outline-none disabled:opacity-50 ${
-            overLimit ? "border-red-400" : "border-border"
+            overLimit || overMrPending ? "border-red-400" : "border-border"
           }`}
         />
         {overLimit && (
-          <p className="text-[10px] text-red-500 mt-0.5">
+          <p className="text-[0.625rem] text-red-500 mt-0.5">
             Max: {fmtNum(item.availableQty)}
+          </p>
+        )}
+        {overMrPending && (
+          <p className="text-[0.625rem] text-red-500 mt-0.5">
+            Max: {fmtNum(item.mrPendingQty!)} (MR pending)
           </p>
         )}
       </div>
@@ -661,7 +684,7 @@ function TransferPreviewModal({
             <Warehouse size={10} /> {transfer.ToGodownName}
           </span>
           <div className="ml-auto">
-            <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} />
+            <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} fallback={<StatusBadge status={transfer.Status} />} />
           </div>
         </div>
 
@@ -707,7 +730,7 @@ function TransferPreviewModal({
               {linkedGRNs.map((g) => (
                 <span
                   key={g.GRNID}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border font-mono"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] bg-muted text-muted-foreground border border-border font-mono"
                 >
                   <FileText size={9} /> {g.GRNNo || g.DocNo}
                 </span>
@@ -852,7 +875,7 @@ function ICTPreviewModal({
                         <tr key={item.ICTItemId} className="border-b border-border last:border-0 hover:bg-muted/20">
                           <td className="px-3 py-2 text-foreground">{item.ItemName || item.ItemId}</td>
                           <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Quantity)}</td>
-                          <td className="px-3 py-2 text-right font-mono text-muted-foreground">{fmtNum(item.Rate)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-muted-foreground">{fmtRate(item.Rate)}</td>
                           <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Amount)}</td>
                           <td className="px-3 py-2 text-right font-mono text-amber-600 dark:text-amber-400">
                             {gstPct > 0 ? `${gstPct}% = ${fmtNum(gstAmt)}` : "—"}
@@ -887,7 +910,7 @@ function ICTPreviewModal({
                   {DOC_LINKS.filter((d) => d.id).map((d) => (
                     <span
                       key={d.label}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] bg-muted text-muted-foreground border border-border"
                     >
                       <FileText size={9} /> {d.label} #{d.id}
                     </span>
@@ -911,7 +934,7 @@ function ICTPreviewModal({
           <div className="px-5 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
             <div className="flex items-center gap-2">
               <BookOpen size={13} className="text-primary" />
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                 Journal Entry — Inter-Company Transfer Posting
               </span>
             </div>
@@ -921,7 +944,7 @@ function ICTPreviewModal({
               const totalCredit = v.rows.filter((r) => r.side === "credit").reduce((s, r) => s + r.amount, 0);
               return (
                 <div key={vi} className="rounded-lg border border-border overflow-hidden">
-                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-3 py-2 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-3 py-2 text-[0.5625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
                     <span>
                       {v.companyName ? `${v.companyName} — ` : ""}Account
                       {v.jvNo ? ` · ${v.jvNo}` : ""}
@@ -944,7 +967,7 @@ function ICTPreviewModal({
                     </div>
                   ))}
                   <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-3 py-2 bg-muted/30 border-t-2 border-border text-xs font-bold gap-2">
-                    <span className="uppercase tracking-widest text-muted-foreground text-[9px]">Total</span>
+                    <span className="uppercase tracking-widest text-muted-foreground text-[0.5625rem]">Total</span>
                     <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtNum(totalDebit)}</span>
                     <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtNum(totalCredit)}</span>
                   </div>
@@ -955,14 +978,14 @@ function ICTPreviewModal({
             {posting.isPosted ? (
               <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
                 <CheckCircle2 size={12} className="text-emerald-500 shrink-0" />
-                <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                <p className="text-[0.6875rem] text-emerald-700 dark:text-emerald-400">
                   Posted to General Ledger. Entries are visible in the Trial Balance.
                 </p>
               </div>
             ) : (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
                 <AlertCircle size={12} className="text-muted-foreground shrink-0" />
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   Not yet posted — this is a preview of what will post once the transfer is approved.
                 </p>
               </div>
@@ -993,6 +1016,13 @@ function TransferHistory() {
     staleTime: 60_000,
   });
   const transfers: StockTransfer[] = data?.data ?? [];
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: transferApprovalTrails, isLoading: transferApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "StockTransfers",
+    transfers.map((t) => t.TransferID),
+  );
 
   // Inter-company transfers (direct GL voucher between the two companies'
   // Inter-Company A/c heads, no bank/cash involved) live in a separate
@@ -1135,13 +1165,13 @@ function TransferHistory() {
           </div>
           <div className="flex items-center gap-2">
             {ictTransfers.length > 0 && (
-              <div className="flex items-center rounded-lg border border-border p-0.5 text-[10px] font-medium">
+              <div className="flex items-center rounded-lg border border-border p-0.5 text-[0.625rem] font-medium">
                 <button
                   onClick={() => setIctGstMode("excl")}
                   title="Show Inter-Company amounts excl. GST"
                   className={`px-2 py-1 rounded-md transition-colors ${
                     ictGstMode === "excl"
-                      ? "bg-primary text-primary-foreground"
+                      ? "btn-module text-white"
                       : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
@@ -1152,7 +1182,7 @@ function TransferHistory() {
                   title="Show Inter-Company amounts incl. GST"
                   className={`px-2 py-1 rounded-md transition-colors ${
                     ictGstMode === "incl"
-                      ? "bg-primary text-primary-foreground"
+                      ? "btn-module text-white"
                       : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
@@ -1228,7 +1258,7 @@ function TransferHistory() {
                       >
                         <td className="px-3 py-2.5 font-mono text-foreground font-semibold whitespace-nowrap">
                           <div>{t.DocNo}</div>
-                          <div className="text-[10px] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
+                          <div className="text-[0.625rem] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                         </td>
                         <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden sm:table-cell">
                           {fmtDate(t.TransferDate)}
@@ -1242,7 +1272,7 @@ function TransferHistory() {
                             <span className="text-emerald-600 dark:text-emerald-400">
                               {t.ReceiverProjectName}
                             </span>
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] bg-muted text-muted-foreground border border-border ml-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] bg-muted text-muted-foreground border border-border ml-1">
                               Inter-Company
                             </span>
                           </div>
@@ -1256,23 +1286,23 @@ function TransferHistory() {
                         </td>
                         <td className="px-3 py-2.5">
                           {t.Status === "Completed" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
                               <CheckCircle2 size={10} /> Completed (auto)
                             </span>
                           ) : t.Status === "Approved" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
                               <CheckCircle2 size={10} /> Approved
                             </span>
                           ) : t.Status === "Pending" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-[#ffe2021a] text-amber-700 dark:text-amber-400 border border-amber-400/30">
                               Pending approval
                             </span>
                           ) : t.Status === "Rejected" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/10 text-red-700 dark:text-red-400 border border-red-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-red-500/10 text-red-700 dark:text-red-400 border border-red-400/30">
                               Rejected
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground border border-border">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-muted text-muted-foreground border border-border">
                               {t.Status}
                             </span>
                           )}
@@ -1319,7 +1349,7 @@ function TransferHistory() {
                     >
                       <td className="px-3 py-2.5 font-mono text-foreground font-semibold whitespace-nowrap">
                         <div>{t.DocNo}</div>
-                        <div className="text-[10px] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
+                        <div className="text-[0.625rem] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                       </td>
                       <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden sm:table-cell">
                         {fmtDate(t.TransferDate)}
@@ -1343,6 +1373,9 @@ function TransferHistory() {
                         <ApprovalStatusChain
                           table="StockTransfers"
                           recordId={t.TransferID}
+                          fallback={<StatusBadge status={t.Status} />}
+                          preloaded={transferApprovalTrails.get(String(t.TransferID)) ?? null}
+                          preloadedLoading={transferApprovalTrailsLoading}
                         />
                       </td>
                       <td className="px-3 py-2.5">
@@ -1357,7 +1390,7 @@ function TransferHistory() {
                           {hasGRN ? (
                             <span
                               title={linkedGRNs.map((g) => g.GRNNo || g.DocNo).join(", ")}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] bg-muted text-muted-foreground border border-border font-mono whitespace-nowrap"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.625rem] bg-muted text-muted-foreground border border-border font-mono whitespace-nowrap"
                             >
                               <FileText size={9} /> {linkedGRNs.length > 1 ? `${linkedGRNs.length} GRNs` : linkedGRNs[0].GRNNo || linkedGRNs[0].DocNo}
                             </span>
@@ -1400,6 +1433,15 @@ export default function StockTransfer() {
   const [filterProjectId, setFilterProjectId] = useState("");
   const [toCompanyId, setToCompanyId] = useState("");
   const [toProjectId, setToProjectId] = useState("");
+  // Inter-company only — raising this transfer from a Material Request.
+  // Same "prefill items, let the user drop/reduce lines, cap at what's
+  // still pending" pattern as PurchaseOrderMaster's own MR-from-PO picker;
+  // see getICTMRPrefill's own comment for why the MR's Company/Project
+  // land on the Receiver side, not Sender.
+  const [sourceMR, setSourceMR] = useState<{ id: number; docNo: string } | null>(null);
+  const [mrDropdownValue, setMrDropdownValue] = useState("");
+  const [mrDropdownLoading, setMrDropdownLoading] = useState(false);
+  const [mrDropdownError, setMrDropdownError] = useState<string | null>(null);
   const [fromGodownId, setFromGodownId] = useState<number | null>(null);
   const [toGodownId, setToGodownId] = useState<number | null>(null);
   const [items, setItems] = useState<TItem[]>([emptyItem()]);
@@ -1431,6 +1473,15 @@ export default function StockTransfer() {
     queryKey: ["enterprise-options", "P"],
     queryFn: () => getEnterpriseOptions(undefined, "P"),
     staleTime: 120_000,
+  });
+
+  // MRs available to raise an Inter-Company Transfer from — same
+  // approved-list endpoint PurchaseOrderMaster's own MR picker uses.
+  const { data: approvedMRs = [] } = useQuery<ApprovedMRSummary[]>({
+    queryKey: ["ict-approved-mrs"],
+    queryFn: () => getApprovedMRList(),
+    enabled: transferMode === "inter",
+    staleTime: 30_000,
   });
   const allProjects: {
     id: number;
@@ -1564,9 +1615,59 @@ export default function StockTransfer() {
     setItems((prev) => prev.filter((_, i) => i !== idx));
   const addItem = () => setItems((prev) => [...prev, emptyItem()]);
 
+  // Raise this Inter-Company Transfer from a Material Request: prefills the
+  // Receiver company/project (the MR's own — it's the project that asked
+  // for the material) and the item lines, each capped at what's still
+  // pending on that MR item. The user can then remove lines they can't
+  // fulfil right now, or reduce a line's quantity below the cap — either
+  // way, whatever's left off this transfer simply stays pending on the MR
+  // for a later PO or ICT to pick up (see getMRItemFulfillment — nothing
+  // here marks the MR "used up", it's always computed live).
+  const handleMRDropdownSelect = async (mrId: string) => {
+    setMrDropdownValue(mrId);
+    if (!mrId) return;
+    setMrDropdownLoading(true);
+    setMrDropdownError(null);
+    try {
+      const prefill = await getICTMRPrefill(Number(mrId));
+      if (!prefill.items.length) {
+        setMrDropdownError("This Material Request has nothing left pending to transfer.");
+        return;
+      }
+      setItems(
+        prefill.items.map((it) => ({
+          itemId: it.ItemId ?? "",
+          itemName: it.ItemName ?? "",
+          qty: String(it.PendingQty ?? it.Quantity ?? 0),
+          uom: it.UOMName ?? it.UOMCode ?? "",
+          availableQty: 0,
+          remarks: it.Remarks ?? "",
+          mrItemId: it.MRItemId ?? null,
+          mrPendingQty: it.PendingQty ?? null,
+        })),
+      );
+      setSourceMR({ id: prefill.MRId, docNo: prefill.DocNo });
+      if (prefill.CompanyId) setToCompanyId(String(prefill.CompanyId));
+      if (prefill.ProjectId) setToProjectId(String(prefill.ProjectId));
+    } catch (err: any) {
+      setMrDropdownError(err.message ?? "Could not load Material Request.");
+    } finally {
+      setMrDropdownLoading(false);
+    }
+  };
+
+  const clearSourceMR = () => {
+    setSourceMR(null);
+    setMrDropdownValue("");
+    setItems([emptyItem()]);
+  };
+
   const hasOverLimit = items.some(
     (it) =>
       it.itemId && it.availableQty > 0 && parseFloat(it.qty) > it.availableQty,
+  );
+  const hasOverMrPending = items.some(
+    (it) => it.mrItemId != null && it.mrPendingQty != null && (parseFloat(it.qty) || 0) - it.mrPendingQty > 0.0001,
   );
 
   const canTransfer =
@@ -1575,6 +1676,7 @@ export default function StockTransfer() {
     (transferMode === "inter" || fromGodownId !== toGodownId) &&
     items.some((it) => it.itemId && parseFloat(it.qty) > 0) &&
     !hasOverLimit &&
+    !hasOverMrPending &&
     !transferMut.isPending &&
     !interTransferMut.isPending;
 
@@ -1588,6 +1690,7 @@ export default function StockTransfer() {
         qty: parseFloat(it.qty),
         uom: it.uom,
         remarks: it.remarks,
+        mrItemId: it.mrItemId ?? null,
       }));
 
     if (transferMode === "inter") {
@@ -1610,6 +1713,7 @@ export default function StockTransfer() {
         ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         ApplyGst: applyGst,
         Remarks: remarks || undefined,
+        SourceMRId: sourceMR?.id ?? undefined,
         Items: validItems.map((it) => {
           const manual = parseFloat(manualRates[it.itemId]);
           return {
@@ -1617,6 +1721,7 @@ export default function StockTransfer() {
             itemName: it.itemName,
             uom: it.uom,
             qty: it.qty,
+            mrItemId: it.mrItemId ?? undefined,
             ...(Number.isFinite(manual) && manual > 0 ? { manualRate: manual } : {}),
           };
         }),
@@ -1639,6 +1744,8 @@ export default function StockTransfer() {
     setRemarks("");
     setErrorMsg("");
     setManualRates({});
+    setSourceMR(null);
+    setMrDropdownValue("");
   };
 
   // Collect all project IDs that belong (directly or via tagging) to the TO company.
@@ -1696,9 +1803,22 @@ export default function StockTransfer() {
   // preview — manualRates holds whatever the user's typed in for those,
   // keyed by itemId, fed back into both the preview and the actual submit.
   const [manualRates, setManualRates] = useState<Record<string, string>>({});
+  // The input itself is bound straight to manualRates (updates every
+  // keystroke, so typing feels instant) — but the actual re-price query only
+  // fires off this debounced copy. Without the debounce, every keystroke
+  // changed the query key, which (a) re-fetched on every character and (b)
+  // flipped interPreviewLoading true, swapping the whole item list — the
+  // very DOM node the input lives in — out for a "Pricing items…" spinner,
+  // unmounting the input and dropping focus after just one character. Same
+  // fix as MaterialExpenseBooking.tsx's debouncedDocNoFilter.
+  const [debouncedManualRates, setDebouncedManualRates] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedManualRates(manualRates), 500);
+    return () => clearTimeout(t);
+  }, [manualRates]);
   const interPreviewItems = items.filter((it) => it.itemId && parseFloat(it.qty) > 0);
   const interPreviewKey = interPreviewItems
-    .map((it) => `${it.itemId}:${it.qty}:${manualRates[it.itemId] || ""}`)
+    .map((it) => `${it.itemId}:${it.qty}:${debouncedManualRates[it.itemId] || ""}`)
     .join(",");
   const {
     data: interPreview,
@@ -1717,7 +1837,7 @@ export default function StockTransfer() {
         ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         ApplyGst: applyGst,
         Items: interPreviewItems.map((it) => {
-          const manual = parseFloat(manualRates[it.itemId]);
+          const manual = parseFloat(debouncedManualRates[it.itemId]);
           return {
             itemId: it.itemId,
             itemName: it.itemName,
@@ -1732,6 +1852,11 @@ export default function StockTransfer() {
       !!fromGodown?.ProjectID &&
       !!toGodown?.ProjectID &&
       interPreviewItems.length > 0,
+    // Keep showing the last priced list while a re-price is in flight
+    // instead of unmounting it for a loading state — belt-and-suspenders
+    // with the debounce above so the manual-rate input never loses its
+    // place even if a refetch does land mid-typing (blur, tab, etc.).
+    placeholderData: keepPreviousData,
     retry: false,
   });
 
@@ -1850,7 +1975,7 @@ export default function StockTransfer() {
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Filters
                 </p>
-                <span className="text-[10px] text-muted-foreground/60">
+                <span className="text-[0.625rem] text-muted-foreground/60">
                   — narrow godowns by company or project
                 </span>
                 {(filterCompanyId || filterProjectId) && (
@@ -1862,7 +1987,7 @@ export default function StockTransfer() {
                       setToGodownId(null);
                       setItems([emptyItem()]);
                     }}
-                    className="ml-auto text-[10px] text-muted-foreground hover:text-red-500 flex items-center gap-1 transition-colors"
+                    className="ml-auto text-[0.625rem] text-muted-foreground hover:text-red-500 flex items-center gap-1 transition-colors"
                   >
                     <X size={10} /> Clear filters
                   </button>
@@ -1929,6 +2054,49 @@ export default function StockTransfer() {
                         placeholder={toCompanyId ? "All projects in company" : "Select a company first"}
                       />
                     </div>
+
+                    {/* Raise from Material Request */}
+                    <div className="space-y-1.5">
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                        <ClipboardList size={13} /> Raise from Material Request (optional)
+                      </label>
+                      {sourceMR ? (
+                        <div className="flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <ClipboardList size={14} className="text-primary" />
+                            From MR: {sourceMR.docNo}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={clearSourceMR}
+                            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            <X size={12} /> Clear
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <select
+                            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            value={mrDropdownValue}
+                            onChange={(e) => handleMRDropdownSelect(e.target.value)}
+                            disabled={mrDropdownLoading}
+                          >
+                            <option value="">
+                              {mrDropdownLoading ? "Loading..." : "Select a Material Request"}
+                            </option>
+                            {approvedMRs.map((mr) => (
+                              <option key={mr.MRId} value={String(mr.MRId)}>
+                                {mr.DocNo} — {mr.ProjectName || mr.CompanyName || ""}
+                              </option>
+                            ))}
+                          </select>
+                          {mrDropdownError && (
+                            <p className="text-xs text-destructive">{mrDropdownError}</p>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </>
                 ) : (
                   <>
@@ -1994,7 +2162,7 @@ export default function StockTransfer() {
               {(filterCompanyId || filterProjectId) && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {filterCompanyId && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-muted text-foreground border border-border font-medium">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.6875rem] bg-muted text-foreground border border-border font-medium">
                       <Building2 size={10} />
                       {
                         companyOptions.find((o) => o.value === filterCompanyId)
@@ -2015,7 +2183,7 @@ export default function StockTransfer() {
                     </span>
                   )}
                   {filterProjectId && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-muted text-foreground border border-border font-medium">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.6875rem] bg-muted text-foreground border border-border font-medium">
                       <FolderKanban size={10} />
                       {
                         projectSelectOptions.find(
@@ -2035,7 +2203,7 @@ export default function StockTransfer() {
                       </button>
                     </span>
                   )}
-                  <span className="text-[10px] text-muted-foreground self-center">
+                  <span className="text-[0.625rem] text-muted-foreground self-center">
                     {companyGodowns.length} godown
                     {companyGodowns.length !== 1 ? "s" : ""} available
                   </span>
@@ -2104,7 +2272,7 @@ export default function StockTransfer() {
                     {["#", "Item", "Avail", "Qty", "UOM", ""].map((h, i) => (
                       <span
                         key={i}
-                        className={`text-[10px] font-semibold text-muted-foreground uppercase tracking-wider ${
+                        className={`text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wider ${
                           i === 0
                             ? "col-span-1"
                             : i === 1
@@ -2154,10 +2322,10 @@ export default function StockTransfer() {
                   {transferMode === "inter" && (
                     <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-xs space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">
+                        <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[0.625rem]">
                           Posting Preview
                         </p>
-                        <label className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground shrink-0 cursor-pointer select-none">
+                        <label className="flex items-center gap-1.5 text-[0.625rem] font-medium text-muted-foreground shrink-0 cursor-pointer select-none">
                           <input
                             type="checkbox"
                             checked={applyGst}
@@ -2167,7 +2335,7 @@ export default function StockTransfer() {
                           Apply GST
                         </label>
                       </div>
-                      {interPreviewLoading ? (
+                      {interPreviewLoading && !interPreview ? (
                         <p className="text-muted-foreground flex items-center gap-1.5">
                           <RefreshCw size={11} className="animate-spin" /> Pricing items…
                         </p>
@@ -2186,16 +2354,16 @@ export default function StockTransfer() {
                               if (it.needsManualRate) {
                                 return (
                                   <div key={it.itemId} className="rounded-md bg-amber-500/5 border border-amber-400/30 px-3 py-2 space-y-1.5">
-                                    <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
+                                    <div className="flex items-center justify-between gap-3 text-[0.6875rem] font-medium">
                                       <span className="text-foreground truncate">
                                         {it.itemName || it.itemId} — {it.qty} {it.unit}
                                       </span>
                                     </div>
-                                    <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                                    <p className="text-[0.625rem] text-amber-600 dark:text-amber-400">
                                       No purchase history found under this company — enter a rate to price this item.
                                     </p>
                                     <div className="flex items-center gap-1.5">
-                                      <span className="text-[11px] text-muted-foreground">₹</span>
+                                      <span className="text-[0.6875rem] text-muted-foreground">₹</span>
                                       <input
                                         type="number"
                                         min="0.01"
@@ -2207,14 +2375,14 @@ export default function StockTransfer() {
                                         placeholder="Rate per unit"
                                         className="w-32 px-2 py-1 rounded-md border border-amber-400/40 bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-amber-500/30"
                                       />
-                                      <span className="text-[10px] text-muted-foreground">per {it.unit}</span>
+                                      <span className="text-[0.625rem] text-muted-foreground">per {it.unit}</span>
                                     </div>
                                   </div>
                                 );
                               }
                               return (
                                 <div key={it.itemId} className="rounded-md bg-muted/30 border border-border/40 px-3 py-2 space-y-0.5">
-                                  <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
+                                  <div className="flex items-center justify-between gap-3 text-[0.6875rem] font-medium">
                                     <span className="text-foreground truncate">
                                       {it.itemName || it.itemId} — {it.qty} {it.unit}
                                     </span>
@@ -2222,16 +2390,16 @@ export default function StockTransfer() {
                                       ₹{inclAmt.toLocaleString("en-IN")}
                                     </span>
                                   </div>
-                                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                                    <span>Excl. GST: ₹{it.rate.toLocaleString("en-IN")}/unit × {it.qty} = ₹{it.amount.toLocaleString("en-IN")}</span>
+                                  <div className="flex items-center justify-between text-[0.625rem] text-muted-foreground">
+                                    <span>Excl. GST: ₹{fmtRate(it.rate)}/unit × {it.qty} = ₹{it.amount.toLocaleString("en-IN")}</span>
                                   </div>
                                   {gstPct > 0 ? (
-                                    <div className="flex items-center justify-between text-[10px] text-amber-600 dark:text-amber-400">
+                                    <div className="flex items-center justify-between text-[0.625rem] text-amber-600 dark:text-amber-400">
                                       <span>GST @ {gstPct}%</span>
                                       <span>+ ₹{gstAmt.toLocaleString("en-IN")}</span>
                                     </div>
                                   ) : (
-                                    <div className="text-[10px] text-muted-foreground/60">GST: N/A (0%)</div>
+                                    <div className="text-[0.625rem] text-muted-foreground/60">GST: N/A (0%)</div>
                                   )}
                                 </div>
                               );
@@ -2239,7 +2407,7 @@ export default function StockTransfer() {
                           </div>
 
                           {/* Totals summary */}
-                          <div className="border-t border-border/60 pt-2 space-y-1 text-[11px]">
+                          <div className="border-t border-border/60 pt-2 space-y-1 text-[0.6875rem]">
                             <div className="flex items-center justify-between">
                               <span className="text-muted-foreground">Subtotal (excl. GST)</span>
                               <span className="font-mono">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
@@ -2261,8 +2429,8 @@ export default function StockTransfer() {
                           </div>
 
                           {/* GL posting lines */}
-                          <div className="border-t border-border/60 pt-2 space-y-1 text-[10px]">
-                            <p className="text-muted-foreground/60 uppercase tracking-wider text-[9px] font-semibold">GL Posting</p>
+                          <div className="border-t border-border/60 pt-2 space-y-1 text-[0.625rem]">
+                            <p className="text-muted-foreground/60 uppercase tracking-wider text-[0.5625rem] font-semibold">GL Posting</p>
                             <div className="flex items-center justify-between">
                               <span className="text-muted-foreground">
                                 {interPreview.senderCompanyName} — Inter-Company A/c debited

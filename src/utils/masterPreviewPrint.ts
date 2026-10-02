@@ -129,3 +129,127 @@ export function printMasterPreview({
     win.print();
   };
 }
+
+// ─── PDF (jsPDF) ────────────────────────────────────────────────────────────
+// Same {title, subtitle, code, status, sections} shape as printMasterPreview
+// above — "Print" and "Generate PDF" render the identical content, just
+// through different pipes (the browser's print dialog vs. a downloaded
+// file), so the two buttons can never show different data for the same
+// record. Portrait, single-column form layout (not src/lib/export.ts's
+// landscape table export — that's for multi-row lists, this is one record).
+function sanitizeForPdf(value: string): string {
+  return String(value ?? "")
+    .replace(/₹/g, "Rs. ")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/–|—/g, "-")
+    .replace(/•/g, "-");
+}
+
+export async function downloadMasterPreviewPdf({
+  title,
+  subtitle,
+  code,
+  status,
+  sections,
+  filename,
+}: PrintPreviewOptions & { filename: string }) {
+  const { default: jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const marginX = 42;
+  const contentW = pageW - marginX * 2;
+  let y = 0;
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed > pageH - 40) {
+      doc.addPage();
+      y = 40;
+    }
+  };
+
+  // Header band
+  doc.setFillColor(79, 70, 229); // indigo-600, matches printMasterPreview's accent
+  doc.rect(0, 0, pageW, 64, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(255, 255, 255);
+  doc.text(sanitizeForPdf(subtitle), marginX, 28);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(sanitizeForPdf(title || code || "—"), marginX, 44);
+  if (code) {
+    doc.setFontSize(8);
+    doc.setTextColor(199, 210, 254);
+    doc.text(sanitizeForPdf(code), marginX, 56);
+  }
+  if (status) {
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text(sanitizeForPdf(status).toUpperCase(), pageW - marginX, 28, { align: "right" });
+  }
+  y = 84;
+
+  for (const section of sections) {
+    ensureSpace(24);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(79, 70, 229);
+    doc.text(sanitizeForPdf(section.title).toUpperCase(), marginX, y);
+    doc.setDrawColor(224, 231, 255);
+    doc.setLineWidth(0.6);
+    doc.line(marginX, y + 4, pageW - marginX, y + 4);
+    y += 18;
+
+    const colW = contentW / 2 - 8;
+    let col = 0;
+    let rowStartY = y;
+    for (const field of section.fields) {
+      const label = sanitizeForPdf(field.label);
+      const valueRaw =
+        field.value === true ? "Yes" : field.value === false ? "No" : field.value === null || field.value === undefined || field.value === "" ? "-" : String(field.value);
+      const value = sanitizeForPdf(valueRaw);
+      const x = marginX + col * (colW + 16);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(156, 163, 175);
+      doc.text(label.toUpperCase(), x, rowStartY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      doc.setTextColor(17, 24, 39);
+      const lines = doc.splitTextToSize(value, colW);
+      doc.text(lines, x, rowStartY + 12);
+
+      const rowH = 14 + lines.length * 12 + 6;
+      if (col === 0) {
+        col = 1;
+      } else {
+        col = 0;
+        rowStartY += rowH;
+        ensureSpace(rowH);
+      }
+    }
+    if (col === 1) rowStartY += 14 + 12 + 6;
+    y = rowStartY + 10;
+  }
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(156, 163, 175);
+  const pageCount = doc.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    doc.text(
+      `CivilierERP  ·  Generated ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`,
+      marginX,
+      pageH - 20,
+    );
+    doc.text(`Page ${p} of ${pageCount}`, pageW - marginX, pageH - 20, { align: "right" });
+  }
+
+  doc.save(filename);
+}

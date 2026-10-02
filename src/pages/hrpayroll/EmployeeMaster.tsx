@@ -23,6 +23,7 @@ import { getCostCenterOptions } from "@/api/costCenterApi";
 import { getUnlinkedEmployeeCandidates, type UnlinkedEmployeeCandidate } from "@/api/offerLetterApi";
 import { getSalaryStructureFamilies } from "@/api/salaryStructureApi";
 import { Wallet3 } from "iconsax-react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Contract", "Consultant", "Intern"];
 const GENDERS = ["Male", "Female", "Other"];
@@ -192,12 +193,12 @@ const SalaryBreakupModal: React.FC<{
   const result = data as SalaryBreakupResult | undefined;
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+    <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-card border border-border rounded-xl shadow-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div>
             <h3 className="font-heading font-semibold text-foreground text-sm">Salary Details</h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">{employeeName}</p>
+            <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{employeeName}</p>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-sm">✕</button>
         </div>
@@ -213,13 +214,13 @@ const SalaryBreakupModal: React.FC<{
           )}
           {result && result.valid && result.totals && (
             <div className="space-y-3">
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 Structure: {result.SalaryStructureName} (v{result.SalaryStructureVersion})
               </p>
               <div className="rounded-lg border border-border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/30 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    <tr className="bg-muted/30 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
                       <th className="text-left px-3 py-2">Salary Head</th>
                       <th className="text-left px-3 py-2">Type</th>
                       <th className="text-left px-3 py-2">Calculation</th>
@@ -262,7 +263,7 @@ const SalaryBreakupModal: React.FC<{
           )}
         </div>
       </div>
-    </div>
+    </div></BodyPortal>
   );
 };
 
@@ -385,7 +386,7 @@ export default function EmployeeMaster() {
           return p.formData.candidateId ? (
             <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground">
               {(p.formData.candidateCode as string) || "-"} {(p.formData.candidateName as string) ? `— ${p.formData.candidateName}` : ""}
-              <span className="ml-2 text-[11px] text-muted-foreground">(auto-linked from Offer Letter &amp; Joining)</span>
+              <span className="ml-2 text-[0.6875rem] text-muted-foreground">(auto-linked from Offer Letter &amp; Joining)</span>
             </div>
           ) : (
             <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-muted-foreground">
@@ -410,7 +411,7 @@ export default function EmployeeMaster() {
                 </option>
               ))}
             </select>
-            <p className="text-[11px] text-muted-foreground mt-1">
+            <p className="text-[0.6875rem] text-muted-foreground mt-1">
               Only candidates with a confirmed Offer Letter &amp; Joining who aren't already an employee are listed. Picking one fills in the fields below.
             </p>
           </div>
@@ -509,7 +510,7 @@ export default function EmployeeMaster() {
     isActive: (value) => (
       <span
         className={
-          "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border " +
+          "inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border " +
           (value
             ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
             : "bg-red-500/10 border-red-500/20 text-red-600")
@@ -525,7 +526,7 @@ export default function EmployeeMaster() {
         onClick={() =>
           setDocsFor({ id: Number(row._id), name: (row.employeeName as string) || "" })
         }
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[11px] font-medium text-foreground hover:bg-muted transition-colors"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[0.6875rem] font-medium text-foreground hover:bg-muted transition-colors"
       >
         <FileText size={12} /> {Number(row.documentCount || 0)}
       </button>
@@ -535,12 +536,12 @@ export default function EmployeeMaster() {
         <button
           type="button"
           onClick={() => setBreakupFor({ id: Number(row._id), name: (row.employeeName as string) || "" })}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[11px] font-medium text-foreground hover:bg-muted transition-colors"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[0.6875rem] font-medium text-foreground hover:bg-muted transition-colors"
         >
           <Wallet3 size={12} /> View
         </button>
       ) : (
-        <span className="text-[11px] text-muted-foreground">No CTC</span>
+        <span className="text-[0.6875rem] text-muted-foreground">No CTC</span>
       ),
   };
 

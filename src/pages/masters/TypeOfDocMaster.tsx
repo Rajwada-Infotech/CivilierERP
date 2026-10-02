@@ -32,6 +32,7 @@ import {
   type ProjectOption,
   type DocTypePayload,
 } from "@/api/documentTypeApi";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -235,7 +236,7 @@ function buildDocColumns(
             {v.split(",").map((l) => (
               <span
                 key={l}
-                className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-medium"
+                className="px-1.5 py-0.5 rounded text-[0.625rem] bg-primary/10 text-primary font-medium"
               >
                 {l.trim()}
               </span>
@@ -260,7 +261,7 @@ function buildDocColumns(
         }
         return (
           <span
-            className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${cls}`}
+            className={`px-2 py-0.5 rounded-full text-[0.625rem] font-medium ${cls}`}
           >
             {label}
           </span>
@@ -287,7 +288,7 @@ function buildDocColumns(
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-1">
-          <button
+          <button data-row-view
             onClick={() => onView(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
             title="View details"
@@ -501,7 +502,7 @@ const TypeOfDocMaster: React.FC = () => {
           rights.canCreate ? (
             <button
               onClick={() => setDrawerOpen(true)}
-              className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-heading hover:bg-primary/90 transition"
+              className="flex items-center gap-2 btn-module text-white px-4 py-2 rounded-lg text-sm font-heading transition"
             >
               <Plus size={16} /> Add New Type
             </button>
@@ -539,7 +540,7 @@ const TypeOfDocMaster: React.FC = () => {
 
       {/* ── Drawer ── */}
       {drawerOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex justify-end">
+        <BodyPortal><div className="fixed inset-0 bg-black/60 z-50 flex justify-end">
           <div className="w-full max-w-md h-full bg-card flex flex-col shadow-2xl">
             {/* Drawer header */}
             <div className="px-6 py-4 border-b flex items-center justify-between bg-card sticky top-0 z-10">
@@ -561,7 +562,7 @@ const TypeOfDocMaster: React.FC = () => {
             >
               {/* ── Scope section ── */}
               <div className="space-y-4">
-                <p className="text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-widest">
+                <p className="text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-widest">
                   Scope
                 </p>
 
@@ -622,7 +623,7 @@ const TypeOfDocMaster: React.FC = () => {
                     ))}
                   </select>
                   {selectedProjectCode && (
-                    <p className="mt-1 text-[11px] text-muted-foreground font-heading">
+                    <p className="mt-1 text-[0.6875rem] text-muted-foreground font-heading">
                       Project code:{" "}
                       <span className="font-mono font-semibold text-foreground">
                         {selectedProjectCode}
@@ -637,7 +638,7 @@ const TypeOfDocMaster: React.FC = () => {
 
               {/* ── Identity section ── */}
               <div className="space-y-4">
-                <p className="text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-widest">
+                <p className="text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-widest">
                   Identity
                 </p>
 
@@ -681,7 +682,7 @@ const TypeOfDocMaster: React.FC = () => {
                       </option>
                     ))}
                   </select>
-                  <p className="mt-1 text-[11px] text-muted-foreground font-heading">
+                  <p className="mt-1 text-[0.6875rem] text-muted-foreground font-heading">
                     Appears as the entry-type segment in the doc number (e.g.{" "}
                     <span className="font-mono">WO</span> →{" "}
                     <span className="font-mono">GC-WO/0001/26-27</span>)
@@ -709,7 +710,7 @@ const TypeOfDocMaster: React.FC = () => {
                     placeholder="e.g. ExB-PO-GRN"
                     maxLength={50}
                   />
-                  <p className="mt-1 text-[11px] text-muted-foreground font-heading">
+                  <p className="mt-1 text-[0.6875rem] text-muted-foreground font-heading">
                     For global (non-project) doc types. Produces{" "}
                     <span className="font-mono">ExB-PO-GRN-2026-00001</span>
                   </p>
@@ -731,7 +732,7 @@ const TypeOfDocMaster: React.FC = () => {
                     maxLength={30}
                     required
                   />
-                  <p className="mt-1 text-[11px] text-muted-foreground font-heading">
+                  <p className="mt-1 text-[0.6875rem] text-muted-foreground font-heading">
                     Auto-filled from entry type's Eprefix — also used as
                     fallback in legacy slash format
                   </p>
@@ -773,7 +774,7 @@ const TypeOfDocMaster: React.FC = () => {
                     >
                       Reset counter each financial year
                     </label>
-                    <p className="text-[11px] text-muted-foreground font-heading mt-0.5">
+                    <p className="text-[0.6875rem] text-muted-foreground font-heading mt-0.5">
                       On = sequence restarts from 1 each April (new convention).
                       Off = global ever-incrementing counter (legacy).
                     </p>
@@ -785,17 +786,17 @@ const TypeOfDocMaster: React.FC = () => {
               {preview && (
                 <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 space-y-1">
                   <div className="flex items-center justify-between">
-                    <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wide">
+                    <p className="text-[0.625rem] text-muted-foreground font-heading uppercase tracking-wide">
                       Document number preview
                     </p>
-                    <span className="text-[10px] font-heading px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                    <span className="text-[0.625rem] font-heading px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                       {tierName}
                     </span>
                   </div>
                   <p className="font-mono font-bold text-primary text-lg tracking-wider">
                     {preview}
                   </p>
-                  <p className="text-[11px] text-muted-foreground font-heading">
+                  <p className="text-[0.6875rem] text-muted-foreground font-heading">
                     Actual number is assigned when the document is saved
                   </p>
                 </div>
@@ -834,7 +835,7 @@ const TypeOfDocMaster: React.FC = () => {
                         onClick={() => toggleLink(opt.value)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-heading font-medium border transition-colors ${
                           checked
-                            ? "bg-primary text-primary-foreground border-primary"
+                            ? "btn-module text-white border-primary"
                             : "bg-background text-muted-foreground border-border hover:border-primary hover:text-primary"
                         }`}
                       >
@@ -844,7 +845,7 @@ const TypeOfDocMaster: React.FC = () => {
                   })}
                 </div>
                 {form.links_to.length > 0 && (
-                  <p className="text-[11px] text-muted-foreground mt-1.5 flex items-center gap-1">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1.5 flex items-center gap-1">
                     <Info size={10} />
                     Controls which module dropdowns this doc type appears in
                   </p>
@@ -863,7 +864,7 @@ const TypeOfDocMaster: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isBusy}
-                  className="flex-1 bg-primary text-primary-foreground py-2.5 rounded-lg text-sm font-heading hover:bg-primary/90 disabled:opacity-60 flex items-center justify-center gap-2 transition"
+                  className="flex-1 btn-module text-white py-2.5 rounded-lg text-sm font-heading disabled:opacity-60 flex items-center justify-center gap-2 transition"
                 >
                   {isBusy ? (
                     <Loader2 size={16} className="animate-spin" />
@@ -875,11 +876,11 @@ const TypeOfDocMaster: React.FC = () => {
               </div>
             </form>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -901,7 +902,7 @@ const TypeOfDocMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Entry Type
                 </p>
                 <p className="text-sm font-medium text-foreground">
@@ -909,7 +910,7 @@ const TypeOfDocMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Description
                 </p>
                 <p className="text-sm text-foreground">
@@ -921,7 +922,7 @@ const TypeOfDocMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Doc Number Prefix
                 </p>
                 <p className="font-mono text-sm font-semibold text-primary">
@@ -934,7 +935,7 @@ const TypeOfDocMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Format
                 </p>
                 {(() => {
@@ -958,7 +959,7 @@ const TypeOfDocMaster: React.FC = () => {
               </div>
               {viewRecord.ProjectName && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Project
                   </p>
                   <p className="text-sm text-foreground">
@@ -972,7 +973,7 @@ const TypeOfDocMaster: React.FC = () => {
                 </div>
               )}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Module Code
                 </p>
                 <p className="font-mono text-sm text-foreground">
@@ -984,7 +985,7 @@ const TypeOfDocMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Starting Number
                 </p>
                 <p className="font-mono text-sm text-foreground">
@@ -992,7 +993,7 @@ const TypeOfDocMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Fin Year Reset
                 </p>
                 <span
@@ -1005,14 +1006,14 @@ const TypeOfDocMaster: React.FC = () => {
               </div>
               {viewRecord.links_to && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Links To
                   </p>
                   <div className="flex flex-wrap gap-1.5 mt-1">
                     {viewRecord.links_to.split(",").map((l) => (
                       <span
                         key={l}
-                        className="px-2 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-medium"
+                        className="px-2 py-0.5 rounded text-[0.625rem] bg-primary/10 text-primary font-medium"
                       >
                         {l.trim()}
                       </span>
@@ -1021,7 +1022,7 @@ const TypeOfDocMaster: React.FC = () => {
                 </div>
               )}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -1037,13 +1038,13 @@ const TypeOfDocMaster: React.FC = () => {
                   openEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white "
               >
                 <Edit size={13} /> Edit Document Type
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
       </AdminShell>
     </>

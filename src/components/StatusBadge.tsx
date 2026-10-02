@@ -32,7 +32,7 @@ const STATUS_CONFIG: Record<
     label: "Pending",
     icon: Clock,
     classes:
-      "bg-amber-500/10 text-amber-600 border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/25",
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
   },
   Approved: {
     label: "Approved",
@@ -161,7 +161,7 @@ const STATUS_CONFIG: Record<
     label: "Important",
     icon: FileEdit,
     classes:
-      "bg-amber-500/10 text-amber-600 border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/25",
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
   },
   Normal: {
     label: "Normal",
@@ -175,7 +175,7 @@ const STATUS_CONFIG: Record<
     label: "On Hold",
     icon: Clock,
     classes:
-      "bg-amber-500/10 text-amber-600 border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/25",
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
   },
   Available: {
     label: "Available",
@@ -208,7 +208,7 @@ const UNIT_STATUS_CONFIG: typeof STATUS_CONFIG = {
     label: "On Hold",
     icon: Clock,
     classes:
-      "bg-amber-500/10 text-amber-600 border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/25",
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
   },
   Available: {
     label: "Available",

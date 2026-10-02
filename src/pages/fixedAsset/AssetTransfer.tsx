@@ -26,6 +26,7 @@ import {
   type TransferUser, type TransferableAsset, type TransferListItem, type TransferDetail,
 } from "@/api/assetTransferApi";
 import { getDepartmentOptions, type DepartmentOption } from "@/api/departmentMasterApi";
+import { DateInput } from "@/components/ui/date-input";
 
 function ensureArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -128,7 +129,7 @@ function FAItemCodeCombobox({
                       <span className="flex flex-col min-w-0">
                         <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{a.FAItemCode}</span>
                         <span className="text-xs truncate">{a.AssetName}{a.AssetCategory ? ` (${a.AssetCategory})` : ""}</span>
-                        <span className="text-[11px] text-muted-foreground truncate">{a.CustodianName ? `Held by ${a.CustodianName}` : "No current holder"}</span>
+                        <span className="text-[0.6875rem] text-muted-foreground truncate">{a.CustodianName ? `Held by ${a.CustodianName}` : "No current holder"}</span>
                       </span>
                     </CommandItem>
                   ))}
@@ -216,7 +217,7 @@ function ItemPicturePicker({
           className="flex w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-background py-6 text-muted-foreground hover:border-yellow-500/40 hover:bg-yellow-500/[0.03] transition-colors disabled:opacity-50">
           {busy ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
           <span className="text-xs font-medium">Upload Item Picture</span>
-          <span className="text-[10px] text-muted-foreground/70">No picture found for this asset · JPG, JPEG, PNG or WEBP · max 4 MB</span>
+          <span className="text-[0.625rem] text-muted-foreground/70">No picture found for this asset · JPG, JPEG, PNG or WEBP · max 4 MB</span>
         </button>
       )}
     </div>
@@ -258,7 +259,7 @@ function TransferPreviewCard({
   return (
     <div className="relative bg-card border border-border rounded-xl overflow-hidden h-fit shadow-lg shadow-black/5 dark:shadow-black/20">
       <div className="bg-gradient-to-br from-yellow-500 via-amber-500 to-yellow-700 p-4 text-white">
-        <p className="text-[10px] uppercase tracking-wide text-white/70 mb-1.5">Draft Transfer</p>
+        <p className="text-[0.625rem] uppercase tracking-wide text-white/70 mb-1.5">Draft Transfer</p>
         <div className="flex items-center gap-2.5">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 shrink-0">
             <ArrowRight size={16} />
@@ -295,7 +296,7 @@ function TransferPreviewCard({
         <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
           <div className="h-full rounded-full bg-gradient-to-r from-yellow-500 to-amber-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }} />
         </div>
-        <p className="text-[11px] text-muted-foreground mt-1.5">{pct}% filled</p>
+        <p className="text-[0.6875rem] text-muted-foreground mt-1.5">{pct}% filled</p>
       </div>
 
       {saving && (
@@ -600,7 +601,7 @@ export default function AssetTransfer() {
               <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               <Check size={13} /> {saving ? "Saving…" : editingId ? "Update Transfer" : "Save Transfer"}
             </button>
           </div>
@@ -647,11 +648,11 @@ export default function AssetTransfer() {
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Document Date *</label>
-                <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Transfer Date *</label>
-                <input type="date" value={form.transferDate} onChange={(e) => setField("transferDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.transferDate} onChange={(e) => setField("transferDate", e.target.value)} className={inputCls} />
               </div>
             </div>
           </div>
@@ -775,7 +776,7 @@ export default function AssetTransfer() {
       action={
         rights.canCreate && (
           <button onClick={goToCreate}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
             <Plus size={13} /> New Transfer
           </button>
         )
@@ -859,7 +860,7 @@ export default function AssetTransfer() {
               <p className="text-sm">No asset transfers found</p>
               {rights.canCreate && (
                 <button onClick={goToCreate}
-                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
                   <Plus size={13} /> Add First Transfer
                 </button>
               )}
@@ -886,7 +887,7 @@ export default function AssetTransfer() {
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(t.TransferDate)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium truncate">{t.AssetName || "—"}</p>
-                        <p className="text-[11px] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{t.FAItemCode || "—"}</td>
                       <td className="px-4 py-3">
@@ -904,7 +905,7 @@ export default function AssetTransfer() {
                       <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">{t.Remarks || "—"}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => goToView(t)}
+                          <button data-row-view onClick={() => goToView(t)}
                             className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="View">
                             <Eye size={13} />
                           </button>
@@ -945,13 +946,13 @@ export default function AssetTransfer() {
                 <UserAvatar id={viewDetail.FromUserId} name={viewDetail.FromUserName || "?"} avatarUrl={viewDetail.FromUserAvatar} size={32} />
                 <div className="text-center">
                   <p className="text-sm font-semibold">{viewDetail.FromUserName || "—"}</p>
-                  <p className="text-[10px] text-muted-foreground">From</p>
+                  <p className="text-[0.625rem] text-muted-foreground">From</p>
                 </div>
                 <ArrowRight size={18} className="text-yellow-600 dark:text-yellow-400 shrink-0" />
                 <UserAvatar id={viewDetail.ToUserId} name={viewDetail.ToUserName || "?"} avatarUrl={viewDetail.ToUserAvatar} size={32} />
                 <div className="text-center">
                   <p className="text-sm font-semibold">{viewDetail.ToUserName || "—"}</p>
-                  <p className="text-[10px] text-muted-foreground">To</p>
+                  <p className="text-[0.625rem] text-muted-foreground">To</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm">

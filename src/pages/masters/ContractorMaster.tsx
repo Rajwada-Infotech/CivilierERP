@@ -58,6 +58,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CONTRACTOR_TYPE = "C";
@@ -338,7 +339,7 @@ function buildContractorColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-start">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -358,7 +359,7 @@ function buildContractorColumns(
         }
         return (
           <div className="flex items-center justify-start gap-2 w-full min-w-[120px]">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
@@ -368,7 +369,7 @@ function buildContractorColumns(
             {canPrint && (
               <button
                 onClick={() => onPrint(row.original)}
-                className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                className="p-1 rounded text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                 title="Print"
               >
                 <Printer size={15} />
@@ -992,7 +993,7 @@ const ContractorMaster: React.FC = () => {
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Contractor" : "Add Contractor"}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are
                 required
               </p>
@@ -1006,7 +1007,7 @@ const ContractorMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <HardHat size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Basic Information
                 </p>
               </div>
@@ -1096,7 +1097,7 @@ const ContractorMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Phone size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Contact Details
                 </p>
               </div>
@@ -1182,7 +1183,7 @@ const ContractorMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <FileText size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Tax &amp; Payment Details
                 </p>
               </div>
@@ -1316,7 +1317,7 @@ const ContractorMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Landmark size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Bank Details
                 </p>
               </div>
@@ -1463,7 +1464,7 @@ const ContractorMaster: React.FC = () => {
 
           {/* Card footer — actions */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">
                   Ready to save
@@ -1651,7 +1652,7 @@ const ContractorMaster: React.FC = () => {
           <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
             <button
               onClick={() => setImportResults(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
             >
               Close
             </button>
@@ -1661,7 +1662,7 @@ const ContractorMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -1732,7 +1733,7 @@ const ContractorMaster: React.FC = () => {
                 { label: "IFSC Code", value: viewRecord.bankIfscCode || "—", mono: true },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     {label}
                   </p>
                   <p
@@ -1743,7 +1744,7 @@ const ContractorMaster: React.FC = () => {
                 </div>
               ))}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -1777,7 +1778,7 @@ const ContractorMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

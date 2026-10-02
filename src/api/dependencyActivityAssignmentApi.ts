@@ -220,7 +220,7 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
   // /:rungId/status autoStatus branch).
   ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
   IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
-  HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+  HOLD: { label: "Hold", className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400" },
   CANCELLED: { label: "Cancelled", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
   APPROVED: { label: "Approved", className: "bg-teal-500/10 text-teal-600 dark:text-teal-400" },
   REWORK: { label: "Rework", className: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400" },
@@ -309,10 +309,63 @@ export interface ReportedAssignment {
   materials: { name: string; quantity: number; uom: string | null }[];
 }
 
-export const getReportedAssignments = async (dependencyMasterId?: number): Promise<ReportedAssignment[]> => {
-  const url = dependencyMasterId ? `${BASE}?dependencyMasterId=${dependencyMasterId}` : BASE;
-  const res = await fetchWithAuth(url);
+// roomId is the one that matters at production scale — scopes to a single
+// room's activities (typically a handful) instead of ever fetching every
+// IsCurrent activity in the system. See getActivityScopeSummary below for
+// how Reporting now builds its location tree without needing this at all
+// until a room is actually expanded.
+export const getReportedAssignments = async (params?: {
+  dependencyMasterId?: number;
+  // A ScopeSummaryRoom's roomId is `null` for the "No room" bucket — pass
+  // that through as-is (not just omitted) so the request scopes to rungs
+  // with no room at all, instead of falling through to "every activity".
+  roomId?: number | null;
+  status?: AssignmentStatus;
+}): Promise<ReportedAssignment[]> => {
+  const qs = new URLSearchParams();
+  if (params?.dependencyMasterId) qs.set("dependencyMasterId", String(params.dependencyMasterId));
+  if (params && "roomId" in params && params.roomId !== undefined) {
+    qs.set("roomId", params.roomId === null ? "null" : String(params.roomId));
+  }
+  if (params?.status) qs.set("status", params.status);
+  const query = qs.toString();
+  const res = await fetchWithAuth(query ? `${BASE}?${query}` : BASE);
   return handleResponse<ReportedAssignment[]>(res);
+};
+
+// ── Scope summary ────────────────────────────────────────────────────────
+// Builds Reporting's Project > Tower > Floor > Unit > Room tree and its
+// status-tile counts from cheap server-side GROUP BYs instead of fetching
+// every activity in the system to count client-side — see the backend
+// route's own comment for why that stopped being viable at production
+// scale (342,000+ rows).
+export interface ScopeSummaryRoom {
+  projectId: number;
+  projectName: string | null;
+  towerId: number;
+  towerName: string | null;
+  floor: string;
+  flatId: number;
+  flatName: string | null;
+  roomId: number | null;
+  roomName: string | null;
+  activityCount: number;
+}
+export interface ActivityScopeSummary {
+  statusCounts: Partial<Record<AssignmentStatus, number>>;
+  total: number;
+  rooms: ScopeSummaryRoom[];
+}
+export const getActivityScopeSummary = async (params?: {
+  status?: AssignmentStatus;
+  search?: string;
+}): Promise<ActivityScopeSummary> => {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.search) qs.set("search", params.search);
+  const query = qs.toString();
+  const res = await fetchWithAuth(`${BASE}/scope-summary${query ? `?${query}` : ""}`);
+  return handleResponse<ActivityScopeSummary>(res);
 };
 
 // StartDate is only ever a tentative plan — the real measure of how
@@ -389,6 +442,26 @@ export interface ProgressLogEntry {
 export const getProgressLog = async (rungId: number): Promise<ProgressLogEntry[]> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/progress-log`);
   return handleResponse<ProgressLogEntry[]>(res);
+};
+
+// The actual logbook — one permanent snapshot per day this activity was
+// ever reported on (written by the PATCH /:rungId/status route's own
+// MERGE, see its comment). Read-only here; a day's row is only ever
+// written by that same day's own save.
+export interface DailyLogEntry {
+  id: number;
+  logDate: string;
+  progressPercent: number | null;
+  remarks: string | null;
+  createdBy: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+  photoCount: number;
+}
+
+export const getDailyLog = async (rungId: number): Promise<DailyLogEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/daily-log`);
+  return handleResponse<DailyLogEntry[]>(res);
 };
 
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────
@@ -469,6 +542,9 @@ export interface ActivityPhotoMeta {
   note: string | null;
   capturedBy: string | null;
   capturedAt: string;
+  /** The day this photo was taken for — see the Daily Log tab. Null on
+   *  photos uploaded before that column existed. */
+  logDate: string | null;
 }
 
 export interface ActivityPhotos {
@@ -482,8 +558,11 @@ export interface ActivityPhotoData {
   dataBase64: string;
 }
 
-export const getActivityPhotos = async (rungId: number): Promise<ActivityPhotos> => {
-  const res = await fetchWithAuth(`${BASE}/${rungId}/photos`);
+// `date` (YYYY-MM-DD) scopes to just that day's photos — used by the Daily
+// Log tab to show one day's uploads; omit for the full "every photo ever
+// taken for this activity" gallery every other caller already relies on.
+export const getActivityPhotos = async (rungId: number, date?: string): Promise<ActivityPhotos> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos${date ? `?date=${date}` : ""}`);
   return handleResponse<ActivityPhotos>(res);
 };
 

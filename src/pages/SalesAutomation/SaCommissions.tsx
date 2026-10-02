@@ -167,7 +167,7 @@ const SaCommissions: React.FC = () => {
             <input type="number" value={form.SpRate} onChange={(e) => setForm({ ...form, SpRate: e.target.value })} placeholder="SP %" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <input type="number" value={form.TlRate} onChange={(e) => setForm({ ...form, TlRate: e.target.value })} placeholder="TL %" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <input value={form.Notes} onChange={(e) => setForm({ ...form, Notes: e.target.value })} placeholder="Notes" className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <button className="inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium">
+            <button className="inline-flex items-center justify-center gap-2 rounded-md btn-module text-white px-3 py-2 text-sm font-medium">
               <Plus size={15} /> Add
             </button>
           </form>

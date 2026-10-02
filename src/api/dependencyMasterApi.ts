@@ -76,6 +76,10 @@ export interface DependencyMasterListRow {
   activityCount: number;
   /** Server-built "Tower > Floor N > Flat > Room" trail — ready to render. */
   scopePath: string;
+  /** Full activity ladder for this chain — included inline so callers that
+   *  need every chain's rungs (e.g. Work Done's chain browser) don't have
+   *  to fire one GET /:id per row. */
+  activities: LadderActivity[];
 }
 
 export interface DependencyMasterDetail extends DependencyMasterListRow {
