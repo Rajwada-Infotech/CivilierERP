@@ -506,6 +506,19 @@ router.post(
         return res.status(400).json({ error: "Only a Completed activity (work dragged to 100%) can be quality-checked." });
       }
 
+      // When Work Allocation named QC people for this activity, only they
+      // (or a super_admin) may decide it. No one named = anyone with the QC
+      // page's edit right, as before.
+      const qcNamed = await pool.request().input("aid", sql.Int, assignmentId).query(
+        "SELECT QcUserId FROM dbo.DependencyActivityQcAssignee WHERE AssignmentId = @aid",
+      );
+      if (qcNamed.recordset.length && req.user?.role !== "super_admin") {
+        const viewerId = Number(req.user?.userId ?? req.user?.id);
+        if (!qcNamed.recordset.some((r) => Number(r.QcUserId) === viewerId)) {
+          return res.status(403).json({ error: "You're not named as a QC reviewer for this activity." });
+        }
+      }
+
       const cp = await pool.request().input("aid", sql.Int, assignmentId).query(
         "SELECT Id, FieldName FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @aid ORDER BY SortOrder, Id",
       );
@@ -610,6 +623,14 @@ router.post(
 // any level regardless of who's named. Shared level-satisfaction logic
 // between the two routes below (kept inline rather than factored out — the
 // two call sites are the entire surface that needs it).
+// Approving or rejecting is only meaningful once QC has passed — Completed
+// alone just means work hit 100%, which happens before QC.
+async function qcHasPassed(pool, assignmentId) {
+  const r = await pool.request().input("aid", sql.Int, assignmentId).query(
+    "SELECT TOP 1 Decision FROM dbo.DependencyActivityQc WHERE AssignmentId = @aid ORDER BY QcAt DESC, Id DESC",
+  );
+  return r.recordset[0]?.Decision === "APPROVED";
+}
 function satisfiedLevel(level, approvals) {
   const approvedIds = new Set(
     approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)),
@@ -711,6 +732,9 @@ async function handleApproveLevel(req, res) {
     if (a.recordset[0].Status !== "COMPLETED") {
       return res.status(400).json({ error: "Only a Completed, QC-passed activity is awaiting approval." });
     }
+    if (!(await qcHasPassed(pool, assignmentId))) {
+      return res.status(400).json({ error: "Quality Check hasn't passed yet — this activity can't be approved before it." });
+    }
     let levels = [];
     try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
 
@@ -750,15 +774,24 @@ async function handleApproveLevel(req, res) {
     const already = approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId));
     if (already) return res.status(400).json({ error: "You've already approved this step." });
 
-    await pool.request()
-      .input("aid", sql.Int, assignmentId)
-      .input("levelId", sql.NVarChar(50), currentLevel.id)
-      .input("levelIndex", sql.Int, currentLevelIndex)
-      .input("userId", sql.Int, viewerUserId)
-      .query(`
-        INSERT INTO dbo.DependencyActivityApproval (AssignmentId, LevelId, LevelIndex, ApproverUserId)
-        VALUES (@aid, @levelId, @levelIndex, @userId)
-      `);
+    try {
+      await pool.request()
+        .input("aid", sql.Int, assignmentId)
+        .input("levelId", sql.NVarChar(50), currentLevel.id)
+        .input("levelIndex", sql.Int, currentLevelIndex)
+        .input("userId", sql.Int, viewerUserId)
+        .query(`
+          INSERT INTO dbo.DependencyActivityApproval (AssignmentId, LevelId, LevelIndex, ApproverUserId)
+          VALUES (@aid, @levelId, @levelIndex, @userId)
+        `);
+    } catch (insErr) {
+      // UX_DependencyActivityApproval_Assignment_Level_User — a double-click
+      // or concurrent retry by the same approver.
+      if (insErr.number === 2627 || insErr.number === 2601) {
+        return res.status(400).json({ error: "You've already approved this step." });
+      }
+      throw insErr;
+    }
 
     // NOT just "was this the last level by position" — a mode "all" level
     // with several named users isn't actually cleared until every one of
@@ -768,7 +801,14 @@ async function handleApproveLevel(req, res) {
     // level flipped the whole activity to APPROVED after just the FIRST
     // of three signoffs, the moment that level happened to be the last one
     // configured.
-    const approvalsAfter = [...approvals, { levelId: currentLevel.id, approverUserId: viewerUserId }];
+    // Re-read AFTER our insert instead of appending to the list read before
+    // it: two approvers clearing the last "all" level at the same moment each
+    // used a stale list that lacked the other's row, so neither saw the level
+    // satisfied and the activity stuck at Completed. Each insert precedes its
+    // own re-read, so at least one of them sees both rows.
+    const approvalsAfter = (await pool.request().input("aid", sql.Int, assignmentId).query(
+      "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+    )).recordset;
     const fullyApproved = firstUnsatisfiedLevelIndex(levels, approvalsAfter) == null;
     if (fullyApproved) {
       await pool.request()
@@ -826,6 +866,9 @@ async function handleRejectLevel(req, res) {
     const assignmentId = a.recordset[0].Id;
     if (a.recordset[0].Status !== "COMPLETED") {
       return res.status(400).json({ error: "Only a Completed, QC-passed activity is awaiting approval." });
+    }
+    if (!(await qcHasPassed(pool, assignmentId))) {
+      return res.status(400).json({ error: "Quality Check hasn't passed yet — send it back from Quality Check instead." });
     }
     let levels = [];
     try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
