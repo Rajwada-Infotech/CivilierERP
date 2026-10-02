@@ -464,6 +464,11 @@ export const getDailyLog = async (rungId: number): Promise<DailyLogEntry[]> => {
   return handleResponse<DailyLogEntry[]>(res);
 };
 
+export const deleteDailyLogEntry = async (rungId: number, logId: number) => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/daily-log/${logId}`, { method: "DELETE" });
+  return handleResponse<{ success: boolean }>(res);
+};
+
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────
 // Scoped per (rung, room, context) — see migration 345/346's own comments
 // for why: two activities in the same chain sharing a room's blueprint
