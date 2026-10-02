@@ -7,6 +7,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate } = require("../services/projectScope");
 
 // GET all
 router.get(
@@ -425,6 +426,12 @@ router.get("/options", authMiddleware, async (req, res) => {
 
     // Always exclude soft-deleted rows from dropdown options
     conditions.push("(discontinue IS NULL OR discontinue = 0)");
+
+    // A project-scoped user only ever sees their assigned projects here —
+    // this one endpoint feeds the project dropdown on nearly every screen.
+    if (req.projectScope && req.query.business_type === "P") {
+      conditions.push(projectPredicate(req.projectScope, "id", "").trim());
+    }
 
     // tagged_company_ids lets callers that fetch the FULL project list once
     // and filter client-side (most of them — see JournalVoucher.tsx,

@@ -4,6 +4,39 @@ const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
+
+// ── Project scoping ──────────────────────────────────────────────────────────
+// A rung / checkpoint / checkpoint-update belongs to the project of its
+// Dependency chain (dbo.DependencyMaster.ProjectId). A restricted user is
+// refused anything outside their assigned projects.
+const RUNG_TO_PROJECT = `
+  FROM dbo.DependencyMasterActivity dma
+  JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId`;
+const projectGuard = (sqlText) => async (req, res, next, value) => {
+  if (!req.projectScope) return next();
+  const id = parseInt(value, 10);
+  if (!Number.isFinite(id)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, id).query(sqlText);
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+router.param("rungId", projectGuard(`SELECT dm.ProjectId ${RUNG_TO_PROJECT} WHERE dma.Id = @id`));
+const CHECKPOINT_TO_PROJECT = `
+  FROM dbo.DependencyActivityCheckpoint cp
+  JOIN dbo.DependencyActivityAssignment daa ON daa.Id = cp.AssignmentId
+  JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+  JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId`;
+router.param("cpId", projectGuard(`SELECT dm.ProjectId ${CHECKPOINT_TO_PROJECT} WHERE cp.Id = @id`));
+// Only /checkpoint-update/:id uses :id in this router.
+router.param("id", projectGuard(`SELECT dm.ProjectId ${CHECKPOINT_TO_PROJECT}
+  JOIN dbo.DependencyActivityCheckpointUpdate cu ON cu.AssignmentCheckpointId = cp.Id WHERE cu.Id = @id`));
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 
@@ -171,6 +204,7 @@ router.get(
       request.input("projectId", sql.Int, projectId);
       conds.push("dm.ProjectId = @projectId");
     }
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "dm.ProjectId", "").trim());
     if (fromDate && !Number.isNaN(Date.parse(fromDate))) {
       request.input("fromDate", sql.Date, fromDate);
       conds.push("daa.UpdatedAt >= @fromDate");
@@ -316,7 +350,7 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}
+        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
         GROUP BY daa.Status
       `);
       const statusCounts = {};
@@ -345,7 +379,7 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}
+        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
           ${statusFilter && STATUS_VALUES.has(statusFilter) ? "AND daa.Status = @statusFilter" : ""}
         GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName
       `);
@@ -415,7 +449,7 @@ router.get(
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
         LEFT JOIN dbo.DependencyActivityAssignment cur
           ON cur.DependencyMasterActivityId = daa.DependencyMasterActivityId AND cur.IsCurrent = 1
-        WHERE daa.IsCurrent = 0
+        WHERE daa.IsCurrent = 0${projectPredicate(req.projectScope, "dm.ProjectId")}
         ORDER BY daa.UpdatedAt DESC
       `);
       res.json(r.recordset);
@@ -956,8 +990,10 @@ router.get(
       const candidates = await pool.request().query(`
         SELECT daa.Id AS assignmentId, daa.ApprovalLevelsJson AS approvalLevelsJson
         FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
         WHERE daa.Status = 'COMPLETED'
-          AND daa.IsCurrent = 1
+          AND daa.IsCurrent = 1${projectPredicate(req.projectScope, "dm.ProjectId")}
           AND (
             SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc
             WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC

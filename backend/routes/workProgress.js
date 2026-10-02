@@ -4,6 +4,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const { projectPredicate, projectParamGuard, assertAllocationAllowed } = require("../services/projectScope");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
 // dbo.WorkProgress — progress entries logged against a Contractor
@@ -60,6 +61,10 @@ const JOINS = `
 `;
 
 // ─── GET / — progress entries, optionally filtered by project/allocation ────
+router.param("id", projectParamGuard(
+  `SELECT ca.ProjectId FROM dbo.WorkProgress wp
+   JOIN dbo.ContractorAllocation ca ON ca.AllocationId = wp.AllocationId WHERE wp.WorkProgressId = @id`));
+
 router.get("/", authMiddleware, requirePageRight("civilworkdpr-dependency", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -72,7 +77,7 @@ router.get("/", authMiddleware, requirePageRight("civilworkdpr-dependency", "vie
       .query(`
         SELECT ${SELECT_COLUMNS}
         ${JOINS}
-        WHERE (@projectId IS NULL OR ca.ProjectId = @projectId)
+        WHERE (@projectId IS NULL OR ca.ProjectId = @projectId)${projectPredicate(req.projectScope, "ca.ProjectId")}
           AND (@allocationId IS NULL OR wp.AllocationId = @allocationId)
         ORDER BY wp.CreatedAt DESC
       `);
@@ -95,6 +100,7 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-dependency", "cr
   if (!Number.isFinite(parseInt(allocationId, 10))) return res.status(400).json({ error: "Allocation is required" });
 
   try {
+    if (!(await assertAllocationAllowed(req, res, allocationId))) return;
     const pool = getPool();
     const result = await pool.request()
       .input("allocationId", sql.Int, allocationId)
