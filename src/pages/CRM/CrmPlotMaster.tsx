@@ -556,7 +556,7 @@ const CrmPlotMaster: React.FC = () => {
                       <td className="px-3 py-2"><span className={`inline-flex rounded-full px-2 py-0.5 text-[0.6875rem] font-medium ${status.cls}`}>{status.label}</span></td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-1">
-                          <button onClick={() => openView(plot)} className="p-1.5 rounded hover:bg-muted" title="View plot"><Eye size={15} /></button>
+                          <button data-row-view onClick={() => openView(plot)} className="p-1.5 rounded hover:bg-muted" title="View plot"><Eye size={15} /></button>
                           {rights.canEdit && <button onClick={() => openEdit(plot)} disabled={!canSelect} className="p-1.5 rounded hover:bg-muted disabled:opacity-35" title={canSelect ? "Edit plot" : "Only available plots can be edited"}><Pencil size={15} /></button>}
                           {rights.canDelete && <button onClick={() => deletePlot(plot)} disabled={!canSelect} className="p-1.5 rounded text-destructive hover:bg-destructive/10 disabled:opacity-35" title={canSelect ? "Delete plot" : "Only available plots can be deleted"}><Trash2 size={15} /></button>}
                         </div>
@@ -717,7 +717,7 @@ const CrmPlotMaster: React.FC = () => {
                               <button key={value} type="button" role="radio" aria-checked={active}
                                 onClick={() => { setConversionMode(value); setConversionConfirmed(false); }}
                                 className={`group relative flex gap-3 rounded-xl border p-3.5 text-left transition ${active
-                                  ? value === "combine" ? "border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/30" : "border-primary bg-primary/5 ring-2 ring-primary/25"
+                                  ? value === "combine" ? "border-amber-500 bg-sky-500/10 ring-2 ring-amber-500/30" : "border-primary bg-primary/5 ring-2 ring-primary/25"
                                   : "border-border hover:border-primary/40 hover:bg-muted/50"}`}>
                                 <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${active ? (value === "combine" ? "bg-amber-500 text-white" : "bg-primary text-primary-foreground") : "bg-muted text-muted-foreground"}`}><Icon size={17} /></span>
                                 <span className="min-w-0">
@@ -777,7 +777,7 @@ const CrmPlotMaster: React.FC = () => {
                       {missing > 0 && <span className="text-xs font-medium text-destructive">{missing} missing built-up area</span>}
                     </div>
                     {!separate && many && (
-                      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                      <div className="rounded-lg border border-amber-500/40 bg-sky-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
                         Merging is permanent: these plots can never be sold or built on separately again. Use it only when one villa really stands across them.
                       </div>
                     )}
@@ -858,7 +858,7 @@ const CrmPlotMaster: React.FC = () => {
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent accent="crm" className="max-w-xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Eye size={17} className="text-primary" /> {detailPlot?.PlotName || "Plot details"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2">{detailPlot?.PlotName || "Plot details"}</DialogTitle></DialogHeader>
           {detailPlot && (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border border-border p-3">
