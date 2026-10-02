@@ -807,6 +807,19 @@ router.get("/:id", authenticateToken, async (req, res) => {
 });
 
 // ── POST / ─────────────────────────────────────────────────────────────────────
+// The financial year is optional on the form, but every "approved MR" picker
+// (Quotation, PO) filters on it — a request saved without one silently vanished
+// from them. When the client sends none, take the year whose date range covers
+// the request date.
+async function resolveFinYearId(db, finYearId, requestDate) {
+  const given = parseInt(finYearId, 10);
+  if (Number.isFinite(given) && given > 0) return given;
+  const r = await db.request().input("d", sql.Date, requestDate || new Date()).query(
+    "SELECT TOP 1 FId FROM dbo.FinYear WHERE @d >= FStartDate AND @d <= FEndDate ORDER BY FStartDate DESC",
+  );
+  return r.recordset[0]?.FId ?? null;
+}
+
 router.post("/", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
@@ -884,7 +897,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
         .request()
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
-        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("FinYearId", sql.Int, await resolveFinYearId(pool, FinYearId, RequestDate))
         .input("RequestDate", sql.Date, RequestDate || new Date())
         .input("RequiredByDate", sql.Date, RequiredByDate || null)
         .input("Priority", sql.NVarChar(20), Priority)
@@ -1070,7 +1083,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
         .input("id", sql.Int, id)
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
-        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("FinYearId", sql.Int, await resolveFinYearId(pool, FinYearId, RequestDate))
         .input("RequestDate", sql.Date, RequestDate || new Date())
         .input("RequiredByDate", sql.Date, RequiredByDate || null)
         .input("Priority", sql.NVarChar(20), Priority)
