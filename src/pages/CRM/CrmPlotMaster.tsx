@@ -96,6 +96,8 @@ const CrmPlotMaster: React.FC = () => {
   const [superBuiltUpArea, setSuperBuiltUpArea] = useState("");
   const [villaTypeId, setVillaTypeId] = useState("");
   const [villaTypesOpen, setVillaTypesOpen] = useState(false);
+  // "each": one villa per plot (the default); "combine": one villa on all the ticked plots.
+  const [conversionMode, setConversionMode] = useState<"each" | "combine">("each");
   const [converting, setConverting] = useState(false);
   const [layoutState, setLayoutState] = useState<{ blockId: number; mode: "arrange" | "neighbours"; focusId: number | null } | null>(null);
   const [assetKindsOpen, setAssetKindsOpen] = useState(false);
@@ -218,14 +220,12 @@ const CrmPlotMaster: React.FC = () => {
   const openConversion = () => {
     if (!selectionIsCompatible) { toast.error("Select plots from one project and block to create one constructed unit"); return; }
     setUnitName(selectedPlots.map((plot) => plot.PlotName).join(" + "));
-    setBuiltUpArea(""); setSuperBuiltUpArea(""); setVillaTypeId("");
+    setBuiltUpArea(""); setSuperBuiltUpArea(""); setVillaTypeId(""); setConversionMode("each");
     // One planned type across the plots pre-selects it; mixed types are left to the user.
     const planned = new Set(selectedPlots.map((plot) => plot.PlannedVillaTypeId ?? null));
     const only = planned.size === 1 ? [...planned][0] : null;
     if (only != null) {
       fetchVillaTypes(selectedPlots[0].ProjectId).then((types) => applyVillaType(String(only), types)).catch(() => {});
-    } else if (planned.size > 1) {
-      toast.warning("The selected plots plan different villa types - choose one");
     }
     if (!unitKind) { const villa = constructedAssetKinds.find((kind) => kind.Code === "VILLA"); if (villa) setUnitKind(villa.Code); }
     setConvertOpen(true);
@@ -309,7 +309,55 @@ const CrmPlotMaster: React.FC = () => {
       await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
     } catch (e: any) { toast.error(e.message); }
   };
+  // One villa per plot: each plot takes its own planned villa type (areas and
+  // layout from the master); the type and areas in the dialog cover plots that
+  // plan none. Each villa is named after its plot. Plots are converted one by
+  // one, so a refusal on one plot does not stop the others.
+  const separate = conversionMode === "each" && selectedPlots.length > 1;
+  const convertEach = async () => {
+    if (!unitKind) { toast.error("Select the constructed asset kind"); return; }
+    if (!(Number(villaRate) > 0)) { toast.error("Enter the villa's construction rate per sq ft"); return; }
+    const typesById = new Map(conversionVillaTypes.map((t) => [t.Id, t]));
+    const jobs = selectedPlots.map((plot) => {
+      const own = plot.PlannedVillaTypeId != null ? typesById.get(plot.PlannedVillaTypeId) : undefined;
+      const layout = own ? layoutTypes.find((l) => l.id === own.LayoutTypeId)?.label : undefined;
+      return {
+        plot,
+        body: {
+          PlotIds: [plot.Id], UnitName: plot.PlotName, UnitType: layout || unitType, UnitKind: unitKind, RatePerSqFt: Number(villaRate),
+          VillaTypeId: own ? own.Id : (villaTypeId ? Number(villaTypeId) : null),
+          BuiltUpAreaSqFt: own ? null : (builtUpArea ? Number(builtUpArea) : null),
+          SuperBuiltUpAreaSqFt: own ? null : (superBuiltUpArea ? Number(superBuiltUpArea) : null),
+        },
+        ok: !!own || villaTypeId !== "" || Number(builtUpArea) > 0,
+        typed: !!(layout || unitType),
+      };
+    });
+    const noArea = jobs.filter((job) => !job.ok).map((job) => job.plot.PlotName);
+    if (noArea.length) { toast.error(`No villa type planned on ${noArea.join(", ")} - choose a villa type or enter the built-up area for them`); return; }
+    const noType = jobs.filter((job) => !job.typed).map((job) => job.plot.PlotName);
+    if (noType.length) { toast.error(`Select a unit type for ${noType.join(", ")}`); return; }
+    setConverting(true);
+    const failed: string[] = [];
+    let done = 0;
+    for (const job of jobs) {
+      try {
+        const response = await fetchWithAuth(`${SETUP_API}/plots/convert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(job.body) });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || "Could not convert");
+        done++;
+      } catch (e: any) { failed.push(`${job.plot.PlotName}: ${e.message}`); }
+    }
+    setConverting(false);
+    if (done) toast.success(`${done} villa${done === 1 ? "" : "s"} created, one per plot`);
+    if (failed.length) toast.error(`Not converted - ${failed.join("; ")}`, { duration: 12000 });
+    setSelectedIds((ids) => ids.filter((id) => jobs.some((job) => job.plot.Id === id && failed.some((f) => f.startsWith(`${job.plot.PlotName}:`)))));
+    if (!failed.length) setConvertOpen(false);
+    await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
+    await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
+  };
   const convert = async () => {
+    if (separate) { await convertEach(); return; }
     if (!unitName.trim() || !unitType || !unitKind) { toast.error("Select the constructed unit name, type, and kind"); return; }
     if (!(Number(villaRate) > 0)) { toast.error("Enter the villa's construction rate per sq ft"); return; }
     if (!(Number(builtUpArea) > 0)) { toast.error("Enter the villa's built-up area"); return; }
@@ -616,7 +664,22 @@ const CrmPlotMaster: React.FC = () => {
               <p className="font-medium">{selectedPlots.map((plot) => plot.PlotName).join(", ")}</p>
               <p className="mt-1 text-xs text-muted-foreground">{selectedPlots[0]?.ProjectName} · {selectedPlots[0]?.BlockName} · {totalArea.toLocaleString("en-IN")} sq ft combined area</p>
             </div>
-            <div><label className="text-xs text-muted-foreground block mb-1">Constructed unit name</label><input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} className={fieldCls} /></div>
+            {selectedPlots.length > 1 && (
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Conversion">
+                {([["each", "One villa per plot", `${selectedPlots.length} villas, each on its own plot`], ["combine", "Combine into one villa", "One villa standing on all the plots"]] as const).map(([value, label, hint]) => (
+                  <button key={value} type="button" role="radio" aria-checked={conversionMode === value} onClick={() => setConversionMode(value)}
+                    className={`rounded-lg border px-3 py-2 text-left ${conversionMode === value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted"}`}>
+                    <span className="block text-sm font-medium">{label}</span>
+                    <span className="block text-[0.6875rem] text-muted-foreground">{hint}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {separate ? (
+              <p className="text-xs text-muted-foreground">Each villa is named after its plot and takes the villa type planned on that plot. The villa type and areas below apply only to plots with no planned type{selectedPlots.some((plot) => plot.PlannedVillaTypeId == null) ? ` (${selectedPlots.filter((plot) => plot.PlannedVillaTypeId == null).map((plot) => plot.PlotName).join(", ")})` : " - every selected plot has one"}.</p>
+            ) : (
+              <div><label className="text-xs text-muted-foreground block mb-1">Constructed unit name</label><input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} className={fieldCls} /></div>
+            )}
             <div>
               <div className="mb-1 flex items-center justify-between">
                 <label className="block text-xs text-muted-foreground">Villa type</label>
@@ -640,7 +703,7 @@ const CrmPlotMaster: React.FC = () => {
             <p className="text-xs text-muted-foreground flex gap-1.5"><Lock size={13} className="shrink-0" /> The source plots remain in Plot Master as converted history and can no longer be booked or edited as plots.</p>
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setConvertOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
-              <button onClick={convert} disabled={converting || !unitName.trim() || !unitType || !unitKind || !(Number(villaRate) > 0) || !(Number(builtUpArea) > 0)} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">{converting ? "Converting..." : "Create Unit Master record"}</button>
+              <button onClick={convert} disabled={converting || !unitKind || !(Number(villaRate) > 0) || (!separate && (!unitName.trim() || !unitType || !(Number(builtUpArea) > 0)))} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">{converting ? "Converting..." : separate ? `Create ${selectedPlots.length} villas` : "Create Unit Master record"}</button>
             </div>
           </div>
         </DialogContent>
