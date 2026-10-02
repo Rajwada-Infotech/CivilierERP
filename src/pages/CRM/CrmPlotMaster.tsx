@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Map as MapIcon, ArrowRight, CheckCircle2, Lock, RefreshCw, Network, Settings2, Eye, Pencil, Plus, Trash2, List } from "lucide-react";
+import { Map as MapIcon, Home, Combine, ArrowRight, CheckCircle2, Lock, RefreshCw, Network, Settings2, Eye, Pencil, Plus, Trash2, List } from "lucide-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -663,88 +663,161 @@ const CrmPlotMaster: React.FC = () => {
       />
 
       <Dialog open={convertOpen} onOpenChange={setConvertOpen}>
-        <DialogContent accent="crm" className="max-w-md">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><CheckCircle2 size={17} className="text-emerald-600" /> Convert plots to Unit Master</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm">
-              <p className="font-medium">{selectedPlots.map((plot) => plot.PlotName).join(", ")}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{selectedPlots[0]?.ProjectName} · {selectedPlots[0]?.BlockName} · {totalArea.toLocaleString("en-IN")} sq ft combined area</p>
-            </div>
-            {selectedPlots.length > 1 && (
-              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Conversion">
-                {([["each", "One villa per plot", `${selectedPlots.length} villas, each on its own plot`], ["combine", "Combine into one villa", "One villa standing on all the plots"]] as const).map(([value, label, hint]) => (
-                  <button key={value} type="button" role="radio" aria-checked={conversionMode === value} onClick={() => { setConversionMode(value); setConversionConfirmed(false); }}
-                    className={`rounded-lg border px-3 py-2 text-left ${conversionMode === value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted"}`}>
-                    <span className="block text-sm font-medium">{label}</span>
-                    <span className="block text-[0.6875rem] text-muted-foreground">{hint}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {separate ? (
-              <p className="text-xs text-muted-foreground">Each villa is named after its plot and takes the villa type planned on that plot. The villa type and areas below apply only to plots with no planned type{selectedPlots.some((plot) => plot.PlannedVillaTypeId == null) ? ` (${selectedPlots.filter((plot) => plot.PlannedVillaTypeId == null).map((plot) => plot.PlotName).join(", ")})` : " - every selected plot has one"}.</p>
-            ) : (
-              <div><label className="text-xs text-muted-foreground block mb-1">Constructed unit name</label><input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} className={fieldCls} /></div>
-            )}
-            <div>
-              <div className="mb-1 flex items-center justify-between">
-                <label className="block text-xs text-muted-foreground">Villa type</label>
-                {rights.canEdit && <button type="button" onClick={() => setVillaTypesOpen(true)} className="text-[0.6875rem] text-primary hover:underline">Manage</button>}
-              </div>
-              <select value={villaTypeId} onChange={(event) => { if (event.target.value) applyVillaType(event.target.value); else setVillaTypeId(""); }} className={fieldCls}>
-                <option value="">None - enter the areas by hand</option>
-                {conversionVillaTypes.map((t) => <option key={t.Id} value={t.Id}>{t.Code} - {t.Name} ({Number(t.BuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft built-up)</option>)}
-              </select>
-            </div>
-            <div><label className="text-xs text-muted-foreground block mb-1">Unit type</label>
-              <Select value={unitType || undefined} onValueChange={setUnitType}><SelectTrigger className="h-9"><SelectValue placeholder="Select a configured unit type" /></SelectTrigger><SelectContent>{unitTypeOptionsForConversion.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
-            <div><label className="text-xs text-muted-foreground block mb-1">Constructed asset kind</label>
-              <Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger className="h-9"><SelectValue placeholder="Select a configured asset kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="text-xs text-muted-foreground block mb-1">Construction rate (₹/sq ft)</label><input type="number" min="0" value={villaRate} onChange={(event) => setVillaRate(event.target.value)} className={fieldCls} /></div>
-              <div><label className="text-xs text-muted-foreground block mb-1">Built-up area (sq ft) *</label><input type="number" min="0" value={builtUpArea} onChange={(event) => setBuiltUpArea(event.target.value)} placeholder="Villa built-up area" className={fieldCls} /></div>
-              <div><label className="text-xs text-muted-foreground block mb-1">Super built-up area (sq ft)</label><input type="number" min="0" value={superBuiltUpArea} onChange={(event) => setSuperBuiltUpArea(event.target.value)} placeholder="Optional — saleable area if given" className={fieldCls} /></div>
-            </div>
-            <p className="text-xs text-muted-foreground">The villa is priced on its construction rate only. A sold plot's owner has already paid for the land; they buy the villa as a separate booking.</p>
-            {selectedPlots.length > 1 && (() => {
-              const typesById = new Map(conversionVillaTypes.map((t) => [t.Id, t]));
-              const fallback = villaTypeId ? conversionVillaTypes.find((t) => String(t.Id) === villaTypeId) : undefined;
-              const rows = separate
-                ? selectedPlots.map((plot) => {
-                    const type = (plot.PlannedVillaTypeId != null ? typesById.get(plot.PlannedVillaTypeId) : undefined) ?? fallback;
-                    const bua = type ? type.BuiltUpAreaSqFt : Number(builtUpArea) || null;
-                    return { key: plot.Id, name: plot.PlotName, on: plot.PlotName, type: type?.Code ?? "-", bua };
-                  })
-                : [{ key: 0, name: unitName.trim() || "(unnamed)", on: selectedPlots.map((plot) => plot.PlotName).join(" + "), type: fallback?.Code ?? "-", bua: Number(builtUpArea) || null }];
-              return (
-                <div className={`rounded-lg border p-3 ${separate ? "border-border" : "border-amber-400 bg-amber-50 dark:bg-amber-950/30"}`}>
-                  <p className="mb-2 text-xs font-semibold">
-                    {separate ? `This will create ${rows.length} separate villas:` : `This will merge ${selectedPlots.length} plots into ONE villa:`}
-                  </p>
-                  {!separate && <p className="mb-2 text-xs text-amber-800 dark:text-amber-300">The plots can never be sold or built on separately again. Choose this only when a single villa really stands across these plots.</p>}
-                  <div className="max-h-40 overflow-auto rounded border border-border bg-background">
-                    <table className="w-full text-xs">
-                      <thead className="bg-muted/50 text-muted-foreground"><tr><th className="px-2 py-1 text-left font-medium">Villa</th><th className="px-2 py-1 text-left font-medium">On plot(s)</th><th className="px-2 py-1 text-left font-medium">Type</th><th className="px-2 py-1 text-right font-medium">Built-up</th></tr></thead>
-                      <tbody>{rows.map((row) => (
-                        <tr key={row.key} className="border-t border-border">
-                          <td className="px-2 py-1 font-medium">{row.name}</td><td className="px-2 py-1">{row.on}</td><td className="px-2 py-1 font-mono">{row.type}</td>
-                          <td className={`px-2 py-1 text-right tabular-nums ${row.bua ? "" : "text-destructive"}`}>{row.bua ? `${Number(row.bua).toLocaleString("en-IN")} sq ft` : "missing"}</td>
-                        </tr>))}</tbody>
-                    </table>
+        <DialogContent accent="crm" className="w-[96vw] max-w-5xl gap-0 overflow-hidden p-0">
+          {(() => {
+            const many = selectedPlots.length > 1;
+            const typesById = new Map(conversionVillaTypes.map((t) => [t.Id, t]));
+            const fallback = villaTypeId ? conversionVillaTypes.find((t) => String(t.Id) === villaTypeId) : undefined;
+            const unplanned = selectedPlots.filter((plot) => plot.PlannedVillaTypeId == null);
+            const rows = separate
+              ? selectedPlots.map((plot) => {
+                  const own = plot.PlannedVillaTypeId != null ? typesById.get(plot.PlannedVillaTypeId) : undefined;
+                  const type = own ?? fallback;
+                  const bua = type ? Number(type.BuiltUpAreaSqFt) : Number(builtUpArea) || null;
+                  return { key: plot.Id, name: plot.PlotName, on: [plot.PlotName], type: type?.Code ?? null, planned: !!own, bua };
+                })
+              : [{ key: 0, name: unitName.trim() || "Unnamed villa", on: selectedPlots.map((plot) => plot.PlotName), type: fallback?.Code ?? null, planned: false, bua: Number(builtUpArea) || null }];
+            const missing = rows.filter((row) => !row.bua).length;
+            const label = "mb-1.5 block text-xs font-medium text-muted-foreground";
+            const input = "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
+            const canSubmit = !converting && !!unitKind && Number(villaRate) > 0 && (!many || conversionConfirmed) && missing === 0
+              && (separate || (!!unitName.trim() && !!unitType && Number(builtUpArea) > 0));
+            return (
+              <>
+                {/* Header: what is being converted */}
+                <div className="border-b border-border px-6 pb-4 pt-5">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 text-lg"><Home size={19} className="text-emerald-600" /> Build villas on plots</DialogTitle>
+                  </DialogHeader>
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    {selectedPlots.map((plot) => (
+                      <span key={plot.Id} className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                        {plot.PlotName}{plot.PlannedVillaTypeCode && <span className="font-mono opacity-70">· {plot.PlannedVillaTypeCode}</span>}
+                      </span>
+                    ))}
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      {selectedPlots[0]?.ProjectName} · Block {selectedPlots[0]?.BlockName} · {totalArea > 0 ? `${totalArea.toLocaleString("en-IN")} sq ft land` : "land area pending"}
+                    </span>
                   </div>
-                  <label className="mt-2 flex items-start gap-2 text-xs">
-                    <input type="checkbox" className="mt-0.5" checked={conversionConfirmed} onChange={(event) => setConversionConfirmed(event.target.checked)} />
-                    <span>{separate ? `Yes, create ${rows.length} separate villas as listed.` : `Yes, merge ${selectedPlots.length} plots into one villa.`} I understand this cannot be undone.</span>
-                  </label>
                 </div>
-              );
-            })()}
-            <p className="text-xs text-muted-foreground flex gap-1.5"><Lock size={13} className="shrink-0" /> The source plots remain in Plot Master as converted history and can no longer be booked or edited as plots.</p>
-            <div className="flex justify-end gap-2 pt-1">
-              <button onClick={() => setConvertOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
-              <button onClick={convert} disabled={converting || !unitKind || !(Number(villaRate) > 0) || (selectedPlots.length > 1 && !conversionConfirmed) || (!separate && (!unitName.trim() || !unitType || !(Number(builtUpArea) > 0)))} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">{converting ? "Converting..." : separate ? `Create ${selectedPlots.length} villas` : selectedPlots.length > 1 ? `Merge ${selectedPlots.length} plots into 1 villa` : "Create Unit Master record"}</button>
-            </div>
-          </div>
+
+                <div className="grid max-h-[70vh] overflow-y-auto md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+                  {/* Left: choices */}
+                  <div className="space-y-6 px-6 py-5">
+                    {many && (
+                      <section>
+                        <p className={label}>How should they be built?</p>
+                        <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Conversion">
+                          {([
+                            ["each", Home, "One villa per plot", `${selectedPlots.length} villas, each on its own plot`, "Recommended"],
+                            ["combine", Combine, "Combine into one villa", "One villa standing across all the plots", ""],
+                          ] as const).map(([value, Icon, title, hint, badge]) => {
+                            const active = conversionMode === value;
+                            return (
+                              <button key={value} type="button" role="radio" aria-checked={active}
+                                onClick={() => { setConversionMode(value); setConversionConfirmed(false); }}
+                                className={`group relative flex gap-3 rounded-xl border p-3.5 text-left transition ${active
+                                  ? value === "combine" ? "border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/30" : "border-primary bg-primary/5 ring-2 ring-primary/25"
+                                  : "border-border hover:border-primary/40 hover:bg-muted/50"}`}>
+                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${active ? (value === "combine" ? "bg-amber-500 text-white" : "bg-primary text-primary-foreground") : "bg-muted text-muted-foreground"}`}><Icon size={17} /></span>
+                                <span className="min-w-0">
+                                  <span className="flex items-center gap-2 text-sm font-semibold">{title}{badge && <span className="rounded-full bg-emerald-500/15 px-1.5 py-px text-[0.625rem] font-medium text-emerald-700 dark:text-emerald-300">{badge}</span>}</span>
+                                  <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    )}
+
+                    <section className="space-y-4">
+                      <p className={label}>Villa specification</p>
+                      {!separate && (
+                        <div><label className={label}>Villa name</label><input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} className={input} /></div>
+                      )}
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <label className={label}>{separate ? "Villa type for plots with none planned" : "Villa type"}</label>
+                          {rights.canEdit && <button type="button" onClick={() => setVillaTypesOpen(true)} className="mb-1.5 text-xs font-medium text-primary hover:underline">Manage types</button>}
+                        </div>
+                        <select value={villaTypeId} onChange={(event) => { if (event.target.value) applyVillaType(event.target.value); else setVillaTypeId(""); }} className={input}
+                          disabled={separate && unplanned.length === 0}>
+                          <option value="">{separate && unplanned.length === 0 ? "Every plot has its own planned type" : "None - enter the areas by hand"}</option>
+                          {conversionVillaTypes.map((t) => <option key={t.Id} value={t.Id}>{t.Code} · {t.Name} · {Number(t.BuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft</option>)}
+                        </select>
+                        {separate && unplanned.length > 0 && <p className="mt-1.5 text-xs text-muted-foreground">No type planned on {unplanned.map((plot) => plot.PlotName).join(", ")}. Plots with a planned type use their own.</p>}
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div><label className={label}>Unit type (room layout)</label>
+                          <Select value={unitType || undefined} onValueChange={setUnitType}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a layout" /></SelectTrigger><SelectContent>{unitTypeOptionsForConversion.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+                        <div><label className={label}>Asset kind</label>
+                          <Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div>
+                        <div className="sm:col-span-2"><label className={label}>Construction rate</label>
+                          <div className="relative"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₹</span>
+                            <input type="number" min="0" value={villaRate} onChange={(event) => setVillaRate(event.target.value)} placeholder="0" className={`${input} pl-7 pr-16 tabular-nums`} />
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">per sq ft</span></div></div>
+                        {[["Built-up area", builtUpArea, setBuiltUpArea, "Required"], ["Super built-up area", superBuiltUpArea, setSuperBuiltUpArea, "Optional"]].map(([text, value, set, hint]) => (
+                          <div key={text as string}><label className={label}>{text as string} <span className="font-normal opacity-70">· {hint as string}</span></label>
+                            <div className="relative">
+                              <input type="number" min="0" value={value as string} onChange={(event) => (set as (v: string) => void)(event.target.value)}
+                                disabled={separate && unplanned.length === 0} placeholder={separate && unplanned.length === 0 ? "From each plot's type" : "0"}
+                                className={`${input} pr-14 tabular-nums disabled:opacity-60`} />
+                              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">sq ft</span></div></div>
+                        ))}
+                      </div>
+                      <p className="text-xs leading-relaxed text-muted-foreground">Priced on construction only. A sold plot's owner has already paid for the land and buys the villa as a separate booking. If super built-up is given, it is the saleable area.</p>
+                    </section>
+                  </div>
+
+                  {/* Right: result preview + confirmation */}
+                  <aside className="flex flex-col gap-4 border-t border-border bg-muted/30 px-6 py-5 md:border-l md:border-t-0">
+                    <div className="flex items-baseline justify-between">
+                      <p className="text-sm font-semibold">{separate ? `${rows.length} villas will be created` : many ? `${selectedPlots.length} plots → 1 villa` : "1 villa will be created"}</p>
+                      {missing > 0 && <span className="text-xs font-medium text-destructive">{missing} missing built-up area</span>}
+                    </div>
+                    {!separate && many && (
+                      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                        Merging is permanent: these plots can never be sold or built on separately again. Use it only when one villa really stands across them.
+                      </div>
+                    )}
+                    <ul className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                      {rows.map((row) => (
+                        <li key={row.key} className="flex items-center gap-3 rounded-xl border border-border bg-background px-3 py-2.5 shadow-sm">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600"><Home size={15} /></span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">{row.name}</span>
+                            <span className="block truncate text-xs text-muted-foreground">on {row.on.join(" + ")}</span>
+                          </span>
+                          <span className="text-right">
+                            {row.type ? <span className="inline-block rounded-md bg-primary/10 px-1.5 py-px font-mono text-[0.6875rem] text-primary">{row.type}{row.planned ? "" : " *"}</span> : <span className="text-[0.6875rem] text-muted-foreground">No type</span>}
+                            <span className={`block text-xs tabular-nums ${row.bua ? "text-foreground" : "font-medium text-destructive"}`}>{row.bua ? `${row.bua.toLocaleString("en-IN")} sq ft` : "Built-up missing"}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {separate && rows.some((row) => row.type && !row.planned) && <p className="-mt-2 text-[0.6875rem] text-muted-foreground">* type chosen here, not planned on the plot</p>}
+                    <p className="flex gap-1.5 text-xs text-muted-foreground"><Lock size={13} className="mt-px shrink-0" /> The plots stay in Plot Master as converted history and can no longer be booked or edited as plots.</p>
+                    {many && (
+                      <label className={`mt-auto flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 text-xs transition ${conversionConfirmed ? "border-primary bg-primary/5" : "border-border bg-background"}`}>
+                        <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" checked={conversionConfirmed} onChange={(event) => setConversionConfirmed(event.target.checked)} />
+                        <span><span className="font-medium">{separate ? `Create ${rows.length} separate villas as listed.` : `Merge ${selectedPlots.length} plots into one villa.`}</span> I understand this cannot be undone.</span>
+                      </label>
+                    )}
+                  </aside>
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center justify-end gap-2 border-t border-border bg-background px-6 py-3.5">
+                  <button onClick={() => setConvertOpen(false)} className="h-9 rounded-lg border border-border px-4 text-sm hover:bg-muted">Cancel</button>
+                  <button onClick={convert} disabled={!canSubmit}
+                    className={`h-9 rounded-lg px-4 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${!separate && many ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"}`}>
+                    {converting ? "Converting..." : separate ? `Create ${selectedPlots.length} villas` : many ? `Merge ${selectedPlots.length} plots into 1 villa` : "Create villa"}
+                  </button>
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
