@@ -138,12 +138,42 @@ export function ExpenseBookingPicker({
   // picker's own company/project/supplier filter above already matched
   // both rows on, so this can never disagree with what the user just saw
   // filtered together.
+  //
+  // Every comparison below is normalized (numeric coercion for the two
+  // ids, trim+lowercase for the name) specifically because this exact
+  // field set has already been the source of one "looks identical, compares
+  // unequal" bug (the projectId-vs-projectName one above) — a stray type or
+  // whitespace mismatch from how a row happened to be fetched/merged into
+  // the options list is exactly the kind of thing that bites here again
+  // without actually meaning the two invoices differ.
+  const normCompanyId = (v: unknown) => (v == null || v === "" ? null : Number(v));
+  const normSupplierId = (v: unknown) => (v == null || v === "" ? null : Number(v));
+  const normProjectName = (v: unknown) => String(v ?? "").trim().toLowerCase();
   const isMergeCompatible = (o: ExpenseOption) =>
     !mergeAnchor ||
-    (o.companyId === mergeAnchor.companyId &&
-      o.projectName === mergeAnchor.projectName &&
-      !!o.supplierId &&
-      o.supplierId === mergeAnchor.supplierId);
+    (normCompanyId(o.companyId) !== null &&
+      normCompanyId(o.companyId) === normCompanyId(mergeAnchor.companyId) &&
+      normProjectName(o.projectName) === normProjectName(mergeAnchor.projectName) &&
+      normSupplierId(o.supplierId) !== null &&
+      normSupplierId(o.supplierId) === normSupplierId(mergeAnchor.supplierId));
+  // Pinpoints exactly which field disagrees — shown in the UI instead of a
+  // generic "different" message, so the NEXT report of this is immediately
+  // actionable (what the two actual values were) instead of needing another
+  // round of "what does the DB actually say" diagnosis.
+  const mergeIncompatibleReason = (o: ExpenseOption): string | null => {
+    if (!mergeAnchor || isMergeCompatible(o)) return null;
+    if (normCompanyId(o.companyId) !== normCompanyId(mergeAnchor.companyId)) {
+      return `Company differs (${o.companyId ?? "—"} vs ${mergeAnchor.companyId ?? "—"})`;
+    }
+    if (normProjectName(o.projectName) !== normProjectName(mergeAnchor.projectName)) {
+      return `Project differs ("${o.projectName ?? "—"}" vs "${mergeAnchor.projectName ?? "—"}")`;
+    }
+    if (normSupplierId(o.supplierId) === null) return "Could not resolve this invoice's supplier";
+    if (normSupplierId(o.supplierId) !== normSupplierId(mergeAnchor.supplierId)) {
+      return `Supplier differs (${o.supplierName ?? o.supplierId} vs ${mergeAnchor.supplierName ?? mergeAnchor.supplierId})`;
+    }
+    return "Different company/project/supplier";
+  };
   const toggleMergeSelect = (o: ExpenseOption) => {
     setMergeSelected((prev) => {
       const next = new Set(prev);
@@ -382,7 +412,7 @@ export function ExpenseBookingPicker({
                       {o.type === "emi" && o.installmentNo && <p className="text-[0.625rem] text-violet-500 mt-0.5">Installment #{o.installmentNo}</p>}
                       {mergeMode && o.type === "emi" && <p className="text-[0.625rem] text-muted-foreground mt-0.5 italic">Not mergeable — paid via its own installments</p>}
                       {mergeMode && o.type !== "emi" && mergeAnchor && !mergeChecked && !isMergeCompatible(o) && (
-                        <p className="text-[0.625rem] text-muted-foreground mt-0.5 italic">Different company/project/supplier</p>
+                        <p className="text-[0.625rem] text-amber-600 dark:text-amber-400 mt-0.5 italic">{mergeIncompatibleReason(o)}</p>
                       )}
                       {isPartiallyPaid(o) && (
                         <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/25">
