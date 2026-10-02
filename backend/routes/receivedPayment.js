@@ -4,6 +4,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectRawAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a receipt whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT RPProjectId AS ProjectId FROM dbo.ReceivedPayment WHERE RPPaymentID = @id"));
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -120,7 +124,7 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
           SUM(CASE WHEN RPStatus = 'Pending' THEN 1 ELSE 0 END) OVER() AS _pendingCount,
           SUM(CASE WHEN RPStatus = 'Rejected' THEN 1 ELSE 0 END) OVER() AS _rejectedCount
         FROM dbo.ReceivedPayment
-        WHERE (@companyId IS NULL OR RPCompanyId = @companyId)
+        WHERE (@companyId IS NULL OR RPCompanyId = @companyId)${projectPredicate(req.projectScope, "RPProjectId")}
           AND (@status IS NULL OR RPStatus = @status)
         ORDER BY RPCreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -583,6 +587,7 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
   try {
     const createdBy = req.user?.name || req.user?.email || null;
     const pool = getPool();
+    if (!(await assertProjectRawAllowed(req, res, req.body?.RPProjectId))) return;
     const row = await createReceivedPaymentInternal(pool, req.body, createdBy);
     await invalidateReceivedPaymentWorkflowCaches();
     res.status(201).json(row);
@@ -596,6 +601,7 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
 router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res) => {
   try {
     const { id } = req.params;
+    if (!(await assertProjectRawAllowed(req, res, req.body?.RPProjectId))) return;
     const {
       RPCompanyName,
       RPCompanyId,

@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { assertGodownAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 
@@ -104,6 +105,7 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
         godownId = null;
       }
     }
+    if (!(await assertGodownAllowed(req, res, godownId))) return;
 
     // ── UOM strategy ─────────────────────────────────────────────────────────
     // Every ledger movement (GRN, Material Issue, Transfer, Stock Update, ...)
@@ -281,6 +283,7 @@ router.get("/item-ledger", async (req, res) => {
 
     const itemId = req.query.itemId;
     const godownId = req.query.godownId ? parseInt(req.query.godownId, 10) : null;
+    if (!(await assertGodownAllowed(req, res, godownId))) return;
     if (!itemId) {
       return res.status(400).json({ error: "itemId is required" });
     }

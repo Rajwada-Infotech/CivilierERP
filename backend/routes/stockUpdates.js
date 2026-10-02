@@ -2,6 +2,10 @@ const express = require("express");
 const router = express.Router();
 
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a stock update whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.StockUpdate WHERE StockUpdateId = @id"));
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const allowRoles = require("../middleware/role");
@@ -23,6 +27,7 @@ router.get("/", authenticateToken, requirePageRight("stock-update", "view"), asy
       LEFT JOIN dbo.enterprise pr ON pr.id = su.ProjectId
       LEFT JOIN dbo.Godowns g ON g.GodownID = su.GodownId
       LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(su.CreatedBy)
+      WHERE 1=1${projectPredicate(req.projectScope, "su.ProjectId")}
       ORDER BY su.UpdateDate DESC, su.StockUpdateId DESC
     `);
     res.json(result.recordset);
@@ -67,6 +72,7 @@ router.get("/:id", authenticateToken, requirePageRight("stock-update", "view"), 
 // transaction so the ledger can never get ahead of (or behind) the record.
 router.post("/", authenticateToken, requirePageRight("stock-update", "create"), async (req, res) => {
   const { UpdateDate, CompanyId, ProjectId, GodownId, Remarks, items } = req.body || {};
+  if (!assertProjectAllowed(req, res, ProjectId)) return;
   const companyId = parseInt(CompanyId, 10);
   const projectId = parseInt(ProjectId, 10);
   const godownId = parseInt(GodownId, 10);

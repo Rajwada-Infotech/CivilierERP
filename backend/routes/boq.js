@@ -4,6 +4,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectRawAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a BOQ whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.BOQ WHERE BoqID = @id"));
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -202,6 +206,7 @@ router.get("/", cache("boq", 300), async (req, res) => {
     const status = (req.query.status || "").toString().trim();
     // Always scope to the requested company — no cross-company list allowed
     const where = ["b.CompanyId = @companyId"];
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
 
     if (search) {
       where.push(`(
@@ -339,6 +344,7 @@ router.get("/:id", async (req, res) => {
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
 router.post("/", requirePageRight("boq", "create"), async (req, res) => {
+  if (!(await assertProjectRawAllowed(req, res, req.body?.ProjectId))) return;
   const {
     BoqNo: boqNoFromClient,
     BoqDate,
@@ -465,6 +471,7 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
 router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (!(await assertProjectRawAllowed(req, res, req.body?.ProjectId))) return;
   const {
     BoqNo,
     BoqDate,

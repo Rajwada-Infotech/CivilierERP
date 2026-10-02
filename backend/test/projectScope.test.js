@@ -7,6 +7,10 @@ const {
   projectPredicate,
   projectAllowed,
   assertProjectAllowed,
+  assertProjectRawAllowed,
+  assertGodownAllowed,
+  ebResolvedProjectSql,
+  paymentProjectSql,
 } = require("../services/projectScope");
 
 const poolReturning = (rows) => ({
@@ -80,5 +84,68 @@ describe("getProjectScope", () => {
       request: () => ({ input() { return this; }, query: async () => { const e = new Error("Invalid object name"); e.number = 208; throw e; } }),
     });
     expect(await getProjectScope({ userId: 4, role: "user" })).toBeNull();
+  });
+});
+
+const mockRes = () => {
+  const res = { status: jest.fn(() => res), json: jest.fn(() => res) };
+  return res;
+};
+
+describe("assertProjectRawAllowed (project given as text: an id or a name)", () => {
+  test("unrestricted users always pass, even with no project", async () => {
+    expect(await assertProjectRawAllowed({ projectScope: null }, mockRes(), "")).toBe(true);
+  });
+
+  test("a restricted user passes with an allowed numeric id and is refused for another", async () => {
+    expect(await assertProjectRawAllowed({ projectScope: [4] }, mockRes(), "4")).toBe(true);
+    const res = mockRes();
+    expect(await assertProjectRawAllowed({ projectScope: [4] }, res, "9")).toBe(false);
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  test("a restricted user must name a project - blank is refused (the row would be invisible to them)", async () => {
+    const res = mockRes();
+    expect(await assertProjectRawAllowed({ projectScope: [4] }, res, "  ")).toBe(false);
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  test("a project given by name is resolved to its id first", async () => {
+    getPool.mockReturnValue(poolReturning([{ id: 4 }]));
+    expect(await assertProjectRawAllowed({ projectScope: [4] }, mockRes(), "Emporis")).toBe(true);
+    getPool.mockReturnValue(poolReturning([]));
+    expect(await assertProjectRawAllowed({ projectScope: [4] }, mockRes(), "Unknown")).toBe(false);
+  });
+});
+
+describe("assertGodownAllowed", () => {
+  test("allows a godown of an in-scope project, refuses other projects and project-less godowns", async () => {
+    getPool.mockReturnValue(poolReturning([{ ProjectID: 4 }]));
+    expect(await assertGodownAllowed({ projectScope: [4] }, mockRes(), 1)).toBe(true);
+    getPool.mockReturnValue(poolReturning([{ ProjectID: 9 }]));
+    expect(await assertGodownAllowed({ projectScope: [4] }, mockRes(), 1)).toBe(false);
+    getPool.mockReturnValue(poolReturning([{ ProjectID: null }]));
+    expect(await assertGodownAllowed({ projectScope: [4] }, mockRes(), 1)).toBe(false);
+  });
+
+  test("unrestricted users are not checked at all", async () => {
+    getPool.mockClear();
+    expect(await assertGodownAllowed({ projectScope: null }, mockRes(), 1)).toBe(true);
+    expect(getPool).not.toHaveBeenCalled();
+  });
+});
+
+describe("project-resolving SQL fragments", () => {
+  test("an invoice's project handles the id form, the name form and the GRN->PO fallback", () => {
+    const sql = ebResolvedProjectSql("eb");
+    expect(sql).toContain("TRY_CAST(eb.EProjectName AS INT)");
+    expect(sql).toContain("pj.name = eb.EProjectName");
+    expect(sql).toContain("GoodsReceiptNotes");
+  });
+
+  test("a payment's project is its invoice's, else its own PProject", () => {
+    const sql = paymentProjectSql("np");
+    expect(sql).toContain("np.PExpenseRef");
+    expect(sql).toContain("TRY_CAST(np.PProject AS INT)");
   });
 });

@@ -13,6 +13,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a Work Order whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.WorkOrderHeader WHERE Id = @id"));
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -77,7 +81,7 @@ router.get(
     try {
       const pool = getPool();
       const result = await pool.request().query(`
-      SELECT id, name FROM dbo.enterprise WHERE business_type = 'P' ORDER BY name
+      SELECT id, name FROM dbo.enterprise WHERE business_type = 'P'${projectPredicate(req.projectScope, "id")} ORDER BY name
     `);
       res.json(
         (result.recordset || []).map((r) => ({ id: r.id, name: r.name })),
@@ -281,7 +285,7 @@ router.get(
         LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
         LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
-        ${companyId ? "WHERE h.CompanyId = @companyId" : ""}
+        ${companyId ? "WHERE h.CompanyId = @companyId" : "WHERE 1=1"}${projectPredicate(req.projectScope, "h.ProjectId")}
         GROUP BY h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
           h.ContractorId, h.SupplierId, h.Remarks, h.TermsAndConditions,
@@ -416,6 +420,7 @@ router.post("/", requirePageRight("engineering-work-order", "create"), async (re
   if (!ProjectId) {
     return res.status(400).json({ error: "ProjectId is required." });
   }
+  if (!assertProjectAllowed(req, res, ProjectId)) return;
   if (!DocumentDate) {
     return res.status(400).json({ error: "DocumentDate is required." });
   }
@@ -575,6 +580,7 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
   if (!ProjectId) {
     return res.status(400).json({ error: "ProjectId is required." });
   }
+  if (!assertProjectAllowed(req, res, ProjectId)) return;
   if (!DocumentNumber) {
     // Unlike POST /, this UPDATE binds DocumentNumber straight from the
     // request body with no DocNo fallback — so DocNo alone does not save it.
@@ -1116,6 +1122,7 @@ router.post("/:id/save-full", requirePageRight("engineering-work-order", "edit")
   const headerId = requireValidId(req, res);
   if (!headerId) return;
   const { header, activities } = req.body;
+  if (!assertProjectAllowed(req, res, header?.ProjectId)) return;
 
   if (!Array.isArray(activities))
     return res.status(400).json({ error: "activities must be an array" });

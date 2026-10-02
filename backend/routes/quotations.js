@@ -23,6 +23,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a Quotation whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.Quotations WHERE QuotationId = @id"));
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
@@ -46,6 +50,7 @@ router.get("/", authenticateToken, async (req, res) => {
     const pool = getPool();
     const request = pool.request();
     const conditions = ["1=1"];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "q.ProjectId", "").trim());
 
     if (req.query.companyId) {
       conditions.push("q.CompanyId = @companyId");
@@ -143,6 +148,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 router.post("/", authenticateToken, requirePageRight("quotation", "create"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
+  if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
 
   try {
     const pool = getPool();
@@ -277,6 +283,7 @@ router.post("/", authenticateToken, requirePageRight("quotation", "create"), asy
 router.put("/:id", authenticateToken, requirePageRight("quotation", "edit"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
+  if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
 
   try {
     const pool = getPool();

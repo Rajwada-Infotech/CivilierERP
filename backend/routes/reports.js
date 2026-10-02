@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool } = require("../db");
+const { projectPredicate, ebResolvedProjectSql, paymentProjectSql } = require("../services/projectScope");
 const sql = require("mssql");
 const { cache } = require("../middleware/cache");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -133,10 +134,14 @@ router.get("/", cache("reports", 60), async (req, res) => {
     );
 
     // Build company filter
-    const compWhere = companyId ? "AND ECompanyId = @CompanyId" : "";
-    const compWhereP = companyId
-      ? "AND PCompany = (SELECT name FROM dbo.enterprise WHERE id = @CompanyId)"
-      : "";
+    // Project scoping rides on the same two filters every summary query already uses.
+    const compWhere =
+      (companyId ? "AND ECompanyId = @CompanyId" : "") +
+      projectPredicate(req.projectScope, ebResolvedProjectSql("ExpenseBooking"));
+    const compWhereP =
+      (companyId
+        ? "AND PCompany = (SELECT name FROM dbo.enterprise WHERE id = @CompanyId)"
+        : "") + projectPredicate(req.projectScope, paymentProjectSql("NewPayment"));
 
     function applyParams(req2, params) {
       if (params.DateFrom) req2.input("DateFrom", sql.Date, params.DateFrom);
@@ -320,6 +325,7 @@ router.get("/invoice-register", async (req, res) => {
       "ISNULL(eb.EStatus, '') NOT IN ('Draft')",
       "ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'",
     ];
+    if (req.projectScope) whereParts.push(projectPredicate(req.projectScope, ebResolvedProjectSql("eb"), "").trim());
     const request = pool
       .request()
       .input("offset", sql.Int, offset)
@@ -547,7 +553,7 @@ router.get("/tds", async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
       LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
       WHERE (ISNULL(np.TDSAmount, 0) > 0 OR np.SourceCrmBrokerageId IS NOT NULL)
-        AND np.Status NOT IN ('Rejected', 'Deleted')
+        AND np.Status NOT IN ('Rejected', 'Deleted')${projectPredicate(req.projectScope, paymentProjectSql("np"))}
 
       UNION ALL
 
@@ -586,7 +592,7 @@ router.get("/tds", async (req, res) => {
         WHERE t.GLHeadId = l.LHeadId AND ISNULL(t.Percentage, 0) > 0
         ORDER BY ABS(t.Percentage - ISNULL(100.0 * l.CreditAmount / NULLIF(ISNULL(pa.Amount, 0) + l.CreditAmount, 0), 0)), t.TDSId
       ) tm
-      WHERE l.CreditAmount > 0 AND jv.Status = 'Approved'
+      WHERE l.CreditAmount > 0 AND jv.Status = 'Approved'${projectPredicate(req.projectScope, "jv.ProjectId")}
     `;
 
     const filters = [];
