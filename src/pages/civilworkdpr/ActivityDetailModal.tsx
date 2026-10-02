@@ -295,6 +295,10 @@ function PhotosTab({ rungId }: { rungId: number }) {
       const note = await getGeoTag();
       const file = new File([blob], `${activeTag}-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" });
       await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
+      // Upload had no success feedback at all before this — only a failure
+      // toast existed, so a working upload and a silently-swallowed one
+      // looked identical to the user (nothing visibly happens either way).
+      toast.success(`${TAG_META[activeTag].label} photo saved.`);
       refresh();
     } catch (err: any) {
       toast.error(err.message || "Upload failed");
@@ -311,16 +315,27 @@ function PhotosTab({ rungId }: { rungId: number }) {
   const handleFilePicked = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     await carryForwardBeforeIfNeeded();
+    let succeeded = 0;
     for (const file of Array.from(files)) {
       setUploading(true);
       try {
         const note = await getGeoTag();
         await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
+        succeeded++;
       } catch (err: any) {
         toast.error(err.message || "Upload failed");
       } finally {
         setUploading(false);
       }
+    }
+    // Same missing-feedback gap as addPhoto — one summary toast for however
+    // many of the picked files actually made it, not one per file.
+    if (succeeded > 0) {
+      toast.success(
+        succeeded === 1
+          ? `${TAG_META[activeTag].label} photo saved.`
+          : `${succeeded} ${TAG_META[activeTag].label} photos saved.`,
+      );
     }
     refresh();
   };
@@ -328,12 +343,16 @@ function PhotosTab({ rungId }: { rungId: number }) {
   const openCamera = async () => {
     const ok = await camera.start();
     if (!ok) {
-      // Used to fall straight to the file picker with zero explanation —
-      // looked exactly like "the camera doesn't work" with no way to tell
-      // permission-denied from no-device from a plain HTTP (non-secure)
-      // deployment, which getUserMedia refuses outright.
+      // This used to also fire fileInputRef.current?.click() right here as
+      // a fallback — but by the time an awaited getUserMedia() call settles,
+      // the click that triggered this handler is no longer "fresh" user
+      // activation. Safari in particular silently refuses to open the file
+      // picker from a .click() that happens after an await, so the fallback
+      // looked exactly like "neither button does anything": the toast below
+      // fired, but no picker ever appeared. "Upload instead" sits right next
+      // to this button for the user to tap themselves instead of an
+      // automatic hand-off that can silently fail.
       toast.error(CAMERA_ERROR_TEXT[camera.error ?? "other"]);
-      fileInputRef.current?.click();
     }
   };
 
