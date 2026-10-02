@@ -7,7 +7,8 @@
 // dependency dialog (mobile does a simple can-delete check + one alert
 // instead of the 4-branch remediation UI).
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput, Alert } from "react-native";
+import { View, Text, Pressable, ActivityIndicator, TextInput, Alert } from "react-native";
+import { ProjectGroupedList } from "@/components/ProjectGroupedList";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
@@ -223,15 +224,21 @@ export default function PurchaseOrderListScreen() {
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={filtered}
+        <ProjectGroupedList
+          items={filtered}
+          getProject={(r) => r.ProjectName}
           keyExtractor={(r) => String(r.PurchaseOrderID)}
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          onEndReachedThreshold={0.4}
+          unit={["PO", "POs"]}
+          accent="#10b981"
+          header={ListHeader}
+          expandAll={!!search.trim()}
+          emptyText="No Purchase Orders yet."
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => (
+          loadingMore={isFetchingNextPage}
+          contentPaddingBottom={insets.bottom + 24}
+          renderItem={(item) => (
             <POCard
               po={item}
               onView={() => setViewingId(item.PurchaseOrderID)}
@@ -241,15 +248,6 @@ export default function PurchaseOrderListScreen() {
               canDelete={rights.canDelete}
             />
           )}
-          ListEmptyComponent={
-            <View className="items-center py-16">
-              <AlertCircle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No Purchase Orders yet.</Text>
-            </View>
-          }
-          ListFooterComponent={isFetchingNextPage ? (
-            <View className="py-4 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-          ) : null}
         />
       )}
 
