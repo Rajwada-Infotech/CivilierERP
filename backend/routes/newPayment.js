@@ -143,9 +143,13 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
     if (Number(r.RemainingAmount) <= 0) bad(`${r.EDocNo}: already fully paid — nothing left to merge.`);
   }
 
-  const distinctCompanies = new Set(rows.map((r) => r.ECompanyId));
-  const distinctProjects = new Set(rows.map((r) => r.ProjectKey));
-  const distinctSuppliers = new Set(rows.map((r) => r.SupplierId));
+  // Trim+lowercase ProjectKey specifically — it can fall back to the raw,
+  // manually-entered EProjectName text (see its own comment above) when the
+  // invoice isn't on a real enterprise id, and stray whitespace there
+  // shouldn't split two otherwise-identical projects into "different".
+  const distinctCompanies = new Set(rows.map((r) => Number(r.ECompanyId)));
+  const distinctProjects = new Set(rows.map((r) => String(r.ProjectKey ?? "").trim().toLowerCase()));
+  const distinctSuppliers = new Set(rows.map((r) => Number(r.SupplierId)));
   if (distinctCompanies.size > 1) bad("All merged invoices must belong to the same company.");
   if (distinctProjects.size > 1) bad("All merged invoices must belong to the same project.");
   if (distinctSuppliers.size > 1) bad("All merged invoices must share the same supplier.");
