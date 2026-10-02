@@ -347,6 +347,7 @@ router.get("/", authenticateToken, async (req, res) => {
     const search = req.query.search || "";
     const statusFilter = req.query.status || ""; // exact status filter from dashboard
     const companyId = parseInt(req.query.companyId, 10) || null;
+    const projectId = parseInt(req.query.projectId, 10) || null;
 
     const request = pool.request();
     request.input("offset", sql.Int, offset);
@@ -354,6 +355,7 @@ router.get("/", authenticateToken, async (req, res) => {
     request.input("search", sql.NVarChar, `%${search}%`);
     request.input("statusFilter", sql.NVarChar, statusFilter);
     request.input("companyId", sql.Int, companyId);
+    request.input("projectId", sql.Int, projectId);
 
     const result = await request.query(`
       SELECT
@@ -397,6 +399,7 @@ router.get("/", authenticateToken, async (req, res) => {
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
         AND (@statusFilter = '' OR mr.Status = @statusFilter)
         AND (@companyId IS NULL OR mr.CompanyId = @companyId)
+        AND (@projectId IS NULL OR mr.ProjectId = @projectId)
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,
                mr.RequestDate, mr.RequiredByDate,
                mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
