@@ -66,9 +66,17 @@ function POCard({ po, onView, onEdit, onDelete, canEdit, canDelete }: {
           <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Company</Text>
           <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, marginTop: 1 }}>{po.CompanyName || "—"}</Text>
         </View>
+        {/* Project is the group header above, so the card shows the MR it
+            came from instead — same as the web register's "MR Ref" column. */}
         <View style={{ width: "50%" }}>
-          <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Project</Text>
-          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, marginTop: 1 }}>{po.ProjectName || "—"}</Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>MR Ref</Text>
+          {(po.EffectiveMRDocNo || po.SourceMRDocNo) ? (
+            <View className="self-start px-1.5 py-0.5 rounded mt-0.5" style={{ backgroundColor: "#6366f11a", borderWidth: 1, borderColor: "#6366f140" }}>
+              <Text numberOfLines={1} style={{ color: "#6366f1", fontSize: 10.5, fontFamily: fonts.heading.bold }}>{po.EffectiveMRDocNo || po.SourceMRDocNo}</Text>
+            </View>
+          ) : (
+            <Text style={{ color: colors.mutedForeground, fontSize: 11.5, marginTop: 1 }}>—</Text>
+          )}
         </View>
         <View style={{ width: "50%" }}>
           <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Amount</Text>

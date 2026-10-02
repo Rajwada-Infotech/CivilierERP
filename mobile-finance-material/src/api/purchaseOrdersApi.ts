@@ -113,6 +113,8 @@ export interface PurchaseOrder {
   DocNo?: string | null;
   SourceMRId?: number | null;
   SourceMRDocNo?: string | null;
+  /** MR the PO came from — its own SourceMRDocNo, or its Quotation's MR (list endpoint). */
+  EffectiveMRDocNo?: string | null;
   SourceWODocNo?: string | null;
   SourceWDDocNo?: string | null;
   SourceQTId?: number | null;
