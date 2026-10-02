@@ -239,10 +239,10 @@ function ChainGroupList({
 
                         {delay && (
                           <span
-                            className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                            className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                               delay.tone === "on-time"
                                 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                             }`}
                           >
                             {delay.label}
@@ -286,7 +286,7 @@ function ChainGroupList({
                 <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                      <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
                         <th className="px-5 py-2">Activity</th>
                         <th className="px-3 py-2">Engineer</th>
                         <th className="px-3 py-2">Start Date</th>
@@ -325,10 +325,10 @@ function ChainGroupList({
                               if (!delay) return null;
                               return (
                                 <span
-                                  className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                                  className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                                     delay.tone === "on-time"
                                       ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                      : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                                   }`}
                                 >
                                   {delay.label}
