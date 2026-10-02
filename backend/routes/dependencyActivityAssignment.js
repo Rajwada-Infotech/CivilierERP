@@ -341,7 +341,10 @@ router.get(
 
       const countsReq = pool.request();
       if (search) countsReq.input("search", sql.NVarChar(200), `%${search}%`);
-      const countsRes = await countsReq.query(`
+      // Started now, awaited below: the status counts and the room list are
+      // independent aggregates over the same tables, so they run in parallel
+      // instead of one after the other (the search made this the slow call).
+      const countsPromise = countsReq.query(`
         SELECT daa.Status AS status, COUNT(*) AS count
         FROM dbo.DependencyActivityAssignment daa
         JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
@@ -354,17 +357,10 @@ router.get(
         WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
         GROUP BY daa.Status
       `);
-      const statusCounts = {};
-      let total = 0;
-      for (const row of countsRes.recordset) {
-        statusCounts[row.status] = row.count;
-        total += row.count;
-      }
-
       const roomsReq = pool.request();
       if (search) roomsReq.input("search", sql.NVarChar(200), `%${search}%`);
       if (statusFilter && STATUS_VALUES.has(statusFilter)) roomsReq.input("statusFilter", sql.NVarChar(20), statusFilter);
-      const roomsRes = await roomsReq.query(`
+      const roomsPromise = roomsReq.query(`
         SELECT
           dm.ProjectId AS projectId, ep.name AS projectName,
           dm.TowerId AS towerId, bm.BlockName AS towerName,
@@ -384,6 +380,14 @@ router.get(
           ${statusFilter && STATUS_VALUES.has(statusFilter) ? "AND daa.Status = @statusFilter" : ""}
         GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName
       `);
+
+      const [countsRes, roomsRes] = await Promise.all([countsPromise, roomsPromise]);
+      const statusCounts = {};
+      let total = 0;
+      for (const row of countsRes.recordset) {
+        statusCounts[row.status] = row.count;
+        total += row.count;
+      }
 
       res.json({ statusCounts, total, rooms: roomsRes.recordset });
     } catch (err) {
