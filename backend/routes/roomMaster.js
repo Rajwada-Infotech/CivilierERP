@@ -7,6 +7,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { resolveLayoutType, getLayoutComposition, getEffectiveComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX, ROOM_HAS_WORK, floorLabelOf } = require("../services/unitLayout");
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -31,6 +32,7 @@ router.get("/", cache("room-master", 300), async (req, res) => {
     if (activeOnly) {
       where += " AND r.IsActive = 1";
     }
+    where += projectPredicate(req.projectScope, "r.ProjectId");
     const result = await request.query(`
       SELECT
         r.Id,
@@ -72,7 +74,7 @@ router.get("/projects", cache("room-master-projects", 600), async (req, res) => 
       SELECT id AS Id, name AS Name
       FROM dbo.enterprise
       WHERE business_type = 'P'
-        AND ISNULL(discontinue, 0) = 0
+        AND ISNULL(discontinue, 0) = 0${projectPredicate(req.projectScope, "id")}
       ORDER BY name
     `);
     res.json(result.recordset);
@@ -108,6 +110,7 @@ router.get("/units", cache("room-master-units", 300), async (req, res) => {
       request.input("ProjectId", sql.Int, projectId);
       query += ` AND u.ProjectId = @ProjectId`;
     }
+    query += projectPredicate(req.projectScope, "u.ProjectId");
     query += ` ORDER BY u.UnitName`;
     const result = await request.query(query);
     res.json(result.recordset);
@@ -128,6 +131,7 @@ router.get("/units", cache("room-master-units", 300), async (req, res) => {
 router.get("/structure", cache("room-master-structure", 120), async (req, res) => {
   const projectId = parseInt(req.query.projectId, 10);
   if (!Number.isFinite(projectId) || projectId <= 0) return res.status(400).json({ error: "projectId is required" });
+  if (!assertProjectAllowed(req, res, projectId)) return;
   try {
     const pool = getPool();
     const blocks = await pool.request().input("pid", sql.Int, projectId).query(`

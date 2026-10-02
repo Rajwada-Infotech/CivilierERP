@@ -4,6 +4,9 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const { projectPredicate, assertProjectAllowed, rungParamGuard, assertRungAllowed } = require("../services/projectScope");
+
+router.param("rungId", rungParamGuard);
 const { requirePageRight } = require("../middleware/requirePageRight");
 
 // dbo.Worker — stable worker identity tied to a Contractor/company.
@@ -41,6 +44,7 @@ function actorOf(req) {
 router.get("/activities", async (req, res) => {
   const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
   if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+  if (!assertProjectAllowed(req, res, projectId)) return;
   try {
     const pool = getPool();
     const r = await pool.request().input("projectId", sql.Int, projectId).query(`
@@ -229,6 +233,7 @@ router.get("/attendance", requirePageRight(PAGE_KEY, "view"), async (req, res) =
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
 
   try {
+    if (!(await assertRungAllowed(req, res, rungId))) return;
     const pool = getPool();
     const r = await pool.request()
       .input("rungId", sql.Int, rungId)
@@ -260,6 +265,7 @@ router.post("/attendance", requirePageRight(PAGE_KEY, "create"), async (req, res
   if (!Number.isFinite(rungIdVal)) return res.status(400).json({ error: "rungId is required" });
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
   if (!Array.isArray(entries) || !entries.length) return res.status(400).json({ error: "entries is required" });
+  if (!(await assertRungAllowed(req, res, rungIdVal))) return;
   for (const e of entries) {
     if (!STATUS_VALUES.has(e.status)) return res.status(400).json({ error: "Each entry's status must be P, A, or H" });
   }
@@ -359,7 +365,7 @@ router.get("/report", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
         LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
         LEFT JOIN dbo.enterprise ec ON ec.id = ep.company_id AND ec.business_type = 'C'
         WHERE wa.DependencyMasterActivityId IS NOT NULL
-          AND (@projectId IS NULL OR dm.ProjectId = @projectId)
+          AND (@projectId IS NULL OR dm.ProjectId = @projectId)${projectPredicate(req.projectScope, "dm.ProjectId")}
           AND (@companyId IS NULL OR ep.company_id = @companyId)
           AND (@rungId IS NULL OR dma.Id = @rungId)
           AND (@workerId IS NULL OR w.WorkerId = @workerId)
@@ -404,7 +410,7 @@ router.get("/workers/:id/calendar", requirePageRight(PAGE_KEY, "view"), async (r
         LEFT JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
         LEFT JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
         LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
-        WHERE wa.WorkerId = @workerId
+        WHERE wa.WorkerId = @workerId${projectPredicate(req.projectScope, "dm.ProjectId")}
           AND wa.AttendanceDate >= @from
           AND wa.AttendanceDate < DATEADD(MONTH, 1, @from)
         ORDER BY wa.AttendanceDate

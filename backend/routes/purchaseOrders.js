@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
@@ -34,6 +35,23 @@ const {
 router.use((req, res, next) => {
   if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
   return checkPermissionForMethod("Material", "PurchaseOrders")(req, res, next);
+});
+
+// Any route with :id — refuse a PO whose project is outside the user's scope.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const poId = parseInt(id, 10);
+  if (!Number.isFinite(poId)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, poId)
+      .query("SELECT ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id");
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -809,6 +827,7 @@ const listPurchaseOrders = async (req, res) => {
       if (!includeShortClosed) whereConditions.push("ISNULL(po.Status, '') != 'Short Closed'");
       if (companyId) whereConditions.push("po.CompanyId = @companyId");
       if (projectId) whereConditions.push("po.ProjectId = @projectId");
+      if (req.projectScope) whereConditions.push(projectPredicate(req.projectScope, "po.ProjectId", "").trim());
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
         : "";
@@ -887,7 +906,7 @@ router.get("/service-eligible", async (req, res) => {
   try {
     const pool = getPool();
     const pos = await getServicePurchaseOrders(pool);
-    res.json(pos);
+    res.json(req.projectScope ? pos.filter((po) => projectAllowed(req.projectScope, po.ProjectId)) : pos);
   } catch (err) {
     console.error("GET service-eligible POs error:", err);
     res.status(500).json({ error: err.message });
@@ -966,6 +985,7 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
+    if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
 
     const pool = getPool();
     const { PurchaseOrderID: newId, PurchaseOrderNo: finalDocNo } =
@@ -1041,6 +1061,7 @@ router.put(
   async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
+    if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
     const {
       PurchaseOrderNo,
       PODate,

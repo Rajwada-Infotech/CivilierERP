@@ -160,7 +160,12 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
         query: req.query || {},
       });
 
-      const scopeId = shared ? "shared" : req.user?.userId || "anon";
+      // A project-scoped user must never be served another scope's list
+      // (shared entries included), so the scope joins the key.
+      const projectScopeKey = Array.isArray(req.projectScope)
+        ? `:ps${[...req.projectScope].map(Number).sort((a, b) => a - b).join("-")}`
+        : "";
+      const scopeId = (shared ? "shared" : req.user?.userId || "anon") + projectScopeKey;
 
       // Version check — served from memory, rarely touches Redis
       const vStart = req.timing?.startStage();

@@ -22,6 +22,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const {
   lockNextDocNumber,
@@ -133,6 +134,23 @@ router.get("/companies", authenticateToken, async (req, res) => {
   }
 });
 
+// Any route with :id — refuse an MR whose project is outside the user's scope.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const mrId = parseInt(id, 10);
+  if (!Number.isFinite(mrId)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, mrId)
+      .query("SELECT ProjectId FROM dbo.MaterialRequests WHERE MRId = @id");
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /projects ──────────────────────────────────────────────────────────────
 router.get("/projects", authenticateToken, async (req, res) => {
   try {
@@ -142,7 +160,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
              (SELECT STRING_AGG(CAST(pc.CompanyId AS NVARCHAR(20)), ',')
                 FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = enterprise.id) AS tagged_company_ids
       FROM   dbo.enterprise
-      WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)
+      WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)${projectPredicate(req.projectScope, "id")}
       ORDER  BY name
     `);
     res.json(result.recordset);
@@ -179,6 +197,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     const requestedProjectId = req.query.projectId
       ? parseInt(req.query.projectId, 10)
       : null;
+    if (requestedProjectId && !assertProjectAllowed(req, res, requestedProjectId)) return;
 
     // Detect optional columns (same pattern as inventoryMaster.js)
     const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply, hasCC] =
@@ -399,7 +418,7 @@ router.get("/", authenticateToken, async (req, res) => {
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
         AND (@statusFilter = '' OR mr.Status = @statusFilter)
         AND (@companyId IS NULL OR mr.CompanyId = @companyId)
-        AND (@projectId IS NULL OR mr.ProjectId = @projectId)
+        AND (@projectId IS NULL OR mr.ProjectId = @projectId)${projectPredicate(req.projectScope, "mr.ProjectId")}
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,
                mr.RequestDate, mr.RequiredByDate,
                mr.ProjectId, mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
@@ -456,6 +475,7 @@ router.get("/approved-list", authenticateToken, async (req, res) => {
       "mr.Status IN ('Approved', 'Partially Fulfilled')",
       "mr.DocNo IS NOT NULL",
     ];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "mr.ProjectId", "").trim());
 
     if (req.query.companyId) {
       conditions.push("mr.CompanyId = @companyId");
@@ -530,6 +550,7 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Material Request not found" });
 
     const mr = header.recordset[0];
+    if (!assertProjectAllowed(req, res, mr.ProjectId)) return;
     if (!["Approved", "Partially Fulfilled"].includes(mr.Status))
       return res.status(400).json({
         error: `MR is ${mr.Status}. Only Approved or Partially Fulfilled MRs can generate a Normal PO.`,
@@ -614,7 +635,7 @@ router.get("/pending-summary", authenticateToken, async (req, res) => {
         WHERE poi.MRItemId = mri.MRItemId
           AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
       ) ord
-      WHERE mr.Status IN ('Approved', 'Partially Fulfilled', 'Completed')
+      WHERE mr.Status IN ('Approved', 'Partially Fulfilled', 'Completed')${projectPredicate(req.projectScope, "mr.ProjectId")}
       GROUP BY mri.MRId
     `);
     res.json(
@@ -648,6 +669,7 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
     const conditions = [
       "mr.Status IN ('Approved', 'Partially Fulfilled')",
     ];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "mr.ProjectId", "").trim());
 
     if (req.query.companyId) {
       conditions.push("mr.CompanyId = @companyId");
@@ -806,6 +828,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       items = [],
     } = req.body;
 
+    if (!assertProjectAllowed(req, res, ProjectId)) return;
     if (!Reason?.trim())
       return res.status(400).json({ error: "Reason is required" });
     if (!items.length)
@@ -973,6 +996,8 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       Status,
       items = [],
     } = req.body;
+
+    if (!assertProjectAllowed(req, res, ProjectId)) return;
 
     // Guard against editing a Pending MR (mid-approval — reject it first) —
     // Draft is normal editing, Approved is allowed too (logged as an

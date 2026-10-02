@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
@@ -36,6 +37,8 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
   const towerId = req.query.towerId ? parseInt(req.query.towerId, 10) : null;
   const floor = req.query.floor ? String(req.query.floor) : null;
   const flatId = req.query.flatId ? parseInt(req.query.flatId, 10) : null;
+
+  if (projectId != null && !assertProjectAllowed(req, res, projectId)) return;
 
   try {
     const pool = getPool();
@@ -143,6 +146,7 @@ router.get("/", authMiddleware, async (req, res) => {
       LEFT JOIN dbo.BlockMaster  bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster   um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster   rm ON rm.Id = dm.RoomId
+      WHERE 1=1${projectPredicate(req.projectScope, "dm.ProjectId")}
       ORDER BY dm.Id DESC
     `);
 
@@ -157,6 +161,8 @@ router.get("/", authMiddleware, async (req, res) => {
              am.activity_name AS activityName, dma.SequenceNo AS sequenceNo, dma.WorkType AS workType
       FROM dbo.DependencyMasterActivity dma
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+      JOIN dbo.DependencyMaster dmx ON dmx.Id = dma.DependencyMasterId
+      WHERE 1=1${projectPredicate(req.projectScope, "dmx.ProjectId")}
       ORDER BY dma.DependencyMasterId, dma.SequenceNo ASC
     `);
     const activitiesByChain = new Map();
@@ -197,7 +203,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
       LEFT JOIN dbo.BlockMaster  bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster   um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster   rm ON rm.Id = dm.RoomId
-      WHERE dm.Id = @Id
+      WHERE dm.Id = @Id${projectPredicate(req.projectScope, "dm.ProjectId")}
     `);
     if (!headRes.recordset.length) return res.status(404).json({ error: "Dependency record not found" });
 
@@ -244,6 +250,7 @@ router.post("/", authMiddleware, requirePageRight("dependency-master", "create")
   if (err) return res.status(400).json({ error: err });
   const { scope, alias, workType, activities } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
+  if (!assertProjectAllowed(req, res, scope?.projectId)) return;
 
   try {
     const pool = getPool();
@@ -330,12 +337,16 @@ router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit")
   if (err) return res.status(400).json({ error: err });
   const { scope, alias, workType, activities } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
+  if (!assertProjectAllowed(req, res, scope?.projectId)) return;
 
   let tx;
   try {
     const pool = getPool();
-    const existing = await pool.request().input("Id", sql.Int, id).query(`SELECT Id FROM dbo.DependencyMaster WHERE Id = @Id`);
+    const existing = await pool.request().input("Id", sql.Int, id).query(`SELECT Id, ProjectId FROM dbo.DependencyMaster WHERE Id = @Id`);
     if (!existing.recordset.length) return res.status(404).json({ error: "Dependency record not found" });
+    if (!projectAllowed(req.projectScope, existing.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
 
     // Same one-chain-per-room rule as POST / — excludes this record itself
     // so re-saving without actually changing the room doesn't self-conflict.
@@ -463,8 +474,11 @@ router.delete("/:id", authMiddleware, requirePageRight("dependency-master", "del
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
-    const existing = await pool.request().input("Id", sql.Int, id).query(`SELECT Alias FROM dbo.DependencyMaster WHERE Id = @Id`);
+    const existing = await pool.request().input("Id", sql.Int, id).query(`SELECT Alias, ProjectId FROM dbo.DependencyMaster WHERE Id = @Id`);
     if (!existing.recordset.length) return res.status(404).json({ error: "Dependency record not found" });
+    if (!projectAllowed(req.projectScope, existing.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
 
     // Hard delete — DependencyMasterActivity rows cascade automatically
     // (FK_DependencyMasterActivity_Master ON DELETE CASCADE, migration 320).
