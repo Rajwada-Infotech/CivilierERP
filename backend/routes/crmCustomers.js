@@ -417,6 +417,15 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     const b = req.body;
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email, id);
+    if (!email) {
+      // The portal login is keyed on this email (CrmCustomerPortalUser.Email
+      // is NOT NULL), so it can't be cleared while a login exists.
+      const portal = await pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 1 AS x FROM dbo.CrmCustomerPortalUser WHERE CustomerId = @id");
+      if (portal.recordset.length) {
+        return res.status(400).json({ error: "This customer has a portal login, which signs in with their email — enter an email address." });
+      }
+    }
 
     const cur = resolveCurrentAddress(b);
 

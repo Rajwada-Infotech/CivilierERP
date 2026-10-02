@@ -292,8 +292,9 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     projectName = proj.recordset[0].name;
     companyId = companyId != null ? companyId : (proj.recordset[0].company_id != null ? proj.recordset[0].company_id : null);
   }
+  const hasValue = (v) => v !== undefined && v !== null && v !== "";
   const rawAppPlotIds = Array.isArray(b.PreferredPlotIds) ? b.PreferredPlotIds.map(Number).filter(Number.isInteger) : [];
-  const rawAppUnitIds = Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0 ? b.PreferredUnitIds : (preferredUnitId ? [preferredUnitId] : []);
+  const rawAppUnitIds = Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0 ? b.PreferredUnitIds : (hasValue(b.PreferredUnitId) ? [b.PreferredUnitId] : []);
   const preferredUnitId = rawAppUnitIds.length > 0 ? rawAppUnitIds[0] : null;
   let unitName = b.InterestedUnit || null;
   if (rawAppPlotIds.length > 0) {
