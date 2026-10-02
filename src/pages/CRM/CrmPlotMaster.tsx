@@ -98,6 +98,11 @@ const CrmPlotMaster: React.FC = () => {
   const [villaTypesOpen, setVillaTypesOpen] = useState(false);
   // "each": one villa per plot (the default); "combine": one villa on all the ticked plots.
   const [conversionMode, setConversionMode] = useState<"each" | "combine">("each");
+  // Conversion cannot be undone, so with several plots the user confirms the
+  // exact outcome shown in the preview. Any change to the mode clears it.
+  const [conversionConfirmed, setConversionConfirmed] = useState(false);
+  // What was confirmed must be what gets created: any edit to the outcome asks again.
+  React.useEffect(() => { setConversionConfirmed(false); }, [selectedIds, unitName, villaTypeId, builtUpArea, superBuiltUpArea]);
   const [converting, setConverting] = useState(false);
   const [layoutState, setLayoutState] = useState<{ blockId: number; mode: "arrange" | "neighbours"; focusId: number | null } | null>(null);
   const [assetKindsOpen, setAssetKindsOpen] = useState(false);
@@ -220,7 +225,7 @@ const CrmPlotMaster: React.FC = () => {
   const openConversion = () => {
     if (!selectionIsCompatible) { toast.error("Select plots from one project and block to create one constructed unit"); return; }
     setUnitName(selectedPlots.map((plot) => plot.PlotName).join(" + "));
-    setBuiltUpArea(""); setSuperBuiltUpArea(""); setVillaTypeId(""); setConversionMode("each");
+    setBuiltUpArea(""); setSuperBuiltUpArea(""); setVillaTypeId(""); setConversionMode("each"); setConversionConfirmed(false);
     // One planned type across the plots pre-selects it; mixed types are left to the user.
     const planned = new Set(selectedPlots.map((plot) => plot.PlannedVillaTypeId ?? null));
     const only = planned.size === 1 ? [...planned][0] : null;
@@ -357,6 +362,7 @@ const CrmPlotMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
   };
   const convert = async () => {
+    if (selectedPlots.length > 1 && !conversionConfirmed) { toast.error("Tick the confirmation under the preview first"); return; }
     if (separate) { await convertEach(); return; }
     if (!unitName.trim() || !unitType || !unitKind) { toast.error("Select the constructed unit name, type, and kind"); return; }
     if (!(Number(villaRate) > 0)) { toast.error("Enter the villa's construction rate per sq ft"); return; }
@@ -667,7 +673,7 @@ const CrmPlotMaster: React.FC = () => {
             {selectedPlots.length > 1 && (
               <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Conversion">
                 {([["each", "One villa per plot", `${selectedPlots.length} villas, each on its own plot`], ["combine", "Combine into one villa", "One villa standing on all the plots"]] as const).map(([value, label, hint]) => (
-                  <button key={value} type="button" role="radio" aria-checked={conversionMode === value} onClick={() => setConversionMode(value)}
+                  <button key={value} type="button" role="radio" aria-checked={conversionMode === value} onClick={() => { setConversionMode(value); setConversionConfirmed(false); }}
                     className={`rounded-lg border px-3 py-2 text-left ${conversionMode === value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted"}`}>
                     <span className="block text-sm font-medium">{label}</span>
                     <span className="block text-[0.6875rem] text-muted-foreground">{hint}</span>
@@ -700,10 +706,43 @@ const CrmPlotMaster: React.FC = () => {
               <div><label className="text-xs text-muted-foreground block mb-1">Super built-up area (sq ft)</label><input type="number" min="0" value={superBuiltUpArea} onChange={(event) => setSuperBuiltUpArea(event.target.value)} placeholder="Optional — saleable area if given" className={fieldCls} /></div>
             </div>
             <p className="text-xs text-muted-foreground">The villa is priced on its construction rate only. A sold plot's owner has already paid for the land; they buy the villa as a separate booking.</p>
+            {selectedPlots.length > 1 && (() => {
+              const typesById = new Map(conversionVillaTypes.map((t) => [t.Id, t]));
+              const fallback = villaTypeId ? conversionVillaTypes.find((t) => String(t.Id) === villaTypeId) : undefined;
+              const rows = separate
+                ? selectedPlots.map((plot) => {
+                    const type = (plot.PlannedVillaTypeId != null ? typesById.get(plot.PlannedVillaTypeId) : undefined) ?? fallback;
+                    const bua = type ? type.BuiltUpAreaSqFt : Number(builtUpArea) || null;
+                    return { key: plot.Id, name: plot.PlotName, on: plot.PlotName, type: type?.Code ?? "-", bua };
+                  })
+                : [{ key: 0, name: unitName.trim() || "(unnamed)", on: selectedPlots.map((plot) => plot.PlotName).join(" + "), type: fallback?.Code ?? "-", bua: Number(builtUpArea) || null }];
+              return (
+                <div className={`rounded-lg border p-3 ${separate ? "border-border" : "border-amber-400 bg-amber-50 dark:bg-amber-950/30"}`}>
+                  <p className="mb-2 text-xs font-semibold">
+                    {separate ? `This will create ${rows.length} separate villas:` : `This will merge ${selectedPlots.length} plots into ONE villa:`}
+                  </p>
+                  {!separate && <p className="mb-2 text-xs text-amber-800 dark:text-amber-300">The plots can never be sold or built on separately again. Choose this only when a single villa really stands across these plots.</p>}
+                  <div className="max-h-40 overflow-auto rounded border border-border bg-background">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/50 text-muted-foreground"><tr><th className="px-2 py-1 text-left font-medium">Villa</th><th className="px-2 py-1 text-left font-medium">On plot(s)</th><th className="px-2 py-1 text-left font-medium">Type</th><th className="px-2 py-1 text-right font-medium">Built-up</th></tr></thead>
+                      <tbody>{rows.map((row) => (
+                        <tr key={row.key} className="border-t border-border">
+                          <td className="px-2 py-1 font-medium">{row.name}</td><td className="px-2 py-1">{row.on}</td><td className="px-2 py-1 font-mono">{row.type}</td>
+                          <td className={`px-2 py-1 text-right tabular-nums ${row.bua ? "" : "text-destructive"}`}>{row.bua ? `${Number(row.bua).toLocaleString("en-IN")} sq ft` : "missing"}</td>
+                        </tr>))}</tbody>
+                    </table>
+                  </div>
+                  <label className="mt-2 flex items-start gap-2 text-xs">
+                    <input type="checkbox" className="mt-0.5" checked={conversionConfirmed} onChange={(event) => setConversionConfirmed(event.target.checked)} />
+                    <span>{separate ? `Yes, create ${rows.length} separate villas as listed.` : `Yes, merge ${selectedPlots.length} plots into one villa.`} I understand this cannot be undone.</span>
+                  </label>
+                </div>
+              );
+            })()}
             <p className="text-xs text-muted-foreground flex gap-1.5"><Lock size={13} className="shrink-0" /> The source plots remain in Plot Master as converted history and can no longer be booked or edited as plots.</p>
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setConvertOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
-              <button onClick={convert} disabled={converting || !unitKind || !(Number(villaRate) > 0) || (!separate && (!unitName.trim() || !unitType || !(Number(builtUpArea) > 0)))} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">{converting ? "Converting..." : separate ? `Create ${selectedPlots.length} villas` : "Create Unit Master record"}</button>
+              <button onClick={convert} disabled={converting || !unitKind || !(Number(villaRate) > 0) || (selectedPlots.length > 1 && !conversionConfirmed) || (!separate && (!unitName.trim() || !unitType || !(Number(builtUpArea) > 0)))} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">{converting ? "Converting..." : separate ? `Create ${selectedPlots.length} villas` : selectedPlots.length > 1 ? `Merge ${selectedPlots.length} plots into 1 villa` : "Create Unit Master record"}</button>
             </div>
           </div>
         </DialogContent>
