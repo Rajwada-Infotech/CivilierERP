@@ -507,10 +507,7 @@ router.get("/tds", async (req, res) => {
     // every broker payment qualifies regardless of TDS, a rejected one
     // would otherwise show up looking like a real payout).
     const whereParts = [
-      // Broker = paid via CRM Brokerage, OR paid directly from Finance to a
-      // Broker Master head (LHeadType 'BR') — both are 194H payments.
-      `(ISNULL(np.TDSAmount, 0) > 0 OR np.SourceCrmBrokerageId IS NOT NULL
-        OR EXISTS (SELECT 1 FROM dbo.AccountHeadMaster bh WHERE bh.LHeadId = np.PPartyId AND bh.LHeadType = 'BR'))`,
+      "(ISNULL(np.TDSAmount, 0) > 0 OR np.SourceCrmBrokerageId IS NOT NULL)",
       "np.Status NOT IN ('Rejected', 'Deleted')",
     ];
     const request = pool.request().input("offset", sql.Int, offset).input("limit", sql.Int, limit);
@@ -554,7 +551,6 @@ router.get("/tds", async (req, res) => {
         )                                                    AS PartyName,
         CASE
           WHEN np.SourceCrmBrokerageId IS NOT NULL THEN 'Brokerage'
-          WHEN party_head.LHeadType = 'BR' THEN 'Broker (Direct)'
           WHEN np.PExpenseRef IS NOT NULL AND np.PExpenseRef <> '' AND np.ContractId IS NULL
              THEN 'Invoice' ELSE 'Direct' END                AS PaymentType,
         np.PExpenseRef                                       AS InvoiceRef,
