@@ -226,14 +226,14 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
     const lines = await q("SELECT BookingId, Status FROM dbo.CrmBookingPlot WHERE PlotId = @p ORDER BY Id", { p: [sql.Int, X.Id] });
     check("A's line Transferred, B's line Active", lines.some((l) => l.BookingId === ax.bookingId && l.Status === "Transferred") && lines.some((l) => l.BookingId === holdId && l.Status === "Active"), lines);
     const feeRow = (await q("SELECT DeveloperFeeGstAmount, DeveloperFeeHsnCode, DeveloperFeeGstRate FROM dbo.CrmUnitResale WHERE Id = @r", { r: [sql.Int, resaleId || 0] }))[0];
-    check("resale fee GST from the masters: HSN 999794 at 18% = 4,500", feeRow && feeRow.DeveloperFeeHsnCode === "999794" && Number(feeRow.DeveloperFeeGstRate) === 18 && money(feeRow.DeveloperFeeGstAmount) === 4500, feeRow);
+    check("plot resale fee: no GST (RESALE_FEE_LAND rule -> HSN LANDNIL 0%)", feeRow && feeRow.DeveloperFeeHsnCode === "LANDNIL" && Number(feeRow.DeveloperFeeGstRate) === 0 && money(feeRow.DeveloperFeeGstAmount) === 0, feeRow);
     const feeGl = await q(`SELECT h.LHeadCode, h.LHeadName, g.DebitAmount, g.CreditAmount FROM dbo.GeneralLedgerEntry g
       JOIN dbo.AccountHeadMaster h ON h.LHeadId = g.LHeadId WHERE g.SourceType = 'CrmUnitResale' AND g.SourceId = @r`, { r: [sql.Int, resaleId || 0] });
     console.table(feeGl);
-    check("fee voucher: Dr original buyer 29,500 / Cr fee income 25,000 / Cr GST 4,500",
-      feeGl.length === 3 && feeGl.some((g) => /^CRMCUST-/.test(g.LHeadCode) && money(g.DebitAmount) === 29500)
+    check("fee voucher: Dr original buyer 25,000 / Cr fee income 25,000, no GST leg",
+      feeGl.length === 2 && feeGl.some((g) => /^CRMCUST-/.test(g.LHeadCode) && money(g.DebitAmount) === 25000)
         && feeGl.some((g) => g.LHeadCode === "CRM-RESALE-FEE" && money(g.CreditAmount) === 25000)
-        && feeGl.some((g) => g.LHeadCode === "CRM-GST-OUTPUT" && money(g.CreditAmount) === 4500), feeGl);
+        && !feeGl.some((g) => g.LHeadCode === "CRM-GST-OUTPUT"), feeGl);
     const aOriginal = (await q("SELECT Status, TotalValue FROM dbo.CrmBooking WHERE Id = @b", { b: [sql.Int, ax.bookingId] }))[0];
     check("A's original sale stands (not cancelled)", aOriginal.Status !== "Cancelled", aOriginal);
 
