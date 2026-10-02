@@ -1,3 +1,4 @@
+import ActivityCommentsTab from "./ActivityCommentsTab";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -33,6 +34,7 @@ import {
   ShieldQuestion,
   Lock,
   CalendarClock,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -75,7 +77,7 @@ import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
 import { useAuth } from "@/contexts/AuthContext";
 import { DateInput } from "@/components/ui/date-input";
 
-type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "daily-log" | "history";
+type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "daily-log" | "comments" | "history";
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00`);
@@ -307,7 +309,10 @@ function PhotosTab({ rungId }: { rungId: number }) {
   };
 
   const handleShutter = async () => {
-    const blob = await camera.capture();
+    // Field photos are downscaled before upload: a full-resolution frame is
+    // several MB, and the server stores it as base64 text in the database, so
+    // size here is what decides how slow a crowd of simultaneous uploads gets.
+    const blob = await camera.capture({ maxDimension: 1600, quality: 0.8 });
     if (blob) await addPhoto(blob);
   };
 
@@ -1384,6 +1389,7 @@ const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
   { id: "attendance", label: "Attendance", icon: Users2 },
   { id: "checkpoints", label: "Checkpoints", icon: ListChecks },
   { id: "daily-log", label: "Daily Log", icon: CalendarClock },
+  { id: "comments", label: "Comments", icon: MessageSquare },
   { id: "history", label: "History", icon: History },
 ];
 
@@ -1480,6 +1486,7 @@ export default function ActivityDetailModal({
               {tab === "attendance" && <AttendanceTab rungId={row.rungId} />}
               {tab === "checkpoints" && <CheckpointsTab rungId={row.rungId} />}
               {tab === "daily-log" && <DailyLogTab rungId={row.rungId} />}
+              {tab === "comments" && <ActivityCommentsTab rungId={row.rungId} />}
               {tab === "history" && <HistoryTab rungId={row.rungId} />}
             </div>
 

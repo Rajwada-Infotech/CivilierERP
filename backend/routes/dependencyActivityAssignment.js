@@ -5,6 +5,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed } = require("../services/projectScope");
+const { invalidateThread } = require("../services/activityThread");
 
 // ── Project scoping ──────────────────────────────────────────────────────────
 // A rung / checkpoint / checkpoint-update belongs to the project of its
@@ -1894,6 +1895,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .query(`DELETE FROM dbo.DependencyActivityCheckpoint WHERE Id = @id`);
     }
 
+    invalidateThread(rungId); // engineers / approvers may have changed
     res.json({ success: true, assignmentId });
   } catch (err) {
     console.error("[dependency-activity-assignment] POST /:rungId error:", err.message);

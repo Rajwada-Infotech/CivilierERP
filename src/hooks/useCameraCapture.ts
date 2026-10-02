@@ -102,17 +102,22 @@ export function useCameraCapture() {
 
   // Draws the current video frame to an offscreen canvas and encodes it as
   // a JPEG Blob — the shutter action.
-  const capture = useCallback((): Promise<Blob | null> => {
+  // Optional `maxDimension` caps the longer edge (the frame is scaled down,
+  // never up) and `quality` overrides the JPEG quality; with no options the
+  // frame is captured at full resolution and 0.9, exactly as before.
+  const capture = useCallback((opts?: { maxDimension?: number; quality?: number }): Promise<Blob | null> => {
     return new Promise((resolve) => {
       const video = videoRef.current;
       if (!video || !video.videoWidth) return resolve(null);
+      const longest = Math.max(video.videoWidth, video.videoHeight);
+      const scale = opts?.maxDimension && longest > opts.maxDimension ? opts.maxDimension / longest : 1;
       const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
       const ctx = canvas.getContext("2d");
       if (!ctx) return resolve(null);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9);
+      canvas.toBlob((blob) => resolve(blob), "image/jpeg", opts?.quality ?? 0.9);
     });
   }, []);
 
