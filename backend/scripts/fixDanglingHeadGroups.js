@@ -8,7 +8,7 @@
  *
  * Read-only by default: lists every head with a missing or dangling group and
  * what it WOULD do. --apply moves only the heads with a known home:
- *   CRM-STAMPDUTY, BNKCHG         -> INDIRECT EXPENSES (found by name)
+ *   CRM-STAMPDUTY, BNKCHG, SA-COMMISSION -> INDIRECT EXPENSES (found by name)
  *   CRM-GST-OUTPUT                -> DUTY & TAXES (DAT)
  *   TDS-%  (GL)                   -> TDS PAYABLE  (TDSP)
  * Everything else is listed for Finance to place by hand.
@@ -42,7 +42,7 @@ const APPLY = process.argv.includes("--apply");
   console.log(`\nheads with a missing or dangling group: ${broken.length}`);
 
   const target = (h) => {
-    if (["CRM-STAMPDUTY", "BNKCHG"].includes(h.LHeadCode)) return groups.ie;
+    if (["CRM-STAMPDUTY", "BNKCHG", "SA-COMMISSION"].includes(h.LHeadCode)) return groups.ie;
     if (h.LHeadCode === "CRM-GST-OUTPUT") return groups.dat;
     if (h.LHeadType === "GL" && String(h.LHeadCode || "").startsWith("TDS-")) return groups.tdsp;
     return null;
