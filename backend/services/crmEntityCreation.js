@@ -26,6 +26,19 @@ function normalizeEmail(value) {
   return trimmed || null;
 }
 
+const { assertVillaBuyerOwnsLand, VillaLandError } = require("./villaLand");
+
+// A villa built on plots can only be bought by the plot's current owner
+// (see services/villaLand.js); surfaced as the caller's own error type.
+async function assertVillaBuyer(pool, unitIds, customerId) {
+  try {
+    await assertVillaBuyerOwnsLand(pool, unitIds, customerId);
+  } catch (e) {
+    if (e instanceof VillaLandError) throw new CrmCreationError(e.message, e.status);
+    throw e;
+  }
+}
+
 class CrmCreationError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -296,6 +309,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   const rawAppPlotIds = Array.isArray(b.PreferredPlotIds) ? b.PreferredPlotIds.map(Number).filter(Number.isInteger) : [];
   const rawAppUnitIds = Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0 ? b.PreferredUnitIds : (hasValue(b.PreferredUnitId) ? [b.PreferredUnitId] : []);
   const preferredUnitId = rawAppUnitIds.length > 0 ? rawAppUnitIds[0] : null;
+  if (rawAppUnitIds.length > 0) await assertVillaBuyer(pool, rawAppUnitIds, customerId);
   let unitName = b.InterestedUnit || null;
   if (rawAppPlotIds.length > 0) {
     const plots = await validatePlotSelection(pool, rawAppPlotIds, { projectId: b.ProjectId });
@@ -563,6 +577,27 @@ async function rebuildLandSchedule(poolOrTx, bookingId, actorUserId = null) {
   return { rebuilt: true };
 }
 
+// Re-shares a booking's TotalValue across its active lines (plots or units)
+// pro-rata by area — the same allocation booking creation uses. Called
+// whenever TotalValue changes after creation; without it the line values
+// keep the old total, and everything that reads them (the land / built
+// split behind GST and the sale ledger) disagrees with the booking.
+async function reallocateBookingLines(poolOrTx, bookingId, totalValue) {
+  for (const table of ["CrmBookingPlot", "CrmBookingUnit"]) {
+    const lines = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(
+      `SELECT Id, AreaSqFt FROM dbo.${table} WHERE BookingId = @bid AND Status = N'Active' ORDER BY Id`)).recordset;
+    if (!lines.length) continue;
+    const parts = allocateConsideration({
+      lines: lines.map((l) => ({ unitId: l.Id, areaSqFt: l.AreaSqFt })),
+      totalConsideration: Number(totalValue),
+    });
+    for (const part of parts) {
+      await poolOrTx.request().input("id", sql.Int, part.unitId).input("v", sql.Decimal(18, 2), part.allocatedValue)
+        .query(`UPDATE dbo.${table} SET AllocatedValue = @v WHERE Id = @id`);
+    }
+  }
+}
+
 async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
   if (!totalValue || totalValue <= 0) return;
   const plotLine = await poolOrTx.request().input("bid", sql.Int, bookingId)
@@ -806,7 +841,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // never exist for are the genuinely dead ones — the same "not dead"
   // exclusion this used before Approved briefly became a real gate.
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
-    .query("SELECT Status, IsActive, PaymentPlanId, BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ChannelPartnerId FROM dbo.CrmApplication WHERE Id = @aid");
+    .query("SELECT Status, IsActive, PaymentPlanId, BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ChannelPartnerId, CustomerId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
   const deadApplicationStatuses = ["Rejected", "Cancelled", "Expired"];
   if (appRow.recordset[0].IsActive === false || deadApplicationStatuses.includes(appRow.recordset[0].Status)) {
@@ -816,6 +851,8 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
   if (isPlotBooking) {
     await validatePlotSelection(pool, unitIds, { applicationId: parseInt(b.ApplicationId) });
+  } else {
+    await assertVillaBuyer(pool, unitIds, appRow.recordset[0].CustomerId);
   }
 
   // Fetch all selected units
@@ -1196,6 +1233,6 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
+  generateMilestonesForBooking, landSaleSchedule, reallocateBookingLines, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

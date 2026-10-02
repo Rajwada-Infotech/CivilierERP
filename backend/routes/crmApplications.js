@@ -16,6 +16,7 @@ const { advanceApplicationStatus, logStatusChange } = require("../services/crmAp
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
 const { recalculateBookingGst } = require("../services/crmGst");
+const { assertVillaBuyerOwnsLand, VillaLandError } = require("../services/villaLand");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { recalculateRemainingMilestones, requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { releaseAllParkingForApplication, applyAddParking, rollupBookingTotals } = require("../routes/crmParking");
@@ -437,8 +438,17 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const actor = actorId(req);
 
     const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, PreferredUnitId, Status, ProjectId, DepositBankId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, PreferredUnitId, Status, ProjectId, DepositBankId, CustomerId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Application not found" });
+    // A villa built on plots can only be picked by the plot's current owner.
+    if (Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0) {
+      try {
+        await assertVillaBuyerOwnsLand(pool, b.PreferredUnitIds, existing.recordset[0].CustomerId);
+      } catch (e) {
+        if (e instanceof VillaLandError) return res.status(e.status).json({ error: e.message });
+        throw e;
+      }
+    }
     const existingUnitId = existing.recordset[0].PreferredUnitId != null ? existing.recordset[0].PreferredUnitId : null;
     const existingStatus = existing.recordset[0].Status;
 

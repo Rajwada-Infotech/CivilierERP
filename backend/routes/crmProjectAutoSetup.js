@@ -1809,6 +1809,17 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   const unitType = String(req.body?.UnitType || "").trim();
   const unitKind = String(req.body?.UnitKind || "").trim();
   if (!plotIds.length || !unitName || !unitType || !unitKind) return res.status(400).json({ error: "PlotIds, UnitName, UnitType, and UnitKind are required" });
+  // The villa's own construction rate. Never the plot's land rate: the plot's
+  // owner has already paid for the land, and a villa priced at the land rate
+  // would charge them for it again.
+  const villaRate = Number(req.body?.RatePerSqFt);
+  if (!Number.isFinite(villaRate) || villaRate <= 0) {
+    return res.status(400).json({ error: "Enter the villa's construction rate per sq ft — the plot's land rate is not used for the villa." });
+  }
+  const builtUpArea = req.body?.AreaSqFt != null && req.body.AreaSqFt !== "" ? Number(req.body.AreaSqFt) : null;
+  if (builtUpArea != null && (!Number.isFinite(builtUpArea) || builtUpArea <= 0)) {
+    return res.status(400).json({ error: "Built-up area must be a positive number of sq ft" });
+  }
   try {
     const pool = getPool();
     const kind = await pool.request().input("kind", sql.NVarChar(20), unitKind)
@@ -1821,24 +1832,33 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
     await tx.begin();
     try {
       // Lock source plots and re-check all inventory claims inside this
-      // transaction. UI availability is advisory; this is the authority that
-      // prevents a sold, applied-for, or held plot becoming a Unit Master row.
+      // transaction. UI availability is advisory; this is the authority.
+      //
+      // A SOLD plot can be built on — that is the business: plot first, the
+      // villa after, bought separately by the plot's owner (services/
+      // villaLand.js). What must not be built on is a plot whose ownership is
+      // still in flux: applied for but not yet booked, or on hold. The owner
+      // check below then requires one owner across all the plots.
       const plots = await tx.request().query(`
-        SELECT p.Id, p.ProjectId, p.BlockId, p.AreaSqFt, p.RatePerSqFt
+        SELECT p.Id, p.ProjectId, p.BlockId, p.AreaSqFt, p.RatePerSqFt,
+               (SELECT TOP 1 a.CustomerId
+                  FROM dbo.CrmBookingPlot bp
+                  JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
+                  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+                 WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
+                   AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')) AS OwnerCustomerId
         FROM dbo.PlotMaster p WITH (UPDLOCK, HOLDLOCK)
         WHERE p.Id IN (${plotIds.join(",")})
           AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM dbo.CrmBookingPlot bp
-            JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
-            WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-              AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected')
-          )
           AND NOT EXISTS (
             SELECT 1 FROM dbo.CrmApplicationPlot ap
             JOIN dbo.CrmApplication a ON a.Id = ap.ApplicationId
             WHERE ap.PlotId = p.Id AND ap.Status = N'Active'
               AND a.IsActive = 1 AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')
+              -- An application that already became a booking is ownership,
+              -- not an open claim.
+              AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking ab WHERE ab.ApplicationId = a.Id AND ab.IsActive = 1
+                                AND ab.Status NOT IN (N'Cancelled', N'Rejected', N'Expired'))
           )
           AND NOT EXISTS (
             SELECT 1 FROM dbo.CrmInventoryHold h
@@ -1846,8 +1866,14 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
               AND h.Status = N'Active' AND h.HoldUntil > SYSDATETIME()
           )
       `);
+      const owners = new Set(plots.recordset.map((p) => p.OwnerCustomerId ?? "unsold"));
+      if (plots.recordset.length === plotIds.length && owners.size > 1) {
+        const mixed = new Error("A villa must stand on plots with one owner — these plots belong to different owners, or some are sold and some are not");
+        mixed.status = 409;
+        throw mixed;
+      }
       if (plots.recordset.length !== plotIds.length) {
-        const conflict = new Error("One or more plots are sold, applied for, held, inactive, or already converted");
+        const conflict = new Error("One or more plots are applied for but not yet booked, on hold, inactive, or already converted");
         conflict.status = 409;
         throw conflict;
       }
@@ -1881,13 +1907,13 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
           throw invalid;
         }
       }
-      const area = plots.recordset.reduce((sum, p) => sum + Number(p.AreaSqFt || 0), 0);
+      const area = builtUpArea ?? plots.recordset.reduce((sum, p) => sum + Number(p.AreaSqFt || 0), 0);
       const created = await tx.request()
         .input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId)
         .input("name", sql.NVarChar(100), unitName).input("type", sql.NVarChar(50), resolvedType.unitType)
         .input("layoutTypeId", sql.Int, resolvedType.layoutTypeId)
         .input("kind", sql.NVarChar(20), unitKind)
-        .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), req.body?.RatePerSqFt ?? first.RatePerSqFt ?? null)
+        .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), villaRate)
         .input("by", sql.Int, req.user?.userId || null)
         .query(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, UnitType, LayoutTypeId, UnitKind, AreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
                 OUTPUT INSERTED.Id VALUES (@pid, @bid, @name, @type, @layoutTypeId, @kind, @area, @rate, 1, @by, SYSDATETIME())`);

@@ -28,6 +28,7 @@
 //   CrmCancellation       unwinds a sale; a resale unwinds nothing
 
 const express = require("express");
+const { getNextDocNumber } = require("../services/docNumber");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -112,6 +113,16 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
       const row = held.recordset[0];
       if (!row)
         return res.status(400).json({ error: "That plot is not currently held by anyone — there is nothing to resell." });
+      // Once the owner has bought the villa on this plot, the plot alone can't
+      // change hands: the villa contract would be left with the old owner on
+      // land they no longer hold. Moving a villa contract is a separate flow.
+      const villaBooked = await pool.request().input("p", sql.Int, plotId).query(`
+        SELECT TOP 1 vb.BookingNo
+        FROM dbo.PlotMaster p
+        JOIN dbo.CrmBooking vb ON vb.UnitId = p.ConvertedUnitId
+        WHERE p.Id = @p AND vb.IsActive = 1 AND vb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')`);
+      if (villaBooked.recordset.length)
+        return res.status(409).json({ error: `The villa on this plot is already booked (${villaBooked.recordset[0].BookingNo}). A plot with a booked villa can't be resold as bare land.` });
       fromBookingId = row.BookingId;
       fromCustomerId = row.CustomerId;
       // Snapshotted so a later rate change cannot restate an already-agreed gain.
@@ -158,21 +169,87 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
 router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
-  const toBookingId = req.body?.ToBookingId != null ? parseInt(req.body.ToBookingId, 10) : null;
-  if (!Number.isFinite(toBookingId))
-    return res.status(400).json({ error: "ToBookingId is required — the new buyer's booking must exist before the resale can complete." });
+  let toBookingId = req.body?.ToBookingId != null && req.body.ToBookingId !== "" ? parseInt(req.body.ToBookingId, 10) : null;
+  if (toBookingId != null && !Number.isFinite(toBookingId))
+    return res.status(400).json({ error: "Invalid ToBookingId" });
 
   const pool = getPool();
   const tx = new sql.Transaction(pool);
   try {
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, PlotId, UnitId, FromBookingId, Status FROM dbo.CrmUnitResale WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, PlotId, UnitId, FromBookingId, ToCustomerId, ResaleDate, Status FROM dbo.CrmUnitResale WHERE Id = @id AND IsActive = 1");
     const resale = cur.recordset[0];
     if (!resale) return res.status(404).json({ error: "Resale not found" });
     if (resale.Status === ResaleStatus.COMPLETED) return res.status(400).json({ error: "This resale is already completed" });
     if (resale.Status === ResaleStatus.CANCELLED) return res.status(400).json({ error: "This resale was cancelled" });
 
+    // The new buyer's ownership record. They paid the original buyer for the
+    // land, not the developer, so it carries no value owed to the developer
+    // and no payment schedule — it exists so the plot has an owner on record,
+    // and so that owner can then buy the villa (services/villaLand.js).
+    // Created here because the plot cannot be booked by anyone else while the
+    // original buyer still holds it: requiring the booking first could never
+    // be satisfied.
+    let holding = null;
+    if (toBookingId == null) {
+      if (resale.PlotId == null)
+        return res.status(400).json({ error: "ToBookingId is required — a villa resale needs the new buyer's villa booking." });
+      if (resale.ToCustomerId == null)
+        return res.status(400).json({ error: "Name the new buyer on the resale before completing it." });
+      const ctx = (await pool.request().input("p", sql.Int, resale.PlotId).input("c", sql.Int, resale.ToCustomerId).query(`
+        SELECT p.PlotName, p.ProjectId, p.BlockId, p.AreaSqFt, blk.BlockName, proj.name AS ProjectName, proj.company_id AS CompanyId,
+               c.CustomerName, c.Mobile, c.Email
+        FROM dbo.PlotMaster p
+        LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
+        LEFT JOIN dbo.enterprise proj ON proj.id = p.ProjectId
+        JOIN dbo.CrmCustomer c ON c.Id = @c
+        WHERE p.Id = @p`)).recordset[0];
+      if (!ctx) return res.status(400).json({ error: "The new buyer's customer record was not found." });
+      // getNextDocNumber takes its own lock and must run on the pool, before the transaction.
+      holding = { ...ctx, appNo: await getNextDocNumber(pool, "APP", "APP"), bookingNo: await getNextDocNumber(pool, "BKG", "BKG") };
+    }
+
     await tx.begin();
+
+    // The seller's application line for the plot moves with the land too:
+    // one Active application line per plot is enforced, and the plot is no
+    // longer the seller's to apply under.
+    if (resale.PlotId != null) {
+      await tx.request().input("p", sql.Int, resale.PlotId).input("b", sql.Int, resale.FromBookingId)
+        .query(`UPDATE ap SET Status = N'${LineStatus.TRANSFERRED}'
+                FROM dbo.CrmApplicationPlot ap
+                JOIN dbo.CrmBooking fb ON fb.ApplicationId = ap.ApplicationId
+                WHERE ap.PlotId = @p AND ap.Status = N'Active' AND fb.Id = @b`);
+    }
+
+    if (holding) {
+      const note = `Plot ${holding.PlotName} held by resale — land bought from the original buyer, nothing owed to the developer.`;
+      const app = await tx.request()
+        .input("no", sql.NVarChar(50), holding.appNo).input("name", sql.NVarChar(200), holding.CustomerName)
+        .input("mob", sql.NVarChar(20), holding.Mobile || null).input("email", sql.NVarChar(200), holding.Email || null)
+        .input("cid", sql.Int, resale.ToCustomerId).input("pid", sql.Int, holding.ProjectId).input("co", sql.Int, holding.CompanyId)
+        .input("proj", sql.NVarChar(200), holding.ProjectName).input("unit", sql.NVarChar(200), holding.PlotName)
+        .input("note", sql.NVarChar(sql.MAX), note).input("by", sql.Int, actorId(req)).input("date", sql.Date, resale.ResaleDate || new Date())
+        .query(`INSERT INTO dbo.CrmApplication (ApplicationNo, ApplicantName, Mobile, Email, CustomerId, ProjectId, CompanyId,
+                  InterestedProject, InterestedUnit, Source, Status, Notes, DateOfApply, CreatedBy, AssignedTo, AssignedBy)
+                OUTPUT INSERTED.Id
+                VALUES (@no, @name, @mob, @email, @cid, @pid, @co, @proj, @unit, N'Other', N'Pending', @note, @date, @by, @by, @by)`);
+      const appId = app.recordset[0].Id;
+      await tx.request().input("a", sql.Int, appId).input("p", sql.Int, resale.PlotId).input("by", sql.Int, actorId(req))
+        .query(`INSERT INTO dbo.CrmApplicationPlot (ApplicationId, PlotId, Status, IsPrimary, CreatedBy) VALUES (@a, @p, N'Active', 1, @by)`);
+      const bk = await tx.request()
+        .input("no", sql.NVarChar(50), holding.bookingNo).input("a", sql.Int, appId)
+        .input("pid", sql.Int, holding.ProjectId).input("pname", sql.NVarChar(200), holding.ProjectName).input("co", sql.Int, holding.CompanyId)
+        .input("blk", sql.Int, holding.BlockId).input("blkName", sql.NVarChar(100), holding.BlockName)
+        .input("unit", sql.NVarChar(200), holding.PlotName).input("area", sql.Decimal(18, 2), holding.AreaSqFt)
+        .input("date", sql.Date, resale.ResaleDate || new Date()).input("note", sql.NVarChar(sql.MAX), note).input("by", sql.Int, actorId(req))
+        .query(`INSERT INTO dbo.CrmBooking (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, BlockId, BlockName, UnitNo,
+                  AreaSqFt, TotalValue, GrandTotal, BookingAmount, BookingDate, Status, WorkflowStage, ConfirmedAt, ConfirmedBy, Notes, CreatedBy, AssignedTo)
+                OUTPUT INSERTED.Id
+                VALUES (@no, @a, NULL, @pid, @pname, @co, @blk, @blkName, @unit,
+                  @area, 0, 0, 0, @date, N'Approved', N'Confirmed', SYSDATETIME(), @by, @note, @by, @by)`);
+      toBookingId = bk.recordset[0].Id;
+    }
 
     if (resale.PlotId != null) {
       // Release the outgoing line first. The unique index allows one Active
@@ -204,7 +281,7 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
               WHERE Id = @id`);
 
     await tx.commit();
-    res.json({ success: true });
+    res.json({ success: true, ToBookingId: toBookingId, holdingCreated: !!holding });
   } catch (e) {
     try { await tx.rollback(); } catch { /* already rolled back */ }
     console.error("[crm-resales] PUT /:id/complete:", e.message);
