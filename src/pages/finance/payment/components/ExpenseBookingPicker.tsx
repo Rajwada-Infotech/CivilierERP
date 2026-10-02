@@ -21,6 +21,7 @@ export function ExpenseBookingPicker({
   onMergeConfirm,
   mergedSummary = null,
   onMergeClear,
+  onRefreshOptions,
 }: {
   options: ExpenseOption[];
   value: string;
@@ -46,6 +47,18 @@ export function ExpenseBookingPicker({
    *  checkbox state has reset. */
   mergedSummary?: { count: number; totalAmount: number; label: string } | null;
   onMergeClear?: () => void;
+  /** Called the moment merge mode is entered, before the user picks
+   *  anything. `options` is react-query data with `staleTime: 0` — which
+   *  only makes it *eligible* to refetch, not force a refetch on mount —
+   *  so a tab left open since before some other fix (a company/project
+   *  retag, say) could still be comparing merge candidates against
+   *  values that no longer match the database. Confirmed: a reported
+   *  "won't merge, says different company/project/supplier" case turned
+   *  out to have byte-identical companyId/projectName/supplierId on both
+   *  invoices server-side — the only explanation left was a stale cache
+   *  in that tab. This closes that gap without needing to chase the
+   *  staleness down further. */
+  onRefreshOptions?: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
@@ -300,7 +313,14 @@ export function ExpenseBookingPicker({
                   {onMergeConfirm && (
                     <button
                       type="button"
-                      onClick={() => (mergeMode ? exitMergeMode() : setMergeMode(true))}
+                      onClick={() => {
+                        if (mergeMode) {
+                          exitMergeMode();
+                        } else {
+                          setMergeMode(true);
+                          onRefreshOptions?.();
+                        }
+                      }}
                       title="Pay off several invoices from the same company, project &amp; supplier in one payment"
                       className={`ml-auto flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[0.6875rem] font-heading font-semibold transition-all border ${
                         mergeMode
