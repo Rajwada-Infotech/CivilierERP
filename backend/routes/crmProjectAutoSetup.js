@@ -480,6 +480,18 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
       WHERE t.ProjectId = @pid AND t.IsActive = 1
     `);
     const tplByBlock = new Map(plotTemplates.recordset.map((t) => [t.BlockId, t]));
+    // Plots entered directly in Plot Master (or imported) have no layout
+    // template. Such a block is already laid out: report its real plots as a
+    // generated layout, so the wizard neither shows 0 plots nor offers to
+    // generate a second set on top of them.
+    const plotCounts = await pool.request().input("pid", sql.Int, projectId).query(`
+      SELECT BlockId, COUNT(*) AS n FROM dbo.PlotMaster WHERE ProjectId = @pid AND IsActive = 1 GROUP BY BlockId`);
+    for (const { BlockId, n } of plotCounts.recordset) {
+      if (!tplByBlock.has(BlockId)) {
+        tplByBlock.set(BlockId, { BlockId, PlotCount: n, PlotsCreated: n, IsGenerated: true, NumberPrefix: null, StartNumber: null,
+          DefaultAreaSqFt: null, DefaultRatePerSqFt: null, DefaultFacing: null, DefaultRoadWidthFt: null, FromPlotMaster: true });
+      }
+    }
 
     // Per-block effective type: a mixed township can hold both kinds, so this
     // cannot be answered once for the whole project.
@@ -1624,6 +1636,14 @@ router.put("/blocks/:id/plot-template", requirePageRight("crm-auto-project-setup
       .query("SELECT Id, ProjectId, BlockName FROM dbo.BlockMaster WHERE Id = @bid");
     const block = blk.recordset[0];
     if (!block) return res.status(404).json({ error: "Block not found" });
+
+    // A block whose plots already exist (entered or imported in Plot Master)
+    // is laid out; a template here would generate a second, duplicate set.
+    const existing = await pool.request().input("bid", sql.Int, blockId).query(`
+      SELECT (SELECT COUNT(*) FROM dbo.PlotMaster WHERE BlockId = @bid AND IsActive = 1) AS plots,
+             (SELECT COUNT(*) FROM dbo.CrmProjectAutoSetupPlotTemplate WHERE BlockId = @bid AND IsActive = 1) AS tpl`);
+    if (existing.recordset[0].plots > 0 && existing.recordset[0].tpl === 0)
+      return res.status(409).json({ error: `Block ${block.BlockName} already has ${existing.recordset[0].plots} plot(s) in Plot Master — manage them there.` });
 
     // Mirror of the floors guard: a tower block must not be laid out as plots.
     const effType = await getEffectiveType(pool, { blockId, projectId: block.ProjectId });
