@@ -251,7 +251,8 @@ router.get("/timeline", async (req, res) => {
              COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
              b.TotalValue, b.BookingAmount,
              b.TokenType, b.TokenValue, b.Status AS BookingStatus, b.BookingDate,
-             b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal
+             b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
+             CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale
       FROM dbo.CrmBooking b
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.ApplicationId = @aid AND b.IsActive = 1

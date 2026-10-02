@@ -46,6 +46,16 @@ const CHECKLIST_ITEMS = [
   { key: "Documents", label: "Required KYC / ID / Address / Income-proof documents are uploaded and legible" },
 ];
 
+// A plot (land) sale verifies the same facts in land terms: plots instead of
+// a unit, and a Booking Amount + balance schedule instead of a payment plan.
+// Applied when the checklist is read (labelsFor), never stored, so the same
+// keys and saved ticks serve both kinds of sale and an application that
+// switches between unit and plots always shows the right wording.
+const PLOT_SALE_LABELS = {
+  ProjectUnitRate: "Project, Plot(s) and Rate/SqFt are correct and the plots are genuinely available",
+  PaymentPlanAmounts: "Booking Amount and balance match what was quoted to the customer (no payment plan for land)",
+};
+
 // There is no longer a separate Level-2 checklist — the two-level
 // Marketing Head -> Director approval (crmBookingStageService.js) replaced
 // it. CHECKLIST_ITEMS above is the only checklist now, applied at Level=1
@@ -85,8 +95,19 @@ async function ensureChecklistRows(pool, applicationId, level = 1) {
   const result = await pool.request()
     .input("aid", sql.Int, applicationId)
     .input("lvl", sql.Int, level)
-    .query("SELECT * FROM dbo.CrmApplicationVerificationChecklist WHERE ApplicationId = @aid AND Level = @lvl ORDER BY Id");
-  return result.recordset;
+    .query(`
+      SELECT c.*,
+             CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmApplicationPlot ap WHERE ap.ApplicationId = c.ApplicationId AND ap.Status = N'Active')
+                       THEN 1 ELSE 0 END AS BIT) AS IsPlotSale
+      FROM dbo.CrmApplicationVerificationChecklist c
+      WHERE c.ApplicationId = @aid AND c.Level = @lvl ORDER BY c.Id`);
+  return result.recordset.map(withSaleLabel);
+}
+
+// The wording the reader sees for a checklist row, by kind of sale.
+function withSaleLabel(row) {
+  if (!row.IsPlotSale || !PLOT_SALE_LABELS[row.ItemKey]) return row;
+  return { ...row, ItemLabel: PLOT_SALE_LABELS[row.ItemKey] };
 }
 
 function assertKnownItem(itemKey, level = 1) {

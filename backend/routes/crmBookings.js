@@ -27,7 +27,7 @@ const { recordGLPosting } = require("../services/approvalService");
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
+const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
 const { logStatusChange, syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 const {
   getStageState,
@@ -112,6 +112,9 @@ async function assertNotFrozen(pool, id, res) {
 const BOOKING_SELECT = `
   SELECT
     b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.ProjectId,
+    -- A plot (land) sale: no parking, no flat areas, no GST. Every screen
+    -- that shows a booking reads this one flag instead of guessing.
+    CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
     -- Display names: always read from master tables so a rename in Block/Project
     -- Master is immediately reflected on every booking without a data migration.
     -- The stored snapshot column is the COALESCE fallback for legacy rows only.
@@ -120,7 +123,9 @@ const BOOKING_SELECT = `
     b.CompanyId,
     COALESCE(um.UnitName,   b.UnitNo)    AS UnitNo,
     COALESCE(blk.BlockName, b.BlockName) AS BlockName,
-    um.BlockId,
+    -- A plot booking has no UnitId, so um is NULL; fall back to the block
+    -- the booking itself carries (migration 519).
+    COALESCE(um.BlockId, b.BlockId) AS BlockId,
     b.FloorName,
     COALESCE(um.UnitType,   b.UnitType)  AS UnitType,
     b.AreaSqFt,
@@ -201,7 +206,7 @@ const BOOKING_SELECT = `
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um   ON um.Id   = b.UnitId
-  LEFT JOIN dbo.BlockMaster blk ON blk.Id  = um.BlockId
+  LEFT JOIN dbo.BlockMaster blk ON blk.Id  = COALESCE(um.BlockId, b.BlockId)
   LEFT JOIN dbo.enterprise  proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.Users u  ON u.id  = b.AssignedTo
   LEFT JOIN dbo.Users cu ON cu.id = b.CreatedBy
@@ -264,10 +269,10 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
     if (applicationId) { req0.input("appId", sql.Int, parseInt(applicationId)); conds.push("b.ApplicationId = @appId"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR um.UnitName LIKE @search)");
+      conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR COALESCE(um.UnitName, b.UnitNo) LIKE @search)");
     }
     const where = `WHERE ${conds.join(" AND ")}`;
 
@@ -298,8 +303,8 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
             AND (@appId2 IS NULL OR b.ApplicationId = @appId2)
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR a.Mobile LIKE @search2 OR b.BookingNo LIKE @search2 OR um.UnitName LIKE @search2))
+            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR a.Mobile LIKE @search2 OR b.BookingNo LIKE @search2 OR COALESCE(um.UnitName, b.UnitNo) LIKE @search2))
         `),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
@@ -318,7 +323,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
-    const [bkRes, milRes, wcRes, agRes, custRes, coAppRes] = await Promise.all([
+    const [bkRes, milRes, wcRes, agRes, custRes, coAppRes, plotRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${BOOKING_SELECT} WHERE b.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
         SELECT m.*,
@@ -345,6 +350,16 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
       // should show the same list, not the intake-time snapshot.
       pool.request().input("id", sql.Int, id).query(
         `SELECT * FROM dbo.CrmCoApplicant WHERE BookingId = @id AND IsActive = 1 ORDER BY CreatedAt`),
+      // The plots on a plot sale, one row each (empty for a unit booking).
+      pool.request().input("id", sql.Int, id).query(`
+        SELECT bp.PlotId, p.PlotName, p.PlotNo, p.SurveyNo, p.Facing, f.Name AS FacingName, p.IsCornerPlot,
+               p.PlotWidthFt, p.PlotDepthFt, p.RoadWidthFt, bp.AreaSqFt, bp.RatePerSqFt, bp.PremiumAmount,
+               bp.AllocatedValue, bp.Status, bp.IsPrimary
+        FROM dbo.CrmBookingPlot bp
+        JOIN dbo.PlotMaster p ON p.Id = bp.PlotId
+        LEFT JOIN dbo.PlotFacingMaster f ON f.Code = p.Facing
+        WHERE bp.BookingId = @id
+        ORDER BY CASE WHEN bp.Status = N'Active' THEN 0 ELSE 1 END, bp.IsPrimary DESC, p.PlotName`),
     ]);
     if (!bkRes.recordset[0]) return res.status(404).json({ error: "Booking not found" });
     const milestones = milRes.recordset;
@@ -358,6 +373,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
       agreement: agRes.recordset[0] || null,
       customer: custRes.recordset[0] || null,
       coApplicants: coAppRes.recordset,
+      plots: plotRes.recordset,
       paymentSummary: { totalDue, totalPaid, balance: totalDue - totalPaid },
       stageState,
     });
@@ -451,6 +467,13 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const hasPlanId = (v) => v !== null && v !== undefined && v !== "";
     const newPlanId = b.PaymentPlanId !== undefined ? (hasPlanId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : null) : undefined;
     const planIsChanging = newPlanId !== undefined && newPlanId !== oldRow.PaymentPlanId;
+    if (planIsChanging && hasPlanId(newPlanId)) {
+      const plotLine = await pool.request().input("bid", sql.Int, id)
+        .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
+      if (plotLine.recordset.length) {
+        return res.status(400).json({ error: "A plot sale has no payment plan — its schedule is the Booking Amount and the balance." });
+      }
+    }
     if (planIsChanging) {
       if (hasPlanId(newPlanId)) {
         // Same tag-based resolver Application/Booking creation use — the new
@@ -515,6 +538,12 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
           WHERE Id = @id AND IsActive = 1
         `);
 
+      // The line values must follow a new total before anything reads them
+      // (the GST recalculation just below splits land from built by them).
+      if (total != null && Number(total) !== Number(oldRow.TotalValue)) {
+        await reallocateBookingLines(tx, id, total);
+      }
+
       // TotalValue may have just moved — Unit+Parking could have crossed the
       // Rs. 45L GST bracket.
       await recalculateBookingGst(tx, id);
@@ -523,7 +552,15 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         { field: "AssignedTo", oldVal: oldRow.AssignedTo, newVal: b.AssignedTo },
       ]);
 
-      if (planIsChanging) {
+      const totalChanged = total != null && Number(total) !== Number(oldRow.TotalValue);
+      const bookingAmountChanged = b.BookingAmount != null && Number(b.BookingAmount) !== Number(oldRow.BookingAmount || 0);
+      const land = (totalChanged || bookingAmountChanged) ? await rebuildLandSchedule(tx, id, actor) : { rebuilt: false };
+      if (land.rebuilt) {
+        // Plot sale: schedule re-derived from the new value / Booking Amount.
+      } else if (land.reason === "money is already recorded against the schedule") {
+        // Never reshape a plot schedule money has already landed on.
+        if (totalChanged) await recalculateRemainingMilestones(tx, id);
+      } else if (planIsChanging) {
         await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
         const effectiveTotal = total || oldRow.TotalValue;
         const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
@@ -564,6 +601,15 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     const b = req.body || {};
     if (!b.NewUnitId) return res.status(400).json({ error: "NewUnitId is required" });
     if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to change a booking's unit" });
+
+    // Re-pointing a land sale at a built unit would leave its plot lines
+    // attached to a unit booking. Plots are changed by cancelling and
+    // re-booking, never by swapping the line type underneath.
+    const plotSale = await pool.request().input("id", sql.Int, id)
+      .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @id");
+    if (plotSale.recordset.length) {
+      return res.status(400).json({ error: "This is a plot sale — its plots can't be swapped for a unit. Cancel the booking and book the new plots instead." });
+    }
 
     // Same active-booking gate every other lifecycle-mutating route uses
     // (blocks both Cancelled and Rejected, not just Cancelled) — re-pointing
@@ -1262,6 +1308,17 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
         WHERE Id = @id
       `);
 
+      // Plot and unit allocation rows use active-only unique indexes. Retiring
+      // the header alone would leave the sold inventory unavailable forever.
+      await tx.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
+        UPDATE dbo.CrmBookingPlot SET Status = N'Cancelled'
+        WHERE BookingId = @bid AND Status = N'Active';
+        UPDATE dbo.CrmBookingUnit SET Status = N'Cancelled'
+        WHERE BookingId = @bid AND Status = N'Active';
+        UPDATE dbo.CrmApplicationPlot SET Status = N'Cancelled'
+        WHERE ApplicationId = @aid AND Status = N'Active';
+      `);
+
     // Revert Application-stage rows so the application can be corrected and
     // re-booked without stale child rows remaining pinned to the deleted booking.
     // Parking allotments are fully deactivated (IsActive = 0) rather than just
@@ -1482,6 +1539,10 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
       // already soft-deleted and its Pending tranches were voided at that
       // time — any remaining rows here are Voided/Clawback records.
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid");
+      // These allocation tables deliberately retain their own audit status on
+      // soft deletion, so they must be removed before a permanent header delete.
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingUnit WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBooking WHERE Id = @bid");
       await tx.commit();
     } catch (txErr) {
@@ -2123,6 +2184,12 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
 
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    // A plot sale's schedule is derived from its value and Booking Amount,
+    // so resync = rebuild (refused once money is recorded against it).
+    const land = await rebuildLandSchedule(pool, id, actorId(req));
+    if (land.rebuilt) return res.json({ success: true, changed: true });
+    if (land.reason !== "not a plot sale") return res.status(400).json({ error: `The schedule can't be rebuilt — ${land.reason}.` });
 
     const bk = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingAmount, GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @id");

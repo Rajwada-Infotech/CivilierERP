@@ -772,7 +772,7 @@ const CrmPaymentMilestones: React.FC = () => {
                       <div className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Price Breakdown</div>
                       <div className="space-y-1.5 text-sm">
                         <div className="flex items-baseline justify-between">
-                          <span className="text-muted-foreground">Unit Value</span>
+                          <span className="text-muted-foreground">{booking.IsPlotSale ? "Land Value (no GST)" : "Unit Value"}</span>
                           <span className="font-medium tabular-nums">{fmt(booking.TotalValue)}</span>
                         </div>
                         {unitGstAmount > 0 && (

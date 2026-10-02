@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -10,7 +10,7 @@ import {
   Plus, AlertTriangle, RotateCcw, UserCircle2,
   CheckCircle2, Send, ShieldAlert, Loader2,
   ChevronRight, FileText, Pencil, Trash2,
-  CalendarDays, Clock, ArrowRight, Search, X, IndianRupee,
+  CalendarDays, Clock, ArrowRight, StickyNote,
 } from "lucide-react";
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -19,8 +19,11 @@ import { promptNextStep } from "@/lib/workflowNav";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { cn } from "@/lib/utils";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmDataTable, CrmRowMenu, type CrmColumn, type RowMenuItem } from "@/components/crm/CrmDataTable";
+import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
+import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 
 const API = "/api/crm/possession-notice";
 const DELIVERY_MODES = ["Email", "Post", "Courier", "InPerson"];
@@ -45,43 +48,34 @@ function deadlineInfo(dl?: string | null, status?: string) {
 }
 
 // ── Status config ─────────────────────────────────────────────────────────────
-const STATUS_CONFIG: Record<string, {
-  label: string; badgeCls: string; borderCls: string; bgCls: string; Icon: React.ElementType;
-}> = {
-  Draft:        { label: "Draft",        badgeCls: "text-slate-600 bg-slate-100 border-slate-300",    borderCls: "border-l-slate-300",    bgCls: "bg-card",                        Icon: FileText      },
-  Sent:         { label: "Sent",         badgeCls: "text-blue-600 bg-blue-50 border-blue-200",        borderCls: "border-l-blue-400",      bgCls: "bg-blue-500/[0.02]",             Icon: Send          },
-  Acknowledged: { label: "Acknowledged", badgeCls: "text-green-700 bg-green-50 border-green-200",     borderCls: "border-l-green-500",     bgCls: "bg-green-500/[0.03]",            Icon: CheckCircle2  },
-  Disputed:     { label: "Disputed",     badgeCls: "text-red-600 bg-red-50 border-red-200",           borderCls: "border-l-red-500",       bgCls: "bg-red-500/[0.03]",              Icon: AlertTriangle },
+const STATUS_CONFIG: Record<string, { label: string; badgeCls: string; accent: string; Icon: React.ElementType }> = {
+  Draft:        { label: "Draft",        badgeCls: "text-slate-600 bg-slate-100 border-slate-300", accent: "border-l-slate-300", Icon: FileText      },
+  Sent:         { label: "Sent",         badgeCls: "text-blue-600 bg-blue-50 border-blue-200",     accent: "border-l-blue-400",  Icon: Send          },
+  Acknowledged: { label: "Acknowledged", badgeCls: "text-green-700 bg-green-50 border-green-200",  accent: "border-l-green-500", Icon: CheckCircle2  },
+  Disputed:     { label: "Disputed",     badgeCls: "text-red-600 bg-red-50 border-red-200",        accent: "border-l-red-500",   Icon: AlertTriangle },
 };
 
+const moneyCompact = new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 });
+
 // ── Fetchers ──────────────────────────────────────────────────────────────────
-interface PossessionNoticeCpb { companyId: string; projectId: string; blockId: string }
-// NOTE on scale: still fetched in full — status-tab counts are computed
-// client-side from the whole set (see `counts` below), same as CrmDemands.
-// Company/Project/Block narrows the set server-side instead.
-async function fetchAll(cpb?: PossessionNoticeCpb): Promise<any[]> {
-  const params = new URLSearchParams();
-  if (cpb?.companyId) params.set("companyId", cpb.companyId);
-  if (cpb?.projectId) params.set("projectId", cpb.projectId);
-  if (cpb?.blockId) params.set("blockId", cpb.blockId);
-  const qs = params.toString();
-  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
+// Server-side paging: rows for one page + per-status counts (counts ignore the
+// status filter so the tabs stay stable while you switch between them).
+interface NoticePage { rows: any[]; total: number; counts: Record<string, number> }
+async function fetchPage(q: CrmListQuery): Promise<NoticePage> {
+  const r = await fetchWithAuth(`${API}?${listParams(q)}`);
   if (!r.ok) { const d = await r.json().catch(() => null); throw new Error(d?.error || `HTTP ${r.status}`); }
-  return r.json();
+  const d = await r.json();
+  return { rows: d.rows ?? [], total: d.total ?? 0, counts: d.counts ?? {} };
 }
 async function fetchEligible(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
 }
 
-// ── Delivery mode badge ───────────────────────────────────────────────────────
+// ── Delivery mode ─────────────────────────────────────────────────────────────
 const MODE_ICON: Record<string, string> = { Email: "✉", Post: "📮", Courier: "📦", InPerson: "🤝" };
 function ModeBadge({ mode }: { mode?: string | null }) {
   if (!mode) return <span className="text-xs text-muted-foreground">—</span>;
-  return (
-    <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-muted-foreground bg-muted/50 border border-border rounded px-1.5 py-0.5">
-      <span>{MODE_ICON[mode] ?? "📄"}</span>{mode}
-    </span>
-  );
+  return <span className="text-xs text-muted-foreground whitespace-nowrap">{MODE_ICON[mode] ?? "📄"} {mode}</span>;
 }
 
 // ── New notice dialog ─────────────────────────────────────────────────────────
@@ -247,156 +241,6 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
   );
 }
 
-// ── Notice card ───────────────────────────────────────────────────────────────
-interface NoticeCardProps {
-  n: any;
-  onMarkSent: (n: any) => void;
-  onEdit: (n: any) => void;
-  onDelete: (n: any) => void;
-  onAcknowledge: (id: number) => void;
-  onDispute: (id: number) => void;
-  onProxyAck: (id: number) => void;
-  onProxyDispute: (id: number) => void;
-  onRetract: (id: number) => void;
-  onHandover: (bookingId: number) => void;
-}
-function NoticeCard({ n, onMarkSent, onEdit, onDelete, onAcknowledge, onDispute, onProxyAck, onProxyDispute, onRetract, onHandover }: NoticeCardProps) {
-  const cfg = STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft;
-  const { Icon } = cfg;
-  const dl = deadlineInfo(n.ResponseDeadline, n.Status);
-
-  return (
-    <div className={cn(
-      "rounded-xl border border-l-4 overflow-hidden transition-shadow hover:shadow-sm",
-      cfg.borderCls, cfg.bgCls,
-    )}>
-      <div className="px-5 py-4">
-        <div className="flex items-start justify-between gap-4">
-          {/* Left: identity */}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="font-mono text-sm font-bold text-primary">{n.NoticeNo}</span>
-              <span className={cn(
-                "inline-flex items-center gap-1 text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full border",
-                cfg.badgeCls,
-              )}>
-                <Icon size={10} />{cfg.label}
-              </span>
-              {dl && (
-                <span className={cn("inline-flex items-center gap-1 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded border", dl.cls)}>
-                  <Clock size={9} />{dl.label}
-                </span>
-              )}
-            </div>
-
-            <div className="mt-1.5">
-              <div className="text-sm font-semibold text-foreground leading-tight">{n.ApplicantName}</div>
-              <div className="text-[0.6875rem] text-muted-foreground mt-0.5">{n.BookingNo} · {n.UnitNo}</div>
-            </div>
-          </div>
-
-          {/* Right: dates + mode */}
-          <div className="shrink-0 text-right space-y-1.5 hidden sm:block">
-            <div className="flex items-center justify-end gap-2">
-              <ModeBadge mode={n.DeliveryMode} />
-            </div>
-            <div className="text-[0.6875rem] text-muted-foreground flex items-center justify-end gap-1">
-              <CalendarDays size={10} />
-              <span>Offered {fmtDate(n.OfferedDate)}</span>
-            </div>
-            {n.ResponseDeadline && (
-              <div className={cn(
-                "text-[0.6875rem] flex items-center justify-end gap-1",
-                dl ? dl.cls.split(" ")[0] : "text-muted-foreground",
-              )}>
-                <Clock size={10} />
-                <span>Deadline {fmtDate(n.ResponseDeadline)}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Outstanding balance — informational, not a gate at notice stage */}
-        {(n.OutstandingMilestones > 0) && (
-          <div className="flex items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
-            <IndianRupee size={11} className="shrink-0" />
-            <span>
-              {n.OutstandingMilestones} milestone{n.OutstandingMilestones > 1 ? "s" : ""} outstanding
-              {n.OutstandingBalance > 0 && (
-                <> · ₹{Math.round(n.OutstandingBalance).toLocaleString("en-IN")} due</>
-              )}
-            </span>
-            <span className="ml-auto text-[0.625rem] font-normal text-red-500">Must be cleared before Handover</span>
-          </div>
-        )}
-        {(n.OutstandingMilestones === 0) && (
-          <div className="flex items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-lg bg-green-50 border border-green-200 text-xs text-green-700 font-medium">
-            <CheckCircle2 size={11} className="shrink-0" />
-            All dues cleared — ready for Handover
-          </div>
-        )}
-
-        {/* Action bar */}
-        <div className="mt-3 pt-3 border-t border-border/60 flex items-center gap-2 flex-wrap">
-          {n.Status === CrmStatus.DRAFT && (
-            <>
-              <button onClick={() => onMarkSent(n)}
-                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
-                <Send size={11} /> Mark Sent
-              </button>
-              <button onClick={() => onEdit(n)}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:bg-muted transition-colors">
-                <Pencil size={11} /> Edit
-              </button>
-              <button onClick={() => onDelete(n)}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors ml-auto">
-                <Trash2 size={11} /> Delete
-              </button>
-            </>
-          )}
-
-          {n.Status === "Sent" && (
-            <>
-              <button onClick={() => onAcknowledge(n.Id)}
-                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors">
-                <CheckCircle2 size={11} /> Acknowledge
-              </button>
-              <button onClick={() => onDispute(n.Id)}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors">
-                <AlertTriangle size={11} /> Dispute
-              </button>
-              <div className="h-4 w-px bg-border mx-1" />
-              <span className="text-[0.625rem] text-muted-foreground font-semibold uppercase tracking-wide">Off-portal:</span>
-              <button onClick={() => onProxyAck(n.Id)}
-                className="flex items-center gap-1 text-xs text-sky-700 hover:underline font-medium">
-                <UserCircle2 size={11} /> Ack
-              </button>
-              <button onClick={() => onProxyDispute(n.Id)}
-                className="flex items-center gap-1 text-xs text-sky-700 hover:underline font-medium">
-                <UserCircle2 size={11} /> Dispute
-              </button>
-            </>
-          )}
-
-          {n.Status === "Disputed" && (
-            <button onClick={() => onRetract(n.Id)}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-sky-500 text-white hover:bg-sky-600 transition-colors">
-              <RotateCcw size={11} /> Retract Dispute
-            </button>
-          )}
-
-          {n.Status === "Acknowledged" && (
-            <button onClick={() => onHandover(n.BookingId)}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg btn-module text-white transition-colors">
-              Schedule Handover <ArrowRight size={11} />
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 const CrmPossessionNotice: React.FC = () => {
   const qc = useQueryClient();
@@ -405,8 +249,6 @@ const CrmPossessionNotice: React.FC = () => {
   usePageRights("crm-possession-notice");
 
   const prefillBookingId = sp.get("bookingId") ?? undefined;
-  const [search,               setSearch]               = useState("");
-  const [statusFilter,         setStatusFilter]         = useState("All");
   const [createOpen,           setCreateOpen]           = useState(() => sp.get("open") === "1");
   const [editTarget,           setEditTarget]           = useState<any | null>(null);
   const [editForm,             setEditForm]             = useState({ ...EMPTY_EDIT });
@@ -423,10 +265,15 @@ const CrmPossessionNotice: React.FC = () => {
   const [proxyAckTarget,       setProxyAckTarget]       = useState<number | null>(null);
   const [proxyDisputeTarget,   setProxyDisputeTarget]   = useState<number | null>(null);
   const [proxySaving,          setProxySaving]          = useState(false);
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
-  const { data: notices = [], isLoading, dataUpdatedAt, isFetching, refetch } =
-    useQuery({ queryKey: ["crm-possession-notice", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000 });
+  const list = useCrmListState({ pageSize: 25, defaultSort: { key: "CreatedAt", dir: "desc" } });
+  const { data, isLoading, isError, error, dataUpdatedAt, isFetching, refetch } =
+    useQuery({ queryKey: ["crm-possession-notice", list.query], queryFn: () => fetchPage(list.query), staleTime: 30_000 });
+  const pageData = useSticky(data);
+  const rows = pageData?.rows ?? [];
+  const total = pageData?.total ?? 0;
+  const counts = pageData?.counts ?? {};
+  const showOnboarding = !isLoading && !isError && (counts.All ?? 0) === 0 && !list.hasFilters;
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
@@ -456,7 +303,7 @@ const CrmPossessionNotice: React.FC = () => {
           OfferedDate:      editForm.OfferedDate      || undefined,
           ResponseDeadline: editForm.ResponseDeadline || undefined,
           DeliveryMode:     editForm.DeliveryMode     || undefined,
-          Notes:            editForm.Notes            || undefined,
+          Notes:            editForm.Notes,
         }),
       });
       const data = await res.json();
@@ -579,36 +426,103 @@ const CrmPossessionNotice: React.FC = () => {
     finally { setProxySaving(false); }
   };
 
-  const noticeList = notices as any[];
-  const counts = {
-    all:          noticeList.length,
-    draft:        noticeList.filter((n) => n.Status === CrmStatus.DRAFT).length,
-    sent:         noticeList.filter((n) => n.Status === "Sent").length,
-    acknowledged: noticeList.filter((n) => n.Status === "Acknowledged").length,
-    disputed:     noticeList.filter((n) => n.Status === "Disputed").length,
-  };
+  const tabs: CrmStatusTab[] = [
+    { key: "All",           label: "All",          count: counts.All ?? 0 },
+    { key: CrmStatus.DRAFT, label: "Draft",        count: counts[CrmStatus.DRAFT] ?? 0, dot: "bg-slate-400" },
+    { key: "Sent",          label: "Sent",         count: counts.Sent ?? 0,             dot: "bg-blue-500"  },
+    { key: "Acknowledged",  label: "Acknowledged", count: counts.Acknowledged ?? 0,     dot: "bg-green-500" },
+    { key: "Disputed",      label: "Disputed",     count: counts.Disputed ?? 0,         dot: "bg-red-500"   },
+  ];
 
-  const filtered = useMemo(() => {
-    let list = noticeList;
-    if (statusFilter !== "All") list = list.filter((n) => n.Status === statusFilter);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((n) =>
-        n.ApplicantName?.toLowerCase().includes(q) ||
-        n.BookingNo?.toLowerCase().includes(q) ||
-        n.NoticeNo?.toLowerCase().includes(q) ||
-        n.UnitNo?.toLowerCase().includes(q),
+  // One primary action per row; everything else lives in the ⋯ menu.
+  const renderActions = (n: any) => {
+    const btn = "inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-md transition-colors whitespace-nowrap";
+    let primary: React.ReactNode = null;
+    let items: RowMenuItem[] = [];
+
+    if (n.Status === CrmStatus.DRAFT) {
+      primary = (
+        <button onClick={() => { setSentTarget(n); setSentMode(n.DeliveryMode || ""); }}
+          className={cn(btn, "bg-blue-600 text-white hover:bg-blue-700")}><Send size={11} /> Mark sent</button>
+      );
+      items = [
+        { label: "Edit",   icon: Pencil, onClick: () => openEdit(n) },
+        { label: "Delete", icon: Trash2, danger: true, onClick: () => setDeleteTarget(n) },
+      ];
+    } else if (n.Status === "Sent") {
+      primary = (
+        <button onClick={() => handleMarkAcknowledged(n.Id)}
+          className={cn(btn, "bg-green-600 text-white hover:bg-green-700")}><CheckCircle2 size={11} /> Acknowledge</button>
+      );
+      items = [
+        { label: "Mark disputed", icon: AlertTriangle, onClick: () => { setDisputeDialog(n.Id); setDisputeReason(""); } },
+        { heading: "Customer replied off-portal" },
+        { label: "Record acknowledgement", icon: UserCircle2, onClick: () => setProxyAckTarget(n.Id) },
+        { label: "Record dispute",         icon: UserCircle2, onClick: () => setProxyDisputeTarget(n.Id) },
+      ];
+    } else if (n.Status === "Disputed") {
+      primary = (
+        <button onClick={() => { setRetractDialog(n.Id); setRetractReason(""); }}
+          className={cn(btn, "bg-sky-500 text-white hover:bg-sky-600")}><RotateCcw size={11} /> Retract</button>
+      );
+    } else if (n.Status === "Acknowledged") {
+      primary = (
+        <button onClick={() => navigate(`/crm/handover?bookingId=${n.BookingId}`)}
+          className={cn(btn, "bg-primary text-primary-foreground hover:bg-primary/90")}>Handover <ArrowRight size={11} /></button>
       );
     }
-    return list;
-  }, [noticeList, statusFilter, search]);
 
-  const STAT_TABS = [
-    { key: "All",          label: "All",          count: counts.all,          cls: "border-border text-foreground",                           activeCls: "bg-foreground text-background border-foreground" },
-    { key: "Draft",        label: "Draft",        count: counts.draft,        cls: "border-slate-300 text-slate-600",                         activeCls: "bg-slate-600 text-white border-slate-600" },
-    { key: "Sent",         label: "Sent",         count: counts.sent,         cls: "border-blue-300 text-blue-600",                           activeCls: "bg-blue-600 text-white border-blue-600" },
-    { key: "Acknowledged", label: "Acknowledged", count: counts.acknowledged, cls: "border-green-300 text-green-700",                         activeCls: "bg-green-600 text-white border-green-600" },
-    { key: "Disputed",     label: "Disputed",     count: counts.disputed,     cls: "border-red-300 text-red-600",                             activeCls: "bg-red-600 text-white border-red-600" },
+    return (
+      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+        {primary}
+        <CrmRowMenu items={items} />
+      </div>
+    );
+  };
+
+  const columns: CrmColumn<any>[] = [
+    { key: "notice", header: "Notice", sortKey: "NoticeNo", cell: (n) => (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">{n.NoticeNo}</span>
+        {n.Notes && <span title={n.Notes}><StickyNote size={11} className="text-muted-foreground" /></span>}
+      </span>
+    ) },
+    { key: "applicant", header: "Applicant", sortKey: "ApplicantName", cell: (n) => (
+      <span className="font-medium block truncate max-w-[220px]" title={n.ApplicantName}>{n.ApplicantName}</span>
+    ) },
+    { key: "booking", header: "Booking", sortKey: "BookingNo", className: "hidden md:table-cell",
+      cell: (n) => <span className="text-xs text-muted-foreground whitespace-nowrap">{n.BookingNo}</span> },
+    { key: "unit", header: "Unit", className: "hidden md:table-cell",
+      cell: (n) => <span className="text-xs whitespace-nowrap">{n.UnitNo}</span> },
+    { key: "status", header: "Status", sortKey: "Status", cell: (n) => {
+      const cfg = STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft;
+      return (
+        <span className={cn("inline-flex items-center gap-1 text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap", cfg.badgeCls)}>
+          <cfg.Icon size={10} />{cfg.label}
+        </span>
+      );
+    } },
+    { key: "mode", header: "Mode", className: "hidden xl:table-cell", cell: (n) => <ModeBadge mode={n.DeliveryMode} /> },
+    { key: "offered", header: "Offered", sortKey: "OfferedDate", className: "hidden lg:table-cell",
+      cell: (n) => <span className="text-xs whitespace-nowrap">{fmtDate(n.OfferedDate)}</span> },
+    { key: "deadline", header: "Deadline", sortKey: "ResponseDeadline", cell: (n) => {
+      const dl = deadlineInfo(n.ResponseDeadline, n.Status);
+      return (
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          <span className="text-xs">{fmtDate(n.ResponseDeadline)}</span>
+          {dl && <span className={cn("text-[0.625rem] font-semibold px-1.5 py-0.5 rounded border", dl.cls)}>{dl.label}</span>}
+        </span>
+      );
+    } },
+    { key: "dues", header: "Dues", align: "right", cell: (n) => n.OutstandingMilestones > 0 ? (
+      <span className="text-xs font-semibold text-red-600 tabular-nums whitespace-nowrap"
+        title={`${n.OutstandingMilestones} milestone(s) outstanding · ₹${Math.round(n.OutstandingBalance).toLocaleString("en-IN")} — must be cleared before Handover`}>
+        ₹{moneyCompact.format(n.OutstandingBalance)}
+      </span>
+    ) : (
+      <span title="All dues cleared"><CheckCircle2 size={14} className="text-green-600 inline" /></span>
+    ) },
+    { key: "actions", header: <span className="sr-only">Actions</span>, align: "right", className: "w-px whitespace-nowrap", cell: renderActions },
   ];
 
   return (
@@ -627,77 +541,34 @@ const CrmPossessionNotice: React.FC = () => {
           </div>
         }
       >
-        {noticeList.length > 0 && (
-          <>
-            {/* Stat + filter tabs */}
-            <div className="flex items-center gap-2 mb-5 flex-wrap">
-              {STAT_TABS.map((t) => (
-                <button key={t.key} onClick={() => setStatusFilter(t.key)}
-                  className={cn(
-                    "flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors",
-                    statusFilter === t.key ? t.activeCls : `${t.cls} bg-background hover:bg-muted`,
-                  )}>
-                  {t.label}
-                  <span className={cn(
-                    "text-[0.625rem] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center",
-                    statusFilter === t.key ? "bg-white/20" : "bg-muted/80",
-                  )}>
-                    {t.count}
-                  </span>
-                </button>
-              ))}
+        {!showOnboarding && (
+          <div className="space-y-3">
+            <CrmListToolbar
+              tabs={tabs} status={list.status} onStatus={list.setStatus}
+              searchValue={list.searchInput} onSearch={list.setSearchInput}
+              placeholder="Search notice, applicant, booking, unit…">
+              <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+            </CrmListToolbar>
 
-              {/* Search */}
-              <div className="ml-auto relative">
-                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search…"
-                  className="text-sm pl-7 pr-7 py-1.5 border border-border rounded-lg bg-background w-48 focus:outline-none focus:ring-1 focus:ring-primary/40"
-                />
-                {search && (
-                  <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
-              <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
-            </div>
-
-            {/* Notice cards */}
-            {isLoading ? (
-              <div className="py-16 flex items-center justify-center text-muted-foreground text-sm gap-2">
-                <Loader2 size={16} className="animate-spin" /> Loading…
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground text-sm">
-                No notices match the current filter
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filtered.map((n) => (
-                  <NoticeCard
-                    key={n.Id}
-                    n={n}
-                    onMarkSent={(x) => { setSentTarget(x); setSentMode(x.DeliveryMode || ""); }}
-                    onEdit={openEdit}
-                    onDelete={setDeleteTarget}
-                    onAcknowledge={handleMarkAcknowledged}
-                    onDispute={(id) => { setDisputeDialog(id); setDisputeReason(""); }}
-                    onProxyAck={setProxyAckTarget}
-                    onProxyDispute={setProxyDisputeTarget}
-                    onRetract={(id) => { setRetractDialog(id); setRetractReason(""); }}
-                    onHandover={(bookingId) => navigate(`/crm/handover?bookingId=${bookingId}`)}
-                  />
-                ))}
-              </div>
-            )}
-          </>
+            <CrmDataTable
+              columns={columns}
+              rows={rows}
+              rowKey={(n) => n.Id}
+              loading={isLoading}
+              fetching={isFetching}
+              error={isError ? (error as Error)?.message : null}
+              onRetry={() => refetch()}
+              sort={list.sort}
+              onSort={list.toggleSort}
+              rowAccent={(n) => (STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft).accent}
+              empty={<>No notices match these filters. <button onClick={list.reset} className="text-primary hover:underline ml-1">Clear filters</button></>}
+              page={list.page} pageSize={list.pageSize} total={total} onPage={list.setPage}
+            />
+          </div>
         )}
 
         {/* Empty state */}
-        {!isLoading && noticeList.length === 0 && (
+        {showOnboarding && (
           <div className="space-y-4">
             <div className="p-8 rounded-xl border-2 border-dashed border-border bg-muted/10 text-center space-y-3">
               <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">

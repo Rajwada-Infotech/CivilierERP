@@ -140,7 +140,7 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
           LEFT JOIN dbo.UnitMaster um ON um.Id = bk.UnitId
           WHERE bk.ProjectId = @pid AND bk.IsActive = 1
             AND bk.Status NOT IN ('Cancelled','Rejected')
-            AND (@bid IS NULL OR um.BlockId = @bid)
+            AND (@bid IS NULL OR b.BlockId = @bid)
         `);
       for (const row of affected.recordset) {
         try {
@@ -223,7 +223,7 @@ router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
           LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
           WHERE b.ProjectId = @pid AND b.IsActive = 1
             AND b.Status NOT IN ('Cancelled','Rejected')
-            AND (@bid IS NULL OR um.BlockId = @bid)
+            AND (@bid IS NULL OR b.BlockId = @bid)
         `);
       for (const row of affected.recordset) {
         try {

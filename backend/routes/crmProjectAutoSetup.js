@@ -12,6 +12,7 @@ const { isValidShortCode, ensureProjectShortCode } = require("../services/projec
 const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
+const { getEffectiveType } = require("../services/projectType");
 
 // Mirrors unitMaster.js's syncUnitPaymentPlanTags — deactivate all, then
 // upsert each valid plan ID back in. Called after generating each unit so
@@ -464,13 +465,44 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
       WHERE ProjectId = @pid AND IsActive = 1 AND BlockId IS NULL
     `);
 
+    // The effective project type, and each block's own, so the wizard knows
+    // whether to render the floor path or the plot path. Resolved server-side
+    // rather than left to the client to work out, and returned as FLAGS — the
+    // UI must branch on HasFloors, never on the type's name.
+    const projectType = await getEffectiveType(pool, { projectId });
+    const plotTemplates = await pool.request().input("pid", sql.Int, projectId).query(`
+      SELECT t.BlockId, t.PlotCount, t.NumberPrefix, t.StartNumber,
+             t.DefaultAreaSqFt, t.DefaultRatePerSqFt, t.DefaultFacing, t.DefaultRoadWidthFt,
+             t.IsGenerated,
+             (SELECT COUNT(*) FROM dbo.PlotMaster p
+               WHERE p.BlockId = t.BlockId AND p.IsActive = 1) AS PlotsCreated
+      FROM dbo.CrmProjectAutoSetupPlotTemplate t
+      WHERE t.ProjectId = @pid AND t.IsActive = 1
+    `);
+    const tplByBlock = new Map(plotTemplates.recordset.map((t) => [t.BlockId, t]));
+
+    // Per-block effective type: a mixed township can hold both kinds, so this
+    // cannot be answered once for the whole project.
+    const blocksOut = [];
+    for (const b of blocks.recordset) {
+      const bType = await getEffectiveType(pool, { blockId: b.Id, projectId });
+      blocksOut.push({
+        ...b,
+        HasFloors: bType.HasFloors,
+        ProjectTypeName: bType.Name,
+        ProjectTypeCode: bType.Code,
+        PlotTemplate: tplByBlock.get(b.Id) || null,
+      });
+    }
+
     res.json({
       project: { Id: project.Id, Name: project.Name, ShortCode: shortCode },
       shortCodeValid: isValidShortCode(shortCode),
+      projectType,
       legacyUnitCount: legacyUnitsRes.recordset.length,
       legacyUnits: legacyUnitsRes.recordset,
       orphanParkingSlotCount: orphanParkingRes.recordset[0].c,
-      blocks: blocks.recordset,
+      blocks: blocksOut,
       floors: floors.recordset,
     });
   } catch (e) {
@@ -1009,6 +1041,19 @@ router.post("/floors", requirePageRight("crm-auto-project-setup", "create"), asy
     for (const b of blocks) {
       const blockId = parseInt(b.BlockId, 10);
       const floorCount = parseInt(b.FloorCount, 10);
+      // A plotted block has no floors. Refused here rather than silently
+      // creating floor rows that could never hold anything, which is what made
+      // choosing "Plotted Development" still walk the user into a floor step.
+      // Decided by the type's HasFloors flag, never by its name — see
+      // services/projectType.js.
+      if (Number.isFinite(blockId)) {
+        const effType = await getEffectiveType(pool, { blockId, projectId });
+        if (!effType.HasFloors) {
+          return res.status(400).json({
+            error: `This block is part of a ${effType.Name} project, which has no floors — lay it out with a plot template instead.`,
+          });
+        }
+      }
       if (!Number.isFinite(blockId) || !Number.isFinite(floorCount) || floorCount < 1 || floorCount > 100) {
         return res.status(400).json({ error: "Each block needs a valid FloorCount between 1 and 100" });
       }
@@ -1536,6 +1581,355 @@ router.post("/generate-parking-slots", requirePageRight("crm-auto-project-setup"
   } catch (e) {
     console.error("[crm-project-auto-setup] POST /generate-parking-slots error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Plotted layouts ────────────────────────────────────────────────────────
+// The floor-driven routes above cannot express a plotted block: there are no
+// floors to hang units off. These three do the equivalent job — a template on
+// the BLOCK, because in a plotted development the block IS the layout.
+
+router.get("/blocks/:id/plot-template", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  const blockId = parseId(req.params.id);
+  if (blockId === null) return res.status(400).json({ error: "Invalid block id" });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("bid", sql.Int, blockId).query(`
+      SELECT Id, BlockId, ProjectId, PlotCount, NumberPrefix, StartNumber,
+             DefaultAreaSqFt, DefaultRatePerSqFt, DefaultFacing, DefaultRoadWidthFt,
+             IsGenerated, GeneratedAt
+      FROM dbo.CrmProjectAutoSetupPlotTemplate
+      WHERE BlockId = @bid AND IsActive = 1
+    `);
+    // An absent template is a normal state (nothing laid out yet), not an
+    // error — the UI renders an empty form from it.
+    res.json(r.recordset[0] || null);
+  } catch (e) {
+    console.error("[auto-setup] GET plot-template:", e.message);
+    res.status(500).json({ error: "Failed to load the plot template" });
+  }
+});
+
+router.put("/blocks/:id/plot-template", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const blockId = parseId(req.params.id);
+  if (blockId === null) return res.status(400).json({ error: "Invalid block id" });
+  const b = req.body || {};
+  const plotCount = parseInt(b.PlotCount, 10);
+  if (!Number.isFinite(plotCount) || plotCount < 1 || plotCount > 500)
+    return res.status(400).json({ error: "PlotCount must be between 1 and 500" });
+
+  try {
+    const pool = getPool();
+    const blk = await pool.request().input("bid", sql.Int, blockId)
+      .query("SELECT Id, ProjectId, BlockName FROM dbo.BlockMaster WHERE Id = @bid");
+    const block = blk.recordset[0];
+    if (!block) return res.status(404).json({ error: "Block not found" });
+
+    // Mirror of the floors guard: a tower block must not be laid out as plots.
+    const effType = await getEffectiveType(pool, { blockId, projectId: block.ProjectId });
+    if (effType.HasFloors)
+      return res.status(400).json({ error: `This block is part of a ${effType.Name} project, which uses floors — define floors instead of a plot layout.` });
+
+    const startNumber = Number.isFinite(parseInt(b.StartNumber, 10)) ? parseInt(b.StartNumber, 10) : 1;
+    const num = (v) => (v != null && v !== "" ? Number(v) : null);
+
+    await pool.request()
+      .input("bid", sql.Int, blockId)
+      .input("pid", sql.Int, block.ProjectId)
+      .input("count", sql.Int, plotCount)
+      .input("prefix", sql.NVarChar(20), b.NumberPrefix || null)
+      .input("start", sql.Int, startNumber)
+      .input("area", sql.Decimal(18, 2), num(b.DefaultAreaSqFt))
+      .input("rate", sql.Decimal(18, 2), num(b.DefaultRatePerSqFt))
+      .input("facing", sql.NVarChar(20), b.DefaultFacing || null)
+      .input("road", sql.Decimal(18, 2), num(b.DefaultRoadWidthFt))
+      .input("by", sql.Int, req.user?.userId || null)
+      .query(`
+        MERGE dbo.CrmProjectAutoSetupPlotTemplate AS tgt
+        USING (SELECT @bid AS BlockId) AS src ON tgt.BlockId = src.BlockId AND tgt.IsActive = 1
+        WHEN MATCHED THEN UPDATE SET
+          PlotCount = @count, NumberPrefix = @prefix, StartNumber = @start,
+          DefaultAreaSqFt = @area, DefaultRatePerSqFt = @rate,
+          DefaultFacing = @facing, DefaultRoadWidthFt = @road,
+          UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+        WHEN NOT MATCHED THEN INSERT
+          (BlockId, ProjectId, PlotCount, NumberPrefix, StartNumber,
+           DefaultAreaSqFt, DefaultRatePerSqFt, DefaultFacing, DefaultRoadWidthFt, CreatedBy)
+          VALUES (@bid, @pid, @count, @prefix, @start, @area, @rate, @facing, @road, @by);
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[auto-setup] PUT plot-template:", e.message);
+    res.status(500).json({ error: "Failed to save the plot template" });
+  }
+});
+
+// Lays the plots out as real UnitMaster rows with UnitKind = 'PLOT'.
+//
+// Sizes are seeded from the template and then edited per plot: a real layout
+// has plots of differing sizes, each with its own dimensions, facing and survey
+// number. Generating uniform plots and refining them beats hand-creating sixty
+// rows, which is the same bargain the floor path already makes.
+router.post("/generate-plots", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
+  const pool = getPool();
+  const createdBy = req.user?.userId || null;
+  try {
+    const blockId = parseInt(req.body.BlockId, 10);
+    if (!Number.isFinite(blockId)) return res.status(400).json({ error: "BlockId is required" });
+
+    // Columns listed explicitly rather than `t.*` plus b.ProjectId: both tables
+    // carry a ProjectId, and the duplicate name collapsed in the recordset so
+    // tpl.ProjectId came back undefined.
+    const tplRow = await pool.request().input("bid", sql.Int, blockId).query(`
+      SELECT t.Id, t.BlockId, t.ProjectId, t.PlotCount, t.NumberPrefix, t.StartNumber,
+             t.DefaultAreaSqFt, t.DefaultRatePerSqFt, t.DefaultFacing, t.DefaultRoadWidthFt,
+             t.IsGenerated, b.BlockName
+      FROM dbo.CrmProjectAutoSetupPlotTemplate t
+      JOIN dbo.BlockMaster b ON b.Id = t.BlockId
+      WHERE t.BlockId = @bid AND t.IsActive = 1
+    `);
+    const tpl = tplRow.recordset[0];
+    if (!tpl) return res.status(400).json({ error: "No plot template defined for this block" });
+    if (tpl.IsGenerated)
+      return res.status(400).json({ error: "Plots have already been generated for this block — add further plots from Unit Master." });
+
+    const effType = await getEffectiveType(pool, { blockId, projectId: tpl.ProjectId });
+    if (effType.HasFloors)
+      return res.status(400).json({ error: `This block is part of a ${effType.Name} project, which uses floors.` });
+
+    const prefix = tpl.NumberPrefix || "P";
+    let created = 0;
+    const skipped = [];
+
+    for (let i = 0; i < tpl.PlotCount; i++) {
+      const plotNo = `${prefix}${tpl.StartNumber + i}`;
+      // Existing names are skipped rather than erroring the whole run, so a
+      // partially-generated block can be completed without manual cleanup.
+      const dupe = await pool.request()
+        .input("pid", sql.Int, tpl.ProjectId).input("bid", sql.Int, blockId).input("n", sql.NVarChar(100), plotNo)
+        .query("SELECT Id FROM dbo.PlotMaster WHERE ProjectId = @pid AND BlockId = @bid AND PlotName = @n AND IsActive = 1");
+      if (dupe.recordset.length) { skipped.push(plotNo); continue; }
+
+      await pool.request()
+        .input("pid", sql.Int, tpl.ProjectId)
+        .input("bid", sql.Int, blockId)
+        .input("name", sql.NVarChar(100), plotNo)
+        .input("plotNo", sql.NVarChar(50), plotNo)
+        .input("area", sql.Decimal(18, 2), tpl.DefaultAreaSqFt)
+        .input("rate", sql.Decimal(18, 2), tpl.DefaultRatePerSqFt)
+        .input("facing", sql.NVarChar(20), tpl.DefaultFacing)
+        .input("road", sql.Decimal(18, 2), tpl.DefaultRoadWidthFt)
+        .input("by", sql.Int, createdBy)
+        .query(`
+          INSERT INTO dbo.PlotMaster
+            (ProjectId, BlockId, PlotName, PlotNo, AreaSqFt, RatePerSqFt,
+             Facing, RoadWidthFt, IsActive, CreatedBy, CreatedAt)
+          VALUES (@pid, @bid, @name, @plotNo, @area, @rate,
+                  @facing, @road, 1, @by, SYSDATETIME())
+        `);
+      created++;
+    }
+
+    await pool.request().input("id", sql.Int, tpl.Id)
+      .query("UPDATE dbo.CrmProjectAutoSetupPlotTemplate SET IsGenerated = 1, GeneratedAt = SYSDATETIME() WHERE Id = @id");
+    await bumpCacheVersion("unit-master");
+
+    res.json({ success: true, created, skipped, blockName: tpl.BlockName });
+  } catch (e) {
+    console.error("[auto-setup] POST generate-plots:", e.message);
+    res.status(500).json({ error: "Failed to generate plots" });
+  }
+});
+
+// GET /blocks/:blockId/plots — lists all PLOT-kind units in this block so the
+// Auto Setup UI can show a drill-down browse panel (same pattern as
+// /floors/:id/units for the floor path). No pagination — plot counts are
+// bounded by the template (≤ 500); returning them all in one shot is fine.
+router.get("/blocks/:blockId/plots", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  const pool = getPool();
+  try {
+    const blockId = parseInt(req.params.blockId, 10);
+    if (!Number.isFinite(blockId)) return res.status(400).json({ error: "blockId required" });
+
+    const r = await pool.request().input("bid", sql.Int, blockId).query(`
+      SELECT
+        p.Id, p.PlotName AS UnitName, p.PlotNo, p.AreaSqFt, p.RatePerSqFt, p.Facing, p.RoadWidthFt,
+        p.IsActive, N'PLOT' AS UnitKind,
+        -- booking / hold / application locks (same pattern as /floors/:id/units)
+        (SELECT TOP 1 b.BookingNo FROM dbo.CrmBooking b
+           JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id
+           WHERE bp.PlotId = p.Id AND b.IsActive = 1
+             AND b.Status NOT IN ('Cancelled', 'Draft')) AS LockBookingNo,
+        (SELECT TOP 1 CAST(h.Id AS NVARCHAR) FROM dbo.CrmInventoryHold h
+           WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id AND h.Status = N'Active'
+             AND h.HoldUntil > SYSDATETIME()) AS LockHoldId,
+        (SELECT TOP 1 a.ApplicationNo FROM dbo.CrmApplication a
+           JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a.Id
+           WHERE ap.PlotId = p.Id AND a.IsActive = 1
+             AND a.Status NOT IN ('Cancelled', 'Draft')) AS LockApplicationNo
+      FROM dbo.PlotMaster p
+      WHERE p.BlockId = @bid AND p.IsActive = 1
+      ORDER BY p.PlotName
+    `);
+    res.json({ plots: r.recordset });
+  } catch (e) {
+    console.error("[auto-setup] GET /blocks/:blockId/plots:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete("/plots/:id", requirePageRight("crm-auto-project-setup", "delete"), async (req, res) => {
+  const plotId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(plotId)) return res.status(400).json({ error: "Invalid plot id" });
+  try {
+    const pool = getPool();
+    const blocked = await pool.request().input("pid", sql.Int, plotId).query(`
+      SELECT TOP 1 1 AS IsBlocked FROM dbo.CrmBookingPlot WHERE PlotId = @pid AND Status = N'Active'
+      UNION ALL
+      SELECT TOP 1 1 FROM dbo.CrmApplicationPlot WHERE PlotId = @pid AND Status = N'Active'
+      UNION ALL
+      SELECT TOP 1 1 FROM dbo.PlotMaster WHERE Id = @pid AND ConvertedUnitId IS NOT NULL
+    `);
+    if (blocked.recordset.length) return res.status(409).json({ error: "This plot is booked, applied for, or converted and cannot be deleted" });
+    const result = await pool.request().input("pid", sql.Int, plotId)
+      .query("UPDATE dbo.PlotMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @pid AND IsActive = 1");
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Plot not found" });
+    res.json({ success: true, message: "Plot deleted" });
+  } catch (e) {
+    console.error("[auto-setup] DELETE plot:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Convert one or more adjacent plots into one constructed asset. The source
+// plots remain in PlotMaster for land-sale history; UnitMaster begins here.
+router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
+  const plotIds = Array.isArray(req.body?.PlotIds) ? req.body.PlotIds.map(Number).filter(Number.isInteger) : [];
+  const unitName = String(req.body?.UnitName || "").trim();
+  const unitType = String(req.body?.UnitType || "").trim();
+  const unitKind = String(req.body?.UnitKind || "").trim();
+  if (!plotIds.length || !unitName || !unitType || !unitKind) return res.status(400).json({ error: "PlotIds, UnitName, UnitType, and UnitKind are required" });
+  // The villa's own construction rate. Never the plot's land rate: the plot's
+  // owner has already paid for the land, and a villa priced at the land rate
+  // would charge them for it again.
+  const villaRate = Number(req.body?.RatePerSqFt);
+  if (!Number.isFinite(villaRate) || villaRate <= 0) {
+    return res.status(400).json({ error: "Enter the villa's construction rate per sq ft — the plot's land rate is not used for the villa." });
+  }
+  const builtUpArea = req.body?.AreaSqFt != null && req.body.AreaSqFt !== "" ? Number(req.body.AreaSqFt) : null;
+  if (builtUpArea != null && (!Number.isFinite(builtUpArea) || builtUpArea <= 0)) {
+    return res.status(400).json({ error: "Built-up area must be a positive number of sq ft" });
+  }
+  try {
+    const pool = getPool();
+    const kind = await pool.request().input("kind", sql.NVarChar(20), unitKind)
+      .query("SELECT Code FROM dbo.CrmConstructedAssetKind WHERE Code = @kind AND IsActive = 1");
+    if (!kind.recordset.length) return res.status(400).json({ error: "Select an active constructed asset kind" });
+    const resolvedType = await resolveUnitTypeInput(
+      pool, { UnitType: unitType }, { requireComposition: true },
+    );
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      // Lock source plots and re-check all inventory claims inside this
+      // transaction. UI availability is advisory; this is the authority.
+      //
+      // A SOLD plot can be built on — that is the business: plot first, the
+      // villa after, bought separately by the plot's owner (services/
+      // villaLand.js). What must not be built on is a plot whose ownership is
+      // still in flux: applied for but not yet booked, or on hold. The owner
+      // check below then requires one owner across all the plots.
+      const plots = await tx.request().query(`
+        SELECT p.Id, p.ProjectId, p.BlockId, p.AreaSqFt, p.RatePerSqFt,
+               (SELECT TOP 1 a.CustomerId
+                  FROM dbo.CrmBookingPlot bp
+                  JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
+                  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+                 WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
+                   AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')) AS OwnerCustomerId
+        FROM dbo.PlotMaster p WITH (UPDLOCK, HOLDLOCK)
+        WHERE p.Id IN (${plotIds.join(",")})
+          AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.CrmApplicationPlot ap
+            JOIN dbo.CrmApplication a ON a.Id = ap.ApplicationId
+            WHERE ap.PlotId = p.Id AND ap.Status = N'Active'
+              AND a.IsActive = 1 AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')
+              -- An application that already became a booking is ownership,
+              -- not an open claim.
+              AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking ab WHERE ab.ApplicationId = a.Id AND ab.IsActive = 1
+                                AND ab.Status NOT IN (N'Cancelled', N'Rejected', N'Expired'))
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.CrmInventoryHold h
+            WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id
+              AND h.Status = N'Active' AND h.HoldUntil > SYSDATETIME()
+          )
+      `);
+      const owners = new Set(plots.recordset.map((p) => p.OwnerCustomerId ?? "unsold"));
+      if (plots.recordset.length === plotIds.length && owners.size > 1) {
+        const mixed = new Error("A villa must stand on plots with one owner — these plots belong to different owners, or some are sold and some are not");
+        mixed.status = 409;
+        throw mixed;
+      }
+      if (plots.recordset.length !== plotIds.length) {
+        const conflict = new Error("One or more plots are applied for but not yet booked, on hold, inactive, or already converted");
+        conflict.status = 409;
+        throw conflict;
+      }
+      const first = plots.recordset[0];
+      if (!plots.recordset.every((p) => p.ProjectId === first.ProjectId && p.BlockId === first.BlockId)) {
+        const invalid = new Error("All converted plots must belong to the same project and block");
+        invalid.status = 400;
+        throw invalid;
+      }
+      if (plotIds.length > 1) {
+        const adjacency = await tx.request().query(`
+          SELECT PlotId, AdjacentPlotId FROM dbo.PlotAdjacency
+          WHERE PlotId IN (${plotIds.join(",")}) AND AdjacentPlotId IN (${plotIds.join(",")})
+        `);
+        const neighbours = new Map(plotIds.map((id) => [id, new Set()]));
+        adjacency.recordset.forEach(({ PlotId, AdjacentPlotId }) => {
+          neighbours.get(PlotId)?.add(AdjacentPlotId);
+          neighbours.get(AdjacentPlotId)?.add(PlotId);
+        });
+        const connected = new Set([plotIds[0]]);
+        const queue = [plotIds[0]];
+        while (queue.length) {
+          const current = queue.shift();
+          for (const next of neighbours.get(current) || []) {
+            if (!connected.has(next)) { connected.add(next); queue.push(next); }
+          }
+        }
+        if (connected.size !== plotIds.length) {
+          const invalid = new Error("Selected plots must form one connected adjacent group before conversion");
+          invalid.status = 409;
+          throw invalid;
+        }
+      }
+      const area = builtUpArea ?? plots.recordset.reduce((sum, p) => sum + Number(p.AreaSqFt || 0), 0);
+      const created = await tx.request()
+        .input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId)
+        .input("name", sql.NVarChar(100), unitName).input("type", sql.NVarChar(50), resolvedType.unitType)
+        .input("layoutTypeId", sql.Int, resolvedType.layoutTypeId)
+        .input("kind", sql.NVarChar(20), unitKind)
+        .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), villaRate)
+        .input("by", sql.Int, req.user?.userId || null)
+        .query(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, UnitType, LayoutTypeId, UnitKind, AreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
+                OUTPUT INSERTED.Id VALUES (@pid, @bid, @name, @type, @layoutTypeId, @kind, @area, @rate, 1, @by, SYSDATETIME())`);
+      const unitId = created.recordset[0].Id;
+      await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
+      await tx.request().input("uid", sql.Int, unitId)
+        .query(`UPDATE dbo.PlotMaster SET ConvertedUnitId = @uid, ConvertedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
+                WHERE Id IN (${plotIds.join(",")})`);
+      await tx.commit();
+      await bumpCacheVersion("unit-master");
+      res.status(201).json({ success: true, UnitId: unitId, PlotIds: plotIds });
+    } catch (e) { await tx.rollback(); throw e; }
+  } catch (e) {
+    if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
+    console.error("[auto-setup] POST convert-plots:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 

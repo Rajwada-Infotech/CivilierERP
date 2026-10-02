@@ -923,7 +923,21 @@ async function recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilest
     Number(r.AmountPaid || 0) > 0 || Number(r.MilestoneNo) === 1;
   const settled = rows.filter(isSettled);
   const open = rows.filter((r) => !isSettled(r));
-  if (!open.length) return; // nothing left to redistribute onto
+  if (!open.length) {
+    // A one-row schedule (a plot sale paid in full, see landSaleSchedule) has
+    // nothing else to absorb a change of total, so its single row follows
+    // the total itself — unless money has already been recorded against it.
+    const schedule = rows.filter((r) => r.ExtraChargeId == null && r.ParkingAllotmentId == null);
+    const only = schedule.length === 1 ? schedule[0] : null;
+    if (only && !["Paid", "Waived"].includes(only.Status) && !(Number(only.AmountPaid || 0) > 0)) {
+      const fixedOthers = rows.filter((r) => r.Id !== only.Id).reduce((s, r) => s + Number(r.AmountDue), 0);
+      const amt = Math.max(0, Math.round((grandTotal - fixedOthers) * 100) / 100);
+      await poolOrTx.request().input("id", sql.Int, only.Id).input("amt", sql.Decimal(18, 2), amt)
+        .input("pct", sql.Decimal(5, 2), Math.round((amt / grandTotal) * 10000) / 100)
+        .query("UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    }
+    return;
+  }
 
   const settledTotal = settled.reduce((s, r) => s + Number(r.AmountDue), 0);
   const remainingTarget = Math.max(0, grandTotal - settledTotal);
