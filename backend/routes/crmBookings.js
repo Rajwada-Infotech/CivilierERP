@@ -27,7 +27,7 @@ const { recordGLPosting } = require("../services/approvalService");
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
+const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
 const { logStatusChange, syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 const {
   getStageState,
@@ -538,6 +538,12 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
           WHERE Id = @id AND IsActive = 1
         `);
 
+      // The line values must follow a new total before anything reads them
+      // (the GST recalculation just below splits land from built by them).
+      if (total != null && Number(total) !== Number(oldRow.TotalValue)) {
+        await reallocateBookingLines(tx, id, total);
+      }
+
       // TotalValue may have just moved — Unit+Parking could have crossed the
       // Rs. 45L GST bracket.
       await recalculateBookingGst(tx, id);
@@ -546,7 +552,15 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         { field: "AssignedTo", oldVal: oldRow.AssignedTo, newVal: b.AssignedTo },
       ]);
 
-      if (planIsChanging) {
+      const totalChanged = total != null && Number(total) !== Number(oldRow.TotalValue);
+      const bookingAmountChanged = b.BookingAmount != null && Number(b.BookingAmount) !== Number(oldRow.BookingAmount || 0);
+      const land = (totalChanged || bookingAmountChanged) ? await rebuildLandSchedule(tx, id, actor) : { rebuilt: false };
+      if (land.rebuilt) {
+        // Plot sale: schedule re-derived from the new value / Booking Amount.
+      } else if (land.reason === "money is already recorded against the schedule") {
+        // Never reshape a plot schedule money has already landed on.
+        if (totalChanged) await recalculateRemainingMilestones(tx, id);
+      } else if (planIsChanging) {
         await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
         const effectiveTotal = total || oldRow.TotalValue;
         const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
@@ -587,6 +601,15 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     const b = req.body || {};
     if (!b.NewUnitId) return res.status(400).json({ error: "NewUnitId is required" });
     if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to change a booking's unit" });
+
+    // Re-pointing a land sale at a built unit would leave its plot lines
+    // attached to a unit booking. Plots are changed by cancelling and
+    // re-booking, never by swapping the line type underneath.
+    const plotSale = await pool.request().input("id", sql.Int, id)
+      .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @id");
+    if (plotSale.recordset.length) {
+      return res.status(400).json({ error: "This is a plot sale — its plots can't be swapped for a unit. Cancel the booking and book the new plots instead." });
+    }
 
     // Same active-booking gate every other lifecycle-mutating route uses
     // (blocks both Cancelled and Rejected, not just Cancelled) — re-pointing
@@ -2161,6 +2184,12 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
 
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    // A plot sale's schedule is derived from its value and Booking Amount,
+    // so resync = rebuild (refused once money is recorded against it).
+    const land = await rebuildLandSchedule(pool, id, actorId(req));
+    if (land.rebuilt) return res.json({ success: true, changed: true });
+    if (land.reason !== "not a plot sale") return res.status(400).json({ error: `The schedule can't be rebuilt — ${land.reason}.` });
 
     const bk = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingAmount, GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @id");

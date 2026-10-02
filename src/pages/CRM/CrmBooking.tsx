@@ -807,7 +807,7 @@ const CrmBooking: React.FC = () => {
                         <AlertTriangle size={14} /> Request Cancellation
                       </DropdownMenuItem>
                     )}
-                    {canEdit && (
+                    {canEdit && !b.IsPlotSale && (
                     <DropdownMenuItem onClick={() => { setUnitChangeBooking(b); setUnitChangeNewId(""); setUnitChangeReason(""); }} className="gap-2 text-rose-600 focus:text-rose-600">
                       <Repeat size={14} /> Change Unit
                     </DropdownMenuItem>

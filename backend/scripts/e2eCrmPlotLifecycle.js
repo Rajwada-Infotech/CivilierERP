@@ -99,6 +99,7 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
       { a: [sql.Int, Math.min(plots[0].Id, plots[1].Id)], b: [sql.Int, Math.max(plots[0].Id, plots[1].Id)], u: [sql.Int, USER] });
     run.adjacency = [Math.min(plots[0].Id, plots[1].Id), Math.max(plots[0].Id, plots[1].Id)];
     console.log(`Plots: ${plots.map((p) => `${p.PlotName} (${p.AreaSqFt} sqft @ ${p.RatePerSqFt})`).join(", ")}`);
+    const PLAN_FOR_GUARD = (await q("SELECT TOP 1 Id FROM dbo.CrmPaymentPlanTemplate WHERE IsActive = 1 ORDER BY Id"))[0]?.Id ?? 1;
     const expectedValue = money(plots.reduce((s, p) => s + Number(p.AreaSqFt) * Number(p.RatePerSqFt), 0));
 
     console.log("\n[1] Application with two plots");
@@ -177,6 +178,48 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
     r = await call("POST", "/api/crm/parking/standalone", { ApplicationId: run.applicationId, ParkingType: "Covered", RateOverride: 1000, Quantity: 1 });
     check("adding parking to the plot application is refused", r.status === 400 && /plot sale has no parking/i.test(r.data?.error || ""), r);
     check("no parking row was created", (await q("SELECT COUNT(*) n FROM dbo.CrmParkingAllotment WHERE BookingId = @b OR ApplicationId = @a", { b: [sql.Int, bid], a: [sql.Int, run.applicationId] }))[0].n === 0);
+
+    console.log("\n[3c] Edits before approval keep value, plot lines and schedule in step");
+    const state = async () => {
+      const b0 = (await q("SELECT TotalValue, GrandTotal, BookingAmount FROM dbo.CrmBooking WHERE Id = @b", { b: [sql.Int, bid] }))[0];
+      const ln = await q("SELECT AllocatedValue FROM dbo.CrmBookingPlot WHERE BookingId = @b AND Status = N'Active'", { b: [sql.Int, bid] });
+      const sc = await q("SELECT MilestoneName, AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = @b AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY MilestoneNo", { b: [sql.Int, bid] });
+      return { total: money(b0.TotalValue), grand: money(b0.GrandTotal), bookingAmt: money(b0.BookingAmount), lines: money(ln.reduce((s, l) => s + Number(l.AllocatedValue), 0)), sched: sc.map((m) => [m.MilestoneName, money(m.AmountDue)]) };
+    };
+    const area = plots.reduce((s, p) => s + p.AreaSqFt, 0);
+    r = await call("PUT", `/api/crm/bookings/${bid}`, { RatePerSqFt: 2600 });
+    let st = await state();
+    check("rate edit: total = area x new rate, plot lines follow", ok(r) && st.total === area * 2600 && st.lines === st.total && st.grand === st.total, { r: r.status, st });
+    check("rate edit: schedule rebuilt as Booking + Balance of the new value", JSON.stringify(st.sched) === JSON.stringify([["Booking", 100000], ["Balance", area * 2600 - 100000]]), st.sched);
+    r = await call("PUT", `/api/crm/bookings/${bid}`, { BookingAmount: 250000 });
+    st = await state();
+    check("booking amount edit: schedule follows", ok(r) && JSON.stringify(st.sched) === JSON.stringify([["Booking", 250000], ["Balance", area * 2600 - 250000]]), { r: r.status, st });
+    r = await call("PUT", `/api/crm/bookings/${bid}`, { BookingAmount: 0 });
+    st = await state();
+    check("booking amount cleared: one Full Payment of the whole value", ok(r) && JSON.stringify(st.sched) === JSON.stringify([["Full Payment", area * 2600]]), { r: r.status, st });
+    r = await call("PUT", `/api/crm/bookings/${bid}`, { RatePerSqFt: 2500, BookingAmount: 100000 });
+    st = await state();
+    check("restored: value, lines and schedule back to the original", ok(r) && st.total === expectedValue && st.lines === expectedValue && JSON.stringify(st.sched) === JSON.stringify([["Booking", 100000], ["Balance", expectedValue - 100000]]), st);
+    r = await call("POST", `/api/crm/bookings/${bid}/resync-schedule`, {});
+    check("resync-schedule rebuilds the land schedule", ok(r) && r.data?.changed === true && JSON.stringify((await state()).sched) === JSON.stringify(st.sched), r);
+    // Editing the application and re-submitting carries the new rate and
+    // Booking Amount through to the booking, its plot lines and schedule.
+    r = await call("PUT", `/api/crm/applications/${run.applicationId}`, { RatePerSqFt: 2600, TokenType: "Amount", TokenValue: 150000, BookingAmount: 150000 });
+    const r2 = await call("PUT", `/api/crm/applications/${run.applicationId}/submit`, {});
+    st = await state();
+    check("application re-submit: new rate reaches value, lines and schedule", ok(r) && ok(r2) && st.total === area * 2600 && st.lines === st.total && JSON.stringify(st.sched) === JSON.stringify([["Booking", 150000], ["Balance", area * 2600 - 150000]]), { r: r.status, r2: r2.status, st });
+    r = await call("PUT", `/api/crm/applications/${run.applicationId}`, { RatePerSqFt: 2500, TokenValue: 100000, BookingAmount: 100000 });
+    await call("PUT", `/api/crm/applications/${run.applicationId}/submit`, {});
+    st = await state();
+    check("application re-submit: restored", st.total === expectedValue && st.lines === expectedValue && JSON.stringify(st.sched) === JSON.stringify([["Booking", 100000], ["Balance", expectedValue - 100000]]), st);
+
+    r = await call("PUT", `/api/crm/bookings/${bid}/change-unit`, { NewUnitId: 1, Reason: TAG });
+    check("change-unit is refused for a plot sale", r.status === 400 && /plot sale/i.test(r.data?.error || ""), r);
+    r = await call("PUT", `/api/crm/bookings/${bid}`, { PaymentPlanId: PLAN_FOR_GUARD });
+    check("attaching a payment plan is refused for a plot sale", r.status === 400 && /no payment plan/i.test(r.data?.error || ""), r);
+    r = await call("GET", `/api/crm/bookings/${bid}/checklist`);
+    const clItems = Array.isArray(r.data) ? r.data : (r.data?.items || []);
+    check("data review checklist speaks of plots", clItems.some((i) => i.ItemKey === "ProjectUnitRate" && /Plot/.test(i.ItemLabel)) && clItems.some((i) => i.ItemKey === "PaymentPlanAmounts" && /no payment plan/i.test(i.ItemLabel)), clItems.map((i) => i.ItemLabel));
 
     console.log("\n[4] Data review checklist -> ready for approval -> approvals");
     for (const key of ["ApplicantKyc", "ProjectUnitRate", "PaymentPlanAmounts", "BankDepositMode", "BrokerDetails", "SourceAssignment", "Documents"]) {

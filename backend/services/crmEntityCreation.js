@@ -518,6 +518,51 @@ function landSaleSchedule(totalValue, bookingAmount) {
   ];
 }
 
+// Re-shares a booking's TotalValue across its active lines (plots or units)
+// pro-rata by area — the same allocation booking creation uses. Called
+// whenever TotalValue changes after creation; without it the line values
+// keep the old total, and everything that reads them (the land / built
+// split behind GST and the sale ledger) disagrees with the booking.
+async function reallocateBookingLines(poolOrTx, bookingId, totalValue) {
+  for (const table of ["CrmBookingPlot", "CrmBookingUnit"]) {
+    const lines = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(
+      `SELECT Id, AreaSqFt FROM dbo.${table} WHERE BookingId = @bid AND Status = N'Active' ORDER BY Id`)).recordset;
+    if (!lines.length) continue;
+    const parts = allocateConsideration({
+      lines: lines.map((l) => ({ unitId: l.Id, areaSqFt: l.AreaSqFt })),
+      totalConsideration: Number(totalValue),
+    });
+    for (const part of parts) {
+      await poolOrTx.request().input("id", sql.Int, part.unitId).input("v", sql.Decimal(18, 2), part.allocatedValue)
+        .query(`UPDATE dbo.${table} SET AllocatedValue = @v WHERE Id = @id`);
+    }
+  }
+}
+
+// A plot sale's schedule is always derived, never hand-shaped: Booking
+// Amount + Balance (or one Full Payment) of the booking's current TotalValue.
+// So whenever the value or the Booking Amount changes, the schedule is
+// rebuilt from those two figures — as long as no money has been recorded
+// against it. Returns { rebuilt, reason }. Parking / extra-charge rows are
+// separate line items and are never touched.
+async function rebuildLandSchedule(poolOrTx, bookingId, actorUserId = null) {
+  const bk = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(`
+    SELECT b.TotalValue, b.BookingAmount, b.BookingDate,
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = b.Id) THEN 1 ELSE 0 END AS IsPlotSale
+    FROM dbo.CrmBooking b WHERE b.Id = @bid`)).recordset[0];
+  if (!bk || !bk.IsPlotSale) return { rebuilt: false, reason: "not a plot sale" };
+  const touched = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(`
+    SELECT COUNT(*) AS n FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+      AND (ISNULL(AmountPaid, 0) > 0 OR Status IN (N'Paid', N'Waived'))`)).recordset[0].n;
+  if (touched) return { rebuilt: false, reason: "money is already recorded against the schedule" };
+  await poolOrTx.request().input("bid", sql.Int, bookingId).query(`
+    DELETE FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL`);
+  await generateMilestonesForBooking(poolOrTx, bookingId, Number(bk.TotalValue), null, bk.BookingDate, actorUserId, Number(bk.BookingAmount || 0));
+  return { rebuilt: true };
+}
+
 async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
   if (!totalValue || totalValue <= 0) return;
   const plotLine = await poolOrTx.request().input("bid", sql.Int, bookingId)
@@ -1151,6 +1196,6 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, landSaleSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
+  generateMilestonesForBooking, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

@@ -14,7 +14,8 @@ const { advanceApplicationStatus, logStatusChange } = require("../services/crmAp
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection } = require("../services/crmEntityCreation");
+const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
+const { recalculateBookingGst } = require("../services/crmGst");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { recalculateRemainingMilestones, requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { releaseAllParkingForApplication, applyAddParking, rollupBookingTotals } = require("../routes/crmParking");
@@ -786,6 +787,8 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         const tx = pool.transaction();
         await tx.begin();
         try {
+          const before = (await tx.request().input("bid", sql.Int, booking.id)
+            .query("SELECT RatePerSqFt, AreaSqFt, TotalValue FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
           await tx.request()
             .input("bid", sql.Int, booking.id)
             .input("RatePerSqFt", sql.Decimal(18, 2), a.RatePerSqFt)
@@ -819,11 +822,28 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
               WHERE Id = @bid
             `);
 
+          // A new rate is a new price: the rate alone used to be copied
+          // across while TotalValue stayed at the old figure.
+          const newRate = a.RatePerSqFt != null ? Number(a.RatePerSqFt) : null;
+          if (newRate != null && Number(before?.RatePerSqFt) !== newRate && Number(before?.AreaSqFt) > 0) {
+            const newTotal = Math.round(Number(before.AreaSqFt) * newRate * 100) / 100;
+            await tx.request().input("bid", sql.Int, booking.id).input("tot", sql.Decimal(18, 2), newTotal).query(`
+              UPDATE dbo.CrmBooking
+              SET TotalValue = @tot, GrandTotal = @tot + ISNULL(ParkingTotal, 0) + ISNULL(ExtraChargesTotal, 0), UpdatedAt = SYSDATETIME()
+              WHERE Id = @bid`);
+            await reallocateBookingLines(tx, booking.id, newTotal);
+            await recalculateBookingGst(tx, booking.id);
+          }
+
+          // A plot sale's schedule is re-derived from the (possibly new)
+          // value and Booking Amount instead of patching Milestone 1.
+          const land = await rebuildLandSchedule(tx, booking.id, actor);
+
           // Resync Milestone #1 (Booking Amount) to match the updated
           // BookingAmount. Without this, editing the application's
           // token/booking amount and re-submitting would update the
           // CrmBooking row but leave the milestone's AmountDue stale.
-          if (a.BookingAmount) {
+          if (land.reason === "not a plot sale" && a.BookingAmount) {
             const m1Res = await tx.request().input("bid", sql.Int, booking.id)
               .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
             const m1 = m1Res.recordset[0];
