@@ -11,6 +11,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 import { PlotLayoutEditor, naturalCompare, plotOrder } from "./PlotLayoutEditor";
+import { VillaTypesDialog, fetchVillaTypes, villaTypesKey, type VillaType } from "./VillaTypesDialog";
 
 const PLOT_API = "/api/plot-master";
 const SETUP_API = "/api/crm/project-auto-setup";
@@ -23,6 +24,7 @@ type Plot = {
   RatePerSqFt?: number | null; Facing?: string | null; IsCornerPlot?: boolean;
   RoadWidthFt?: number | null; PlotWidthFt?: number | null; PlotDepthFt?: number | null; GuidelineRatePerSqFt?: number | null;
   GridRow?: number | null; GridCol?: number | null;
+  PlannedVillaTypeId?: number | null; PlannedVillaTypeCode?: string | null; PlannedVillaTypeName?: string | null;
   ConvertedUnitId?: number | null; ConvertedAt?: string | null; ConvertedUnitName?: string | null;
   LockBookingNo?: string | null; LockApplicationNo?: string | null; LockHoldId?: number | null; AdjacentPlotCount?: number;
 };
@@ -92,6 +94,8 @@ const CrmPlotMaster: React.FC = () => {
   const [villaRate, setVillaRate] = useState("");
   const [builtUpArea, setBuiltUpArea] = useState("");
   const [superBuiltUpArea, setSuperBuiltUpArea] = useState("");
+  const [villaTypeId, setVillaTypeId] = useState("");
+  const [villaTypesOpen, setVillaTypesOpen] = useState(false);
   const [converting, setConverting] = useState(false);
   const [layoutState, setLayoutState] = useState<{ blockId: number; mode: "arrange" | "neighbours"; focusId: number | null } | null>(null);
   const [assetKindsOpen, setAssetKindsOpen] = useState(false);
@@ -116,8 +120,23 @@ const CrmPlotMaster: React.FC = () => {
   const { data: layoutTypes = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60_000 });
   const { data: constructedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds"], queryFn: fetchConstructedAssetKinds, staleTime: 60_000 });
   const { data: managedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds", "manage"], queryFn: fetchManagedConstructedAssetKinds, staleTime: 30_000 });
+  // Villa types of the project being converted, and of the plot being edited.
+  const conversionProjectId = plots.find((plot: Plot) => selectedIds.includes(plot.Id))?.ProjectId ?? null;
+  const { data: conversionVillaTypes = [] } = useQuery<VillaType[]>({ queryKey: villaTypesKey(conversionProjectId), queryFn: () => fetchVillaTypes(conversionProjectId!), enabled: convertOpen && conversionProjectId != null });
+  const { data: editVillaTypes = [] } = useQuery<VillaType[]>({ queryKey: villaTypesKey(plotDraft.ProjectId), queryFn: () => fetchVillaTypes(plotDraft.ProjectId), enabled: editOpen && !!plotDraft.ProjectId });
   const unitTypeOptionsForConversion = useMemo(() => unitTypeOptions(layoutTypes, unitType), [layoutTypes, unitType]);
 
+  // Picking a villa type fills the areas and room layout from the master;
+  // every field stays editable.
+  const applyVillaType = (id: string, types: VillaType[] = conversionVillaTypes) => {
+    setVillaTypeId(id);
+    const type = types.find((t) => String(t.Id) === id);
+    if (!type) return;
+    setBuiltUpArea(String(type.BuiltUpAreaSqFt ?? ""));
+    setSuperBuiltUpArea(type.SuperBuiltUpAreaSqFt != null ? String(type.SuperBuiltUpAreaSqFt) : "");
+    const layout = layoutTypes.find((l) => l.id === type.LayoutTypeId);
+    if (layout) setUnitType(layout.label);
+  };
   const facingName = (code?: string | null) => (code ? facings.find((facing) => facing.Code === code)?.Name ?? code : "");
 
   const saveFacing = async () => {
@@ -199,6 +218,16 @@ const CrmPlotMaster: React.FC = () => {
   const openConversion = () => {
     if (!selectionIsCompatible) { toast.error("Select plots from one project and block to create one constructed unit"); return; }
     setUnitName(selectedPlots.map((plot) => plot.PlotName).join(" + "));
+    setBuiltUpArea(""); setSuperBuiltUpArea(""); setVillaTypeId("");
+    // One planned type across the plots pre-selects it; mixed types are left to the user.
+    const planned = new Set(selectedPlots.map((plot) => plot.PlannedVillaTypeId ?? null));
+    const only = planned.size === 1 ? [...planned][0] : null;
+    if (only != null) {
+      fetchVillaTypes(selectedPlots[0].ProjectId).then((types) => applyVillaType(String(only), types)).catch(() => {});
+    } else if (planned.size > 1) {
+      toast.warning("The selected plots plan different villa types - choose one");
+    }
+    if (!unitKind) { const villa = constructedAssetKinds.find((kind) => kind.Code === "VILLA"); if (villa) setUnitKind(villa.Code); }
     setConvertOpen(true);
   };
 
@@ -290,7 +319,7 @@ const CrmPlotMaster: React.FC = () => {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           PlotIds: selectedPlots.map((plot) => plot.Id), UnitName: unitName.trim(), UnitType: unitType, UnitKind: unitKind,
-          RatePerSqFt: Number(villaRate), BuiltUpAreaSqFt: builtUpArea ? Number(builtUpArea) : null, SuperBuiltUpAreaSqFt: superBuiltUpArea ? Number(superBuiltUpArea) : null,
+          RatePerSqFt: Number(villaRate), VillaTypeId: villaTypeId ? Number(villaTypeId) : null, BuiltUpAreaSqFt: builtUpArea ? Number(builtUpArea) : null, SuperBuiltUpAreaSqFt: superBuiltUpArea ? Number(superBuiltUpArea) : null,
         }),
       });
       const body = await response.json().catch(() => ({}));
@@ -323,7 +352,7 @@ const CrmPlotMaster: React.FC = () => {
         </div>
         <div className="min-w-0">
           <span className="block truncate text-xs text-muted-foreground">
-            {plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "Area pending"}{plot.IsCornerPlot ? " · Corner" : ""}{plot.Facing ? ` · ${plot.Facing}` : ""}
+            {plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "Area pending"}{plot.IsCornerPlot ? " · Corner" : ""}{plot.Facing ? ` · ${plot.Facing}` : ""}{plot.PlannedVillaTypeCode ? ` · ${plot.PlannedVillaTypeCode}` : ""}
           </span>
           <span className="mt-0.5 block truncate text-[0.6875rem]">{status.label}</span>
         </div>
@@ -373,6 +402,7 @@ const CrmPlotMaster: React.FC = () => {
         <div className="flex items-center gap-2">
           <button onClick={() => navigate("/crm/setup/auto-project-setup")} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted"><MapIcon size={14} /> Configure plots</button>
           {rights.canEdit && <button onClick={() => { setFacingDraft({}); setFacingsOpen(true); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Manage plot facings"><Settings2 size={14} /> Facings</button>}
+          {rights.canEdit && <button onClick={() => setVillaTypesOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Manage villa types"><Settings2 size={14} /> Villa types</button>}
           {rights.canEdit && <button onClick={() => { editAssetKind(); setAssetKindsOpen(true); }} className="p-2 border border-border rounded-lg hover:bg-muted" title="Manage constructed asset kinds"><Settings2 size={14} /></button>}
           <button onClick={() => refetch()} className="p-2 border border-border rounded-lg hover:bg-muted" title="Refresh"><RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /></button>
         </div>
@@ -468,7 +498,7 @@ const CrmPlotMaster: React.FC = () => {
                       <td className="px-3 py-2 text-muted-foreground">{plot.SurveyNo || "-"}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "-"}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{plot.RatePerSqFt ? `Rs. ${Number(plot.RatePerSqFt).toLocaleString("en-IN")}` : "-"}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{[facingName(plot.Facing), plot.IsCornerPlot ? "Corner" : "", plot.RoadWidthFt ? `${plot.RoadWidthFt} ft road` : ""].filter(Boolean).join(" · ") || "-"}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{[facingName(plot.Facing), plot.IsCornerPlot ? "Corner" : "", plot.RoadWidthFt ? `${plot.RoadWidthFt} ft road` : "", plot.PlannedVillaTypeName ? `Plans ${plot.PlannedVillaTypeName}` : ""].filter(Boolean).join(" · ") || "-"}</td>
                       <td className="px-3 py-2"><span className={`inline-flex rounded-full px-2 py-0.5 text-[0.6875rem] font-medium ${status.cls}`}>{status.label}</span></td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-1">
@@ -587,6 +617,16 @@ const CrmPlotMaster: React.FC = () => {
               <p className="mt-1 text-xs text-muted-foreground">{selectedPlots[0]?.ProjectName} · {selectedPlots[0]?.BlockName} · {totalArea.toLocaleString("en-IN")} sq ft combined area</p>
             </div>
             <div><label className="text-xs text-muted-foreground block mb-1">Constructed unit name</label><input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} className={fieldCls} /></div>
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="block text-xs text-muted-foreground">Villa type</label>
+                {rights.canEdit && <button type="button" onClick={() => setVillaTypesOpen(true)} className="text-[0.6875rem] text-primary hover:underline">Manage</button>}
+              </div>
+              <select value={villaTypeId} onChange={(event) => { if (event.target.value) applyVillaType(event.target.value); else setVillaTypeId(""); }} className={fieldCls}>
+                <option value="">None - enter the areas by hand</option>
+                {conversionVillaTypes.map((t) => <option key={t.Id} value={t.Id}>{t.Code} - {t.Name} ({Number(t.BuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft built-up)</option>)}
+              </select>
+            </div>
             <div><label className="text-xs text-muted-foreground block mb-1">Unit type</label>
               <Select value={unitType || undefined} onValueChange={setUnitType}><SelectTrigger className="h-9"><SelectValue placeholder="Select a configured unit type" /></SelectTrigger><SelectContent>{unitTypeOptionsForConversion.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
             <div><label className="text-xs text-muted-foreground block mb-1">Constructed asset kind</label>
@@ -606,6 +646,15 @@ const CrmPlotMaster: React.FC = () => {
         </DialogContent>
       </Dialog>
 
+      <VillaTypesDialog
+        open={villaTypesOpen} onOpenChange={setVillaTypesOpen}
+        projects={Array.from(new Map(blockCatalog.map((block) => [block.ProjectId, { ProjectId: block.ProjectId, ProjectName: block.ProjectName }])).values())}
+        initialProjectId={projectId !== ALL ? Number(projectId) : null}
+        layoutTypes={layoutTypes}
+        selectedPlotIds={selectedPlots.length > 0 && selectedPlots.every((plot) => plot.ProjectId === selectedPlots[0].ProjectId) ? selectedPlots.map((plot) => plot.Id) : []}
+        selectedProjectId={selectedPlots[0]?.ProjectId ?? null}
+        onPlotsChanged={() => queryClient.invalidateQueries({ queryKey: ["plot-master"] })}
+      />
       <Dialog open={assetKindsOpen} onOpenChange={setAssetKindsOpen}>
         <DialogContent accent="crm" className="max-w-2xl">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 size={17} className="text-primary" /> Constructed asset kinds</DialogTitle></DialogHeader>
@@ -702,6 +751,14 @@ const CrmPlotMaster: React.FC = () => {
                 {plotDraft.Facing && !facings.some((facing) => facing.Code === plotDraft.Facing) && <option value={plotDraft.Facing}>{plotDraft.Facing} (not in master)</option>}
               </select>
               {facingsFailed && <p className="mt-1 text-[0.6875rem] text-destructive">Could not load the facing list - the options above may be incomplete.</p>}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">Planned villa type</label>
+              <select value={plotDraft.PlannedVillaTypeId ?? ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, PlannedVillaTypeId: event.target.value || null }))} className={fieldCls}>
+                <option value="">Not planned</option>
+                {editVillaTypes.map((t) => <option key={t.Id} value={t.Id}>{t.Code} - {t.Name}</option>)}
+                {plotDraft.PlannedVillaTypeId && !editVillaTypes.some((t) => String(t.Id) === String(plotDraft.PlannedVillaTypeId)) && <option value={plotDraft.PlannedVillaTypeId}>{plotDraft.PlannedVillaTypeName || "Current type"} (inactive)</option>}
+              </select>
             </div>
             {[["AreaSqFt", "Area (sq ft)"], ["RatePerSqFt", "Rate per sq ft"], ["PlotWidthFt", "Width (ft)"], ["PlotDepthFt", "Depth (ft)"], ["RoadWidthFt", "Road width (ft)"], ["GuidelineRatePerSqFt", "Guideline rate / sq ft"]].map(([field, label]) => (
               <div key={field}><label className="mb-1 block text-xs text-muted-foreground">{label}</label><input type="number" min="0" step="0.01" value={plotDraft[field] ?? ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, [field]: event.target.value }))} className={fieldCls} /></div>
