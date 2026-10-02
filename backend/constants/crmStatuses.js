@@ -46,11 +46,11 @@ const LineStatus = Object.freeze({
   ACTIVE: 'Active',
   CANCELLED: 'Cancelled',
   // A resale moved the line to a new owner. Not Cancelled: nothing was undone,
-  // the original sale stands and the outgoing investor was paid.
+  // the original sale stands and the original buyer was paid.
   TRANSFERRED: 'Transferred',
 });
 
-// Status of an investor resale (dbo.CrmUnitResale). Must stay identical to
+// Status of a resale (dbo.CrmUnitResale). Must stay identical to
 // CK_CrmUnitResale_Status (migration 486) — pinned by the same test.
 const ResaleStatus = Object.freeze({
   PENDING: 'Pending',

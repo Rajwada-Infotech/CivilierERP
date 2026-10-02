@@ -14,11 +14,11 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 const API = "/api/crm/resales";
 const PLOT_API = "/api/plot-master";
 
-// Investor exit: a plot changing hands between two CUSTOMERS, with the
+// Resale: a plot changing hands between two buyers, with the
 // developer facilitating rather than selling.
 //
 // THE DISTINCTION THIS SCREEN HAS TO MAKE OBVIOUS
-// The developer is not selling the land here — the investor is. Their gain is
+// The developer is not selling the land here — the original buyer is. Their gain is
 // theirs, not company revenue; only the facilitation fee is. The two figures
 // are therefore shown in separate columns and never summed into a single
 // "total", because a combined number is exactly what would end up being read as
@@ -47,7 +47,7 @@ interface Resale {
   ResaleDate: string | null;
   AgreedValue: number | null;
   OriginalValue: number | null;
-  InvestorGain: number | null;
+  ResaleGain: number | null;
   DeveloperFeeAmount: number | null;
   DeveloperFeeGstAmount: number | null;
   Status: string;
@@ -107,7 +107,7 @@ const CrmResales: React.FC = () => {
 
   const create = async () => {
     if (!form.PlotId) { toast.error("Which plot is changing hands?"); return; }
-    if (!form.AgreedValue) { toast.error("What is the new buyer paying the investor?"); return; }
+    if (!form.AgreedValue) { toast.error("What is the new buyer paying the original buyer?"); return; }
     setSaving(true);
     try {
       const r = await fetchWithAuth(API, {
@@ -173,16 +173,16 @@ const CrmResales: React.FC = () => {
         </span>
       ),
     },
-    { header: "Investor Paid", accessorKey: "OriginalValue", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.OriginalValue)}</span> },
+    { header: "Original Buyer Paid", accessorKey: "OriginalValue", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.OriginalValue)}</span> },
     { header: "Resold At", accessorKey: "AgreedValue", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.AgreedValue)}</span> },
     {
-      header: "Investor Gain",
-      accessorKey: "InvestorGain",
+      header: "Resale Gain",
+      accessorKey: "ResaleGain",
       cell: ({ row }) => {
-        const g = Number(row.original.InvestorGain || 0);
+        const g = Number(row.original.ResaleGain || 0);
         return (
           <span className={`tabular-nums font-medium ${g > 0 ? "text-emerald-600" : g < 0 ? "text-red-600" : ""}`}>
-            {fmt(row.original.InvestorGain)}
+            {fmt(row.original.ResaleGain)}
           </span>
         );
       },
@@ -217,7 +217,7 @@ const CrmResales: React.FC = () => {
   ];
 
   return (
-    <CrmShell title="Plot Resale" subtitle="Investor exits — a plot changing hands between customers">
+    <CrmShell title="Plot Resale" subtitle="A plot changing hands from its original buyer to a new buyer">
       <Breadcrumbs items={["CRM", "Plot Resale"]} />
 
       {/* Stated plainly on the screen, because the distinction is the whole
@@ -225,7 +225,7 @@ const CrmResales: React.FC = () => {
       <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2 mb-3">
         <Info size={13} className="text-muted-foreground mt-0.5 shrink-0" />
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          The investor is selling, not the company. <span className="font-medium text-foreground">Investor Gain</span> is
+          The original buyer is selling, not the company. <span className="font-medium text-foreground">Resale Gain</span> is
           theirs and is never company revenue — only <span className="font-medium text-foreground">Our Fee</span> is.
         </p>
       </div>
@@ -282,7 +282,7 @@ const CrmResales: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5">
-                  New buyer pays investor (₹)
+                  New buyer pays original buyer (₹)
                 </label>
                 <input type="number" value={form.AgreedValue}
                   onChange={(e) => setForm((f) => ({ ...f, AgreedValue: e.target.value }))}
@@ -331,7 +331,7 @@ const CrmResales: React.FC = () => {
             <DialogTitle className="font-heading">Complete the Resale</DialogTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
               This moves the plot. The outgoing line is kept as history, marked Transferred —
-              nothing is cancelled, because the original sale stands and the investor was paid.
+              nothing is cancelled, because the original sale stands and the original buyer was paid.
             </p>
           </DialogHeader>
           {completing && (
@@ -342,9 +342,9 @@ const CrmResales: React.FC = () => {
               </div>
               <div className="text-right">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1 justify-end">
-                  <TrendingUp size={11} /> Investor gain
+                  <TrendingUp size={11} /> Resale gain
                 </p>
-                <p className="text-lg font-bold tabular-nums text-primary">{fmt(completing.InvestorGain)}</p>
+                <p className="text-lg font-bold tabular-nums text-primary">{fmt(completing.ResaleGain)}</p>
               </div>
             </div>
           )}

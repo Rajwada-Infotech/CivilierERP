@@ -1,19 +1,19 @@
-// Investor resale — a plot (or constructed unit) changing hands between two
+// Resale — a plot (or constructed unit) changing hands between two
 // CUSTOMERS, with the developer as facilitator rather than seller.
 //
 // THE FLOW THIS SERVES
-// Plots are sold to investors. The developer then builds villas on them
+// Plots are sold to buyers. The developer then builds villas on them
 // regardless of who owns the plot. Once built, the owner either keeps the villa
 // (paying for the construction) or exits, selling the plot on to a new buyer.
 // That exit is what this records.
 //
 // THE ACCOUNTING RULE THAT SHAPES EVERY MONEY FIELD HERE
-// The developer is NOT selling the land — the investor is. If an investor
+// The developer is NOT selling the land — the original buyer is. If a buyer
 // bought at 20L and exits at 30L, that 10L gain is theirs. Routing it through
 // developer income would inflate turnover and create a GST liability on a
 // supply the developer never made. So:
 //
-//   AgreedValue         new buyer -> outgoing investor.  NEVER developer income.
+//   AgreedValue         new buyer -> original buyer.  NEVER developer income.
 //   DeveloperFeeAmount  the developer's facilitation fee. The ONLY figure here
 //                       that is developer revenue — and being a service, it is
 //                       taxable even though the land itself is outside GST.
@@ -51,9 +51,9 @@ const SELECT = `
          tb.BookingNo AS ToBookingNo,
          fc.CustomerName AS FromCustomerName,
          tc.CustomerName AS ToCustomerName,
-         -- The investor's gain, derived rather than stored so it can never
+         -- The original buyer's gain, derived rather than stored so it can never
          -- drift from the two figures it comes from.
-         (ISNULL(r.AgreedValue, 0) - ISNULL(r.OriginalValue, 0)) AS InvestorGain
+         (ISNULL(r.AgreedValue, 0) - ISNULL(r.OriginalValue, 0)) AS ResaleGain
   FROM dbo.CrmUnitResale r
   LEFT JOIN dbo.PlotMaster p   ON p.Id  = r.PlotId
   LEFT JOIN dbo.UnitMaster u   ON u.Id  = r.UnitId
@@ -152,7 +152,7 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
 // line becomes 'Transferred' and the incoming booking takes it over.
 //
 // 'Transferred', not 'Cancelled' — nothing was undone. The original sale stands
-// and the investor was paid; the plot simply has a new owner. Cancelling it
+// and the original buyer was paid; the plot simply has a new owner. Cancelling it
 // would misstate history and, for a cancelled booking, could trigger refund
 // handling for money that was never refunded.
 router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req, res) => {
