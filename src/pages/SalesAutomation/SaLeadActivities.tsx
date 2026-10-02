@@ -115,7 +115,7 @@ const SaLeadActivities: React.FC = () => {
             <input value={form.Outcome} onChange={(e) => setForm({ ...form, Outcome: e.target.value })} placeholder="Outcome" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <DateInput value={form.NextFollowupDate} onChange={(e) => setForm({ ...form, NextFollowupDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <textarea value={form.Summary} onChange={(e) => setForm({ ...form, Summary: e.target.value })} placeholder="Conversation summary" className="md:col-span-5 min-h-20 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <button className="inline-flex items-center justify-center gap-2 rounded-md btn-module text-white px-3 py-2 text-sm font-medium">
+            <button className="inline-flex items-center justify-center gap-2 self-end h-10 rounded-md btn-module text-white px-4 text-sm font-medium shadow-sm">
               <Plus size={15} /> Log
             </button>
           </form>

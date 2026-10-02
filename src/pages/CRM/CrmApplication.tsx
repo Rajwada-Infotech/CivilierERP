@@ -3855,7 +3855,7 @@ const AttachmentsStep: React.FC<{
                 <span className="truncate flex-1">{d.DocumentType} — {d.FileName}</span>
                 <div className="flex items-center gap-1 shrink-0">
                   {previewable && (
-                    <button type="button" title="Preview" onClick={() => setPreviewDoc(d)}
+                    <button data-row-view type="button" title="Preview" onClick={() => setPreviewDoc(d)}
                       className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
                       <Eye size={12} />
                     </button>

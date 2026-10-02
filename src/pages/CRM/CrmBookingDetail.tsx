@@ -1980,7 +1980,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             {inv ? (
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className="flex items-center gap-1 text-xs font-medium text-green-600"><Check size={13} /> Invoiced</span>
-                                <button onClick={() => setPreviewInvoice(inv)}
+                                <button data-row-view onClick={() => setPreviewInvoice(inv)}
                                   className="flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400 hover:underline">
                                   <Eye size={12} /> View
                                 </button>
@@ -2720,7 +2720,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                               <td className="px-2.5 py-2 text-right">
                                 <div className="flex items-center justify-end gap-1 flex-wrap">
                                   {previewable && (
-                                    <button onClick={() => setPreviewAttachment({ ...a, fileUrl })}
+                                    <button data-row-view onClick={() => setPreviewAttachment({ ...a, fileUrl })}
                                       className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border rounded hover:bg-muted">
                                       <Eye size={11} /> Preview
                                     </button>
@@ -2763,7 +2763,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         been verified yet, so neither preview nor download is offered. */}
                     {booking?.ApplicationId && currentStage !== "Review" && (
                       <div className="flex items-center gap-1.5">
-                        <button onClick={() => setPreviewApplicationForm({ id: booking.ApplicationId, no: booking.ApplicationNo })}
+                        <button data-row-view onClick={() => setPreviewApplicationForm({ id: booking.ApplicationId, no: booking.ApplicationNo })}
                           className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-lg hover:bg-muted font-medium">
                           <Eye size={11} /> View Application Form
                         </button>
@@ -2819,7 +2819,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                 </span>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
-                                <button onClick={() => setPreviewReceipt(mr)}
+                                <button data-row-view onClick={() => setPreviewReceipt(mr)}
                                   className="flex items-center gap-1 px-2.5 py-1 text-xs border border-border rounded-lg hover:bg-muted font-medium">
                                   <Eye size={11} /> View
                                 </button>

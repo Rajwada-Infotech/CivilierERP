@@ -206,7 +206,7 @@ function ActionButtons({
           {selected ? <CheckSquare size={15} className="text-primary" /> : <Square size={15} />}
         </button>
       )}
-      <button
+      <button data-row-view
         onClick={(e) => {
           e.stopPropagation();
           handleAction("preview");

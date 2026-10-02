@@ -2093,7 +2093,7 @@ const CrmAgreement: React.FC = () => {
                                 {d.FileName && <span className="text-[0.6875rem] text-muted-foreground truncate max-w-[200px]">{d.FileName}</span>}
                                 {d.FileSize && <span className="text-[0.6875rem] text-muted-foreground">{fmtBytes(d.FileSize)}</span>}
                                 {d.IssuedBy && <span className="text-[0.6875rem] text-muted-foreground">by {d.IssuedBy}</span>}
-                                {(d.FilePath || d.DocumentUrl) && <Eye size={11} className="text-muted-foreground/60" />}
+                                
                               </>
                             )}
                           </div>
