@@ -540,9 +540,11 @@ export function ExpenseBookingPicker({
                   <button type="button"
                     disabled={mergeSelectedOptions.length < 2}
                     onClick={() => {
+                      // No onContractClear/onJVLineClear here — both blank
+                      // company/project/party/amount and, running right after
+                      // onMergeConfirm, win the race and wipe what it just
+                      // filled. onMergeConfirm drops the contract/JV links itself.
                       onMergeConfirm?.(mergeSelectedOptions);
-                      if (onContractClear) onContractClear();
-                      if (onJVLineClear) onJVLineClear();
                       exitMergeMode();
                       setOpen(false);
                       setSearch("");
