@@ -35,18 +35,18 @@ const PortalBooking: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="My Property" title="My Booking" subtitle="Everything about your unit, in one place." />
+      <PageHeader eyebrow="My Property" title="My Booking" subtitle={booking.IsPlotSale ? "Everything about your plot, in one place." : "Everything about your unit, in one place."} />
 
       <Card className="p-5">
         <Stepper steps={bookingSteps} />
       </Card>
 
       <Card>
-        <CardHeader icon={Building2} title="Unit & Booking Details" action={<StatusPill status={booking.BookingStatus} />} />
+        <CardHeader icon={Building2} title={booking.IsPlotSale ? "Plot & Booking Details" : "Unit & Booking Details"} action={<StatusPill status={booking.BookingStatus} />} />
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-5">
           <InfoField label="Booking No." value={booking.BookingNo} mono />
           <InfoField label="Project" value={booking.ProjectName} />
-          <InfoField label="Unit No." value={booking.UnitNo} />
+          <InfoField label={booking.IsPlotSale ? "Plot No." : "Unit No."} value={booking.UnitNo} />
           <InfoField label="Token Type" value={booking.TokenType} />
           <InfoField label="Token Value" value={booking.TokenType === "Amount" ? fmtMoney(booking.TokenValue) : `${booking.TokenValue ?? "—"}%`} />
           <InfoField label="Total Value" value={fmtMoney(booking.TotalValue)} />
@@ -90,7 +90,7 @@ const PortalBooking: React.FC = () => {
         <Card>
           <CardHeader icon={Landmark} title="Additional Charges" />
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-5">
-            <InfoField label="Unit Value" value={fmtMoney(booking.TotalValue)} />
+            <InfoField label={booking.IsPlotSale ? "Land Value" : "Unit Value"} value={fmtMoney(booking.TotalValue)} />
             {booking.ParkingTotal > 0 && <InfoField label="Parking" value={fmtMoney(booking.ParkingTotal)} />}
             {booking.ExtraChargesTotal > 0 && <InfoField label="Extra Charges" value={fmtMoney(booking.ExtraChargesTotal)} />}
             <InfoField label="Grand Total" value={fmtMoney(booking.GrandTotal)} />

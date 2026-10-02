@@ -75,6 +75,7 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         u.UnitName,
         u.FloorNo,
         u.UnitType,
+        u.UnitKind,
         u.LayoutTypeId,
         u.AreaSqFt,
         u.CarpetAreaSqFt,

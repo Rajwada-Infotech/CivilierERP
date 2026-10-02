@@ -184,7 +184,7 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("c.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR c.CancellationNo LIKE @search)");
@@ -217,7 +217,7 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
           WHERE (@st2 IS NULL OR c.Status = @st2)
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
             AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR c.CancellationNo LIKE @search2))
         `),
     ]);
@@ -510,6 +510,20 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
 
       await tx.request().input("bid", sql.Int, bookingId)
         .query("UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
+
+      // CrmBookingPlot has an active-only unique index. A cancelled booking
+      // must release its plot lines in the same transaction as its header,
+      // otherwise the land inventory can never be sold again.
+      await tx.request().input("bid", sql.Int, bookingId).query(`
+        UPDATE dbo.CrmBookingPlot SET Status = N'Cancelled'
+        WHERE BookingId = @bid AND Status = N'Active'
+      `);
+      await tx.request().input("bid", sql.Int, bookingId).query(`
+        UPDATE ap SET Status = N'Cancelled'
+        FROM dbo.CrmApplicationPlot ap
+        JOIN dbo.CrmBooking b ON b.ApplicationId = ap.ApplicationId
+        WHERE b.Id = @bid AND ap.Status = N'Active'
+      `);
 
       // The Application was force-advanced to 'Approved' the instant this
       // Booking was created and nothing has touched it since — without this,

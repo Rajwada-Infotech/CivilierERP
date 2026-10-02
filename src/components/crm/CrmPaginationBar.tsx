@@ -10,7 +10,7 @@ export function CrmPaginationBar({ page, pageSize, total, onPage }: { page: numb
   if (totalPages <= 1) return null;
   return (
     <div className="flex items-center justify-between px-1 py-2 text-xs text-muted-foreground">
-      <span>Page {page} of {totalPages} · {total} total</span>
+      <span>Page {page} of {totalPages} &middot; {total} total</span>
       <div className="flex items-center gap-1">
         <button onClick={() => onPage(Math.max(1, page - 1))} disabled={page <= 1}
           className="flex items-center gap-1 px-2 py-1 border border-border rounded-md hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed">

@@ -233,7 +233,7 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
     // already-scoped set rather than the entire table.
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR d.DeedNo LIKE @search OR b.BookingNo LIKE @search)");
@@ -388,7 +388,7 @@ router.get("/registry", requirePageRight("crm-registry", "view"), async (req, re
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("r.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
       where.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
@@ -421,7 +421,7 @@ router.get("/registry", requirePageRight("crm-registry", "view"), async (req, re
           WHERE (@st2 IS NULL OR r.Status = @st2)
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
             AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
         `),
     ]);
@@ -1021,7 +1021,7 @@ router.get("/query-payment", requirePageRight("crm-query-payment", "view"), asyn
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("qp.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
     const result = await req0.query(`${QP_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY qp.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {

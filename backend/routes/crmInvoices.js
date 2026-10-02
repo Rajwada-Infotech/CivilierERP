@@ -47,7 +47,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       const req_ = pool.request().input("pageSize", sql.Int, pageSizeNum).input("offset", sql.Int, offset);
       let where = "WHERE 1=1";
       if (projectId) { where += " AND b.ProjectId = @pid"; req_.input("pid", sql.Int, parseInt(projectId, 10)); }
-      if (blockId)   { where += " AND um.BlockId = @bkid"; req_.input("bkid", sql.Int, parseInt(blockId, 10)); }
+      if (blockId)   { where += " AND b.BlockId = @bkid"; req_.input("bkid", sql.Int, parseInt(blockId, 10)); }
       if (search) {
         where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR COALESCE(proj.name, b.ProjectName) LIKE @s)";
         req_.input("s", sql.NVarChar(200), `%${search}%`);
@@ -97,7 +97,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       const countReq = pool.request();
       let countWhere = "WHERE 1=1";
       if (projectId) { countWhere += " AND b.ProjectId = @pid"; countReq.input("pid", sql.Int, parseInt(projectId, 10)); }
-      if (blockId)   { countWhere += " AND um.BlockId = @bkid"; countReq.input("bkid", sql.Int, parseInt(blockId, 10)); }
+      if (blockId)   { countWhere += " AND b.BlockId = @bkid"; countReq.input("bkid", sql.Int, parseInt(blockId, 10)); }
       if (search) {
         countWhere += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR COALESCE(proj.name, b.ProjectName) LIKE @s)";
         countReq.input("s", sql.NVarChar(200), `%${search}%`);
@@ -184,7 +184,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
     let where = "WHERE 1=1";
     if (type)       { where += " AND inv.InvoiceType = @t"; req_.input("t", sql.NVarChar(30), type); }
     if (projectId)  { where += " AND b.ProjectId = @pid"; req_.input("pid", sql.Int, parseInt(projectId, 10)); }
-    if (blockId)    { where += " AND um.BlockId = @bkid"; req_.input("bkid", sql.Int, parseInt(blockId, 10)); }
+    if (blockId)    { where += " AND b.BlockId = @bkid"; req_.input("bkid", sql.Int, parseInt(blockId, 10)); }
     if (dateFrom)   { where += " AND inv.InvoiceDate >= @df"; req_.input("df", sql.Date, dateFrom); }
     if (dateTo)     { where += " AND inv.InvoiceDate <= @dt"; req_.input("dt", sql.Date, dateTo); }
     if (search) {
@@ -214,7 +214,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
     let countWhere = "WHERE 1=1";
     if (type)      { countWhere += " AND inv.InvoiceType = @t"; countReq.input("t", sql.NVarChar(30), type); }
     if (projectId) { countWhere += " AND b.ProjectId = @pid"; countReq.input("pid", sql.Int, parseInt(projectId, 10)); }
-    if (blockId)   { countWhere += " AND um.BlockId = @bkid"; countReq.input("bkid", sql.Int, parseInt(blockId, 10)); }
+    if (blockId)   { countWhere += " AND b.BlockId = @bkid"; countReq.input("bkid", sql.Int, parseInt(blockId, 10)); }
     if (dateFrom)  { countWhere += " AND inv.InvoiceDate >= @df"; countReq.input("df", sql.Date, dateFrom); }
     if (dateTo)    { countWhere += " AND inv.InvoiceDate <= @dt"; countReq.input("dt", sql.Date, dateTo); }
     if (search) {

@@ -70,7 +70,7 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
     const req0 = pool.request();
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
@@ -200,6 +200,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
     const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes, padRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
         SELECT b.Id, b.BookingNo,
+               CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
                COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
                COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
                COALESCE(bn.UnitType, b.UnitType) AS UnitType,
@@ -310,7 +311,7 @@ router.get("/", requirePageRight("crm-welcome-calls", "view"), async (req, res) 
     if (pending === "1") conds.push("wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)");
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
@@ -344,7 +345,7 @@ router.get("/", requirePageRight("crm-welcome-calls", "view"), async (req, res) 
             ${pending === "1" ? "AND wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)" : ""}
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
             AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
         `),
     ]);
