@@ -1182,6 +1182,7 @@
 .table-sticky-actions .sticky-act {
   position: sticky;
   right: 0;
+  white-space: nowrap;
   z-index: 2;
   background-color: hsl(var(--card));
   box-shadow: -8px 0 10px -8px rgb(0 0 0 / 0.18);
@@ -1198,6 +1199,35 @@
 }
 .dark .table-sticky-actions .sticky-act {
   box-shadow: -8px 0 10px -8px rgb(0 0 0 / 0.5);
+}
+
+/* Pinned Status column — sits immediately left of the pinned actions
+   column (--sticky-act-w is that column's width, set by main.tsx), same
+   backgrounds, and it carries the edge shadow instead of the actions cell. */
+.table-sticky-actions .sticky-status {
+  position: sticky;
+  right: var(--sticky-act-w, 0px);
+  z-index: 2;
+  background-color: hsl(var(--card));
+  box-shadow: -8px 0 10px -8px rgb(0 0 0 / 0.18);
+  white-space: nowrap;
+}
+.table-sticky-actions thead .sticky-status {
+  z-index: 3;
+  background-color: hsl(var(--muted));
+}
+.table-sticky-actions tbody tr:nth-child(even) > .sticky-status {
+  background-color: color-mix(in srgb, hsl(var(--card)) 96%, hsl(var(--muted-foreground)) 4%);
+}
+.table-sticky-actions tbody tr:hover > .sticky-status {
+  background-color: color-mix(in srgb, hsl(var(--card)) 92%, hsl(var(--foreground)) 8%);
+}
+.dark .table-sticky-actions .sticky-status {
+  box-shadow: -8px 0 10px -8px rgb(0 0 0 / 0.5);
+}
+/* With Status pinned beside it, the actions cell needs no shadow of its own. */
+.table-sticky-actions tr:has(> .sticky-status) > .sticky-act {
+  box-shadow: none;
 }
 
 /* Tooltip showing the full text of a cut-off table value (see main.tsx). */
@@ -1223,9 +1253,10 @@
 /* ── Buttons inside grid forms ───────────────────────────────────────────
    A button placed directly in a form grid (e.g. "+ Log" next to a textarea)
    would stretch to the full row height. Keep it a normal-height button,
-   aligned to the bottom of its row like the fields beside it. */
+   vertically centred in its row. Single-line dropdowns / inputs placed
+   beside a tall textarea get the same treatment. */
 :is(main, [role="dialog"]) :is(form.grid, form .grid) > :is(button, a[class*="btn"], .btn-module) {
-  align-self: end;
+  align-self: center;
   height: auto;
   min-height: 2.25rem;
   max-height: 2.75rem;
@@ -1276,4 +1307,8 @@
 [data-dup-close],
 [data-dup-close-bar] {
   display: none !important;
+}
+
+:is(main, [role="dialog"]) :is(form.grid, form .grid) > :is(select, input:not([type="checkbox"]):not([type="radio"])) {
+  align-self: center;
 }
