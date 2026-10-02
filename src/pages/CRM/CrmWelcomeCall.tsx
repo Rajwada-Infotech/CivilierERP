@@ -1908,7 +1908,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                       <span className="font-medium">{d.DocumentType}</span>
                       {d.FileName && <span className="block text-[0.6875rem] text-muted-foreground truncate max-w-[220px]">{d.FileName}{d.FileSize ? ` · ${fmtBytes(d.FileSize)}` : ""}</span>}
                     </span>
-                    {(d.FilePath || d.DocumentUrl) && <Eye size={13} className="text-muted-foreground shrink-0" />}
+                    
                   </button>
                   <div className="flex items-center gap-2 shrink-0">
                     {rights.canEdit && (

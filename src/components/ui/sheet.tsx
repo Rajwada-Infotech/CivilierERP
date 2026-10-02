@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { dedupeCloseControls } from "@/components/ui/dialog";
 
 const Sheet = SheetPrimitive.Root;
 
@@ -52,18 +53,42 @@ interface SheetContentProps
     VariantProps<typeof sheetVariants> {}
 
 const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Content>, SheetContentProps>(
-  ({ side = "right", className, children, ...props }, ref) => (
-    <SheetPortal>
-      <SheetOverlay />
-      <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
-        {children}
-        <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-secondary hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-          <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
-        </SheetPrimitive.Close>
-      </SheetPrimitive.Content>
-    </SheetPortal>
-  ),
+  ({ side = "right", className, children, ...props }, ref) => {
+    // Same one-close-control rule as dialogs: if the drawer draws its own ×
+    // (or a footer "Close"), the duplicate is hidden (see dialog.tsx).
+    const [el, setEl] = React.useState<HTMLDivElement | null>(null);
+    const anchorRef = React.useRef<HTMLSpanElement>(null);
+    const setRefs = React.useCallback(
+      (node: HTMLDivElement | null) => {
+        setEl(node);
+        if (typeof ref === "function") ref(node);
+        else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      },
+      [ref],
+    );
+    React.useLayoutEffect(() => {
+      if (!el) return;
+      const run = () => dedupeCloseControls(el, anchorRef.current);
+      run();
+      const mo = new MutationObserver(() => requestAnimationFrame(run));
+      mo.observe(el, { childList: true, subtree: true });
+      return () => mo.disconnect();
+    }, [el]);
+    return (
+      <SheetPortal>
+        <SheetOverlay />
+        <SheetPrimitive.Content ref={setRefs} className={cn(sheetVariants({ side }), className)} {...props}>
+          {children}
+          <span ref={anchorRef} className="contents">
+            <SheetPrimitive.Close className="dlg-close absolute right-4 top-4 z-10 rounded-sm opacity-70 ring-offset-background transition-opacity data-[state=open]:bg-secondary hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+              <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
+            </SheetPrimitive.Close>
+          </span>
+        </SheetPrimitive.Content>
+      </SheetPortal>
+    );
+  },
 );
 SheetContent.displayName = SheetPrimitive.Content.displayName;
 

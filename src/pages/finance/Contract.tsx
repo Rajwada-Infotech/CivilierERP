@@ -109,7 +109,7 @@ function AttachmentRow({ att, onRemove, readOnly }: { att: Attachment; onRemove:
         {att.size && <p className="text-[0.625rem] text-muted-foreground">{(att.size / 1024).toFixed(1)} KB</p>}
       </div>
       <div className="flex items-center gap-1">
-        <a href={att.url} target="_blank" rel="noreferrer"
+        <a data-row-view href={att.url} target="_blank" rel="noreferrer"
            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition">
           <Eye size={13} />
         </a>

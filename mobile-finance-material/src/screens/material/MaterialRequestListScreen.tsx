@@ -1,7 +1,7 @@
 // RN port of src/pages/material/MaterialRequest.tsx (web) register/list view.
 // Card layout follows the same visual language as GRN/PO/VIO list cards.
 import { useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput, Alert } from "react-native";
+import { View, Text, Pressable, ActivityIndicator, TextInput, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList, Search, X, Plus, Eye, Pencil, Trash2, ShieldOff, AlertCircle } from "lucide-react-native";
@@ -10,6 +10,7 @@ import { fonts } from "@/theme/fonts";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getMaterialRequests, deleteMaterialRequest, PRIORITY_COLOR, type MaterialRequest } from "@/api/materialRequestApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { ProjectGroupedList } from "@/components/ProjectGroupedList";
 import { MaterialRequestFormModal } from "./materialRequest/MaterialRequestFormModal";
 import { MaterialRequestDetailModal } from "./materialRequest/MaterialRequestDetailModal";
 
@@ -185,15 +186,21 @@ export default function MaterialRequestListScreen() {
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={filtered}
+        <ProjectGroupedList
+          items={filtered}
+          getProject={(r) => r.ProjectName}
           keyExtractor={(r) => String(r.MRId)}
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          onEndReachedThreshold={0.4}
+          unit={["req", "req"]}
+          accent="#10b981"
+          header={ListHeader}
+          expandAll={!!search.trim()}
+          emptyText="No Material Requests yet."
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => (
+          loadingMore={isFetchingNextPage}
+          contentPaddingBottom={insets.bottom + 24}
+          renderItem={(item) => (
             <MRCard
               mr={item}
               onView={() => setViewingId(item.MRId)}
@@ -203,15 +210,6 @@ export default function MaterialRequestListScreen() {
               canDelete={rights.canDelete}
             />
           )}
-          ListEmptyComponent={
-            <View className="items-center py-16">
-              <AlertCircle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No Material Requests yet.</Text>
-            </View>
-          }
-          ListFooterComponent={isFetchingNextPage ? (
-            <View className="py-4 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-          ) : null}
         />
       )}
 

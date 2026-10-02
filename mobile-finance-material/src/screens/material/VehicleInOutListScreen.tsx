@@ -5,7 +5,8 @@
 // lifecycle beyond Draft/approval, unlike Payment) — CSV import/export and
 // Print stay web-only.
 import { useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput, Alert } from "react-native";
+import { View, Text, Pressable, ActivityIndicator, TextInput, Alert } from "react-native";
+import { ProjectGroupedList } from "@/components/ProjectGroupedList";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Truck, Search, X, Plus, Paperclip, Eye, Pencil, Trash2, ShieldOff, AlertCircle, SlidersHorizontal } from "lucide-react-native";
@@ -208,15 +209,21 @@ export default function VehicleInOutListScreen() {
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={filtered}
+        <ProjectGroupedList
+          items={filtered}
+          getProject={(r) => r.ProjectName}
           keyExtractor={(r) => String(r.VehicleInOutID)}
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          onEndReachedThreshold={0.4}
+          unit={["entry", "entries"]}
+          accent="#10b981"
+          header={ListHeader}
+          expandAll={!!search.trim()}
+          emptyText="No Vehicle In/Out entries yet."
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => (
+          loadingMore={isFetchingNextPage}
+          contentPaddingBottom={insets.bottom + 24}
+          renderItem={(item) => (
             <VehicleCard
               rec={item}
               onView={() => setViewingId(item.VehicleInOutID)}
@@ -226,15 +233,6 @@ export default function VehicleInOutListScreen() {
               canDelete={rights.canDelete}
             />
           )}
-          ListEmptyComponent={
-            <View className="items-center py-16">
-              <AlertCircle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No Vehicle In/Out entries yet.</Text>
-            </View>
-          }
-          ListFooterComponent={isFetchingNextPage ? (
-            <View className="py-4 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-          ) : null}
         />
       )}
 

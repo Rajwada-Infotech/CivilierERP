@@ -271,7 +271,7 @@ const PayrollRun: React.FC = () => {
                           <td className="px-4 py-2.5 text-right font-mono">₹{e.NetSalary.toLocaleString("en-IN")}</td>
                           <td className="px-4 py-2.5 text-right font-mono">₹{e.TotalCTC.toLocaleString("en-IN")}</td>
                           <td className="px-4 py-2.5 text-right">
-                            <button
+                            <button data-row-view
                               onClick={() => navigate(`/hr-payroll/payroll-run/${detail.PayrollRunId}/payslip/${e.EmployeeId}`)}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[0.6875rem] font-medium text-foreground hover:bg-muted transition-colors"
                             >

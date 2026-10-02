@@ -774,7 +774,7 @@ const CrmBooking: React.FC = () => {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem onClick={() => openBooking(b.Id)} className="gap-2">
-                  <Eye size={14} className="text-muted-foreground" /> View Details / Invoice / Attachments
+                   View Details / Invoice / Attachments
                 </DropdownMenuItem>
                 {(welcomeCallReached || bankDetailsReached || agreementReached || paymentsReached) && (
                   <>

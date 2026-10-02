@@ -7,7 +7,8 @@
 // dependency dialog (mobile does a simple can-delete check + one alert
 // instead of the 4-branch remediation UI).
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput, Alert } from "react-native";
+import { View, Text, Pressable, ActivityIndicator, TextInput, Alert } from "react-native";
+import { ProjectGroupedList } from "@/components/ProjectGroupedList";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
@@ -65,9 +66,17 @@ function POCard({ po, onView, onEdit, onDelete, canEdit, canDelete }: {
           <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Company</Text>
           <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, marginTop: 1 }}>{po.CompanyName || "—"}</Text>
         </View>
+        {/* Project is the group header above, so the card shows the MR it
+            came from instead — same as the web register's "MR Ref" column. */}
         <View style={{ width: "50%" }}>
-          <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Project</Text>
-          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11.5, marginTop: 1 }}>{po.ProjectName || "—"}</Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>MR Ref</Text>
+          {(po.EffectiveMRDocNo || po.SourceMRDocNo) ? (
+            <View className="self-start px-1.5 py-0.5 rounded mt-0.5" style={{ backgroundColor: "#6366f11a", borderWidth: 1, borderColor: "#6366f140" }}>
+              <Text numberOfLines={1} style={{ color: "#6366f1", fontSize: 10.5, fontFamily: fonts.heading.bold }}>{po.EffectiveMRDocNo || po.SourceMRDocNo}</Text>
+            </View>
+          ) : (
+            <Text style={{ color: colors.mutedForeground, fontSize: 11.5, marginTop: 1 }}>—</Text>
+          )}
         </View>
         <View style={{ width: "50%" }}>
           <Text style={{ color: colors.mutedForeground, fontSize: 9, textTransform: "uppercase" }}>Amount</Text>
@@ -223,15 +232,21 @@ export default function PurchaseOrderListScreen() {
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={filtered}
+        <ProjectGroupedList
+          items={filtered}
+          getProject={(r) => r.ProjectName}
           keyExtractor={(r) => String(r.PurchaseOrderID)}
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          onEndReachedThreshold={0.4}
+          unit={["PO", "POs"]}
+          accent="#10b981"
+          header={ListHeader}
+          expandAll={!!search.trim()}
+          emptyText="No Purchase Orders yet."
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => (
+          loadingMore={isFetchingNextPage}
+          contentPaddingBottom={insets.bottom + 24}
+          renderItem={(item) => (
             <POCard
               po={item}
               onView={() => setViewingId(item.PurchaseOrderID)}
@@ -241,15 +256,6 @@ export default function PurchaseOrderListScreen() {
               canDelete={rights.canDelete}
             />
           )}
-          ListEmptyComponent={
-            <View className="items-center py-16">
-              <AlertCircle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No Purchase Orders yet.</Text>
-            </View>
-          }
-          ListFooterComponent={isFetchingNextPage ? (
-            <View className="py-4 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-          ) : null}
         />
       )}
 
