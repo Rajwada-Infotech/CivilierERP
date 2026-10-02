@@ -91,6 +91,7 @@ const CrmPlotMaster: React.FC = () => {
   const [unitKind, setUnitKind] = useState("");
   const [villaRate, setVillaRate] = useState("");
   const [builtUpArea, setBuiltUpArea] = useState("");
+  const [superBuiltUpArea, setSuperBuiltUpArea] = useState("");
   const [converting, setConverting] = useState(false);
   const [layoutState, setLayoutState] = useState<{ blockId: number; mode: "arrange" | "neighbours"; focusId: number | null } | null>(null);
   const [assetKindsOpen, setAssetKindsOpen] = useState(false);
@@ -282,13 +283,14 @@ const CrmPlotMaster: React.FC = () => {
   const convert = async () => {
     if (!unitName.trim() || !unitType || !unitKind) { toast.error("Select the constructed unit name, type, and kind"); return; }
     if (!(Number(villaRate) > 0)) { toast.error("Enter the villa's construction rate per sq ft"); return; }
+    if (!(Number(builtUpArea) > 0)) { toast.error("Enter the villa's built-up area"); return; }
     setConverting(true);
     try {
       const response = await fetchWithAuth(`${SETUP_API}/plots/convert`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           PlotIds: selectedPlots.map((plot) => plot.Id), UnitName: unitName.trim(), UnitType: unitType, UnitKind: unitKind,
-          RatePerSqFt: Number(villaRate), AreaSqFt: builtUpArea ? Number(builtUpArea) : null,
+          RatePerSqFt: Number(villaRate), BuiltUpAreaSqFt: builtUpArea ? Number(builtUpArea) : null, SuperBuiltUpAreaSqFt: superBuiltUpArea ? Number(superBuiltUpArea) : null,
         }),
       });
       const body = await response.json().catch(() => ({}));
@@ -591,13 +593,14 @@ const CrmPlotMaster: React.FC = () => {
               <Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger className="h-9"><SelectValue placeholder="Select a configured asset kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div>
             <div className="grid grid-cols-2 gap-3">
               <div><label className="text-xs text-muted-foreground block mb-1">Construction rate (₹/sq ft)</label><input type="number" min="0" value={villaRate} onChange={(event) => setVillaRate(event.target.value)} className={fieldCls} /></div>
-              <div><label className="text-xs text-muted-foreground block mb-1">Built-up area (sq ft)</label><input type="number" min="0" value={builtUpArea} onChange={(event) => setBuiltUpArea(event.target.value)} placeholder={`${totalArea.toLocaleString("en-IN")} (plot area)`} className={fieldCls} /></div>
+              <div><label className="text-xs text-muted-foreground block mb-1">Built-up area (sq ft) *</label><input type="number" min="0" value={builtUpArea} onChange={(event) => setBuiltUpArea(event.target.value)} placeholder="Villa built-up area" className={fieldCls} /></div>
+              <div><label className="text-xs text-muted-foreground block mb-1">Super built-up area (sq ft)</label><input type="number" min="0" value={superBuiltUpArea} onChange={(event) => setSuperBuiltUpArea(event.target.value)} placeholder="Optional — saleable area if given" className={fieldCls} /></div>
             </div>
             <p className="text-xs text-muted-foreground">The villa is priced on its construction rate only. A sold plot's owner has already paid for the land; they buy the villa as a separate booking.</p>
             <p className="text-xs text-muted-foreground flex gap-1.5"><Lock size={13} className="shrink-0" /> The source plots remain in Plot Master as converted history and can no longer be booked or edited as plots.</p>
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setConvertOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
-              <button onClick={convert} disabled={converting || !unitName.trim() || !unitType || !unitKind || !(Number(villaRate) > 0)} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">{converting ? "Converting..." : "Create Unit Master record"}</button>
+              <button onClick={convert} disabled={converting || !unitName.trim() || !unitType || !unitKind || !(Number(villaRate) > 0) || !(Number(builtUpArea) > 0)} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">{converting ? "Converting..." : "Create Unit Master record"}</button>
             </div>
           </div>
         </DialogContent>
