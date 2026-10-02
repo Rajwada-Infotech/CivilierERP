@@ -329,6 +329,7 @@ export default function MaterialRequest() {
         search,
         status: statusFilter,
         projectId: projectFilter ? Number(projectFilter) : undefined,
+        groupBy: "project",
       }),
   });
 
@@ -927,7 +928,7 @@ export default function MaterialRequest() {
                 </CardTitle>
                 {!loadingList && (
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {totalCount} record{totalCount !== 1 ? "s" : ""}
+                    {totalCount} project{totalCount !== 1 ? "s" : ""} · {rows.length} request{rows.length !== 1 ? "s" : ""} on this page
                   </p>
                 )}
               </div>
