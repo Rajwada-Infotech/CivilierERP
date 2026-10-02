@@ -1312,3 +1312,11 @@
 :is(main, [role="dialog"]) :is(form.grid, form .grid) > :is(select, input:not([type="checkbox"]):not([type="radio"])) {
   align-self: center;
 }
+
+/* Short single values in table cells stay on one line (see markNowrapCells
+   in main.tsx). */
+:is(main, [role="dialog"]) table .cell-nowrap {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
