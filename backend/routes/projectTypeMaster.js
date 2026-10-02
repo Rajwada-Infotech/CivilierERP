@@ -1,6 +1,6 @@
-// Project Type master — CRUD over dbo.ProjectTypeMaster (migration 482).
+// Project Type master — CRUD over dbo.ProjectTypeMaster (migration 502).
 //
-// Migration 482 SEEDED five types, which made them look hardcoded from the
+// Migration 502 SEEDED five types, which made them look hardcoded from the
 // application's side: you could not add "Row Housing" or retire one without a
 // deploy. This route makes them ordinary master data.
 //

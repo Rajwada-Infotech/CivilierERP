@@ -1,4 +1,4 @@
--- Migration 496: plot facing becomes master data, with its own premium.
+-- Migration 516: plot facing becomes master data, with its own premium.
 --
 -- dbo.PlotMaster.Facing is free text today, typed into a box. Three problems
 -- follow from that, and the third is the expensive one:
@@ -36,10 +36,10 @@ BEGIN
     UpdatedAt      DATETIME2(0) NULL
   );
   CREATE UNIQUE INDEX UX_PlotFacingMaster_Code ON dbo.PlotFacingMaster(Code) WHERE IsActive = 1;
-  PRINT 'Migration 496: created dbo.PlotFacingMaster.';
+  PRINT 'Migration 516: created dbo.PlotFacingMaster.';
 END
 ELSE
-  PRINT 'Migration 496: dbo.PlotFacingMaster already exists — skipped.';
+  PRINT 'Migration 516: dbo.PlotFacingMaster already exists — skipped.';
 GO
 
 -- The eight compass directions, all at zero premium. Seeded as a starting
@@ -63,6 +63,6 @@ WHERE NOT EXISTS (SELECT 1 FROM dbo.PlotFacingMaster f WHERE f.Code = v.Code);
 GO
 
 DECLARE @Rows INT = (SELECT COUNT(*) FROM dbo.PlotFacingMaster WHERE IsActive = 1);
-PRINT CONCAT('Migration 496 done. Active facings: ', @Rows,
+PRINT CONCAT('Migration 516 done. Active facings: ', @Rows,
              '. All seeded at 0% — set a premium per facing where the project charges one.');
 GO

@@ -57,7 +57,7 @@ interface MatrixUnit {
   HoldMobile: string | null;
   HoldAssignedToName: string | null;
   HoldAssignedToEmail: string | null;
-  // ── plot-only (dbo.PlotMaster, migration 491) ──
+  // ── plot-only (dbo.PlotMaster, migration 511) ──
   // Set when the row came from the plot matrix. Plots have no FloorNo, so
   // this is what the grouping below branches on rather than inferring
   // 'plot' from a missing floor, which a floor-less unit would also satisfy.

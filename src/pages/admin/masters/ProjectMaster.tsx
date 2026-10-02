@@ -47,7 +47,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { useAuth } from "@/contexts/AuthContext";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 
-/** A row of dbo.ProjectTypeMaster (migration 482). The flags are what code
+/** A row of dbo.ProjectTypeMaster (migration 502). The flags are what code
  *  should branch on — never Code or Name. */
 interface ProjectTypeOption {
   Id: number;

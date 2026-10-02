@@ -1,4 +1,4 @@
--- Migration 485: a booking becomes a header with UNIT LINES.
+-- Migration 505: a booking becomes a header with UNIT LINES.
 --
 -- CRM assumes one unit per booking (CrmBooking.UnitId). That holds for a flat,
 -- but a plotted buyer routinely takes 2-3 plots on a SINGLE agreement with one
@@ -82,10 +82,10 @@ BEGIN
   CREATE NONCLUSTERED INDEX IX_CrmBookingUnit_Booking
     ON dbo.CrmBookingUnit(BookingId) INCLUDE (UnitId, AreaSqFt, AllocatedValue) WHERE Status = N'Active';
 
-  PRINT 'Migration 485: created dbo.CrmBookingUnit.';
+  PRINT 'Migration 505: created dbo.CrmBookingUnit.';
 END
 ELSE
-  PRINT 'Migration 485: dbo.CrmBookingUnit already exists — skipped.';
+  PRINT 'Migration 505: dbo.CrmBookingUnit already exists — skipped.';
 GO
 
 -- Backfill: exactly one line per existing booking, from the unit it already
@@ -119,5 +119,5 @@ DECLARE @Orphans  INT = (
   SELECT COUNT(*) FROM dbo.CrmBooking b
   WHERE b.UnitId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingUnit l WHERE l.BookingId = b.Id)
 );
-PRINT CONCAT('Migration 485 done. Bookings with a unit: ', @Bookings, ', lines: ', @Lines, ', bookings still without a line: ', @Orphans, ' (must be 0).');
+PRINT CONCAT('Migration 505 done. Bookings with a unit: ', @Bookings, ', lines: ', @Lines, ', bookings still without a line: ', @Orphans, ' (must be 0).');
 GO

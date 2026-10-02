@@ -26,7 +26,7 @@ const CRM_GST_OUTPUT_ACCOUNT = "GST Output Liability - CRM Sales";
 // crmBookings.js's full-payment gate) — never on cash receipt, since until
 // then the money is a pure liability, not yet earned income.
 const CRM_SALE_INCOME_ACCOUNT = "Sale of Flat/Parking";
-// Seeded by migration 484. Kept strictly separate from the construction head
+// Seeded by migration 504. Kept strictly separate from the construction head
 // above — see postCrmInvoiceToGL for why they must never be pooled.
 const CRM_SALE_LAND_ACCOUNT = "Sale of Land";
 // Stable keys for the two heads above. Names are editable from Account Head

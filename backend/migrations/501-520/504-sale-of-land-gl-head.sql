@@ -1,4 +1,4 @@
--- Migration 484: GL head for recognising income from the sale of LAND.
+-- Migration 504: GL head for recognising income from the sale of LAND.
 --
 -- Land and construction are two different revenue streams and must never
 -- share an income head. The sale of land is outside GST altogether
@@ -17,7 +17,7 @@
 -- collected, and generating the invoice is what moves it —
 -- Dr Advance from Customer / Cr Sale of Land. Which of the two income heads
 -- gets credited is decided by what the booking actually sold (UnitKind on its
--- units, migration 483), never by the project's type.
+-- units, migration 503), never by the project's type.
 
 IF NOT EXISTS (
   SELECT 1 FROM dbo.AccountHeadMaster

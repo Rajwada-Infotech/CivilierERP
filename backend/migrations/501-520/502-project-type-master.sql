@@ -1,4 +1,4 @@
--- Migration 482: Project Type, as a master carrying BEHAVIOUR FLAGS.
+-- Migration 522: Project Type, as a master carrying BEHAVIOUR FLAGS.
 --
 -- CRM has so far assumed one shape of product: a vertical building whose units
 -- stack on floors, are sold one-per-booking, and are always a taxable supply.
@@ -51,10 +51,10 @@ BEGIN
     UpdatedAt           DATETIME2(0) NULL
   );
   CREATE UNIQUE INDEX UX_ProjectTypeMaster_Code ON dbo.ProjectTypeMaster(Code) WHERE IsActive = 1;
-  PRINT 'Migration 482: created dbo.ProjectTypeMaster.';
+  PRINT 'Migration 522: created dbo.ProjectTypeMaster.';
 END
 ELSE
-  PRINT 'Migration 482: dbo.ProjectTypeMaster already exists — skipped.';
+  PRINT 'Migration 522: dbo.ProjectTypeMaster already exists — skipped.';
 GO
 
 -- Seed rows. MERGE-free and idempotent: each is inserted only if its Code is
@@ -76,10 +76,10 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.enterprise') AND name = 'project_type_id')
 BEGIN
   ALTER TABLE dbo.enterprise ADD project_type_id INT NULL;
-  PRINT 'Migration 482: added enterprise.project_type_id.';
+  PRINT 'Migration 522: added enterprise.project_type_id.';
 END
 ELSE
-  PRINT 'Migration 482: enterprise.project_type_id already exists — skipped.';
+  PRINT 'Migration 522: enterprise.project_type_id already exists — skipped.';
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_enterprise_ProjectType')
@@ -92,10 +92,10 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.BlockMaster') AND name = 'ProjectTypeId')
 BEGIN
   ALTER TABLE dbo.BlockMaster ADD ProjectTypeId INT NULL;
-  PRINT 'Migration 482: added BlockMaster.ProjectTypeId (NULL = inherit project).';
+  PRINT 'Migration 522: added BlockMaster.ProjectTypeId (NULL = inherit project).';
 END
 ELSE
-  PRINT 'Migration 482: BlockMaster.ProjectTypeId already exists — skipped.';
+  PRINT 'Migration 522: BlockMaster.ProjectTypeId already exists — skipped.';
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_BlockMaster_ProjectType')
@@ -107,5 +107,5 @@ DECLARE @Untyped INT = (
   SELECT COUNT(*) FROM dbo.enterprise
   WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0 AND project_type_id IS NULL
 );
-PRINT CONCAT('Migration 482 done. ', @Untyped, ' existing project(s) have no type set — they keep todays behaviour (floors, single-unit, taxable) until one is chosen.');
+PRINT CONCAT('Migration 502 done. ', @Untyped, ' existing project(s) have no type set — they keep todays behaviour (floors, single-unit, taxable) until one is chosen.');
 GO

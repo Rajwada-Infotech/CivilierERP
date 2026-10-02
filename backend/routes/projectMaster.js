@@ -309,7 +309,7 @@ router.get("/", cache("project-master", 60, { shared: true }), async (req, res) 
 });
 
 // ── GET /company/:id — fetch compliance fields from linked Company ─────────────
-// The Project Type options the create/edit form offers (migration 482).
+// The Project Type options the create/edit form offers (migration 502).
 //
 // Returns the BEHAVIOUR FLAGS alongside the name, not just id/label, so the
 // form can react to the choice without a second round trip or a hardcoded list

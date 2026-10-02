@@ -10,7 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const { LineStatus, ResaleStatus } = require("../constants/crmStatuses");
 
-const MIG = path.join(__dirname, "..", "migrations", "481-500");
+const MIG = path.join(__dirname, "..", "migrations", "501-520");
 const read = (f) => fs.readFileSync(path.join(MIG, f), "utf8");
 
 // The LAST definition of a CHECK constraint across the migrations is the live
@@ -29,14 +29,14 @@ function checkValues(sources, constraintName) {
 describe("status constants match their CHECK constraints", () => {
   test("LineStatus === CK_CrmBookingUnit_Status", () => {
     const db = checkValues(
-      [read("485-crm-booking-unit-lines.sql"), read("486-crm-unit-resale.sql")],
+      [read("505-crm-booking-unit-lines.sql"), read("506-crm-unit-resale.sql")],
       "CK_CrmBookingUnit_Status",
     );
     expect(Object.values(LineStatus).sort()).toEqual(db);
   });
 
   test("ResaleStatus === CK_CrmUnitResale_Status", () => {
-    const db = checkValues([read("486-crm-unit-resale.sql")], "CK_CrmUnitResale_Status");
+    const db = checkValues([read("506-crm-unit-resale.sql")], "CK_CrmUnitResale_Status");
     expect(Object.values(ResaleStatus).sort()).toEqual(db);
   });
 

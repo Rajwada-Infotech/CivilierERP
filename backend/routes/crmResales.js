@@ -29,6 +29,7 @@
 
 const express = require("express");
 const { getNextDocNumber } = require("../services/docNumber");
+const { resolveResaleFeeGst, GstSetupError } = require("../services/crmGst");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -44,7 +45,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const SELECT = `
   SELECT r.Id, r.PlotId, r.UnitId, r.FromBookingId, r.FromCustomerId, r.ToBookingId, r.ToCustomerId,
          r.ResaleDate, r.AgreedValue, r.OriginalValue,
-         r.DeveloperFeeAmount, r.DeveloperFeeGstAmount,
+         r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, r.DeveloperFeeHsnCode, r.DeveloperFeeGstRate,
          r.Status, r.Notes, r.CreatedAt,
          p.PlotNo, p.PlotName, p.AreaSqFt AS PlotAreaSqFt,
          u.UnitName,
@@ -78,6 +79,18 @@ router.get("/", requirePageRight("crm-resales", "view"), async (req, res) => {
   } catch (e) {
     console.error("[crm-resales] GET:", e.message);
     res.status(500).json({ error: "Failed to load resales" });
+  }
+});
+
+// GET /fee-gst?amount= — what GST the fee will carry, from the GST rules and
+// HSN masters, so the form shows the same figure the server will store.
+router.get("/fee-gst", requirePageRight("crm-resales", "view"), async (req, res) => {
+  try {
+    res.json(await resolveResaleFeeGst(getPool(), req.query.amount));
+  } catch (e) {
+    if (e instanceof GstSetupError) return res.status(400).json({ error: e.message });
+    console.error("[crm-resales] GET /fee-gst:", e.message);
+    res.status(500).json({ error: "Failed to work out the fee GST" });
   }
 });
 
@@ -129,6 +142,15 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
       originalValue = row.AllocatedValue;
     }
 
+    // The fee's GST comes from the masters, never from the request.
+    let feeGst;
+    try {
+      feeGst = await resolveResaleFeeGst(pool, num(b.DeveloperFeeAmount));
+    } catch (e) {
+      if (e instanceof GstSetupError) return res.status(400).json({ error: e.message });
+      throw e;
+    }
+
     const result = await pool.request()
       .input("plot", sql.Int, plotId)
       .input("unit", sql.Int, unitId)
@@ -139,17 +161,19 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
       .input("agreed", sql.Decimal(18, 2), num(b.AgreedValue))
       .input("orig", sql.Decimal(18, 2), originalValue != null ? originalValue : num(b.OriginalValue))
       .input("fee", sql.Decimal(18, 2), num(b.DeveloperFeeAmount))
-      .input("feeGst", sql.Decimal(18, 2), num(b.DeveloperFeeGstAmount))
+      .input("feeGst", sql.Decimal(18, 2), feeGst.gstAmount)
+      .input("feeHsn", sql.VarChar(20), feeGst.hsnCode)
+      .input("feeRate", sql.Decimal(5, 2), feeGst.rate)
       .input("notes", sql.NVarChar(1000), b.Notes || null)
       .input("by", sql.Int, actorId(req))
       .query(`
         INSERT INTO dbo.CrmUnitResale
           (PlotId, UnitId, FromBookingId, FromCustomerId, ToCustomerId, ResaleDate,
-           AgreedValue, OriginalValue, DeveloperFeeAmount, DeveloperFeeGstAmount,
+           AgreedValue, OriginalValue, DeveloperFeeAmount, DeveloperFeeGstAmount, DeveloperFeeHsnCode, DeveloperFeeGstRate,
            Status, Notes, CreatedBy)
         OUTPUT INSERTED.Id
         VALUES (@plot, @unit, @fb, @fc, @tc, @date,
-                @agreed, @orig, @fee, @feeGst,
+                @agreed, @orig, @fee, @feeGst, @feeHsn, @feeRate,
                 N'${ResaleStatus.PENDING}', @notes, @by)
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id });

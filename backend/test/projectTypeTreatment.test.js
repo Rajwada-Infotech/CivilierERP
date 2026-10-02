@@ -81,10 +81,10 @@ describe("bookingSaleTreatment", () => {
 });
 
 describe("LEGACY_DEFAULT", () => {
-  test("an unset project behaves exactly as CRM did before migration 482", () => {
+  test("an unset project behaves exactly as CRM did before migration 502", () => {
     // Nothing was backfilled on the live database, so every pre-existing
     // project resolves to this. It must stay floor-based, single-unit and
-    // taxable, or migration 482 silently changed behaviour for live projects.
+    // taxable, or migration 502 silently changed behaviour for live projects.
     expect(LEGACY_DEFAULT.HasFloors).toBe(true);
     expect(LEGACY_DEFAULT.SellsLand).toBe(false);
     expect(LEGACY_DEFAULT.SellsConstruction).toBe(true);
@@ -93,10 +93,10 @@ describe("LEGACY_DEFAULT", () => {
 });
 
 describe("land kinds come from the master, not a literal", () => {
-  // Migration 492 dropped the CHECK constraint on UnitMaster.UnitKind and made
+  // Migration 512 dropped the CHECK constraint on UnitMaster.UnitKind and made
   // kinds an editable master, which turned the old `kind === "PLOT"` test into
   // a trap: a kind added from the UI as COMMERCIAL_PLOT or FARM_LAND would be
-  // taxed as construction even though it is land. Migration 497 moved the
+  // taxed as construction even though it is land. Migration 517 moved the
   // decision onto an IsLand flag; these pin that it stays there.
   const register = new Set(["PLOT", "COMMERCIAL_PLOT", "FARM_LAND"]);
 

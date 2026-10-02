@@ -93,7 +93,7 @@ async function resolveLandOwnedByBookingCustomer(pool, bookingId) {
   const result = await pool.request().input("bid", sql.Int, bookingId).query(`
     -- Every constructed unit on this booking, not just its primary one.
     --
-    -- This used to read b.UnitId alone. Migration 485 made a booking a header
+    -- This used to read b.UnitId alone. Migration 505 made a booking a header
     -- with CrmBookingUnit lines, so a booking carrying several villas would
     -- have had only its primary unit examined — the rest silently escaping the
     -- works-contract test, and once a CONSTRUCTION_ON_CUSTOMER_LAND rule
@@ -150,7 +150,7 @@ async function resolveLandOwnedByBookingCustomer(pool, bookingId) {
  *
  * This test used to be written out in three places — here, crmParking.js and
  * applicationFormPdf.js — each comparing against the UNIT_PARKING_THRESHOLD
- * constant directly. Once migration 487 made the bands editable master data,
+ * constant directly. Once migration 507 made the bands editable master data,
  * that duplication became a real inconsistency rather than mere repetition:
  * moving the threshold in dbo.CrmGstRule changed the booking's GST while
  * parking pricing and the customer's printed application form carried on using
@@ -179,7 +179,7 @@ async function resolveUnitParkingHsn(pool, bracketBase, opts = {}) {
 /**
  * The Extra Work (extra charges) HSN, from the master.
  *
- * Migration 487 seeded an EXTRA_WORK rule, but every caller kept using the
+ * Migration 507 seeded an EXTRA_WORK rule, but every caller kept using the
  * EXTRA_WORK_HSN_CODE constant directly — so the rule existed and did nothing.
  * The same contradiction as the Unit+Parking bracket: change the rule and the
  * charge keeps its old rate, while the application form keeps PRINTING the old
@@ -247,7 +247,7 @@ async function recalculateBookingGst(pool, bookingId) {
   // byte-for-byte the previous behaviour.
   const bracketBase = split.constructionValue + parkingBase;
 
-  // WHICH HSN applies now comes from dbo.CrmGstRule (migration 487) so the
+  // WHICH HSN applies now comes from dbo.CrmGstRule (migration 507) so the
   // threshold and the works-contract question are editable master data rather
   // than constants in this file. The RATE still comes from dbo.HSN via
   // getHsnRate below — one place for rates, one place for selection.
@@ -369,7 +369,36 @@ async function recalculateBookingGst(pool, bookingId) {
   };
 }
 
+/**
+ * GST on the developer's fee for a plot resale / transfer — the only developer
+ * income in a resale (the land price passes between the buyers, outside GST).
+ *
+ * Which HSN: the RESALE_FEE rule in dbo.CrmGstRule. The rate: that HSN row.
+ * Unlike the unit bracket there is no constant fallback: a fee is a small,
+ * explicit charge, and silently taxing it at 0% because a master row is
+ * missing would be worse than refusing — so a missing rule or HSN row is an
+ * error the caller shows to the user.
+ */
+class GstSetupError extends Error {}
+async function resolveResaleFeeGst(pool, feeAmount) {
+  const fee = Math.round((Number(feeAmount) || 0) * 100) / 100;
+  if (fee <= 0) return { hsnCode: null, rate: 0, gstAmount: 0 };
+  const resolved = await resolveHsnCode(pool, APPLIES_TO.RESALE_FEE, { value: fee });
+  if (!resolved.hsnCode) {
+    throw new GstSetupError("No GST rule is set up for the resale fee — add an active RESALE_FEE rule in the GST rules master.");
+  }
+  const row = (await pool.request().input("code", sql.VarChar(20), resolved.hsnCode)
+    .query("SELECT TOP 1 1 AS x FROM dbo.HSN WHERE HCode = @code AND HStatus = 1")).recordset[0];
+  if (!row) {
+    throw new GstSetupError(`HSN ${resolved.hsnCode} (used for the resale fee) is missing or inactive in the HSN master.`);
+  }
+  const rate = await getHsnRate(pool, resolved.hsnCode);
+  return { hsnCode: resolved.hsnCode, rate, gstAmount: Math.round(fee * rate) / 100 };
+}
+
 module.exports = {
+  resolveResaleFeeGst,
+  GstSetupError,
   resolveUnitParkingHsn,
   resolveLandOwnedByBookingCustomer,
   resolveExtraWorkHsn,

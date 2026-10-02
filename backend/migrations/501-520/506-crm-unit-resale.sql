@@ -1,4 +1,4 @@
--- Migration 486: a plot changing hands — investor resale / assignment.
+-- Migration 506: a plot changing hands — investor resale / assignment.
 --
 -- THE BUSINESS MODEL THIS EXISTS FOR
 -- Plots are sold to investors. The developer then builds villas on them
@@ -35,7 +35,7 @@
 -- head, while DeveloperFeeAmount is the only figure here that may.
 --
 -- WHY CrmBookingUnit GAINS A 'Transferred' STATUS
--- Migration 485 permits one Active line per unit, which is what stops a plot
+-- Migration 505 permits one Active line per unit, which is what stops a plot
 -- being sold twice. A resale is neither a cancellation (nothing was undone --
 -- the original sale stands and the investor was paid) nor a plain re-booking.
 -- The outgoing line becomes 'Transferred', preserving the history and freeing
@@ -87,10 +87,10 @@ BEGIN
   );
   CREATE NONCLUSTERED INDEX IX_CrmUnitResale_Unit ON dbo.CrmUnitResale(UnitId) WHERE IsActive = 1;
   CREATE NONCLUSTERED INDEX IX_CrmUnitResale_FromBooking ON dbo.CrmUnitResale(FromBookingId) WHERE IsActive = 1;
-  PRINT 'Migration 486: created dbo.CrmUnitResale.';
+  PRINT 'Migration 506: created dbo.CrmUnitResale.';
 END
 ELSE
-  PRINT 'Migration 486: dbo.CrmUnitResale already exists — skipped.';
+  PRINT 'Migration 506: dbo.CrmUnitResale already exists — skipped.';
 GO
 
 -- Widen CrmBookingUnit.Status to admit 'Transferred' (see header). T-SQL has no
@@ -105,8 +105,8 @@ BEGIN
   ALTER TABLE dbo.CrmBookingUnit DROP CONSTRAINT CK_CrmBookingUnit_Status;
   ALTER TABLE dbo.CrmBookingUnit WITH NOCHECK
     ADD CONSTRAINT CK_CrmBookingUnit_Status CHECK (Status IN (N'Active', N'Cancelled', N'Transferred'));
-  PRINT 'Migration 486: CrmBookingUnit.Status now admits Transferred.';
+  PRINT 'Migration 506: CrmBookingUnit.Status now admits Transferred.';
 END
 ELSE
-  PRINT 'Migration 486: CrmBookingUnit.Status already admits Transferred — skipped.';
+  PRINT 'Migration 506: CrmBookingUnit.Status already admits Transferred — skipped.';
 GO

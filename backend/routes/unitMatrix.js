@@ -62,7 +62,7 @@ router.get("/blocks", requirePageRight("crm-unit-matrix", "view"), async (req, r
 // a plot is free, which is precisely the question the matrix answers. Same data,
 // correct permission.
 //
-// Plots live in dbo.PlotMaster (migration 491), not UnitMaster, and are held
+// Plots live in dbo.PlotMaster (migration 511), not UnitMaster, and are held
 // through dbo.CrmBookingPlot — so none of the unit query above can see them.
 router.get("/plots", requirePageRight("crm-unit-matrix", "view"), async (req, res) => {
   try {

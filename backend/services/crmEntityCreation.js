@@ -577,27 +577,6 @@ async function rebuildLandSchedule(poolOrTx, bookingId, actorUserId = null) {
   return { rebuilt: true };
 }
 
-// Re-shares a booking's TotalValue across its active lines (plots or units)
-// pro-rata by area — the same allocation booking creation uses. Called
-// whenever TotalValue changes after creation; without it the line values
-// keep the old total, and everything that reads them (the land / built
-// split behind GST and the sale ledger) disagrees with the booking.
-async function reallocateBookingLines(poolOrTx, bookingId, totalValue) {
-  for (const table of ["CrmBookingPlot", "CrmBookingUnit"]) {
-    const lines = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(
-      `SELECT Id, AreaSqFt FROM dbo.${table} WHERE BookingId = @bid AND Status = N'Active' ORDER BY Id`)).recordset;
-    if (!lines.length) continue;
-    const parts = allocateConsideration({
-      lines: lines.map((l) => ({ unitId: l.Id, areaSqFt: l.AreaSqFt })),
-      totalConsideration: Number(totalValue),
-    });
-    for (const part of parts) {
-      await poolOrTx.request().input("id", sql.Int, part.unitId).input("v", sql.Decimal(18, 2), part.allocatedValue)
-        .query(`UPDATE dbo.${table} SET AllocatedValue = @v WHERE Id = @id`);
-    }
-  }
-}
-
 async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
   if (!totalValue || totalValue <= 0) return;
   const plotLine = await poolOrTx.request().input("bid", sql.Int, bookingId)
@@ -1053,7 +1032,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
     bookingId = result.recordset[0].Id;
 
-    // Insert unit lines (Migration 485 support for multi-plot sales)
+    // Insert unit lines (Migration 505 support for multi-plot sales)
     // Primary flag set on the first unit in the array.
     //
     // When staff type a negotiated lump sum, the booking stores THAT total
@@ -1233,6 +1212,6 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, landSaleSchedule, reallocateBookingLines, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
+  generateMilestonesForBooking, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

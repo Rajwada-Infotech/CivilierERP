@@ -1,4 +1,4 @@
--- Migration 483: UnitMaster gains a KIND, plot attributes, and villa lineage.
+-- Migration 503: UnitMaster gains a KIND, plot attributes, and villa lineage.
 --
 -- UnitMaster is flat-shaped today: FloorNo, CarpetAreaSqFt, BuiltUpAreaSqFt,
 -- SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt. None of that describes a plot of
@@ -12,7 +12,7 @@
 -- silently tax land the moment such a project exists; deriving it from the unit
 -- is correct in every case, including mixed, with no special-casing.
 --
--- Project/block type (migration 482) therefore drives UI and defaults only —
+-- Project/block type (migration 502) therefore drives UI and defaults only —
 -- which auto-setup path runs, floor grid vs site map. UnitKind drives money.
 --
 -- PLOT vs VILLA are separate rows, never one row mutating into the other:
@@ -29,10 +29,10 @@ BEGIN
   -- 'FLAT' (the existing, implicit meaning of every current row), 'PLOT', 'VILLA'.
   ALTER TABLE dbo.UnitMaster ADD UnitKind NVARCHAR(20) NOT NULL
     CONSTRAINT DF_UnitMaster_UnitKind DEFAULT (N'FLAT');
-  PRINT 'Migration 483: added UnitMaster.UnitKind (existing rows default to FLAT).';
+  PRINT 'Migration 503: added UnitMaster.UnitKind (existing rows default to FLAT).';
 END
 ELSE
-  PRINT 'Migration 483: UnitMaster.UnitKind already exists — skipped.';
+  PRINT 'Migration 503: UnitMaster.UnitKind already exists — skipped.';
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_UnitMaster_UnitKind')
@@ -60,10 +60,10 @@ BEGIN
     -- the higher of consideration and guideline value, and a multi-plot sale
     -- has to apportion back to each plot at registration time.
     GuidelineRatePerSqFt DECIMAL(18,2) NULL;
-  PRINT 'Migration 483: added plot attribute columns to UnitMaster.';
+  PRINT 'Migration 503: added plot attribute columns to UnitMaster.';
 END
 ELSE
-  PRINT 'Migration 483: UnitMaster plot attributes already exist — skipped.';
+  PRINT 'Migration 503: UnitMaster plot attributes already exist — skipped.';
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_UnitMaster_Kind_Project' AND object_id = OBJECT_ID('dbo.UnitMaster'))
@@ -88,8 +88,8 @@ BEGIN
   );
   CREATE UNIQUE INDEX UX_CrmUnitLineage_Pair ON dbo.CrmUnitLineage(VillaUnitId, PlotUnitId) WHERE IsActive = 1;
   CREATE NONCLUSTERED INDEX IX_CrmUnitLineage_Plot ON dbo.CrmUnitLineage(PlotUnitId) WHERE IsActive = 1;
-  PRINT 'Migration 483: created dbo.CrmUnitLineage (villa <-> plots, many-to-many).';
+  PRINT 'Migration 503: created dbo.CrmUnitLineage (villa <-> plots, many-to-many).';
 END
 ELSE
-  PRINT 'Migration 483: dbo.CrmUnitLineage already exists — skipped.';
+  PRINT 'Migration 503: dbo.CrmUnitLineage already exists — skipped.';
 GO

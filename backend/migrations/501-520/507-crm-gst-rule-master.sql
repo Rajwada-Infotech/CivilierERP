@@ -1,4 +1,4 @@
--- Migration 487: which HSN applies becomes DATA, not code.
+-- Migration 507: which HSN applies becomes DATA, not code.
 --
 -- GST was already half-dynamic. Rates live in dbo.HSN and crmGst.js reads them
 -- through getHsnRate(), so changing a rate is a master edit. But WHICH HSN code
@@ -8,7 +8,7 @@
 --   * When the affordable-housing threshold moves — it has before — that is a
 --     code change and a deploy, not a master edit.
 --   * A villa built on land the CUSTOMER already owns is arguably a works
---     contract at a different rate entirely (see migration 486's business
+--     contract at a different rate entirely (see migration 506's business
 --     model). Expressing that meant adding another branch in code.
 --
 -- This table makes the SELECTION data too, while the rate stays in HSN:
@@ -67,10 +67,10 @@ BEGIN
     UpdatedAt           DATETIME2(0) NULL
   );
   CREATE NONCLUSTERED INDEX IX_CrmGstRule_Lookup ON dbo.CrmGstRule(AppliesTo, Priority) WHERE IsActive = 1;
-  PRINT 'Migration 487: created dbo.CrmGstRule.';
+  PRINT 'Migration 507: created dbo.CrmGstRule.';
 END
 ELSE
-  PRINT 'Migration 487: dbo.CrmGstRule already exists — skipped.';
+  PRINT 'Migration 507: dbo.CrmGstRule already exists — skipped.';
 GO
 
 -- Seed = today's hardcoded behaviour, moved into rows. Idempotent by Name.
@@ -95,6 +95,6 @@ GO
 -- resolver falls back to the ordinary UNIT_PARKING treatment, which is the
 -- behaviour that exists today. Add the row once the finance team confirms.
 DECLARE @Rules INT = (SELECT COUNT(*) FROM dbo.CrmGstRule WHERE IsActive = 1);
-PRINT CONCAT('Migration 487 done. Active GST rules: ', @Rules,
+PRINT CONCAT('Migration 507 done. Active GST rules: ', @Rules,
              '. No CONSTRUCTION_ON_CUSTOMER_LAND rule seeded — add one when the works-contract treatment is confirmed.');
 GO

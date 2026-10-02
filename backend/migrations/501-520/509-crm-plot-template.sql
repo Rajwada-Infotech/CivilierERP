@@ -1,4 +1,4 @@
--- Migration 489: a plot template, so plotted blocks can be laid out too.
+-- Migration 509: a plot template, so plotted blocks can be laid out too.
 --
 -- Auto Project Setup is floor-driven end to end: blocks -> floors
 -- (CrmProjectAutoSetupFloor) -> units per floor. A plotted block has no floors
@@ -11,7 +11,7 @@
 -- SIZES ARE A STARTING POINT, NOT A RULE. Plots in a real layout differ in
 -- size, so DefaultAreaSqFt only seeds the generated rows; each plot is then
 -- edited individually with its own area, dimensions, facing and survey number
--- (migration 483 added those columns). Generating identical plots and refining
+-- (migration 503 added those columns). Generating identical plots and refining
 -- them beats making someone hand-create sixty rows.
 --
 -- One template per block, which is why the unique index is on BlockId alone —
@@ -54,8 +54,8 @@ BEGIN
   );
   CREATE UNIQUE INDEX UX_CrmPlotTemplate_Block ON dbo.CrmProjectAutoSetupPlotTemplate(BlockId) WHERE IsActive = 1;
   CREATE NONCLUSTERED INDEX IX_CrmPlotTemplate_Project ON dbo.CrmProjectAutoSetupPlotTemplate(ProjectId) WHERE IsActive = 1;
-  PRINT 'Migration 489: created dbo.CrmProjectAutoSetupPlotTemplate.';
+  PRINT 'Migration 509: created dbo.CrmProjectAutoSetupPlotTemplate.';
 END
 ELSE
-  PRINT 'Migration 489: dbo.CrmProjectAutoSetupPlotTemplate already exists — skipped.';
+  PRINT 'Migration 509: dbo.CrmProjectAutoSetupPlotTemplate already exists — skipped.';
 GO

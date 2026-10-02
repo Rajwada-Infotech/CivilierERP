@@ -40,7 +40,7 @@ const CrmStatus = {
 // let a rename silently break every query that filters on it, and a newly added
 // status would have no behaviour at all.
 //
-// Must stay identical to CK_CrmBookingUnit_Status (migrations 485 / 486).
+// Must stay identical to CK_CrmBookingUnit_Status (migrations 505 / 506).
 // test/statusConstants.test.js fails if the two drift apart.
 const LineStatus = Object.freeze({
   ACTIVE: 'Active',
@@ -51,7 +51,7 @@ const LineStatus = Object.freeze({
 });
 
 // Status of a resale (dbo.CrmUnitResale). Must stay identical to
-// CK_CrmUnitResale_Status (migration 486) — pinned by the same test.
+// CK_CrmUnitResale_Status (migration 506) — pinned by the same test.
 const ResaleStatus = Object.freeze({
   PENDING: 'Pending',
   APPROVED: 'Approved',

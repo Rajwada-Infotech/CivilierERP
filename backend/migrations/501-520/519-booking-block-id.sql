@@ -1,4 +1,4 @@
--- Migration 499: a booking carries its own BlockId.
+-- Migration 519: a booking carries its own BlockId.
 --
 -- THE PROBLEM
 -- Every Company/Project/Block scope filter in CRM resolves the block by joining
@@ -8,7 +8,7 @@
 --     ... AND um.BlockId = @blockId
 --
 -- A PLOT booking has UnitId NULL by design (plots live in dbo.PlotMaster since
--- migration 491, linked through dbo.CrmBookingPlot), so `um` is NULL, the
+-- migration 511, linked through dbo.CrmBookingPlot), so `um` is NULL, the
 -- predicate is NULL, and the row is dropped. Not an error — the booking simply
 -- is not there. 81 such filters exist across 31 route files, which means a land
 -- sale vanishes from the Booking Register, the Sales Deed list, the Registry and
@@ -31,10 +31,10 @@
 IF COL_LENGTH('dbo.CrmBooking', 'BlockId') IS NULL
 BEGIN
   ALTER TABLE dbo.CrmBooking ADD BlockId INT NULL;
-  PRINT 'Migration 499: added CrmBooking.BlockId.';
+  PRINT 'Migration 519: added CrmBooking.BlockId.';
 END
 ELSE
-  PRINT 'Migration 499: CrmBooking.BlockId already exists — skipped.';
+  PRINT 'Migration 519: CrmBooking.BlockId already exists — skipped.';
 GO
 
 -- Backfill from the unit, for every ordinary booking.
@@ -71,6 +71,6 @@ DECLARE @Miss  INT = (
   WHERE b.BlockId IS NULL
     AND (b.UnitId IS NOT NULL OR EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = b.Id AND bp.Status = N'Active'))
 );
-PRINT CONCAT('Migration 499 done. Bookings: ', @Total, ', BlockId set: ', @Set,
+PRINT CONCAT('Migration 519 done. Bookings: ', @Total, ', BlockId set: ', @Set,
              ', still unresolved despite having a unit or plot: ', @Miss, ' (should be 0).');
 GO

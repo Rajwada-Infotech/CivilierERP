@@ -1,4 +1,4 @@
-// Resolves WHICH HSN code applies, from dbo.CrmGstRule (migration 487).
+// Resolves WHICH HSN code applies, from dbo.CrmGstRule (migration 507).
 //
 // The rate itself is never decided here — it stays in dbo.HSN, read through
 // crmGst.getHsnRate(), so there is exactly one place to change a rate. This

@@ -5,12 +5,12 @@
 //
 //   * PROJECT (or BLOCK) TYPE drives presentation and defaults — whether the
 //     unit matrix shows a floor grid or a site map, which auto-setup path runs,
-//     which masters are even offered. See migration 482.
+//     which masters are even offered. See migration 502.
 //
 //   * UNIT KIND drives money — GST or no GST, and which income head is
-//     credited. See migration 483 and unitSaleTreatment() below.
+//     credited. See migration 503 and unitSaleTreatment() below.
 //
-// Mixing those two is the trap. A mixed township (migration 482's 'MIXED')
+// Mixing those two is the trap. A mixed township (migration 502's 'MIXED')
 // holds both tower and plotted blocks, so a booking there may contain either.
 // Deriving taxability from the project would silently tax land the moment such
 // a project exists. Deriving it from the unit is correct everywhere, including
@@ -22,7 +22,7 @@ const { sql } = require("../db");
 // construction split and the line allocations it came from agree exactly.
 const { round2 } = require("./bookingUnits");
 
-// What an unset type means. Every project that existed before migration 482 has
+// What an unset type means. Every project that existed before migration 502 has
 // project_type_id NULL, and must keep behaving exactly as CRM did then:
 // floor-stacked, one unit per booking, taxable construction. Treated as a real
 // value rather than an error so nothing has to be backfilled on a live system.
@@ -65,7 +65,7 @@ function normaliseRow(row) {
  * The effective type for a block, or for a project when no block is given.
  *
  * A block's own ProjectTypeId wins; NULL there means "inherit the project",
- * which is what every block created before migration 482 has. If neither
+ * which is what every block created before migration 502 has. If neither
  * carries a type, LEGACY_DEFAULT applies.
  *
  * Ids of 0 are legitimate in this database (a historical identity reseed left
@@ -110,10 +110,10 @@ async function getEffectiveType(pool, { projectId = null, blockId = null } = {})
  */
 /**
  * The land register: which unit kinds are land, read from
- * dbo.CrmConstructedAssetKind.IsLand (migration 497).
+ * dbo.CrmConstructedAssetKind.IsLand (migration 517).
  *
  * This replaces a `kind === 'PLOT'` comparison that became unsafe the moment
- * migration 492 dropped the CHECK constraint on UnitMaster.UnitKind and made
+ * migration 512 dropped the CHECK constraint on UnitMaster.UnitKind and made
  * kinds an editable master. A kind added from the UI as COMMERCIAL_PLOT or
  * FARM_LAND would otherwise have been taxed as construction, silently.
  *
@@ -196,16 +196,16 @@ function bookingSaleTreatment(unitKinds = [], landKinds = null) {
  *      into it would push the construction half of a plotted project over the
  *      bracket and silently reprice every villa from 1% to 5%.
  *
- * Derived from the UNIT KIND on the booking's lines (migrations 483/485), never
+ * Derived from the UNIT KIND on the booking's lines (migrations 503/505), never
  * from the project's type — a mixed township holds both plotted and tower
  * blocks, so the project cannot answer this question. See services/projectType.js.
  *
- * Bookings predating migration 485 have no lines; they fall back to the single
+ * Bookings predating migration 505 have no lines; they fall back to the single
  * unit CrmBooking.UnitId points at, which for all existing data is a FLAT.
  */
 async function getBookingLandSplit(pool, bookingId, totalValue) {
   const rows = await pool.request().input("bid", sql.Int, bookingId).query(`
-    -- Land sold as PLOTS. Migration 491 moved plot inventory out of UnitMaster
+    -- Land sold as PLOTS. Migration 511 moved plot inventory out of UnitMaster
     -- into dbo.PlotMaster, with dbo.CrmBookingPlot as its booking line — so a
     -- plot booking has NO CrmBookingUnit row at all. Reading only the unit
     -- lines (as this did before) classified a pure-land booking as construction
@@ -244,7 +244,7 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
     return { landValue: 0, constructionValue: round2(totalValue), isPureLand: false, hasLand: false };
   }
 
-  // Which kinds count as land comes from the master (migration 497), not from
+  // Which kinds count as land comes from the master (migration 517), not from
   // a comparison against the literal 'PLOT'. A kind added as COMMERCIAL_PLOT or
   // FARM_LAND is land the moment it is flagged, with no code change.
   const landKinds = await loadLandKinds(pool);

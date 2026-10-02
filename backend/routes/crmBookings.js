@@ -124,7 +124,7 @@ const BOOKING_SELECT = `
     COALESCE(um.UnitName,   b.UnitNo)    AS UnitNo,
     COALESCE(blk.BlockName, b.BlockName) AS BlockName,
     -- A plot booking has no UnitId, so um is NULL; fall back to the block
-    -- the booking itself carries (migration 499).
+    -- the booking itself carries (migration 519).
     COALESCE(um.BlockId, b.BlockId) AS BlockId,
     b.FloorName,
     COALESCE(um.UnitType,   b.UnitType)  AS UnitType,
