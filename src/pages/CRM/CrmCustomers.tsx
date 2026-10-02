@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 
@@ -742,13 +743,17 @@ const CrmCustomers: React.FC = () => {
 
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Link to Existing Lead (optional)</label>
-            <select value={form.LeadId} onChange={(e) => handleLeadChange(e.target.value)}
-              className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40">
-              <option value="">— Walk-in / New Customer —</option>
-              {availableLeads.map((l: any) => (
-                <option key={l.Id} value={String(l.Id)}>{l.CustomerName} · {l.Mobile} · {l.LeadUid}</option>
-              ))}
-            </select>
+            {/* Searchable: type a lead's name, mobile or lead id. */}
+            <SearchableSelect
+              value={form.LeadId}
+              onChange={(v) => handleLeadChange(v)}
+              placeholder="— Walk-in / New Customer —"
+              searchPlaceholder="Search name, mobile or lead id..."
+              options={[
+                { value: "", label: "— Walk-in / New Customer —" },
+                ...availableLeads.map((l: any) => ({ value: String(l.Id), label: [l.CustomerName, l.Mobile, l.LeadUid].filter(Boolean).join(" · ") })),
+              ]}
+            />
             {form.LeadId && <p className="text-xs text-green-600 mt-1">Name, mobile and email prefilled from lead — only converted leads are listed</p>}
           </div>
 
