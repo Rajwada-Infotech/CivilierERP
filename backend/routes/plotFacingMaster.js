@@ -23,6 +23,33 @@ const adminOnly = allowRoles("admin", "super_admin", "dba");
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
+// One validator for POST and PUT. Before this, a non-numeric premium reached SQL as NaN
+// (a 500), a premium over 999.999 overflowed DECIMAL(6,3), and over-long codes/names were
+// only caught by the database.
+function parseFacingBody(b) {
+  const code = String(b.Code || b.code || "").trim().toUpperCase();
+  const name = String(b.Name || b.name || "").trim();
+  if (!code) return { error: "Code is required" };
+  if (!name) return { error: "Name is required" };
+  if (code.length > 20) return { error: "Code must be 20 characters or fewer" };
+  if (name.length > 50) return { error: "Name must be 50 characters or fewer" };
+  let premium = 0;
+  if (b.PremiumPercent != null && b.PremiumPercent !== "") {
+    premium = Number(b.PremiumPercent);
+    if (!Number.isFinite(premium) || premium < -100 || premium > 999.999) return { error: "Premium must be a number between -100 and 999.999" };
+    premium = Math.round(premium * 1000) / 1000;
+  }
+  let sort = 100;
+  if (b.SortOrder != null && b.SortOrder !== "") {
+    sort = parseInt(b.SortOrder, 10);
+    if (!Number.isInteger(sort) || sort < 0 || sort > 9999) return { error: "Sort order must be a whole number from 0 to 9999" };
+  }
+  return { code, name, premium, sort };
+}
+
+// A unique index on Code (if present) still applies to soft-deleted rows.
+function codeConflict(e) { return e.number === 2627 || e.number === 2601; }
+
 // Usage count is returned alongside each row so the UI can say WHY a facing
 // cannot be removed before anyone tries, rather than only after the refusal.
 const SELECT = `
@@ -46,11 +73,9 @@ router.get("/", async (req, res) => {
 });
 
 router.post("/", adminOnly, async (req, res) => {
-  const b = req.body || {};
-  const code = String(b.Code || b.code || "").trim().toUpperCase();
-  const name = String(b.Name || b.name || "").trim();
-  if (!code) return res.status(400).json({ error: "Code is required" });
-  if (!name) return res.status(400).json({ error: "Name is required" });
+  const parsed = parseFacingBody(req.body || {});
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const { code, name } = parsed;
   try {
     const pool = getPool();
     const dup = await pool.request().input("c", sql.NVarChar(20), code)
@@ -60,13 +85,14 @@ router.post("/", adminOnly, async (req, res) => {
     const r = await pool.request()
       .input("code", sql.NVarChar(20), code)
       .input("name", sql.NVarChar(50), name)
-      .input("prem", sql.Decimal(6, 3), b.PremiumPercent != null && b.PremiumPercent !== "" ? Number(b.PremiumPercent) : 0)
-      .input("sort", sql.Int, b.SortOrder != null && b.SortOrder !== "" ? parseInt(b.SortOrder, 10) : 100)
+      .input("prem", sql.Decimal(6, 3), parsed.premium)
+      .input("sort", sql.Int, parsed.sort)
       .input("by", sql.Int, req.user?.id ?? req.user?.userId ?? null)
       .query(`INSERT INTO dbo.PlotFacingMaster (Code, Name, PremiumPercent, SortOrder, CreatedBy)
               OUTPUT INSERTED.Id VALUES (@code, @name, @prem, @sort, @by)`);
     res.status(201).json({ success: true, id: r.recordset[0].Id });
   } catch (e) {
+    if (codeConflict(e)) return res.status(400).json({ error: "That facing code is already taken (it may belong to a removed facing)" });
     console.error("[plot-facing-master] POST:", e.message);
     res.status(500).json({ error: "Failed to create the facing" });
   }
@@ -76,10 +102,10 @@ router.put("/:id", adminOnly, async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const b = req.body || {};
-  const code = String(b.Code || b.code || "").trim().toUpperCase();
-  const name = String(b.Name || b.name || "").trim();
-  if (!code) return res.status(400).json({ error: "Code is required" });
-  if (!name) return res.status(400).json({ error: "Name is required" });
+  const parsed = parseFacingBody(b);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const { code, name } = parsed;
+  const wantsActive = !(b.IsActive === false || b.IsActive === 0 || b.IsActive === "false");
   try {
     const pool = getPool();
 
@@ -98,6 +124,15 @@ router.put("/:id", adminOnly, async (req, res) => {
         return res.status(400).json({ error: `${used.recordset[0].n} plot(s) use code "${oldCode}" — rename is blocked, but the name and premium can still be changed.` });
     }
 
+    // Deactivating hides the facing from every dropdown, so plots still using it would
+    // show "(not in master)". Same rule as delete.
+    if (!wantsActive) {
+      const inUse = await pool.request().input("c", sql.NVarChar(20), oldCode)
+        .query("SELECT COUNT(*) AS n FROM dbo.PlotMaster WHERE Facing = @c AND IsActive = 1");
+      if (inUse.recordset[0].n > 0)
+        return res.status(400).json({ error: `In use by ${inUse.recordset[0].n} plot(s) — reassign them before deactivating this facing.` });
+    }
+
     const dup = await pool.request().input("c", sql.NVarChar(20), code).input("id", sql.Int, id)
       .query("SELECT TOP 1 Id FROM dbo.PlotFacingMaster WHERE Code = @c AND IsActive = 1 AND Id <> @id");
     if (dup.recordset.length) return res.status(400).json({ error: `Facing code "${code}" already exists` });
@@ -106,9 +141,9 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("id", sql.Int, id)
       .input("code", sql.NVarChar(20), code)
       .input("name", sql.NVarChar(50), name)
-      .input("prem", sql.Decimal(6, 3), b.PremiumPercent != null && b.PremiumPercent !== "" ? Number(b.PremiumPercent) : 0)
-      .input("sort", sql.Int, b.SortOrder != null && b.SortOrder !== "" ? parseInt(b.SortOrder, 10) : 100)
-      .input("active", sql.Bit, b.IsActive === false || b.IsActive === 0 || b.IsActive === "false" ? 0 : 1)
+      .input("prem", sql.Decimal(6, 3), parsed.premium)
+      .input("sort", sql.Int, parsed.sort)
+      .input("active", sql.Bit, wantsActive ? 1 : 0)
       .input("by", sql.Int, req.user?.id ?? req.user?.userId ?? null)
       .query(`UPDATE dbo.PlotFacingMaster
               SET Code = @code, Name = @name, PremiumPercent = @prem, SortOrder = @sort,
@@ -116,6 +151,7 @@ router.put("/:id", adminOnly, async (req, res) => {
               WHERE Id = @id`);
     res.json({ success: true });
   } catch (e) {
+    if (codeConflict(e)) return res.status(400).json({ error: "That facing code is already taken (it may belong to a removed facing)" });
     console.error("[plot-facing-master] PUT:", e.message);
     res.status(500).json({ error: "Failed to update the facing" });
   }

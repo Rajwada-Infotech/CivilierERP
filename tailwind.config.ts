@@ -109,5 +109,5 @@ export default {
       },
     },
   },
-  plugins: [], // Removed tailwindcss-animate to avoid require() error
+  plugins: [require("tailwindcss-animate")],
 } satisfies Config;

@@ -15,7 +15,6 @@ import { usePageRights } from "@/hooks/usePageRights";
 // stuck request on one side can never affect the other — switching tabs is
 // a plain in-memory conditional render, no route change, no reload.
 const API = "/api/crm/project-auto-setup";
-const PROJECTS_API = "/api/unit-master/projects";
 const DROPDOWN_API = "/api/business/dropdown";
 
 type ParkingTemplateRow = { ParkingType: string; Count: string; Charge: string; GstRate: string };
@@ -27,20 +26,15 @@ async function fetchParkingTypes(): Promise<string[]> {
   } catch { return []; }
 }
 
-async function fetchProjects(): Promise<any[]> {
-  try { const r = await fetchWithAuth(PROJECTS_API); return r.ok ? r.json() : []; } catch { return []; }
-}
-// Company is the real top of this hierarchy (dbo.enterprise: business_type
-// 'C' is a Project's business_type 'P' parent via company_id) — same shared
-// dropdown endpoint every other Company->Project chain in the app already
-// uses. fetchProjects above already returns each Project's CompanyId.
-async function fetchCompanies(): Promise<{ id: number; name: string }[]> {
+// Companies and projects from the shared business dropdown. Same query key
+// and shape as CrmProjectAutoSetup.tsx's fetchDropdown, so the two pages
+// share one cache entry — keep the return shape identical.
+async function fetchDropdown(): Promise<{ companies: any[]; projects: any[] }> {
   try {
     const r = await fetchWithAuth(DROPDOWN_API);
-    if (!r.ok) return [];
-    const data = await r.json();
-    return data.companies ?? [];
-  } catch { return []; }
+    if (!r.ok) return { companies: [], projects: [] };
+    return r.json();
+  } catch { return { companies: [], projects: [] }; }
 }
 async function fetchStatus(projectId: string): Promise<any> {
   const r = await fetchWithAuth(`${API}/status?projectId=${projectId}`);
@@ -72,11 +66,12 @@ const CrmProjectAutoSetupParking: React.FC = () => {
   // from the Block/Floor/Unit page's ["crm-auto-project-setup-status", ...]
   // key — no shared cache entry, so nothing here can invalidate/refetch
   // that page's data or vice versa.
-  const { data: companies = [] } = useQuery({ queryKey: ["business-dropdown-companies"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
-  const { data: projects = [] } = useQuery({ queryKey: ["crm-auto-project-setup-parking-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
+  const { data: dropdown } = useQuery({ queryKey: ["crm-business-dropdown"], queryFn: fetchDropdown, staleTime: 5 * 60_000 });
+  const companies = dropdown?.companies || [];
+  const projects = dropdown?.projects || [];
   const { data: parkingTypes = [] } = useQuery<string[]>({ queryKey: ["parking-master-types"], queryFn: fetchParkingTypes, staleTime: 10 * 60_000 });
   const projectsForCompany = useMemo(
-    () => (companyId ? (projects as any[]).filter((p: any) => String(p.CompanyId) === companyId) : []),
+    () => companyId ? (projects as any[]).filter((p: any) => String(p.company_ids || p.company_id || p.CompanyId || "").split(",").includes(companyId)) : [],
     [projects, companyId],
   );
   const { data: status, isLoading: statusLoading } = useQuery({
@@ -265,7 +260,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
           className={inputCls}
         >
           <option value="">Select company</option>
-          {(companies as any[]).map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+          {(companies as any[]).map((c: any) => <option key={c.id || c.Id} value={String(c.id || c.Id)}>{c.name || c.Name}</option>)}
         </select>
       </div>
 
@@ -278,7 +273,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
           className={`${inputCls} ${!companyId ? "opacity-50 cursor-not-allowed" : ""}`}
         >
           <option value="">{companyId ? "Select project" : "Select a Company first"}</option>
-          {projectsForCompany.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+          {projectsForCompany.map((p: any) => <option key={p.id || p.Id} value={String(p.id || p.Id)}>{p.name || p.Name}</option>)}
         </select>
       </div>
 

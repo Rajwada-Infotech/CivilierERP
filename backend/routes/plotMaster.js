@@ -5,6 +5,73 @@ const { getEffectiveType } = require("../services/projectType");
 
 const router = express.Router();
 
+const PAGE = "crm-auto-project-setup";
+const MAX_GRID = 60;
+const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+// "P-2" must come before "P-10". SQL's ORDER BY on a string cannot do that, so the
+// natural ordering is applied here and every consumer of the list gets it.
+function sortPlots(rows) {
+  return rows.sort((a, b) =>
+    collator.compare(a.ProjectName || "", b.ProjectName || "")
+    || collator.compare(a.BlockName || "", b.BlockName || "")
+    || collator.compare(a.PlotName || "", b.PlotName || "")
+    || collator.compare(a.PlotNo || "", b.PlotNo || ""));
+}
+
+function parseId(value) {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// One definition of "what a plot row looks like" for the list AND the detail call.
+// The detail endpoint used to return p.* only, which has no lock columns, so a booked
+// plot opened in the dialog was shown as Available with an Edit button.
+const PLOT_SELECT = `
+  SELECT p.Id, p.ProjectId, e.name AS ProjectName, p.BlockId, b.BlockName,
+         p.PlotNo, p.PlotName, p.SurveyNo, p.AreaSqFt, p.RatePerSqFt,
+         p.PlotWidthFt, p.PlotDepthFt, p.Facing, p.IsCornerPlot, p.RoadWidthFt, p.GuidelineRatePerSqFt,
+         p.GridRow, p.GridCol,
+         p.ConvertedUnitId, p.ConvertedAt, converted.UnitName AS ConvertedUnitName,
+         (SELECT COUNT(*) FROM dbo.PlotAdjacency pa
+            JOIN dbo.PlotMaster o ON o.Id = CASE WHEN pa.PlotId = p.Id THEN pa.AdjacentPlotId ELSE pa.PlotId END
+           WHERE (pa.PlotId = p.Id OR pa.AdjacentPlotId = p.Id) AND o.IsActive = 1) AS AdjacentPlotCount,
+         bk.BookingNo AS LockBookingNo, app.ApplicationNo AS LockApplicationNo, hold.Id AS LockHoldId
+  FROM dbo.PlotMaster p
+  JOIN dbo.enterprise e ON e.id = p.ProjectId
+  JOIN dbo.BlockMaster b ON b.Id = p.BlockId
+  LEFT JOIN dbo.UnitMaster converted ON converted.Id = p.ConvertedUnitId
+  OUTER APPLY (
+    SELECT TOP 1 cb.BookingNo
+    FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking cb ON cb.Id = bp.BookingId
+    WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND cb.IsActive = 1
+      AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+  ) bk
+  OUTER APPLY (
+    SELECT TOP 1 ca.ApplicationNo
+    FROM dbo.CrmApplicationPlot ap JOIN dbo.CrmApplication ca ON ca.Id = ap.ApplicationId
+    WHERE ap.PlotId = p.Id AND ap.Status = N'Active' AND ca.IsActive = 1
+      AND ca.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')
+  ) app
+  OUTER APPLY (
+    SELECT TOP 1 h.Id FROM dbo.CrmInventoryHold h
+    WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id AND h.Status = N'Active'
+      AND h.HoldUntil >= SYSDATETIME()
+  ) hold
+`;
+
+// The Facing column must hold a Code from dbo.PlotFacingMaster, otherwise the master
+// (and the premium that hangs off it) is bypassed by anything that posts free text.
+// A plot may keep a legacy value it already has; it just cannot be set to a new unknown one.
+async function resolveFacing(pool, facing, currentFacing = null) {
+  if (!facing) return { value: null };
+  if (currentFacing && facing === currentFacing) return { value: facing };
+  const found = await pool.request().input("c", sql.NVarChar(20), facing)
+    .query("SELECT TOP 1 Code FROM dbo.PlotFacingMaster WHERE Code = @c AND IsActive = 1");
+  if (!found.recordset.length) return { error: `Facing "${facing}" is not defined in the Facing master` };
+  return { value: found.recordset[0].Code };
+}
+
 router.get("/constructed-kinds", requirePageRight("crm-auto-project-setup", "view"), async (_req, res) => {
   try {
     const result = await getPool().request().query(`
@@ -95,10 +162,9 @@ router.get("/:id/adjacent", requirePageRight("crm-auto-project-setup", "view"), 
       SELECT p.Id, p.PlotNo, p.PlotName, p.AreaSqFt
       FROM dbo.PlotAdjacency pa
       JOIN dbo.PlotMaster p ON p.Id = CASE WHEN pa.PlotId = @plotId THEN pa.AdjacentPlotId ELSE pa.PlotId END
-      WHERE pa.PlotId = @plotId OR pa.AdjacentPlotId = @plotId
-      ORDER BY p.PlotName
+      WHERE (pa.PlotId = @plotId OR pa.AdjacentPlotId = @plotId) AND p.IsActive = 1
     `);
-    res.json(result.recordset);
+    res.json(result.recordset.sort((a, b) => collator.compare(a.PlotName, b.PlotName)));
   } catch (error) {
     console.error("[plot-master] GET adjacency error:", error.message);
     res.status(500).json({ error: error.message });
@@ -118,9 +184,11 @@ router.put("/:id/adjacent", requirePageRight("crm-auto-project-setup", "edit"), 
     `);
     if (!source.recordset.length) return res.status(404).json({ error: "Active unconverted plot not found" });
     if (adjacentIds.length) {
-      const candidates = await pool.request().query(`
+      const candidateRequest = pool.request();
+      adjacentIds.forEach((id, i) => candidateRequest.input(`a${i}`, sql.Int, id));
+      const candidates = await candidateRequest.query(`
         SELECT Id, ProjectId, BlockId FROM dbo.PlotMaster
-        WHERE Id IN (${adjacentIds.join(",")}) AND IsActive = 1 AND ConvertedUnitId IS NULL
+        WHERE Id IN (${adjacentIds.map((_, i) => `@a${i}`).join(",")}) AND IsActive = 1 AND ConvertedUnitId IS NULL
       `);
       const origin = source.recordset[0];
       if (candidates.recordset.length !== adjacentIds.length || candidates.recordset.some((p) => p.ProjectId !== origin.ProjectId || p.BlockId !== origin.BlockId)) {
@@ -149,54 +217,181 @@ router.put("/:id/adjacent", requirePageRight("crm-auto-project-setup", "edit"), 
   }
 });
 
+// Plot-type blocks (not floors/units) so the screen can offer a block that has no plots yet:
+// the filter dropdowns and "Add plot" used to be built from existing plots, which made the
+// very first plot of a new block impossible to create.
+router.get("/blocks", requirePageRight(PAGE, "view"), async (_req, res) => {
+  try {
+    const pool = getPool();
+    const rows = (await pool.request().query(`
+      SELECT b.Id AS BlockId, b.BlockName, b.ProjectId, e.name AS ProjectName
+      FROM dbo.BlockMaster b JOIN dbo.enterprise e ON e.id = b.ProjectId
+      WHERE b.IsActive = 1
+    `)).recordset;
+    const checked = await Promise.all(rows.map(async (row) => {
+      try {
+        const type = await getEffectiveType(pool, { projectId: row.ProjectId, blockId: row.BlockId });
+        return type.HasFloors ? null : row;
+      } catch (error) {
+        console.error("[plot-master] block type lookup failed:", row.BlockId, error.message);
+        return null;
+      }
+    }));
+    res.json(checked.filter(Boolean).sort((a, b) =>
+      collator.compare(a.ProjectName, b.ProjectName) || collator.compare(a.BlockName, b.BlockName)));
+  } catch (error) {
+    console.error("[plot-master] GET blocks error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Grid size + neighbour pairs for one block. Plot positions travel with the normal plot list.
+router.get("/layout/:blockId", requirePageRight(PAGE, "view"), async (req, res) => {
+  const blockId = parseId(req.params.blockId);
+  if (blockId === null) return res.status(400).json({ error: "Invalid block id" });
+  try {
+    const pool = getPool();
+    const layout = await pool.request().input("b", sql.Int, blockId)
+      .query("SELECT GridRows, GridCols FROM dbo.PlotBlockLayout WHERE BlockId = @b");
+    const adjacency = await pool.request().input("b", sql.Int, blockId).query(`
+      SELECT pa.PlotId, pa.AdjacentPlotId
+      FROM dbo.PlotAdjacency pa
+      JOIN dbo.PlotMaster a ON a.Id = pa.PlotId AND a.IsActive = 1
+      JOIN dbo.PlotMaster c ON c.Id = pa.AdjacentPlotId AND c.IsActive = 1
+      WHERE a.BlockId = @b AND c.BlockId = @b
+    `);
+    res.json({
+      BlockId: blockId,
+      GridRows: layout.recordset[0]?.GridRows ?? null,
+      GridCols: layout.recordset[0]?.GridCols ?? null,
+      Adjacency: adjacency.recordset,
+    });
+  } catch (error) {
+    console.error("[plot-master] GET layout error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Saves the whole matrix of one block in one transaction: grid size, every plot's cell, and
+// (optionally) the full neighbour set. Plots left out of Placements become "unplaced".
+// Adjacency is only replaced when the key is present, so a client that never loaded the
+// links cannot wipe them by saving positions.
+router.put("/layout/:blockId", requirePageRight(PAGE, "edit"), async (req, res) => {
+  const blockId = parseId(req.params.blockId);
+  if (blockId === null) return res.status(400).json({ error: "Invalid block id" });
+  const gridRows = Number(req.body?.GridRows);
+  const gridCols = Number(req.body?.GridCols);
+  if (![gridRows, gridCols].every((n) => Number.isInteger(n) && n >= 1 && n <= MAX_GRID)) {
+    return res.status(400).json({ error: `Rows and columns must be whole numbers from 1 to ${MAX_GRID}` });
+  }
+  if (!Array.isArray(req.body?.Placements)) return res.status(400).json({ error: "Placements are required" });
+
+  try {
+    const pool = getPool();
+    const block = await pool.request().input("b", sql.Int, blockId)
+      .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @b AND IsActive = 1");
+    if (!block.recordset.length) return res.status(404).json({ error: "Block not found" });
+
+    const plotRows = (await pool.request().input("b", sql.Int, blockId)
+      .query("SELECT Id, ConvertedUnitId FROM dbo.PlotMaster WHERE BlockId = @b AND IsActive = 1")).recordset;
+    const plotById = new Map(plotRows.map((row) => [row.Id, row]));
+
+    const placements = [];
+    const seenPlots = new Set();
+    const seenCells = new Set();
+    for (const item of req.body.Placements) {
+      const id = Number(item?.Id), row = Number(item?.Row), col = Number(item?.Col);
+      if (!plotById.has(id)) return res.status(400).json({ error: `Plot ${item?.Id} is not an active plot of this block` });
+      if (seenPlots.has(id)) return res.status(400).json({ error: "A plot was placed twice" });
+      if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || col < 0 || row >= gridRows || col >= gridCols) {
+        return res.status(400).json({ error: "A plot was placed outside the grid" });
+      }
+      const cell = `${row}:${col}`;
+      if (seenCells.has(cell)) return res.status(400).json({ error: "Two plots were placed in the same cell" });
+      seenPlots.add(id); seenCells.add(cell);
+      placements.push({ id, row, col });
+    }
+
+    let pairs = null;
+    if (Array.isArray(req.body?.Adjacency)) {
+      pairs = new Map();
+      for (const pair of req.body.Adjacency) {
+        const a = Number(pair?.[0]), b = Number(pair?.[1]);
+        if (!plotById.has(a) || !plotById.has(b) || a === b) {
+          return res.status(400).json({ error: "Neighbours must be two different active plots of this block" });
+        }
+        if (plotById.get(a).ConvertedUnitId || plotById.get(b).ConvertedUnitId) {
+          return res.status(400).json({ error: "Converted plots cannot have neighbours" });
+        }
+        pairs.set(`${Math.min(a, b)}-${Math.max(a, b)}`, [Math.min(a, b), Math.max(a, b)]);
+      }
+    }
+
+    const by = req.user?.userId || null;
+    const tx = pool.transaction();
+    await tx.begin();
+    let finished = false;
+    try {
+      const upsert = await tx.request().input("b", sql.Int, blockId).input("r", sql.Int, gridRows).input("c", sql.Int, gridCols).input("by", sql.Int, by)
+        .query("UPDATE dbo.PlotBlockLayout SET GridRows = @r, GridCols = @c, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE BlockId = @b");
+      if (!upsert.rowsAffected[0]) {
+        await tx.request().input("b", sql.Int, blockId).input("r", sql.Int, gridRows).input("c", sql.Int, gridCols).input("by", sql.Int, by)
+          .query("INSERT INTO dbo.PlotBlockLayout (BlockId, GridRows, GridCols, UpdatedBy) VALUES (@b, @r, @c, @by)");
+      }
+      // Clear first so a swap never trips the unique-cell index half-way through.
+      await tx.request().input("b", sql.Int, blockId)
+        .query("UPDATE dbo.PlotMaster SET GridRow = NULL, GridCol = NULL WHERE BlockId = @b AND IsActive = 1 AND (GridRow IS NOT NULL OR GridCol IS NOT NULL)");
+      for (const item of placements) {
+        await tx.request().input("id", sql.Int, item.id).input("r", sql.Int, item.row).input("c", sql.Int, item.col)
+          .query("UPDATE dbo.PlotMaster SET GridRow = @r, GridCol = @c WHERE Id = @id");
+      }
+      if (pairs) {
+        await tx.request().input("b", sql.Int, blockId).query(`
+          DELETE FROM dbo.PlotAdjacency
+          WHERE PlotId IN (SELECT Id FROM dbo.PlotMaster WHERE BlockId = @b)
+             OR AdjacentPlotId IN (SELECT Id FROM dbo.PlotMaster WHERE BlockId = @b)
+        `);
+        for (const [left, right] of pairs.values()) {
+          await tx.request().input("l", sql.Int, left).input("r", sql.Int, right).input("by", sql.Int, by)
+            .query("INSERT INTO dbo.PlotAdjacency (PlotId, AdjacentPlotId, CreatedBy, CreatedAt) VALUES (@l, @r, @by, SYSDATETIME())");
+        }
+      }
+      await tx.commit();
+      finished = true;
+      res.json({ success: true, placed: placements.length, neighbourPairs: pairs ? pairs.size : undefined });
+    } catch (error) {
+      if (!finished) { try { await tx.rollback(); } catch { /* already aborted */ } }
+      throw error;
+    }
+  } catch (error) {
+    if (error.number === 2627 || error.number === 2601) return res.status(409).json({ error: "Two plots ended up in the same cell - reload and try again" });
+    console.error("[plot-master] PUT layout error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Land inventory only. Constructed assets are intentionally absent here and
 // continue to be served by Unit Master after a conversion.
-router.get("/", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+router.get("/", requirePageRight(PAGE, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
     const where = ["p.IsActive = 1"];
     if (req.query.projectId != null) {
-      request.input("projectId", sql.Int, Number(req.query.projectId));
+      const projectId = parseId(req.query.projectId);
+      if (projectId === null) return res.status(400).json({ error: "Invalid projectId" });
+      request.input("projectId", sql.Int, projectId);
       where.push("p.ProjectId = @projectId");
     }
     if (req.query.blockId != null) {
-      request.input("blockId", sql.Int, Number(req.query.blockId));
+      const blockId = parseId(req.query.blockId);
+      if (blockId === null) return res.status(400).json({ error: "Invalid blockId" });
+      request.input("blockId", sql.Int, blockId);
       where.push("p.BlockId = @blockId");
     }
     if (req.query.available === "1") where.push("p.ConvertedUnitId IS NULL");
-    const result = await request.query(`
-      SELECT p.Id, p.ProjectId, e.name AS ProjectName, p.BlockId, b.BlockName,
-             p.PlotNo, p.PlotName, p.SurveyNo, p.AreaSqFt, p.RatePerSqFt,
-             p.PlotWidthFt, p.PlotDepthFt, p.Facing, p.IsCornerPlot, p.RoadWidthFt, p.GuidelineRatePerSqFt,
-             p.ConvertedUnitId, p.ConvertedAt, converted.UnitName AS ConvertedUnitName,
-             (SELECT COUNT(*) FROM dbo.PlotAdjacency pa WHERE pa.PlotId = p.Id OR pa.AdjacentPlotId = p.Id) AS AdjacentPlotCount,
-             bk.BookingNo AS LockBookingNo, app.ApplicationNo AS LockApplicationNo, hold.Id AS LockHoldId
-      FROM dbo.PlotMaster p
-      JOIN dbo.enterprise e ON e.id = p.ProjectId
-      JOIN dbo.BlockMaster b ON b.Id = p.BlockId
-      LEFT JOIN dbo.UnitMaster converted ON converted.Id = p.ConvertedUnitId
-      OUTER APPLY (
-        SELECT TOP 1 cb.BookingNo
-        FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking cb ON cb.Id = bp.BookingId
-        WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND cb.IsActive = 1
-          AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
-      ) bk
-      OUTER APPLY (
-        SELECT TOP 1 ca.ApplicationNo
-        FROM dbo.CrmApplicationPlot ap JOIN dbo.CrmApplication ca ON ca.Id = ap.ApplicationId
-        WHERE ap.PlotId = p.Id AND ap.Status = N'Active' AND ca.IsActive = 1
-          AND ca.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')
-      ) app
-      OUTER APPLY (
-        SELECT TOP 1 h.Id FROM dbo.CrmInventoryHold h
-        WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id AND h.Status = N'Active'
-          AND h.HoldUntil >= SYSDATETIME()
-      ) hold
-      WHERE ${where.join(" AND ")}
-      ORDER BY e.name, b.BlockName, p.PlotName
-    `);
-    res.json(result.recordset);
+    const result = await request.query(`${PLOT_SELECT} WHERE ${where.join(" AND ")}`);
+    res.json(sortPlots(result.recordset));
   } catch (error) {
     console.error("[plot-master] GET error:", error.message);
     res.status(500).json({ error: error.message });
@@ -246,6 +441,9 @@ router.post("/", requirePageRight("crm-auto-project-setup", "create"), async (re
     if (!block.recordset.length) return res.status(400).json({ error: "Select an active block belonging to the project" });
     const type = await getEffectiveType(pool, { projectId, blockId });
     if (type.HasFloors) return res.status(400).json({ error: "This block uses floors and units, not Plot Master" });
+    const facingCheck = await resolveFacing(pool, value.facing);
+    if (facingCheck.error) return res.status(400).json({ error: facingCheck.error });
+    value.facing = facingCheck.value;
     const result = await pool.request()
       .input("projectId", sql.Int, projectId).input("blockId", sql.Int, blockId).input("plotNo", sql.NVarChar(50), value.plotNo).input("plotName", sql.NVarChar(100), value.plotName)
       .input("surveyNo", sql.NVarChar(100), value.surveyNo).input("area", sql.Decimal(18, 2), value.AreaSqFt).input("rate", sql.Decimal(18, 2), value.RatePerSqFt)
@@ -263,18 +461,12 @@ router.post("/", requirePageRight("crm-auto-project-setup", "create"), async (re
   }
 });
 
-router.get("/:id", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid plot id" });
+router.get("/:id", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid plot id" });
   try {
-    const result = await getPool().request().input("id", sql.Int, id).input("by", sql.Int, req.user?.userId || null).query(`
-      SELECT p.*, e.name AS ProjectName, b.BlockName, u.UnitName AS ConvertedUnitName
-      FROM dbo.PlotMaster p
-      JOIN dbo.enterprise e ON e.id = p.ProjectId
-      JOIN dbo.BlockMaster b ON b.Id = p.BlockId
-      LEFT JOIN dbo.UnitMaster u ON u.Id = p.ConvertedUnitId
-      WHERE p.Id = @id AND p.IsActive = 1
-    `);
+    const result = await getPool().request().input("id", sql.Int, id)
+      .query(`${PLOT_SELECT} WHERE p.Id = @id AND p.IsActive = 1`);
     if (!result.recordset.length) return res.status(404).json({ error: "Plot not found" });
     res.json(result.recordset[0]);
   } catch (error) {
@@ -291,7 +483,7 @@ router.put("/:id", requirePageRight("crm-auto-project-setup", "edit"), async (re
   try {
     const pool = getPool();
     const editable = await pool.request().input("id", sql.Int, id).query(`
-      SELECT p.Id, p.BlockId
+      SELECT p.Id, p.BlockId, p.Facing
       FROM dbo.PlotMaster p
       WHERE p.Id = @id AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.PlotId = p.Id AND bp.Status = N'Active')
@@ -302,6 +494,9 @@ router.put("/:id", requirePageRight("crm-auto-project-setup", "edit"), async (re
     const duplicate = await pool.request().input("id", sql.Int, id).input("blockId", sql.Int, editable.recordset[0].BlockId).input("plotNo", sql.NVarChar(50), value.plotNo)
       .query("SELECT TOP 1 Id FROM dbo.PlotMaster WHERE BlockId = @blockId AND PlotNo = @plotNo AND IsActive = 1 AND Id <> @id");
     if (duplicate.recordset.length) return res.status(409).json({ error: "Another active plot in this block already uses this plot number" });
+    const facingCheck = await resolveFacing(pool, value.facing, editable.recordset[0].Facing);
+    if (facingCheck.error) return res.status(400).json({ error: facingCheck.error });
+    value.facing = facingCheck.value;
     const updated = await pool.request()
       .input("id", sql.Int, id).input("plotNo", sql.NVarChar(50), value.plotNo).input("plotName", sql.NVarChar(100), value.plotName)
       .input("surveyNo", sql.NVarChar(100), value.surveyNo).input("area", sql.Decimal(18, 2), value.AreaSqFt).input("rate", sql.Decimal(18, 2), value.RatePerSqFt)
@@ -321,21 +516,37 @@ router.put("/:id", requirePageRight("crm-auto-project-setup", "edit"), async (re
   }
 });
 
-router.delete("/:id", requirePageRight("crm-auto-project-setup", "delete"), async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid plot id" });
+router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid plot id" });
   try {
-    const result = await getPool().request().input("id", sql.Int, id).query(`
-      UPDATE p
-      SET IsActive = 0, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-      FROM dbo.PlotMaster p
-      WHERE p.Id = @id AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.PlotId = p.Id AND bp.Status = N'Active')
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmApplicationPlot ap WHERE ap.PlotId = p.Id AND ap.Status = N'Active')
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id AND h.Status = N'Active' AND h.HoldUntil >= SYSDATETIME())
-    `);
-    if (!result.rowsAffected[0]) return res.status(409).json({ error: "Only available, unconverted plots can be deleted" });
-    res.json({ success: true });
+    const pool = getPool();
+    const tx = pool.transaction();
+    await tx.begin();
+    let finished = false;
+    try {
+      // @by was referenced but never bound, so every delete failed with "Must declare the scalar variable".
+      const result = await tx.request().input("id", sql.Int, id).input("by", sql.Int, req.user?.userId || null).query(`
+        UPDATE p
+        SET IsActive = 0, GridRow = NULL, GridCol = NULL, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+        FROM dbo.PlotMaster p
+        WHERE p.Id = @id AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+          AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.PlotId = p.Id AND bp.Status = N'Active')
+          AND NOT EXISTS (SELECT 1 FROM dbo.CrmApplicationPlot ap WHERE ap.PlotId = p.Id AND ap.Status = N'Active')
+          AND NOT EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id AND h.Status = N'Active' AND h.HoldUntil >= SYSDATETIME())
+      `);
+      if (!result.rowsAffected[0]) {
+        await tx.rollback(); finished = true;
+        return res.status(409).json({ error: "Only available, unconverted plots can be deleted" });
+      }
+      await tx.request().input("id", sql.Int, id)
+        .query("DELETE FROM dbo.PlotAdjacency WHERE PlotId = @id OR AdjacentPlotId = @id");
+      await tx.commit(); finished = true;
+      res.json({ success: true });
+    } catch (error) {
+      if (!finished) { try { await tx.rollback(); } catch { /* already aborted */ } }
+      throw error;
+    }
   } catch (error) {
     console.error("[plot-master] DELETE error:", error.message);
     res.status(500).json({ error: error.message });

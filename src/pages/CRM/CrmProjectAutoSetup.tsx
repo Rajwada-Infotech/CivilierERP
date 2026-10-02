@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -17,7 +17,7 @@ const EMPTY_ITEMS: any[] = [];
 
 type NamingScheme = "Alphabetical" | "Numeric" | "Custom";
 
-// Unit Types come from Unit Composition (dbo.RoomLayoutType) — only types
+// Unit Types come from Unit Composition (dbo.RoomLayoutType) â€” only types
 // with a defined room layout are offered for a new pick (see unitTypeOptions),
 // since every generated unit's rooms are built from its layout.
 function firstPickableType(types: LayoutType[]): string {
@@ -35,27 +35,20 @@ async function fetchApplicablePlans(projectId: string): Promise<PaymentPlan[]> {
   } catch { return []; }
 }
 
-async function fetchProjects(): Promise<any[]> {
-  try { const r = await fetchWithAuth(PROJECTS_API); return r.ok ? r.json() : []; } catch { return []; }
-}
-// Company is the real top of this hierarchy (dbo.enterprise: business_type
-// 'C' is a Project's business_type 'P' parent via company_id) — same shared
-// dropdown endpoint every other Company->Project chain in the app already
-// uses. fetchProjects above already returns each Project's CompanyId.
-async function fetchCompanies(): Promise<{ id: number; name: string }[]> {
+async function fetchDropdown(): Promise<{ companies: any[]; projects: any[] }> {
   try {
     const r = await fetchWithAuth(DROPDOWN_API);
-    if (!r.ok) return [];
-    const data = await r.json();
-    return data.companies ?? [];
-  } catch { return []; }
+    if (!r.ok) return { companies: [], projects: [] };
+    return r.json();
+  } catch { return { companies: [], projects: [] }; }
 }
+
 async function fetchStatus(projectId: string): Promise<any> {
   const r = await fetchWithAuth(`${API}/status?projectId=${projectId}`);
   return r.ok ? r.json() : null;
 }
 
-// A-Z, then AA, AB, ... for anything beyond 26 — same wrap-around scheme
+// A-Z, then AA, AB, ... for anything beyond 26 â€” same wrap-around scheme
 // spreadsheet columns use, so it stays readable at any block count.
 function alphabeticalName(index: number): string {
   let n = index + 1;
@@ -68,7 +61,7 @@ function alphabeticalName(index: number): string {
   return name;
 }
 
-// Skips any candidate name already taken (case-insensitive) — so suggesting
+// Skips any candidate name already taken (case-insensitive) â€” so suggesting
 // names for "Add More Blocks" never re-offers e.g. "A1" if a Block named
 // "A1" (or "a1") already exists on this project, no matter how far it has to
 // walk the sequence to find the next free one. Custom scheme has no
@@ -77,7 +70,7 @@ function generateNames(count: number, scheme: NamingScheme, existingLower?: Set<
   if (scheme === "Custom") return Array.from({ length: count }, () => "");
   const names: string[] = [];
   let i = 0;
-  let guard = 0; // safety valve — never loop forever even in a pathological all-taken case
+  let guard = 0; // safety valve â€” never loop forever even in a pathological all-taken case
   while (names.length < count && guard < count + 10000) {
     guard++;
     const candidate = scheme === "Alphabetical" ? alphabeticalName(i) : String(i + 1);
@@ -103,11 +96,11 @@ const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 b
 const labelCls = "text-xs text-muted-foreground block mb-1";
 const cardCls = "rounded-xl border border-border p-4 space-y-3";
 
-// Consistent section header across the Blocks/Floors/Units cards — a small
+// Consistent section header across the Blocks/Floors/Units cards â€” a small
 // colored icon badge instead of a bare icon, so the three sections read as
 // distinct, color-coded areas of one page rather than a numbered "Step 1/2/3"
 // wizard (this is a resumable, all-editable dashboard now, not a strict
-// linear flow — the label shouldn't pretend otherwise).
+// linear flow â€” the label shouldn't pretend otherwise).
 const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; title: string; done?: boolean; right?: React.ReactNode }> =
   ({ icon: Icon, colorClass, title, done, right }) => (
     <div className="flex items-center gap-2">
@@ -121,9 +114,9 @@ const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; tit
   );
 
 
-// ── Plot Layout (plotted projects) ──────────────────────────────────────────
+// â”€â”€ Plot Layout (plotted projects) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // The floor-driven step above cannot describe a plotted block: there are no
-// floors to hang units off. This is its counterpart — one template per BLOCK,
+// floors to hang units off. This is its counterpart â€” one template per BLOCK,
 // because in a plotted development the block IS the layout.
 //
 // The sizes here SEED the generated plots; they are not a claim that every plot
@@ -188,7 +181,7 @@ const PlotLayoutStep: React.FC<{
       // block is completed without anyone wondering why the count is short.
       toast.success(
         `${body.created} plot(s) created in ${b.BlockName}` +
-          (body.skipped?.length ? ` — ${body.skipped.length} already existed` : ""),
+          (body.skipped?.length ? ` â€” ${body.skipped.length} already existed` : ""),
       );
       onChanged();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
@@ -203,7 +196,7 @@ const PlotLayoutStep: React.FC<{
         done={blocks.some((b) => b.PlotTemplate?.IsGenerated)}
       />
       <p className="text-[11px] text-muted-foreground -mt-1">
-        {projectTypeName ? `${projectTypeName} — no floors. ` : ""}
+        {projectTypeName ? `${projectTypeName} â€” no floors. ` : ""}
         Plots are laid out per block. These sizes seed every plot; adjust each
         plot&apos;s own area, dimensions, facing and survey number afterwards in Plot Master.
       </p>
@@ -257,13 +250,13 @@ const PlotLayoutStep: React.FC<{
                   {canEdit && (
                     <button onClick={() => save(b)} disabled={working}
                       className="px-3 h-8 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40">
-                      {working ? "Saving…" : "Save layout"}
+                      {working ? "Savingâ€¦" : "Save layout"}
                     </button>
                   )}
                   {canCreate && t && (
                     <button onClick={() => generate(b)} disabled={working}
                       className="px-3 h-8 text-xs bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
-                      {working ? "Generating…" : `Generate ${t.PlotCount} plot(s)`}
+                      {working ? "Generatingâ€¦" : `Generate ${t.PlotCount} plot(s)`}
                     </button>
                   )}
                 </div>
@@ -281,10 +274,10 @@ const PlotLayoutStep: React.FC<{
   );
 };
 
-// ── Plot Block Expand Row ───────────────────────────────────────────────────
+// â”€â”€ Plot Block Expand Row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Wraps PlotBlockBrowser with its own expand/collapse toggle. Exists as a
 // separate component (not inlined into .map()) because React requires hooks
-// to be called unconditionally at the top level of a component — calling
+// to be called unconditionally at the top level of a component â€” calling
 // useState inside a map callback violates the Rules of Hooks.
 const PlotBlockExpandRow: React.FC<{
   block: any;
@@ -317,8 +310,8 @@ const PlotBlockExpandRow: React.FC<{
   );
 };
 
-// ── Plot Block Browser ──────────────────────────────────────────────────────
-// Shows the generated plots for a plotted block in a card grid — the same
+// â”€â”€ Plot Block Browser â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Shows the generated plots for a plotted block in a card grid â€” the same
 // "browse what was generated" experience that BlockFloorTree + FloorUnitList
 // provides for floored projects. Fetches on first mount via the new
 // GET /blocks/:blockId/plots endpoint (no FloorId exists for plots).
@@ -363,15 +356,15 @@ const PlotBlockBrowser: React.FC<{
   return (
     <div className="ml-6 pl-3 border-l border-border pb-1.5">
       {loading ? (
-        <div className="text-[11px] text-muted-foreground py-1">Loading plots…</div>
+        <div className="text-[11px] text-muted-foreground py-1">Loading plotsâ€¦</div>
       ) : !plots?.length ? (
-        <div className="text-[11px] text-muted-foreground py-1">No plots found — try refreshing.</div>
+        <div className="text-[11px] text-muted-foreground py-1">No plots found â€” try refreshing.</div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5 py-1">
           {plots.map((u) => {
-            const lockReason = u.LockBookingNo ? `Booked — ${u.LockBookingNo}`
+            const lockReason = u.LockBookingNo ? `Booked â€” ${u.LockBookingNo}`
               : u.LockHoldId ? "On hold"
-              : u.LockApplicationNo ? `Applied — ${u.LockApplicationNo}`
+              : u.LockApplicationNo ? `Applied â€” ${u.LockApplicationNo}`
               : null;
             const isExpanded = expandedId === u.Id;
             const dotColor = u.LockBookingNo ? "bg-red-500" : u.LockHoldId ? "bg-amber-500" : u.LockApplicationNo ? "bg-amber-500" : "bg-green-500";
@@ -385,9 +378,9 @@ const PlotBlockBrowser: React.FC<{
                   <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} title={lockReason || "Available"} />
                 </div>
                 <div className="text-muted-foreground truncate">
-                  {u.AreaSqFt ? `${u.AreaSqFt} sq ft` : "—"}
-                  {u.RatePerSqFt ? ` · ₹${Number(u.RatePerSqFt).toLocaleString("en-IN")}/sqft` : ""}
-                  {u.Facing ? ` · ${u.Facing}` : ""}
+                  {u.AreaSqFt ? `${u.AreaSqFt} sq ft` : "â€”"}
+                  {u.RatePerSqFt ? ` Â· â‚¹${Number(u.RatePerSqFt).toLocaleString("en-IN")}/sqft` : ""}
+                  {u.Facing ? ` Â· ${u.Facing}` : ""}
                 </div>
                 {isExpanded && (
                   <div onClick={(e) => e.stopPropagation()} className="mt-1.5 pt-1.5 border-t border-border/60 space-y-1.5">
@@ -404,7 +397,7 @@ const PlotBlockBrowser: React.FC<{
                       <a href="/crm/setup/plot-master" className="text-primary hover:underline">Open Plot Master</a>
                       <button onClick={() => handleDelete(u)} disabled={!!lockReason || deletingId === u.Id}
                         className="text-red-600 hover:underline disabled:opacity-40 disabled:no-underline">
-                        {deletingId === u.Id ? "Deleting…" : "Delete"}
+                        {deletingId === u.Id ? "Deletingâ€¦" : "Delete"}
                       </button>
                     </div>
                   </div>
@@ -426,11 +419,11 @@ const CrmProjectAutoSetup: React.FC = () => {
   const rights = usePageRights("crm-auto-project-setup");
   // Top-level toggle between this page's Block/Floor/Unit wizard and the
   // fully separate Parking Setup component (CrmProjectAutoSetupParking.tsx).
-  // Plain in-memory state, not a route — switching tabs never reloads or
+  // Plain in-memory state, not a route â€” switching tabs never reloads or
   // refetches anything on the other side, and Parking keeps its own
   // Project selection/state entirely, so nothing here is shared with it.
   const [activeTab, setActiveTab] = useState<"setup" | "parking">("setup");
-  // Strict Company -> Project gate — a Project can only be picked once its
+  // Strict Company -> Project gate â€” a Project can only be picked once its
   // Company is chosen, matching the same cascade now enforced in
   // BlockMaster.tsx/UnitMaster.tsx/ParkingMaster.tsx/ParkingSlotMaster.tsx.
   const [companyId, setCompanyId] = useState("");
@@ -445,23 +438,23 @@ const CrmProjectAutoSetup: React.FC = () => {
   const [editingBlockId, setEditingBlockId] = useState<number | null>(null);
   const [editingBlockName, setEditingBlockName] = useState("");
   // The "Add More Blocks" form only opens on demand once Blocks already
-  // exist — always-open was cluttering the card with a full form nobody
+  // exist â€” always-open was cluttering the card with a full form nobody
   // was using yet. Starts open for a brand-new project (nothing to add
   // "more" to) and auto-collapses again after a successful add.
   const [showAddBlockForm, setShowAddBlockForm] = useState(false);
   // Rename/delete on Blocks and Floors are locked behind an explicit "Edit"
-  // toggle rather than always live on hover — someone just visiting to see
-  // the project plan shouldn't be greeted by pencils and × buttons on every
+  // toggle rather than always live on hover â€” someone just visiting to see
+  // the project plan shouldn't be greeted by pencils and Ã— buttons on every
   // chip; editing is a deliberate mode you step into and back out of.
   const [blocksEditMode, setBlocksEditMode] = useState(false);
   const [floorsEditMode, setFloorsEditMode] = useState(false);
-  // The Block→Floor→Unit drill-down tree appears in FOUR separate places on
+  // The Blockâ†’Floorâ†’Unit drill-down tree appears in FOUR separate places on
   // this page (the always-on overview card, the Blocks section, the Floor
-  // Plan section, and Unit Types & Generation) — each needs its OWN
+  // Plan section, and Unit Types & Generation) â€” each needs its OWN
   // "which floor is expanded" state. Sharing one variable across all four
   // (the original bug) meant clicking a floor in any one place also
   // silently expanded that same floor in every other place using it.
-  // floorUnits/loadingUnitsFloorId stay shared — that's just a fetched-data
+  // floorUnits/loadingUnitsFloorId stay shared â€” that's just a fetched-data
   // cache, safe to reuse regardless of which section triggered the fetch.
   const [expandedFloorId, setExpandedFloorId] = useState<number | null>(null); // Unit Types & Generation
   const [overviewExpandedFloorId, setOverviewExpandedFloorId] = useState<number | null>(null);
@@ -469,7 +462,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   const [floorPlanExpandedFloorId, setFloorPlanExpandedFloorId] = useState<number | null>(null);
   const [floorUnits, setFloorUnits] = useState<Record<number, any[]>>({});
   const [loadingUnitsFloorId, setLoadingUnitsFloorId] = useState<number | null>(null);
-  // Per-block Unit Type template (e.g. 2x 2BHK + 2x 3BHK) — applies to every
+  // Per-block Unit Type template (e.g. 2x 2BHK + 2x 3BHK) â€” applies to every
   // non-Ground floor in that block instead of typing a count for each one.
   const [templates, setTemplates] = useState<Record<number, TemplateRow[]>>({});
   const [savingTemplateBlockId, setSavingTemplateBlockId] = useState<number | null>(null);
@@ -477,18 +470,18 @@ const CrmProjectAutoSetup: React.FC = () => {
   const [editingUnitId, setEditingUnitId] = useState<number | null>(null);
   const [editingUnit, setEditingUnit] = useState<UnitEdit | null>(null);
   const [savingUnitId, setSavingUnitId] = useState<number | null>(null);
-  // Non-Ground floors render as a compact one-line summary by default — this
+  // Non-Ground floors render as a compact one-line summary by default â€” this
   // tracks which single floor is currently expanded into its editable count
   // input, same click-to-reveal pattern used for the Block chips above.
   const [editingFloorId, setEditingFloorId] = useState<number | null>(null);
   // Step 2 (Floors) now mirrors Step 1 (Blocks): a block that already has
   // floors shows a collapsed, tree-style chip summary instead of the raw
-  // count input sitting open forever — this is the fix for "still showing
+  // count input sitting open forever â€” this is the fix for "still showing
   // Generate option" after floors already exist. The input only opens by
   // default for a block with zero floors (nothing to summarize yet) or once
   // the user explicitly asks to add more via this toggle.
   const [floorFormOpenFor, setFloorFormOpenFor] = useState<Record<number, boolean>>({});
-  // Collapsed by default per block — the always-on structure tree and the
+  // Collapsed by default per block â€” the always-on structure tree and the
   // Blocks section each get their own independent copy of this (same
   // "shared state expands everything at once" reasoning as the floor state
   // above), so expanding a block in one doesn't also expand it in the other.
@@ -500,11 +493,12 @@ const CrmProjectAutoSetup: React.FC = () => {
   // instead of staying open with nothing left to do. This re-opens it
   // on demand (e.g. to prep the template before adding more floors later).
   const [unitTemplateOpenFor, setUnitTemplateOpenFor] = useState<Record<number, boolean>>({});
-  // Payment plan IDs selected per block — forward-filled to every unit generated in that block.
+  // Payment plan IDs selected per block â€” forward-filled to every unit generated in that block.
   const [blockPaymentPlans, setBlockPaymentPlans] = useState<Record<number, number[]>>({});
 
-  const { data: companies = [] } = useQuery({ queryKey: ["business-dropdown-companies"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
-  const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
+  const { data: dropdown } = useQuery({ queryKey: ["crm-business-dropdown"], queryFn: fetchDropdown, staleTime: 5 * 60_000 });
+  const companies = dropdown?.companies || [];
+  const projects = dropdown?.projects || [];
   const { data: unitTypesMaster = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60_000 });
   const { data: applicablePlans = [] } = useQuery<PaymentPlan[]>({
     queryKey: ["applicable-plans-for-project", projectId],
@@ -513,7 +507,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     staleTime: 2 * 60_000,
   });
   const projectsForCompany = useMemo(
-    () => (companyId ? (projects as any[]).filter((p: any) => String(p.CompanyId) === companyId) : []),
+    () => companyId ? (projects as any[]).filter((p: any) => String(p.company_ids || p.company_id || p.CompanyId || "").split(",").includes(companyId)) : [],
     [projects, companyId],
   );
   const { data: status, isLoading: statusLoading } = useQuery({
@@ -530,7 +524,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["crm-unit-matrix"] });
     qc.invalidateQueries({ queryKey: ["crm-parking-matrix"] });
     qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
-    // Flat Master (Civil Work DPR) — generating/editing units here also
+    // Flat Master (Civil Work DPR) â€” generating/editing units here also
     // builds/adjusts their rooms there.
     qc.invalidateQueries({ queryKey: ["room-master"] });
     qc.invalidateQueries({ queryKey: ["room-master-units"] });
@@ -592,7 +586,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   }, [blocks, floorsByBlock]);
 
   // Whether this project lays out FLOORS or PLOTS. Taken from the type's
-  // HasFloors flag, resolved server-side in /status — never from its name, so
+  // HasFloors flag, resolved server-side in /status â€” never from its name, so
   // a type added in Project Type master works here with no change. A project
   // with no type set resolves to floors, which is the legacy behaviour.
   const isPlotted = status?.projectType ? !status.projectType.HasFloors : false;
@@ -601,7 +595,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   const step2Done = floors.length > 0;
 
   // Lazily fetches each block's Unit Type template the first time Step 3
-  // becomes visible for it — defaults to one blank row (2 BHK) so there's
+  // becomes visible for it â€” defaults to one blank row (2 BHK) so there's
   // always something to edit rather than an empty state with no way in.
   useEffect(() => {
     if (!step2Done) return;
@@ -626,7 +620,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         if (data.paymentPlanIds?.length) {
           setBlockPaymentPlans((m) => ({ ...m, [b.Id]: data.paymentPlanIds }));
         }
-      } catch { /* leave unset — user can still add rows manually */ }
+      } catch { /* leave unset â€” user can still add rows manually */ }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step2Done, blocks]);
@@ -634,11 +628,11 @@ const CrmProjectAutoSetup: React.FC = () => {
   const handleSaveBlocks = async () => {
     if (!projectId) { toast.error("Select a project"); return; }
     if (blockNames.some((n) => !n.trim())) { toast.error("Every block name is required"); return; }
-    // Client-side mirror of the server's case-insensitive uniqueness rule —
+    // Client-side mirror of the server's case-insensitive uniqueness rule â€”
     // catches it before a round trip, both against Blocks that already
     // exist on this project AND against another name in this same batch.
     const dupeIdx = blockNames.findIndex((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower));
-    if (dupeIdx !== -1) { toast.error(`Block "${blockNames[dupeIdx].trim()}" already exists — choose a different name.`); return; }
+    if (dupeIdx !== -1) { toast.error(`Block "${blockNames[dupeIdx].trim()}" already exists â€” choose a different name.`); return; }
     setSavingBlocks(true);
     try {
       const res = await fetchWithAuth(`${API}/blocks`, {
@@ -650,7 +644,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       if (!res.ok) throw new Error(data.error || "Failed to save blocks");
       toast.success(`${data.blocks.length} block(s) created`);
       // Reset the "add more" form so it's ready for another batch instead of
-      // still showing the names that were just consumed, and collapse it —
+      // still showing the names that were just consumed, and collapse it â€”
       // the user just finished adding, no need to keep the form open.
       setBlockNames(generateNames(Math.max(1, Math.min(100, parseInt(blockCount, 10) || 1)), namingScheme));
       setShowAddBlockForm(false);
@@ -663,7 +657,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     }
   };
 
-  // Only sends blocks with a valid, filled-in count — so extending just one
+  // Only sends blocks with a valid, filled-in count â€” so extending just one
   // block's floors doesn't require re-confirming every other block's
   // already-correct count first. POST /floors is additive/idempotent on the
   // backend, so re-sending an unchanged count for an already-set-up block is
@@ -732,8 +726,8 @@ const CrmProjectAutoSetup: React.FC = () => {
   };
 
   // Backend refuses (409, with a reason like "has 3 active unit(s) under
-  // it") whenever a child still exists — see getBlockLockReason in
-  // crmHierarchyLocks.js — surfaced here as a toast, same pattern as
+  // it") whenever a child still exists â€” see getBlockLockReason in
+  // crmHierarchyLocks.js â€” surfaced here as a toast, same pattern as
   // booking/hold errors elsewhere in this app.
   const handleDeleteBlock = async (b: any) => {
     if (!window.confirm(`Delete block "${b.BlockName}"?`)) return;
@@ -763,7 +757,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     }
   };
 
-  // Shared by all four independent "which floor is expanded" states below —
+  // Shared by all four independent "which floor is expanded" states below â€”
   // takes the current value + its own setter so each call site's toggle
   // only ever touches its own state, never any other section's.
   const toggleFloorGeneric = async (f: any, current: number | null, setCurrent: (v: number | null) => void) => {
@@ -784,7 +778,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   const handleToggleBlocksFloor = (f: any) => toggleFloorGeneric(f, blocksExpandedFloorId, setBlocksExpandedFloorId);
   const handleToggleFloorPlanFloor = (f: any) => toggleFloorGeneric(f, floorPlanExpandedFloorId, setFloorPlanExpandedFloorId);
 
-  // Deletes straight through the existing Unit Master endpoint — it already
+  // Deletes straight through the existing Unit Master endpoint â€” it already
   // enforces the (now Application-aware) Unit-level lock check, so nothing
   // is duplicated here.
   const handleDeleteUnit = async (floorId: number, unit: any) => {
@@ -850,11 +844,11 @@ const CrmProjectAutoSetup: React.FC = () => {
       const rs = data.roomSync;
       toast.success(
         (data.message || "Unit updated")
-        + (rs?.added ? ` — ${rs.added} room(s) added from the ${rs.layout} layout` : "")
+        + (rs?.added ? ` â€” ${rs.added} room(s) added from the ${rs.layout} layout` : "")
         + (rs?.deactivated ? `, ${rs.deactivated} old room(s) deactivated` : ""),
       );
       if (rs?.keptWithWork?.length) {
-        toast.warning(`Kept ${rs.keptWithWork.join(", ")} — not in the new layout but has DPR work recorded against it.`);
+        toast.warning(`Kept ${rs.keptWithWork.join(", ")} â€” not in the new layout but has DPR work recorded against it.`);
       }
       setFloorUnits((m) => ({
         ...m,
@@ -913,7 +907,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save template");
-      toast.success(`Template saved — ${data.total} units/floor`);
+      toast.success(`Template saved â€” ${data.total} units/floor`);
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -927,7 +921,7 @@ const CrmProjectAutoSetup: React.FC = () => {
       const res = await fetchWithAuth(`${API}/blocks/${blockId}/unit-template/apply`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to apply template");
-      toast.success(`Applied to ${data.updatedCount} floor(s) — ${data.total} units each`);
+      toast.success(`Applied to ${data.updatedCount} floor(s) â€” ${data.total} units each`);
       refetchStatus();
       invalidateSyncedMasters();
     } catch (e: any) {
@@ -948,17 +942,17 @@ const CrmProjectAutoSetup: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to generate units");
       if (data.createdCount === 0) {
-        toast.info("No eligible floors to generate — set a unit count on at least one floor first");
+        toast.info("No eligible floors to generate â€” set a unit count on at least one floor first");
       } else {
         toast.success(
-          `${data.createdCount} unit(s) created — e.g. ${data.sample.slice(0, 3).join(", ")}`
-          + (data.roomsCreated ? ` · ${data.roomsCreated} room(s) built in Flat Master from their layouts` : ""),
+          `${data.createdCount} unit(s) created â€” e.g. ${data.sample.slice(0, 3).join(", ")}`
+          + (data.roomsCreated ? ` Â· ${data.roomsCreated} room(s) built in Flat Master from their layouts` : ""),
         );
         const noRooms: { unitType: string; count: number }[] = data.unitsWithoutRooms ?? [];
         if (noRooms.length) {
           toast.warning(
-            `No rooms built for ${noRooms.map((r) => `${r.count} × ${r.unitType}`).join(", ")} — that Unit Type has no layout yet. `
-            + "Define it in Civil Work DPR › Unit Composition, then use Flat Master's \"Generate Rooms in Bulk\".",
+            `No rooms built for ${noRooms.map((r) => `${r.count} Ã— ${r.unitType}`).join(", ")} â€” that Unit Type has no layout yet. `
+            + "Define it in Civil Work DPR â€º Unit Composition, then use Flat Master's \"Generate Rooms in Bulk\".",
             { duration: 12000 },
           );
         }
@@ -976,13 +970,13 @@ const CrmProjectAutoSetup: React.FC = () => {
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Project Auto Setup"]} />
       <CrmShell
-        title="CRM — Auto Project Setup"
+        title="CRM â€” Auto Project Setup"
         subtitle={isPlotted
           ? "Configure plot blocks and land inventory here. Plot Master remains the sales inventory until construction creates a Unit Master record."
           : "Pick a Project, then generate its Blocks, Floors, and Units in one guided flow instead of one-row-at-a-time forms"}
     >
       <div className="space-y-4">
-        {/* Plain in-page toggle — no route change, so switching tabs never
+        {/* Plain in-page toggle â€” no route change, so switching tabs never
             reloads or refetches anything. Parking is a fully separate
             component with its own Project selector/state (see
             CrmProjectAutoSetupParking.tsx); nothing below is shared with
@@ -1019,7 +1013,7 @@ const CrmProjectAutoSetup: React.FC = () => {
             className={inputCls}
           >
             <option value="">Select company</option>
-            {(companies as any[]).map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+            {(companies as any[]).map((c: any) => <option key={c.id || c.Id} value={String(c.id || c.Id)}>{c.name || c.Name}</option>)}
           </select>
         </div>
 
@@ -1032,7 +1026,7 @@ const CrmProjectAutoSetup: React.FC = () => {
             className={`${inputCls} ${!companyId ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <option value="">{companyId ? "Select project" : "Select a Company first"}</option>
-            {projectsForCompany.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+            {projectsForCompany.map((p: any) => <option key={p.id || p.Id} value={String(p.id || p.Id)}>{p.name || p.Name}</option>)}
           </select>
         </div>
 
@@ -1042,18 +1036,18 @@ const CrmProjectAutoSetup: React.FC = () => {
 
         {projectId && status && !status.shortCodeValid && (
           <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-            This project has no valid Short Name set (letters/numbers only) — set one in Project Master first, it becomes the first segment of every generated unit name (e.g. RYG/A/1001).
+            This project has no valid Short Name set (letters/numbers only) â€” set one in Project Master first, it becomes the first segment of every generated unit name (e.g. RYG/A/1001).
           </div>
         )}
 
         {/* Floor-less units are now shown in the Unassigned row in the tree
             below (Option B synthetic bucket). This note stays as a lightweight
             signpost so staff know what the amber row means without having to
-            guess — it disappears automatically once all units are fixed. */}
+            guess â€” it disappears automatically once all units are fixed. */}
         {projectId && status && !isPlotted && status.legacyUnitCount > 0 && (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-amber-600 flex items-center gap-2">
             <span>
-              {status.legacyUnitCount} unit{status.legacyUnitCount === 1 ? "" : "s"} with no floor assigned — visible as the{" "}
+              {status.legacyUnitCount} unit{status.legacyUnitCount === 1 ? "" : "s"} with no floor assigned â€” visible as the{" "}
               <span className="font-semibold">Unassigned</span> row in the tree below. Edit each unit to assign a floor, or go to{" "}
               <a href="/crm/setup/unit-master" className="underline" onClick={(e) => e.stopPropagation()}>
                 Unit Master
@@ -1064,17 +1058,17 @@ const CrmProjectAutoSetup: React.FC = () => {
 
         {projectId && status && (
           <>
-            {/* Always-on structure tree — a resumable, at-a-glance view of
+            {/* Always-on structure tree â€” a resumable, at-a-glance view of
                 exactly where this project stands (Project > Block > Floor >
                 Units), built straight from `status` so it's never stale
                 relative to what the step cards below show. This is what a
                 person should be able to glance at instead of having to
-                infer progress from which form happens to be open — the
+                infer progress from which form happens to be open â€” the
                 step cards below still do the actual editing, but a
                 completed Block/Floor/Unit no longer needs a "Generate"-
                 shaped form left open to prove it exists. */}
             {blocks.length > 0 && (() => {
-              // ── Plotted overview ─────────────────────────────────────────
+              // â”€â”€ Plotted overview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
               if (isPlotted) {
                 const totalPlotted   = blocks.reduce((s, b) => s + (b.PlotTemplate?.PlotCount  ?? 0), 0);
                 const totalCreated   = blocks.reduce((s, b) => s + (b.PlotTemplate?.PlotsCreated ?? 0), 0);
@@ -1121,7 +1115,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 {isExpanded ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
                                 <span className="font-medium truncate">{b.BlockName}</span>
                               </span>
-                              <span className="text-muted-foreground">{tpl ? `${tpl.PlotCount} configured` : "—"}</span>
+                              <span className="text-muted-foreground">{tpl ? `${tpl.PlotCount} configured` : "â€”"}</span>
                               <span className="text-muted-foreground">{tpl?.PlotsCreated ?? 0} created</span>
                               <span>
                                 {pendingLabel ? (
@@ -1153,7 +1147,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                 );
               }
 
-              // ── Floored overview ─────────────────────────────────────────
+              // â”€â”€ Floored overview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
               const totalFloors = floors.length;
               const totalUnitsGenerated = floors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
               const pendingFloorCount = floors.filter((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0).length;
@@ -1163,7 +1157,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     <Building2 size={16} className="text-primary shrink-0" />
                     <span className="text-sm font-semibold truncate">{status.project?.Name}</span>
                   </div>
-                  {/* Stat strip — the at-a-glance numbers a person actually
+                  {/* Stat strip â€” the at-a-glance numbers a person actually
                       scans for first, ahead of the per-block detail below. */}
                   <div className="grid grid-cols-4 divide-x divide-border border-b border-border">
                     {[
@@ -1245,8 +1239,8 @@ const CrmProjectAutoSetup: React.FC = () => {
               );
             })()}
 
-            {/* Step 1 — Blocks. Collapsed state is a single dense row —
-                header, chips, and the add-affordance all inline — instead
+            {/* Step 1 â€” Blocks. Collapsed state is a single dense row â€”
+                header, chips, and the add-affordance all inline â€” instead
                 of stacked sections, since at rest there's nothing here but
                 a handful of short labels. */}
             <div className={`${cardCls} border-l-2 border-l-violet-500`}>
@@ -1259,10 +1253,10 @@ const CrmProjectAutoSetup: React.FC = () => {
                   {step1Done && <CheckCircle2 size={13} className="text-green-600" />}
                 </div>
 
-                {/* Locked, plain-label chips by default — someone just here
+                {/* Locked, plain-label chips by default â€” someone just here
                     to see the project plan gets a calm, read-only list, not
-                    a row of pencils/× (backend still refuses delete with a
-                    clear reason if anything exists underneath it — see
+                    a row of pencils/Ã— (backend still refuses delete with a
+                    clear reason if anything exists underneath it â€” see
                     getBlockLockReason). Rename/delete only appear once
                     blocksEditMode is switched on via the toggle below. */}
                 {blocks.map((b) => (
@@ -1288,9 +1282,9 @@ const CrmProjectAutoSetup: React.FC = () => {
                         </button>
                       </>
                     ) : (
-                      // View mode — clicking a Block name drills into its
+                      // View mode â€” clicking a Block name drills into its
                       // Floors (and from there, into real Units), same tree
-                      // interaction as the overview card above — but with
+                      // interaction as the overview card above â€” but with
                       // its own independent expand state (blocksExpandedBlocks),
                       // so expanding it here doesn't also expand it up there.
                       isPlotted ? (
@@ -1315,7 +1309,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                   </button>
                 )}
 
-                {/* "Add More Blocks" only opens on demand — a collapsed
+                {/* "Add More Blocks" only opens on demand â€” a collapsed
                     project already has its blocks; there's no reason to keep
                     a whole create-form permanently open underneath them. A
                     brand-new project (nothing to add "more" to yet) shows
@@ -1329,7 +1323,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                 )}
               </div>
 
-              {/* Expanded Block(s) — its Floor tree, drilling further into
+              {/* Expanded Block(s) â€” its Floor tree, drilling further into
                   real Units per Floor, same as clicking through the
                   overview card above. */}
               {!isPlotted && blocks.filter((b) => blocksExpandedBlocks[b.Id]).map((b) => (
@@ -1398,20 +1392,20 @@ const CrmProjectAutoSetup: React.FC = () => {
                   </div>
                   <button onClick={handleSaveBlocks} disabled={savingBlocks || !rights.canCreate || blockNames.some((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower))}
                     className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                    {step1Done ? "Add Blocks" : "OK — Create Blocks"}
+                    {step1Done ? "Add Blocks" : "OK â€” Create Blocks"}
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Step 2 — Floors. Every block's floor count stays editable —
+            {/* Step 2 â€” Floors. Every block's floor count stays editable â€”
                 prefilled with what's already there, so bumping a 10-floor
                 block up to 12 is just changing one number, not starting
                 over. Submitting an unchanged count for an already-set-up
                 block is always a safe no-op (POST /floors only ever adds
                 what's missing). */}
             {/* A plotted block has no floors, so the whole Floor Plan step is
-                replaced rather than hidden field-by-field — the backend refuses
+                replaced rather than hidden field-by-field â€” the backend refuses
                 POST /floors for such a block anyway, and leaving the step
                 visible would invite an action that can only fail. */}
             {step1Done && isPlotted && (
@@ -1424,7 +1418,7 @@ const CrmProjectAutoSetup: React.FC = () => {
               />
             )}
 
-            {/* Plot browse — shown once at least one block has plots generated.
+            {/* Plot browse â€” shown once at least one block has plots generated.
                 Mirrors the "Unit Types & Generation" card for floored projects:
                 expand a block to browse every plot, check availability status,
                 and delete a plot (with the booking/hold lock guard in place).
@@ -1447,7 +1441,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                         <div key={b.Id} className="rounded-lg border border-border/50 p-2 flex items-center gap-2">
                           <span className="text-xs font-medium">{b.BlockName}</span>
                           <span className="text-[11px] text-muted-foreground">
-                            {tpl ? `${tpl.PlotCount} configured — generate plots first` : "No layout set"}
+                            {tpl ? `${tpl.PlotCount} configured â€” generate plots first` : "No layout set"}
                           </span>
                         </div>
                       );
@@ -1480,7 +1474,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     return (
                       <div key={b.Id} className="rounded-lg border border-border/50 p-2">
                         {hasFloors && !isOpen ? (
-                          // Collapsed tree row — this is the state a
+                          // Collapsed tree row â€” this is the state a
                           // completed block sits in, instead of the input
                           // staying open forever.
                           <div>
@@ -1496,10 +1490,10 @@ const CrmProjectAutoSetup: React.FC = () => {
                                       : floorsEditMode ? "bg-muted/70" : "bg-muted/40"
                                   }`}>
                                     {/* Generated floors are clickable in view
-                                        mode — same drill-into-Units tree as
+                                        mode â€” same drill-into-Units tree as
                                         the overview card/Blocks section.
                                         Unassigned bucket (FloorNo -1) is not
-                                        clickable here — use the overview tree. */}
+                                        clickable here â€” use the overview tree. */}
                                     {!floorsEditMode && f.IsGenerated && f.FloorNo !== -1 ? (
                                       <button onClick={() => handleToggleFloorPlanFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
                                     ) : (
@@ -1599,7 +1593,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                 {blocks.some((b) => !(floorsByBlock.get(b.Id) || []).length || floorFormOpenFor[b.Id]) && (
                   <button onClick={async () => { await handleSaveFloors(); setFloorFormOpenFor({}); }} disabled={savingFloors}
                     className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                    {step2Done ? "Add Floors" : "OK — Generate Floors"}
+                    {step2Done ? "Add Floors" : "OK â€” Generate Floors"}
                   </button>
                 )}
               </div>
@@ -1617,7 +1611,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     const groundFloor = (floorsByBlock.get(b.Id) || []).find((f) => f.FloorNo === 0);
 
                     // Anything left this block could still generate right
-                    // now — mirrors the backend's own eligibility check
+                    // now â€” mirrors the backend's own eligibility check
                     // (IsGenerated=0, HasUnits=1, UnitCount>0).
                     // Fully done: at least one non-Ground floor exists and
                     // every one of them (plus Ground, if it's marked
@@ -1630,7 +1624,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     return (
                       <div key={b.Id} className="rounded-lg border border-border/60 p-3 space-y-2">
                         {blockFullyGenerated && !unitTemplateOpenFor[b.Id] ? (
-                          // Locked summary row — nothing pending here, so the
+                          // Locked summary row â€” nothing pending here, so the
                           // template editor and per-floor forms stay closed
                           // instead of sitting open with nothing left to do.
                           <div className="space-y-1.5">
@@ -1692,7 +1686,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                               )}
                             </div>
 
-                        {/* Unit Type template — defined ONCE per block, then
+                        {/* Unit Type template â€” defined ONCE per block, then
                             applied to every non-Ground floor in one click.
                             A floor whose count is later customized away from
                             this total still gets typed by cycling through
@@ -1700,7 +1694,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                         <div className="space-y-1.5">
                           {!firstPickableType(unitTypesMaster) && (
                             <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                              No Unit Type has a room layout yet — define one in Civil Work DPR › Unit Composition first.
+                              No Unit Type has a room layout yet â€” define one in Civil Work DPR â€º Unit Composition first.
                             </p>
                           )}
                           {rows.map((row, idx) => (
@@ -1722,37 +1716,37 @@ const CrmProjectAutoSetup: React.FC = () => {
                               <div className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr] gap-1.5">
                                 <div className="flex flex-col gap-0.5">
                                   <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.AreaSqFt}
+                                  <input type="number" min={0} placeholder="â€”" value={row.AreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { AreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate/sqft (₹)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.RatePerSqFt}
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate/sqft (â‚¹)</span>
+                                  <input type="number" min={0} placeholder="â€”" value={row.RatePerSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { RatePerSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
                                   <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Carpet (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.CarpetAreaSqFt}
+                                  <input type="number" min={0} placeholder="â€”" value={row.CarpetAreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { CarpetAreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
                                   <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Built-up (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.BuiltUpAreaSqFt}
+                                  <input type="number" min={0} placeholder="â€”" value={row.BuiltUpAreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { BuiltUpAreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
                                   <span className="text-[10px] text-muted-foreground uppercase tracking-wide">SBU (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.SuperBuiltUpAreaSqFt}
+                                  <input type="number" min={0} placeholder="â€”" value={row.SuperBuiltUpAreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { SuperBuiltUpAreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
                                   <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Open Terrace (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.OpenTerraceAreaSqFt}
+                                  <input type="number" min={0} placeholder="â€”" value={row.OpenTerraceAreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { OpenTerraceAreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
@@ -1778,7 +1772,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                           {applicablePlans.length > 0 && (
                             <div className="pt-1.5 border-t border-border/40">
                               <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">
-                                Payment Plans — forward-filled to every unit generated in this block
+                                Payment Plans â€” forward-filled to every unit generated in this block
                               </div>
                               <div className="flex flex-wrap gap-1.5">
                                 {applicablePlans.map((plan) => {
@@ -1805,14 +1799,14 @@ const CrmProjectAutoSetup: React.FC = () => {
                               </div>
                               {(blockPaymentPlans[b.Id] || []).length > 0 && (
                                 <div className="text-[10px] text-green-600 mt-1">
-                                  {(blockPaymentPlans[b.Id] || []).length} plan{(blockPaymentPlans[b.Id] || []).length > 1 ? "s" : ""} selected — saved with template
+                                  {(blockPaymentPlans[b.Id] || []).length} plan{(blockPaymentPlans[b.Id] || []).length > 1 ? "s" : ""} selected â€” saved with template
                                 </div>
                               )}
                             </div>
                           )}
                         </div>
 
-                        {/* Ground floor stays its own explicit row — never
+                        {/* Ground floor stays its own explicit row â€” never
                             covered by the block template above. */}
                         {groundFloor && (
                           <div className="pt-1 border-t border-border/60">
@@ -1820,7 +1814,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                               <button onClick={() => handleToggleExpandFloor(groundFloor)}
                                 className="text-xs text-muted-foreground flex items-center gap-1 hover:text-primary">
                                 {expandedFloorId === groundFloor.Id ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                                <Lock size={10} /> Ground: {groundFloor.GeneratedUnitCount} unit(s) generated — click to manage
+                                <Lock size={10} /> Ground: {groundFloor.GeneratedUnitCount} unit(s) generated â€” click to manage
                               </button>
                             ) : (
                               <label className="flex items-center gap-1.5 cursor-pointer text-xs">
@@ -1853,7 +1847,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Non-Ground floors — compact one-liner by default
+                        {/* Non-Ground floors â€” compact one-liner by default
                             (generated by the template above); a pencil
                             reveals the editable count for a real exception. */}
                         {nonGroundFloors.length > 0 && (
@@ -1910,7 +1904,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                 </div>
 
                 {/* The commit button only shows up when something is
-                    actually eligible to generate anywhere on this project —
+                    actually eligible to generate anywhere on this project â€”
                     otherwise it's just an invitation to re-click into the
                     same "No eligible floors" toast with nothing to act on. */}
                 {blocks.some((b) => {
@@ -1936,13 +1930,13 @@ const CrmProjectAutoSetup: React.FC = () => {
   );
 };
 
-// Shared expanded-unit list for a generated floor (Ground or otherwise) —
+// Shared expanded-unit list for a generated floor (Ground or otherwise) â€”
 // real UnitMaster rows, each deletable straight through the existing Unit
 // Master endpoint (already enforces the booking/hold/Application lock).
 // Deleting every unit here is what then lets the Floor itself be deleted
 // in Step 2 above.
 // A Block's Floor list, each generated Floor clickable to drill down into
-// its real Units (via FloorUnitList) — the same tree interaction reused in
+// its real Units (via FloorUnitList) â€” the same tree interaction reused in
 // three places: the always-on overview card, the Blocks section, and the
 // Floor Plan section, so clicking a Block or Floor name behaves identically
 // everywhere it appears instead of only working in one spot.
@@ -1969,7 +1963,7 @@ const BlockFloorTree: React.FC<{
       blockFloors.map((f) => (
         <div key={f.Id}>
           {f.FloorNo === -1 ? (
-            // Synthetic "Unassigned" bucket — units with no FloorNo at all.
+            // Synthetic "Unassigned" bucket â€” units with no FloorNo at all.
             // Still clickable to expand and edit inline (assign a real floor),
             // but amber-styled so it reads as "something to fix" not "done".
             <button onClick={() => onToggleFloor(f)}
@@ -1978,7 +1972,7 @@ const BlockFloorTree: React.FC<{
               <Layers size={10} className="shrink-0" />
               <span className="shrink-0 font-medium">Unassigned</span>
               <span className="text-amber-500/80">
-                {f.GeneratedUnitCount ?? f.UnitCount} unit{(f.GeneratedUnitCount ?? f.UnitCount) === 1 ? "" : "s"} — no floor set, edit to assign one
+                {f.GeneratedUnitCount ?? f.UnitCount} unit{(f.GeneratedUnitCount ?? f.UnitCount) === 1 ? "" : "s"} â€” no floor set, edit to assign one
               </span>
             </button>
           ) : f.IsGenerated ? (
@@ -1996,7 +1990,7 @@ const BlockFloorTree: React.FC<{
               <Layers size={10} className="text-muted-foreground shrink-0" />
               <span className="shrink-0">Floor {f.FloorLabel}</span>
               {f.HasUnits && f.UnitCount > 0 ? (
-                <span className="text-amber-600">{f.UnitCount} unit{f.UnitCount === 1 ? "" : "s"} planned — not generated yet</span>
+                <span className="text-amber-600">{f.UnitCount} unit{f.UnitCount === 1 ? "" : "s"} planned â€” not generated yet</span>
               ) : (
                 <span className="text-muted-foreground">no units planned</span>
               )}
@@ -2039,8 +2033,8 @@ const FloorUnitList: React.FC<{
   onDelete: (floorId: number, unit: any) => void;
 }> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, unitTypesMaster, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => {
   // Tapping a unit expands it into a small detail panel (status + real
-  // Edit/Delete buttons) instead of always showing a bare pencil/× stranded
-  // at the far edge of the row. Local to this floor's list — each floor
+  // Edit/Delete buttons) instead of always showing a bare pencil/Ã— stranded
+  // at the far edge of the row. Local to this floor's list â€” each floor
   // tracks its own expanded unit independently.
   const [expandedUnitId, setExpandedUnitId] = useState<number | null>(null);
 
@@ -2051,15 +2045,15 @@ const FloorUnitList: React.FC<{
       ) : (units || []).length === 0 ? (
         <div className="text-[11px] text-muted-foreground py-1">No units left on this floor.</div>
       ) : (
-        // A responsive card grid instead of one full-width row per unit —
+        // A responsive card grid instead of one full-width row per unit â€”
         // uses the available width on a wide screen instead of a single
         // narrow column with a name on the left and buttons stranded far
         // off to the right.
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5 py-1">
           {(units || []).map((u) => {
-            const lockReason = u.LockBookingNo ? `Booked — ${u.LockBookingNo}`
+            const lockReason = u.LockBookingNo ? `Booked â€” ${u.LockBookingNo}`
               : u.LockHoldId ? "On hold"
-              : u.LockApplicationNo ? `Applied — ${u.LockApplicationNo}`
+              : u.LockApplicationNo ? `Applied â€” ${u.LockApplicationNo}`
               : null;
             const isEditing = editingUnitId === u.Id && editingUnit;
             const isExpanded = expandedUnitId === u.Id;
@@ -2083,9 +2077,9 @@ const FloorUnitList: React.FC<{
                       {unitTypeOptions(unitTypesMaster, u.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
                     </select>
                   </div>
-                  {/* Floor No. input — only shown for Unassigned units (FloorNo IS NULL)
+                  {/* Floor No. input â€” only shown for Unassigned units (FloorNo IS NULL)
                       so staff can assign a real floor right here without going to Unit Master.
-                      Hidden for units already on a real floor — their floor is set correctly
+                      Hidden for units already on a real floor â€” their floor is set correctly
                       by the wizard and shouldn't be changed from the inline form. */}
                   {u.FloorNo == null && (
                     <div className="flex items-center gap-2">
@@ -2102,37 +2096,37 @@ const FloorUnitList: React.FC<{
                   <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5">
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
-                      <input value={editingUnit.AreaSqFt} type="number" min={0} placeholder="—"
+                      <input value={editingUnit.AreaSqFt} type="number" min={0} placeholder="â€”"
                         onChange={(e) => onEditChange({ AreaSqFt: e.target.value })}
                         className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Carpet (sqft)</span>
-                      <input value={editingUnit.CarpetAreaSqFt} type="number" min={0} placeholder="—"
+                      <input value={editingUnit.CarpetAreaSqFt} type="number" min={0} placeholder="â€”"
                         onChange={(e) => onEditChange({ CarpetAreaSqFt: e.target.value })}
                         className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Built-up (sqft)</span>
-                      <input value={editingUnit.BuiltUpAreaSqFt} type="number" min={0} placeholder="—"
+                      <input value={editingUnit.BuiltUpAreaSqFt} type="number" min={0} placeholder="â€”"
                         onChange={(e) => onEditChange({ BuiltUpAreaSqFt: e.target.value })}
                         className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-muted-foreground uppercase tracking-wide">SBU (sqft)</span>
-                      <input value={editingUnit.SuperBuiltUpAreaSqFt} type="number" min={0} placeholder="—"
+                      <input value={editingUnit.SuperBuiltUpAreaSqFt} type="number" min={0} placeholder="â€”"
                         onChange={(e) => onEditChange({ SuperBuiltUpAreaSqFt: e.target.value })}
                         className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Open Terrace (sqft)</span>
-                      <input value={editingUnit.OpenTerraceAreaSqFt} type="number" min={0} placeholder="—"
+                      <input value={editingUnit.OpenTerraceAreaSqFt} type="number" min={0} placeholder="â€”"
                         onChange={(e) => onEditChange({ OpenTerraceAreaSqFt: e.target.value })}
                         className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate/sqft (₹)</span>
-                      <input value={editingUnit.RatePerSqFt} type="number" min={0} placeholder="—"
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate/sqft (â‚¹)</span>
+                      <input value={editingUnit.RatePerSqFt} type="number" min={0} placeholder="â€”"
                         onChange={(e) => onEditChange({ RatePerSqFt: e.target.value })}
                         className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
                     </div>
@@ -2159,8 +2153,8 @@ const FloorUnitList: React.FC<{
                 </div>
                 <div className="text-muted-foreground truncate">
                   {u.UnitType || "No type set"}
-                  {u.AreaSqFt ? ` · ${u.AreaSqFt} sqft` : ""}
-                  {u.RatePerSqFt ? ` · ₹${Number(u.RatePerSqFt).toLocaleString("en-IN")}/sqft` : ""}
+                  {u.AreaSqFt ? ` Â· ${u.AreaSqFt} sqft` : ""}
+                  {u.RatePerSqFt ? ` Â· â‚¹${Number(u.RatePerSqFt).toLocaleString("en-IN")}/sqft` : ""}
                 </div>
 
                 {isExpanded && (
