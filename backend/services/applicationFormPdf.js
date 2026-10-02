@@ -2,10 +2,8 @@ const PDFDocument = require("pdfkit");
 const { sql } = require("../db");
 const {
   getHsnRate,
-  UNIT_PARKING_THRESHOLD,
-  AFFORDABLE_HSN_CODE,
-  OTHER_RESIDENTIAL_HSN_CODE,
-  EXTRA_WORK_HSN_CODE,
+  resolveUnitParkingHsn,
+  resolveExtraWorkHsn,
 } = require("./crmGst");
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -184,11 +182,19 @@ async function fetchApplicationFormData(pool, applicationId) {
     const extraBase = d.extraCharges.reduce((s, c) => s + Number(c.Amount || 0), 0);
     const extraGst = d.extraCharges.reduce((s, c) => s + Number(c.GstAmount || 0), 0);
     const upTotal = unitValue + parkingBase;
-    const hsnCode = upTotal <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE;
+    // Same resolver the booking itself uses, so the printed form can never
+    // quote a different bracket from the one that will be charged.
+    const hsnCode = (await resolveUnitParkingHsn(pool, upTotal)).hsnCode;
     const gstRate = upTotal > 0 ? await getHsnRate(pool, hsnCode) : 0;
+    // Resolved once here, in async context, and carried on d.pricing: the row
+    // builder below renders synchronously, and this code is PRINTED on the
+    // customer's form — a stale constant there would show an HSN the invoice
+    // never uses.
+    const extraHsnCode = (await resolveExtraWorkHsn(pool)).hsnCode;
     const unitGst = round2(unitValue * gstRate / 100);
     const parkingGst = round2(parkingBase * gstRate / 100);
     d.pricing = {
+      extraHsnCode,
       unitValue, unitGst, parkingBase, parkingGst, extraBase, extraGst,
       grandTotal: unitValue + unitGst + parkingBase + parkingGst + extraBase + extraGst,
       gstRate, hsnCode: upTotal > 0 ? hsnCode : null,
@@ -587,7 +593,7 @@ function renderApplicationFormPdfBuffer(d) {
       if (p.extraBase > 0) {
         const extRate = p.extraBase > 0 ? round2((p.extraGst / p.extraBase) * 100) : 18;
         pricingRows.push({
-          label: "Extra / Additional Charges", hsn: EXTRA_WORK_HSN_CODE,
+          label: "Extra / Additional Charges", hsn: p.extraHsnCode,
           taxable: p.extraBase, gstAmount: p.extraGst,
           total: p.extraBase + p.extraGst, ratePct: extRate,
         });

@@ -48,12 +48,31 @@ import { useAuth } from "@/contexts/AuthContext";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
 
+/** A row of dbo.ProjectTypeMaster (migration 502). The flags are what code
+ *  should branch on — never Code or Name. */
+interface ProjectTypeOption {
+  Id: number;
+  Code: string;
+  Name: string;
+  Description?: string | null;
+  HasFloors: boolean;
+  SellsLand: boolean;
+  SellsConstruction: boolean;
+  AllowsMultiUnitSale: boolean;
+}
+
 interface Project {
   Id?: number;
   code: string;
   name: string;
   shortName: string;
   type: string;
+  /** dbo.ProjectTypeMaster.Id — decides floors vs plots, land vs
+   *  construction, single vs multi-unit sale. Empty means unset, which
+   *  keeps the project on the legacy high-rise behaviour. */
+  projectTypeId: string;
+  projectTypeName: string; // display-only, from the GET join
+  projectTypeCode: string; // display-only
   enterpriseId: string; // id stored, name resolved via JOIN for display
   enterpriseName: string; // display-only, from GET join
   companyId: string;
@@ -232,6 +251,9 @@ const emptyProject: Project = {
   name: "",
   shortName: "",
   type: "Construction",
+  projectTypeId: "",
+  projectTypeName: "",
+  projectTypeCode: "",
   enterpriseId: "",
   enterpriseName: "",
   companyId: "",
@@ -270,6 +292,9 @@ function rowToForm(row: any): Project {
     name: row.Name ?? "",
     shortName: row.ShortName ?? "",
     type: row.Type ?? "Construction",
+    projectTypeId: row.ProjectTypeId != null ? String(row.ProjectTypeId) : "",
+    projectTypeName: row.ProjectTypeName ?? "",
+    projectTypeCode: row.ProjectTypeCode ?? "",
     enterpriseId: row.EnterpriseId != null ? String(row.EnterpriseId) : "",
     enterpriseName: row.EnterpriseName ?? "",
     companyId: row.CompanyId != null ? String(row.CompanyId) : "",
@@ -486,6 +511,10 @@ function ProjectViewModal({
             <Section title="General" />
             <Row label="Short Name" value={project.shortName} />
             <Row label="Type" value={project.type} />
+            <Row
+              label="Project Type"
+              value={project.projectTypeName || "Not set (high-rise)"}
+            />
             <Row label="Enterprise" value={project.enterpriseName} />
             <Row label="Company" value={project.companyName} />
             <Row label="Description" value={project.description} />
@@ -588,6 +617,15 @@ function buildProjectColumns(
           </span>
         );
       },
+    },
+    {
+      id: "project_type",
+      header: "Project Type",
+      cell: ({ row }) => (
+        <span className="text-xs text-muted-foreground">
+          {row.original.ProjectTypeName || "—"}
+        </span>
+      ),
     },
     {
       accessorKey: "Type",
@@ -748,6 +786,20 @@ export default function ProjectMaster() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Project types come from dbo.ProjectTypeMaster with their behaviour flags
+  // attached, so the form can describe a choice without a hardcoded map of
+  // which code means what — a type added to the master explains itself.
+  const { data: projectTypeOptions = [] } = useQuery<ProjectTypeOption[]>({
+    queryKey: ["project-type-master"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/project-master/types");
+      if (!res.ok) throw new Error("Failed to load project types");
+      const data = await res.json().catch(() => []);
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: companies = [] } = useQuery({
     queryKey: ["companies-list"],
     queryFn: async () => {
@@ -760,6 +812,10 @@ export default function ProjectMaster() {
     },
     staleTime: 5 * 60 * 1000,
   });
+
+  const selectedProjectType = projectTypeOptions.find(
+    (t) => String(t.Id) === form.projectTypeId,
+  );
 
   // Companies filtered to those belonging to the selected enterprise
   const filteredCompanies = useMemo(() => {
@@ -818,6 +874,7 @@ export default function ProjectMaster() {
         name: form.name,
         shortName: form.shortName,
         type: form.type,
+        projectTypeId: form.projectTypeId !== "" ? parseInt(form.projectTypeId, 10) : null,
         enterpriseId: form.enterpriseId ? parseInt(form.enterpriseId) : null,
         companyId: form.companyId ? parseInt(form.companyId) : null,
         // address
@@ -1239,6 +1296,61 @@ export default function ProjectMaster() {
                   {fi("Project Name", "name", "text", "", false, true)}
                   {fi("Short Name", "shortName")}
                   {se("Type", "type", projectTypes)}
+
+                  {/* Project Type — what the project SELLS, which is a different
+                      question from "Type" above (Construction / Renovation …).
+                      It decides whether units stack on floors or sit on a site
+                      map, whether land is sold (outside GST) or construction is
+                      (taxable), and whether several units can go on one booking.
+                      Leaving it unset keeps the existing high-rise behaviour. */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Project Type
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={form.projectTypeId}
+                        onChange={(e) => {
+                          const sel = projectTypeOptions.find(
+                            (t) => String(t.Id) === e.target.value,
+                          );
+                          setForm((p) => ({
+                            ...p,
+                            projectTypeId: e.target.value,
+                            projectTypeName: sel?.Name ?? "",
+                            projectTypeCode: sel?.Code ?? "",
+                          }));
+                        }}
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                      >
+                        <option value="">— Not set (high-rise behaviour) —</option>
+                        {projectTypeOptions.map((t) => (
+                          <option key={t.Id} value={String(t.Id)}>
+                            {t.Name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                    </div>
+                    {/* Describe the choice from the master's own flags rather
+                        than a hardcoded lookup, so a type added later explains
+                        itself without a code change. */}
+                    {selectedProjectType && (
+                      <p className="mt-1 text-[0.6875rem] text-muted-foreground">
+                        {[
+                          selectedProjectType.HasFloors ? "Floors" : "Site layout (no floors)",
+                          selectedProjectType.SellsLand ? "sells land (outside GST)" : null,
+                          selectedProjectType.SellsConstruction ? "sells construction (taxable)" : null,
+                          selectedProjectType.AllowsMultiUnitSale ? "several units per booking" : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    )}
+                  </div>
                   {se("Currency", "currency", currencies)}
 
                   {/* Enterprise Dropdown */}

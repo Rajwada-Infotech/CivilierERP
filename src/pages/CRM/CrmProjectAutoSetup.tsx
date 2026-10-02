@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil, X, ChevronDown, ChevronRight, Map as MapIcon } from "lucide-react";
 import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -14,6 +14,7 @@ import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutTyp
 const API = "/api/crm/project-auto-setup";
 const PROJECTS_API = "/api/unit-master/projects";
 const DROPDOWN_API = "/api/business/dropdown";
+const EMPTY_ITEMS: any[] = [];
 
 type NamingScheme = "Alphabetical" | "Numeric" | "Custom";
 
@@ -35,21 +36,14 @@ async function fetchApplicablePlans(projectId: string): Promise<PaymentPlan[]> {
   } catch { return []; }
 }
 
-async function fetchProjects(): Promise<any[]> {
-  try { const r = await fetchWithAuth(PROJECTS_API); return r.ok ? r.json() : []; } catch { return []; }
-}
-// Company is the real top of this hierarchy (dbo.enterprise: business_type
-// 'C' is a Project's business_type 'P' parent via company_id) — same shared
-// dropdown endpoint every other Company->Project chain in the app already
-// uses. fetchProjects above already returns each Project's CompanyId.
-async function fetchCompanies(): Promise<{ id: number; name: string }[]> {
+async function fetchDropdown(): Promise<{ companies: any[]; projects: any[] }> {
   try {
     const r = await fetchWithAuth(DROPDOWN_API);
-    if (!r.ok) return [];
-    const data = await r.json();
-    return data.companies ?? [];
-  } catch { return []; }
+    if (!r.ok) return { companies: [], projects: [] };
+    return r.json();
+  } catch { return { companies: [], projects: [] }; }
 }
+
 async function fetchStatus(projectId: string): Promise<any> {
   const r = await fetchWithAuth(`${API}/status?projectId=${projectId}`);
   return r.ok ? r.json() : null;
@@ -163,6 +157,307 @@ const SetupProgress: React.FC<{ steps: { label: string; detail: string; done: bo
   </ol>
 );
 
+
+// ── Plot Layout (plotted projects) ──────────────────────────────────────────
+// The floor-driven step above cannot describe a plotted block: there are no
+// floors to hang units off. This is its counterpart — one template per BLOCK,
+// because in a plotted development the block IS the layout.
+//
+// The sizes here SEED the generated plots; they are not a claim that every plot
+// is identical. Real layouts have plots of differing sizes, each with its own
+// area, dimensions, facing and survey number, edited per plot afterwards.
+// Generating uniform plots and refining them beats hand-creating sixty rows.
+const PlotLayoutStep: React.FC<{
+  blocks: any[];
+  projectTypeName?: string;
+  canEdit: boolean;
+  canCreate: boolean;
+  onChanged: () => void;
+}> = ({ blocks, projectTypeName, canEdit, canCreate, onChanged }) => {
+  const [drafts, setDrafts] = useState<Record<number, any>>({});
+  const [busy, setBusy] = useState<number | null>(null);
+
+  const draftFor = (b: any) => {
+    const t = b.PlotTemplate;
+    return (
+      drafts[b.Id] ?? {
+        PlotCount: t?.PlotCount ?? "",
+        NumberPrefix: t?.NumberPrefix ?? "P-",
+        StartNumber: t?.StartNumber ?? 1,
+        DefaultAreaSqFt: t?.DefaultAreaSqFt ?? "",
+        DefaultRatePerSqFt: t?.DefaultRatePerSqFt ?? "",
+        DefaultFacing: t?.DefaultFacing ?? "",
+        DefaultRoadWidthFt: t?.DefaultRoadWidthFt ?? "",
+      }
+    );
+  };
+  const patch = (id: number, p: any) =>
+    setDrafts((d) => ({ ...d, [id]: { ...draftFor(blocks.find((b) => b.Id === id)), ...p } }));
+
+  const save = async (b: any) => {
+    const d = draftFor(b);
+    if (!d.PlotCount) { toast.error("How many plots?"); return; }
+    setBusy(b.Id);
+    try {
+      const r = await fetchWithAuth(`${API}/blocks/${b.Id}/plot-template`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(d),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Could not save the plot layout");
+      toast.success(`Plot layout saved for ${b.BlockName}`);
+      onChanged();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  };
+
+  const generate = async (b: any) => {
+    setBusy(b.Id);
+    try {
+      const r = await fetchWithAuth(`${API}/generate-plots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ BlockId: b.Id }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Could not generate plots");
+      // Skipped names are reported rather than swallowed: a partially generated
+      // block is completed without anyone wondering why the count is short.
+      toast.success(
+        `${body.created} plot(s) created in ${b.BlockName}` +
+          (body.skipped?.length ? ` — ${body.skipped.length} already existed` : ""),
+      );
+      onChanged();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  };
+
+  return (
+    <div className={`${cardCls} border-l-2 border-l-emerald-500`}>
+      <SectionHeader
+        icon={Ruler}
+        colorClass="bg-emerald-500/10 text-emerald-600"
+        title="Plot Layout"
+        done={blocks.some((b) => b.PlotTemplate?.IsGenerated)}
+      />
+      <p className="text-[0.6875rem] text-muted-foreground -mt-1">
+        {projectTypeName ? `${projectTypeName} — no floors. ` : ""}
+        Plots are laid out per block. These sizes seed every plot; adjust each
+        plot&apos;s own area, dimensions, facing and survey number afterwards in Plot Master.
+      </p>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+        {blocks.map((b) => {
+          const d = draftFor(b);
+          const t = b.PlotTemplate;
+          const generated = !!t?.IsGenerated;
+          const working = busy === b.Id;
+          const f = (label: string, key: string, type = "number", placeholder = "") => (
+            <div>
+              <label className="block text-[0.625rem] uppercase tracking-wide text-muted-foreground mb-0.5">{label}</label>
+              <input
+                type={type}
+                value={d[key] ?? ""}
+                placeholder={placeholder}
+                disabled={generated || !canEdit || working}
+                onChange={(e) => patch(b.Id, { [key]: e.target.value })}
+                className="w-full h-8 text-xs border border-border rounded-lg px-2 bg-background disabled:opacity-50"
+              />
+            </div>
+          );
+          return (
+            <div key={b.Id} className="rounded-lg border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-foreground">{b.BlockName}</span>
+                {generated ? (
+                  <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-medium">
+                    {t.PlotsCreated} plot(s) created
+                  </span>
+                ) : (
+                  <span className="text-[0.6875rem] text-muted-foreground">not laid out yet</span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {f("Plots", "PlotCount")}
+                {f("Prefix", "NumberPrefix", "text", "P-")}
+                {f("Start No.", "StartNumber")}
+                {f("Area (sq ft)", "DefaultAreaSqFt")}
+                {f("Rate / sq ft", "DefaultRatePerSqFt")}
+                {f("Road (ft)", "DefaultRoadWidthFt")}
+                <div className="col-span-3">
+                  {f("Facing", "DefaultFacing", "text", "e.g. North")}
+                </div>
+              </div>
+
+              {!generated && (
+                <div className="flex justify-end gap-2 pt-1">
+                  {canEdit && (
+                    <button onClick={() => save(b)} disabled={working}
+                      className="px-3 h-8 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40">
+                      {working ? "Saving…" : "Save layout"}
+                    </button>
+                  )}
+                  {canCreate && t && (
+                    <button onClick={() => generate(b)} disabled={working}
+                      className="px-3 h-8 text-xs bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
+                      {working ? "Generating…" : `Generate ${t.PlotCount} plot(s)`}
+                    </button>
+                  )}
+                </div>
+              )}
+              {generated && (
+                <p className="text-[0.6875rem] text-muted-foreground">
+                  Generated. Manage this land inventory in Plot Master. Regenerating here is blocked so the layout cannot be doubled.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ── Plot Block Expand Row ───────────────────────────────────────────────────
+// Wraps PlotBlockBrowser with its own expand/collapse toggle. Exists as a
+// separate component (not inlined into .map()) because React requires hooks
+// to be called unconditionally at the top level of a component — calling
+// useState inside a map callback violates the Rules of Hooks.
+const PlotBlockExpandRow: React.FC<{
+  block: any;
+  onChanged: () => void;
+}> = ({ block, onChanged }) => {
+  const [open, setOpen] = useState(false);
+  const tpl = block.PlotTemplate;
+  return (
+    <div className="rounded-lg border border-border/50 overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted/30"
+      >
+        {open ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
+        <span className="text-xs font-medium flex-1">{block.BlockName}</span>
+        {tpl && (
+          <span className="text-[0.6875rem] text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full font-medium shrink-0">
+            {tpl.PlotsCreated ?? tpl.PlotCount} plot(s)
+          </span>
+        )}
+      </button>
+      {open && (
+        <PlotBlockBrowser
+          blockId={block.Id}
+          blockName={block.BlockName}
+          onDeleteUnit={() => onChanged()}
+        />
+      )}
+    </div>
+  );
+};
+
+// ── Plot Block Browser ──────────────────────────────────────────────────────
+// Shows the generated plots for a plotted block in a card grid — the same
+// "browse what was generated" experience that BlockFloorTree + FloorUnitList
+// provides for floored projects. Fetches on first mount via the new
+// GET /blocks/:blockId/plots endpoint (no FloorId exists for plots).
+type PlotUnit = {
+  Id: number; UnitName: string; PlotNo?: string; AreaSqFt?: number; RatePerSqFt?: number;
+  Facing?: string; RoadWidthFt?: number; IsActive: boolean; UnitKind: string;
+  LockBookingNo?: string; LockHoldId?: string; LockApplicationNo?: string;
+};
+const PlotBlockBrowser: React.FC<{
+  blockId: number;
+  blockName: string;
+  onDeleteUnit: (unit: PlotUnit) => void;
+}> = ({ blockId, blockName, onDeleteUnit }) => {
+  const [plots, setPlots] = useState<PlotUnit[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (plots !== null) return;
+    setLoading(true);
+    fetchWithAuth(`${API}/blocks/${blockId}/plots`)
+      .then((r) => r.ok ? r.json() : { plots: [] })
+      .then((data) => setPlots(data.plots || []))
+      .catch(() => setPlots([]))
+      .finally(() => setLoading(false));
+  }, [blockId, plots]);
+
+  const handleDelete = async (u: PlotUnit) => {
+    if (!window.confirm(`Delete plot "${u.UnitName}"?`)) return;
+    setDeletingId(u.Id);
+    try {
+      const res = await fetchWithAuth(`${API}/plots/${u.Id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete plot");
+      toast.success(data.message || "Plot deleted");
+      setPlots((ps) => (ps || []).filter((p) => p.Id !== u.Id));
+      onDeleteUnit(u);
+    } catch (e: any) { toast.error(e.message); } finally { setDeletingId(null); }
+  };
+
+  return (
+    <div className="ml-6 pl-3 border-l border-border pb-1.5">
+      {loading ? (
+        <div className="text-[0.6875rem] text-muted-foreground py-1">Loading plots…</div>
+      ) : !plots?.length ? (
+        <div className="text-[0.6875rem] text-muted-foreground py-1">No plots found — try refreshing.</div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5 py-1">
+          {plots.map((u) => {
+            const lockReason = u.LockBookingNo ? `Booked — ${u.LockBookingNo}`
+              : u.LockHoldId ? "On hold"
+              : u.LockApplicationNo ? `Applied — ${u.LockApplicationNo}`
+              : null;
+            const isExpanded = expandedId === u.Id;
+            const dotColor = u.LockBookingNo ? "bg-red-500" : u.LockHoldId ? "bg-sky-500" : u.LockApplicationNo ? "bg-sky-500" : "bg-green-500";
+            return (
+              <div key={u.Id}
+                className={`rounded-lg border p-2 text-[0.6875rem] cursor-pointer transition-colors ${isExpanded ? "border-emerald-500/50 bg-emerald-500/5" : "border-border/60 bg-muted/20 hover:bg-muted/40"}`}
+                onClick={() => setExpandedId(isExpanded ? null : u.Id)}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-mono font-semibold truncate">{u.UnitName}</span>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} title={lockReason || "Available"} />
+                </div>
+                <div className="text-muted-foreground truncate">
+                  {u.AreaSqFt ? `${u.AreaSqFt} sq ft` : "—"}
+                  {u.RatePerSqFt ? ` · ₹${Number(u.RatePerSqFt).toLocaleString("en-IN")}/sqft` : ""}
+                  {u.Facing ? ` · ${u.Facing}` : ""}
+                </div>
+                {isExpanded && (
+                  <div onClick={(e) => e.stopPropagation()} className="mt-1.5 pt-1.5 border-t border-border/60 space-y-1.5">
+                    {u.RoadWidthFt && <div className="text-muted-foreground">Road: {u.RoadWidthFt} ft</div>}
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Status:</span>
+                      {lockReason ? (
+                        <span className="text-sky-600 flex items-center gap-0.5"><Lock size={9} /> {lockReason}</span>
+                      ) : (
+                        <span className="text-green-600">Available</span>
+                      )}
+                    </div>
+                    <div className="flex gap-3">
+                      <a href="/crm/setup/plot-master" className="text-primary hover:underline">Open Plot Master</a>
+                      <button onClick={() => handleDelete(u)} disabled={!!lockReason || deletingId === u.Id}
+                        className="text-red-600 hover:underline disabled:opacity-40 disabled:no-underline">
+                        {deletingId === u.Id ? "Deleting…" : "Delete"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <a href="/crm/setup/plot-master" className="text-[0.6875rem] text-primary hover:underline flex items-center gap-0.5 mt-0.5">
+        manage land inventory in Plot Master <ExternalLink size={9} />
+      </a>
+    </div>
+  );
+};
+
 const CrmProjectAutoSetup: React.FC = () => {
   const qc = useQueryClient();
   const rights = usePageRights("crm-auto-project-setup");
@@ -245,8 +540,9 @@ const CrmProjectAutoSetup: React.FC = () => {
   // Payment plan IDs selected per block — forward-filled to every unit generated in that block.
   const [blockPaymentPlans, setBlockPaymentPlans] = useState<Record<number, number[]>>({});
 
-  const { data: companies = [] } = useQuery({ queryKey: ["business-dropdown-companies"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
-  const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
+  const { data: dropdown } = useQuery({ queryKey: ["crm-business-dropdown"], queryFn: fetchDropdown, staleTime: 5 * 60_000 });
+  const companies = dropdown?.companies || [];
+  const projects = dropdown?.projects || [];
   const { data: unitTypesMaster = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60_000 });
   const { data: applicablePlans = [] } = useQuery<PaymentPlan[]>({
     queryKey: ["applicable-plans-for-project", projectId],
@@ -255,7 +551,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     staleTime: 2 * 60_000,
   });
   const projectsForCompany = useMemo(
-    () => (companyId ? (projects as any[]).filter((p: any) => String(p.CompanyId) === companyId) : []),
+    () => companyId ? (projects as any[]).filter((p: any) => String(p.company_ids || p.company_id || p.CompanyId || "").split(",").includes(companyId)) : [],
     [projects, companyId],
   );
   const { data: status, isLoading: statusLoading } = useQuery({
@@ -277,7 +573,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     invalidateRoomData(qc);
   };
 
-  const blocksForNames: any[] = status?.blocks || [];
+  const blocksForNames: any[] = status?.blocks ?? EMPTY_ITEMS;
   const existingBlockNamesLower = useMemo(
     () => new Set(blocksForNames.map((b) => String(b.BlockName).trim().toLowerCase())),
     [blocksForNames],
@@ -291,12 +587,16 @@ const CrmProjectAutoSetup: React.FC = () => {
   // it's no longer gated on whether Blocks already exist.
   useEffect(() => {
     const n = Math.max(1, Math.min(100, parseInt(blockCount, 10) || 0));
-    setBlockNames(generateNames(n, namingScheme, existingBlockNamesLower));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blockCount, namingScheme, status?.project?.Id, existingBlockNamesLower]);
+    const nextNames = generateNames(n, namingScheme, existingBlockNamesLower);
+    setBlockNames((current) =>
+      current.length === nextNames.length && current.every((name, index) => name === nextNames[index])
+        ? current
+        : nextNames,
+    );
+  }, [blockCount, namingScheme, existingBlockNamesLower]);
 
-  const blocks: any[] = status?.blocks || [];
-  const floors: any[] = status?.floors || [];
+  const blocks: any[] = status?.blocks ?? EMPTY_ITEMS;
+  const floors: any[] = status?.floors ?? EMPTY_ITEMS;
   const floorsByBlock = useMemo(() => {
     const map = new Map<number, any[]>();
     floors.forEach((f) => {
@@ -326,6 +626,12 @@ const CrmProjectAutoSetup: React.FC = () => {
       return changed ? next : prev;
     });
   }, [blocks, floorsByBlock]);
+
+  // Whether this project lays out FLOORS or PLOTS. Taken from the type's
+  // HasFloors flag, resolved server-side in /status — never from its name, so
+  // a type added in Project Type master works here with no change. A project
+  // with no type set resolves to floors, which is the legacy behaviour.
+  const isPlotted = status?.projectType ? !status.projectType.HasFloors : false;
 
   const step1Done = blocks.length > 0;
   const step2Done = floors.length > 0;
@@ -707,7 +1013,9 @@ const CrmProjectAutoSetup: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "CRM", "Project Auto Setup"]} />
       <CrmShell
         title="CRM — Auto Project Setup"
-      subtitle="Pick a Project, then generate its Blocks, Floors, and Units in one guided flow instead of one-row-at-a-time forms"
+        subtitle={isPlotted
+          ? "Configure plot blocks and land inventory here. Plot Master remains the sales inventory until construction creates a Unit Master record."
+          : "Pick a Project, then generate its Blocks, Floors, and Units in one guided flow instead of one-row-at-a-time forms"}
     >
       <div className="space-y-4">
         {/* Plain in-page toggle — no route change, so switching tabs never
@@ -723,7 +1031,7 @@ const CrmProjectAutoSetup: React.FC = () => {
               activeTab === "setup" ? "btn-module text-white shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-background/60"
             }`}
           >
-            <Building2 size={15} className="shrink-0" /> <span className="truncate">Block / Floor / Unit</span>
+            <Building2 size={15} className="shrink-0" /> <span className="truncate">{isPlotted ? "Block / Plot" : "Block / Floor / Unit"}</span>
           </button>
           <button
             onClick={() => setActiveTab("parking")}
@@ -756,7 +1064,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                 className={inputCls}
               >
                 <option value="">Select company</option>
-                {(companies as any[]).map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+                {(companies as any[]).map((c: any) => <option key={c.id || c.Id} value={String(c.id || c.Id)}>{c.name || c.Name}</option>)}
               </select>
             </div>
             <div>
@@ -768,7 +1076,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                 className={`${inputCls} ${!companyId ? "opacity-50 cursor-not-allowed" : ""}`}
               >
                 <option value="">{companyId ? "Select project" : "Select a Company first"}</option>
-                {projectsForCompany.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+                {projectsForCompany.map((p: any) => <option key={p.id || p.Id} value={String(p.id || p.Id)}>{p.name || p.Name}</option>)}
               </select>
             </div>
           </div>
@@ -812,7 +1120,7 @@ const CrmProjectAutoSetup: React.FC = () => {
             below (Option B synthetic bucket). This note stays as a lightweight
             signpost so staff know what the amber row means without having to
             guess — it disappears automatically once all units are fixed. */}
-        {projectId && status && status.legacyUnitCount > 0 && (
+        {projectId && status && !isPlotted && status.legacyUnitCount > 0 && (
           <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-2.5 text-sm text-sky-600 flex items-center gap-2">
             <span>
               {status.legacyUnitCount} unit{status.legacyUnitCount === 1 ? "" : "s"} with no floor assigned — visible as the{" "}
@@ -836,6 +1144,86 @@ const CrmProjectAutoSetup: React.FC = () => {
                 completed Block/Floor/Unit no longer needs a "Generate"-
                 shaped form left open to prove it exists. */}
             {blocks.length > 0 && (() => {
+              // ── Plotted overview ─────────────────────────────────────────
+              if (isPlotted) {
+                const totalPlotted   = blocks.reduce((s, b) => s + (b.PlotTemplate?.PlotCount  ?? 0), 0);
+                const totalCreated   = blocks.reduce((s, b) => s + (b.PlotTemplate?.PlotsCreated ?? 0), 0);
+                const pendingBlocks  = blocks.filter((b) => b.PlotTemplate && !b.PlotTemplate.IsGenerated).length;
+                const noTemplates    = blocks.filter((b) => !b.PlotTemplate).length;
+                return (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="p-4 pb-3 flex items-center gap-2 border-b border-border bg-muted/20">
+                      <Building2 size={16} className="text-primary shrink-0" />
+                      <span className="text-sm font-semibold truncate">{status.project?.Name}</span>
+                      <span className="ml-2 text-[0.6875rem] text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full font-medium">
+                        {status.projectType?.Name ?? "Plotted"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 divide-x divide-border border-b border-border">
+                      {[
+                        { label: "Blocks",          value: blocks.length },
+                        { label: "Plots configured", value: totalPlotted },
+                        { label: "Plots created",    value: totalCreated },
+                        { label: "Blocks pending",   value: pendingBlocks + noTemplates, accent: (pendingBlocks + noTemplates) > 0 },
+                      ].map((stat) => (
+                        <div key={stat.label} className="px-4 py-2.5 text-center">
+                          <div className={`text-lg font-semibold ${stat.accent ? "text-sky-600" : "text-foreground"}`}>{stat.value}</div>
+                          <div className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">{stat.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="p-2">
+                      {blocks.map((b) => {
+                        const tpl = b.PlotTemplate;
+                        const isExpanded = !!treeExpandedBlocks[b.Id];
+                        const pendingLabel = !tpl
+                          ? "Set up plot layout"
+                          : !tpl.IsGenerated
+                            ? `Generate ${tpl.PlotCount} plot(s)`
+                            : null;
+                        return (
+                          <div key={b.Id} className="text-xs rounded-lg hover:bg-muted/30">
+                            <button
+                              onClick={() => setTreeExpandedBlocks((m) => ({ ...m, [b.Id]: !isExpanded }))}
+                              className="w-full grid grid-cols-4 items-center gap-2 px-2 py-1.5 text-left"
+                            >
+                              <span className="flex items-center gap-2 min-w-0">
+                                {isExpanded ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
+                                <span className="font-medium truncate">{b.BlockName}</span>
+                              </span>
+                              <span className="text-muted-foreground">{tpl ? `${tpl.PlotCount} configured` : "—"}</span>
+                              <span className="text-muted-foreground">{tpl?.PlotsCreated ?? 0} created</span>
+                              <span>
+                                {pendingLabel ? (
+                                  <span className="text-sky-600 bg-sky-500/10 px-1.5 py-0.5 rounded-full">{pendingLabel}</span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded-full">
+                                    <CheckCircle2 size={11} /> Done
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                            {isExpanded && tpl?.IsGenerated && (
+                              <PlotBlockBrowser
+                                blockId={b.Id}
+                                blockName={b.BlockName}
+                                onDeleteUnit={(unit) => { refetchStatus(); invalidateSyncedMasters(); }}
+                              />
+                            )}
+                            {isExpanded && !tpl?.IsGenerated && (
+                              <div className="ml-6 pl-3 border-l border-border pb-1.5 text-muted-foreground text-[0.6875rem] py-1">
+                                {tpl ? "Generate plots first to browse them here." : "Set up the plot layout below first."}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+
+              // ── Floored overview ─────────────────────────────────────────
               const totalFloors = floors.length;
               const totalUnitsGenerated = floors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
               const pendingFloorCount = floors.filter((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0).length;
@@ -952,7 +1340,7 @@ const CrmProjectAutoSetup: React.FC = () => {
               <SectionHeader
                 icon={Building2}
                 colorClass="bg-violet-500/10 text-violet-600"
-                title="1 · Blocks"
+                title={isPlotted ? "1 · Plot Blocks" : "1 · Blocks"}
                 hint={step1Done ? "Click a block to see its floors. Use Edit to rename or remove blocks." : "Create the towers / blocks of this project."}
                 done={step1Done}
                 right={
@@ -1014,11 +1402,17 @@ const CrmProjectAutoSetup: React.FC = () => {
                       // interaction as the overview card above — but with
                       // its own independent expand state (blocksExpandedBlocks),
                       // so expanding it here doesn't also expand it up there.
-                      <button onClick={() => setBlocksExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))}
-                        className="flex items-center gap-1">
-                        {blocksExpandedBlocks[b.Id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                        {b.BlockName}
-                      </button>
+                        isPlotted ? (
+                          <a href="/crm/setup/plot-master" className="flex items-center gap-1 hover:text-primary">
+                            <MapIcon size={12} /> {b.BlockName}
+                          </a>
+                        ) : (
+                        <button onClick={() => setBlocksExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))}
+                          className="flex items-center gap-1">
+                          {blocksExpandedBlocks[b.Id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          {b.BlockName}
+                        </button>
+                        )
                     )}
                   </span>
                 ))}
@@ -1030,7 +1424,7 @@ const CrmProjectAutoSetup: React.FC = () => {
               {/* Expanded Block(s) — its Floor tree, drilling further into
                   real Units per Floor, same as clicking through the
                   overview card above. */}
-              {blocks.filter((b) => blocksExpandedBlocks[b.Id]).map((b) => (
+              {!isPlotted && blocks.filter((b) => blocksExpandedBlocks[b.Id]).map((b) => (
                 <div key={b.Id} className="rounded-xl border border-violet-500/20 bg-violet-500/[0.03] p-3 text-xs">
                   <div className="text-sm font-semibold mb-1.5 flex items-center gap-1.5">
                     <Building2 size={13} className="text-violet-600" /> Block {b.BlockName}
@@ -1057,7 +1451,7 @@ const CrmProjectAutoSetup: React.FC = () => {
               {(!step1Done || showAddBlockForm) && (
                 <div className={step1Done ? "rounded-xl border border-dashed border-border bg-muted/10 p-3 sm:p-4 space-y-4" : "space-y-4"}>
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-heading font-semibold text-foreground">{step1Done ? "Add More Blocks" : "Create Blocks"}</div>
+                    <div className="text-sm font-heading font-semibold text-foreground">{step1Done ? `Add More ${isPlotted ? "Plot " : ""}Blocks` : `Create ${isPlotted ? "Plot " : ""}Blocks`}</div>
                     {step1Done && (
                       <button onClick={() => setShowAddBlockForm(false)} className="text-xs px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50">
                         Cancel
@@ -1115,7 +1509,55 @@ const CrmProjectAutoSetup: React.FC = () => {
                 over. Submitting an unchanged count for an already-set-up
                 block is always a safe no-op (POST /floors only ever adds
                 what's missing). */}
-            {step1Done && (
+            {/* A plotted block has no floors, so the whole Floor Plan step is
+                replaced rather than hidden field-by-field — the backend refuses
+                POST /floors for such a block anyway, and leaving the step
+                visible would invite an action that can only fail. */}
+            {step1Done && isPlotted && (
+              <PlotLayoutStep
+                blocks={blocks}
+                projectTypeName={status?.projectType?.Name}
+                canEdit={rights.canEdit}
+                canCreate={rights.canCreate}
+                onChanged={() => { refetchStatus(); invalidateSyncedMasters(); }}
+              />
+            )}
+
+            {/* Plot browse — shown once at least one block has plots generated.
+                Mirrors the "Unit Types & Generation" card for floored projects:
+                expand a block to browse every plot, check availability status,
+                and delete a plot (with the booking/hold lock guard in place).
+                Detailed editing stays in Unit Master. */}
+            {step1Done && isPlotted && blocks.some((b) => b.PlotTemplate?.IsGenerated) && (
+              <div className={`${cardCls} border-l-2 border-l-sky-500`}>
+                <SectionHeader
+                  icon={MapIcon}
+                  colorClass="bg-sky-500/10 text-sky-600"
+                  title="Land Inventory"
+                  done={blocks.every((b) => !b.PlotTemplate || b.PlotTemplate.IsGenerated)}
+                  right={<a href={`/crm/setup/plot-master?projectId=${projectId}`} className="ml-auto inline-flex items-center gap-1 text-[0.6875rem] text-primary hover:underline">Open Plot Master <ExternalLink size={11} /></a>}
+                />
+                <p className="text-[0.6875rem] text-muted-foreground -mt-1">Review live availability below. Use Plot Master for filters, plot history, and conversion to Unit Master after construction.</p>
+                <div className="space-y-1.5">
+                  {blocks.map((b) => {
+                    const tpl = b.PlotTemplate;
+                    if (!tpl?.IsGenerated) {
+                      return (
+                        <div key={b.Id} className="rounded-lg border border-border/50 p-2 flex items-center gap-2">
+                          <span className="text-xs font-medium">{b.BlockName}</span>
+                          <span className="text-[0.6875rem] text-muted-foreground">
+                            {tpl ? `${tpl.PlotCount} configured — generate plots first` : "No layout set"}
+                          </span>
+                        </div>
+                      );
+                    }
+                    return <PlotBlockExpandRow key={b.Id} block={b} onChanged={() => { refetchStatus(); invalidateSyncedMasters(); }} />;
+                  })}
+                </div>
+              </div>
+            )}
+
+            {step1Done && !isPlotted && (
               <div className={`${cardCls} border-l-4 border-l-cyan-500`}>
                 <SectionHeader icon={Layers} colorClass="bg-cyan-500/10 text-cyan-600" title="2 · Floor Plan" done={step2Done}
                   hint={step2Done ? "Click a floor to see its units. Use Edit to remove empty floors." : "Enter how many floors each block has."}
@@ -1273,7 +1715,7 @@ const CrmProjectAutoSetup: React.FC = () => {
             )}
 
             {/* Unit Types & Generation */}
-            {step2Done && (
+            {step2Done && !isPlotted && (
               <div className={`${cardCls} border-l-4 border-l-sky-500`}>
                 <SectionHeader icon={Ruler} colorClass="bg-sky-500/10 text-sky-600" title="3 · Unit Types & Generation"
                   hint="Define the unit mix per floor for each block, apply it to the floors, then generate the units." />
@@ -1743,7 +2185,7 @@ const FloorUnitList: React.FC<{
               : null;
             const isEditing = editingUnitId === u.Id && editingUnit;
             const isExpanded = expandedUnitId === u.Id;
-            const dotColor = u.LockBookingNo ? "bg-red-500" : u.LockHoldId ? "bg-amber-500" : u.LockApplicationNo ? "bg-amber-500" : "bg-green-500";
+            const dotColor = u.LockBookingNo ? "bg-red-500" : u.LockHoldId ? "bg-sky-500" : u.LockApplicationNo ? "bg-sky-500" : "bg-green-500";
 
             if (isEditing) {
               return (

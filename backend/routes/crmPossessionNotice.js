@@ -71,23 +71,86 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
   }
 });
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Contract (same {rows,total} shape as CrmHandover, plus per-status counts):
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Draft, Sent, Acknowledged, Disputed } }
+// `counts` honours search + company/project/block but NOT status, so the tabs
+// always show what each status would contain. Without `page` the legacy
+// full-array response is returned so existing callers keep working.
+const PN_STATUSES = [CrmStatus.DRAFT, "Sent", "Acknowledged", "Disputed"];
+const PN_SORT = {
+  NoticeNo: "n.NoticeNo",
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  Status: "n.Status",
+  OfferedDate: "n.OfferedDate",
+  ResponseDeadline: "n.ResponseDeadline",
+  CreatedAt: "n.CreatedAt",
+};
+const PN_JOINS = `
+  JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+`;
+
+function buildPnWhere(request, query, includeStatus) {
+  const conds = [];
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR n.NoticeNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search OR a.Mobile LIKE @search)");
+  }
+  if (includeStatus && PN_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(30), query.status);
+    conds.push("n.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
-    const conds = [];
-    // Not paginated — status-tab counts are computed client-side from the
-    // full set (see CrmPossessionNotice.tsx), same reasoning as CrmDemands.
-    // Company/Project/Block narrows the set server-side instead.
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`${PN_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where} ORDER BY n.CreatedAt DESC`);
-    res.json(result.recordset);
+
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildPnWhere(r0, req.query, false);
+      const result = await r0.query(`${PN_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where} ORDER BY n.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = PN_SORT[req.query.sortKey] || PN_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
+    const countReq = pool.request();
+    const countWhere = buildPnWhere(countReq, req.query, false);
+    const countRes = await countReq.query(
+      `SELECT n.Status, COUNT(*) AS C FROM dbo.CrmPossessionNotice n ${PN_JOINS} ${countWhere} GROUP BY n.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = PN_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildPnWhere(pageReq, req.query, true);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${PN_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${pageWhere}
+       ORDER BY ${sortCol} ${dir}, n.Id DESC
+       OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    res.json({ rows: rowsRes.recordset, total, counts });
   } catch (e) {
     console.error("[crm-possession-notice] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -187,17 +250,20 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    const noteSet = "Notes" in b;
     await pool.request()
       .input("id", sql.Int, id)
       .input("odt", sql.Date, b.OfferedDate || null)
       .input("rdl", sql.Date, b.ResponseDeadline || null)
       .input("mode", sql.NVarChar(50), b.DeliveryMode || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes ?? null)
+      .input("note_set", sql.Bit, noteSet ? 1 : 0)
       .input("ub", sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmPossessionNotice SET
           OfferedDate = ISNULL(@odt, OfferedDate), ResponseDeadline = ISNULL(@rdl, ResponseDeadline),
-          DeliveryMode = ISNULL(@mode, DeliveryMode), Notes = @note,
+          DeliveryMode = ISNULL(@mode, DeliveryMode),
+          Notes = CASE WHEN @note_set = 1 THEN @note ELSE Notes END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
