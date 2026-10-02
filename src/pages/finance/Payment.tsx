@@ -2701,6 +2701,7 @@ const Payment: React.FC = () => {
                           onMergeConfirm={handleMergeConfirm}
                           mergedSummary={mergedSummary}
                           onMergeClear={handleMergeClear}
+                          onRefreshOptions={refetchExpenseOptions}
                         />
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (
