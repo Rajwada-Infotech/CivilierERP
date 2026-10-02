@@ -1225,6 +1225,32 @@ router.get(
   },
 );
 
+// DELETE /:rungId/daily-log/:logId — removes one logbook day. Only the
+// log row goes; the live assignment's progress/remarks and that day's
+// photos are untouched.
+router.delete(
+  "/:rungId/daily-log/:logId",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    const logId = parseInt(req.params.logId, 10);
+    if (!Number.isFinite(rungId) || !Number.isFinite(logId)) return res.status(400).json({ error: "Invalid id" });
+    try {
+      const pool = await getPool();
+      const r = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("logId", sql.Int, logId)
+        .query("DELETE FROM dbo.DependencyActivityDailyLog WHERE Id = @logId AND DependencyMasterActivityId = @rungId");
+      if (!r.rowsAffected[0]) return res.status(404).json({ error: "Daily log entry not found" });
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] DELETE /:rungId/daily-log/:logId error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // POST /:rungId/restore — bring a Cancelled activity back. super_admin
 // only, deliberately checked by role directly rather than a page right —
 // this is meant to be a rare, deliberate override, not something granted
