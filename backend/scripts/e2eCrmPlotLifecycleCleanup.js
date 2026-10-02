@@ -99,6 +99,10 @@ async function cleanup(pool, tag) {
     };
 
     // Rows that point at the sale by plain column (no FK) — in dependency order.
+    for (const t of ["CrmRefund", "CrmCancellation"]) {
+      const n = await q(`DELETE FROM dbo.[${t}] WHERE BookingId IN (${inList(bookings)})`);
+      if (n) console.log(`[cleanup] ${t}: ${n}`);
+    }
     await purge("CrmInvoice", "Id", invoices);
     await purge("CrmOnAccountPayment", "Id", oas);
     await purge("CrmMoneyReceipt", "Id", mrs);
