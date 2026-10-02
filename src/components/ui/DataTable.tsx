@@ -132,9 +132,30 @@ export function DataTable<TData extends RowData>({
     pageSize: defaultPageSize,
   });
 
+  // Status sits immediately left of the row-actions column (or last when
+  // there's none), so it can be pinned right beside Actions while the other
+  // columns scroll (see .sticky-status in index.css). Display order only —
+  // data, sorting and export are unaffected.
+  const orderedColumns = React.useMemo(() => {
+    const hdr = (c: ColumnDef<TData, unknown>) => (typeof c.header === "string" ? c.header.trim() : "");
+    const key = (c: ColumnDef<TData, unknown>) =>
+      String((c as { id?: string }).id ?? (c as { accessorKey?: string }).accessorKey ?? "").toLowerCase();
+    const statusIdx = columns.findIndex((c) => /^status$/i.test(hdr(c)) || key(c) === "status");
+    if (statusIdx < 0) return columns;
+    const lastIdx = columns.length - 1;
+    const last = columns[lastIdx];
+    const hasActions = lastIdx !== statusIdx && (key(last) === "actions" || /^actions?$/i.test(hdr(last)) || (!hdr(last) && typeof last.header !== "function"));
+    const target = hasActions ? lastIdx - 1 : lastIdx;
+    if (statusIdx === target) return columns;
+    const next = columns.slice();
+    const [status] = next.splice(statusIdx, 1);
+    next.splice(target, 0, status);
+    return next;
+  }, [columns]);
+
   const table = useReactTable({
     data,
-    columns,
+    columns: orderedColumns,
     state: {
       sorting,
       globalFilter,

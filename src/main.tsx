@@ -128,17 +128,20 @@ function markStickyActions() {
       const label = headText(last);
       const cells = columnCells(placed, last);
       let isActions = /^actions?$/i.test(label);
+      // Empty header: it's the actions column if ANY body row has buttons
+      // there (the first row may have none, e.g. an already-paid milestone).
       if (!isActions && !label && cells.some((c) => c.parentElement?.parentElement?.tagName === "THEAD")) {
-        const bodyCell = cells.find((c) => c.parentElement?.parentElement?.tagName === "TBODY");
-        isActions = !!bodyCell && !!bodyCell.querySelector("button, a");
+        isActions = cells.some((c) => c.parentElement?.parentElement?.tagName === "TBODY" && !!c.querySelector("button, a"));
       }
       if (isActions) actionCells = cells;
     }
     // Status = header labelled "Status" (not the actions column itself)
+    // Status is pinned only when it already sits right beside Actions (or
+    // is the last column) — pinning it from further left would cover the
+    // columns in between. DataTable reorders Status into that slot itself.
     let statusCells: HTMLTableCellElement[] = [];
-    for (let col = 0; col < ncols - (actionCells.length ? 1 : 0); col++) {
-      if (/^status$/i.test(headText(col))) { statusCells = columnCells(placed, col); break; }
-    }
+    const statusSlot = ncols - (actionCells.length ? 2 : 1);
+    if (statusSlot > 0 && /^status$/i.test(headText(statusSlot))) statusCells = columnCells(placed, statusSlot);
     if (ncols < 3) statusCells = [];
 
     const sync = (cls: string, want: Set<HTMLTableCellElement>) => {
@@ -155,6 +158,35 @@ function markStickyActions() {
 }
 window.addEventListener("resize", () => requestAnimationFrame(markStickyActions));
 
+// Short single values in table cells never break across lines: dates
+// ("2026-10-01" was splitting at its hyphens), numbers with units
+// ("4900 sqft", "₹1.50L") and space-free codes ("CUST-2026-00017"). The
+// element holding such text gets .cell-nowrap, so its column widens to fit
+// (the table scrolls if it must) while longer free text still wraps.
+const NOWRAP_PATTERNS = [
+  /^\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/,
+  /^\d{1,2}[ \-/.][A-Za-z]{3,9}[ \-/.,]+\d{2,4}(?:,? \d{1,2}:\d{2}(?: ?[AP]M)?)?$/i,
+  /^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}(?:,? \d{1,2}:\d{2}(?: ?[AP]M)?)?$/i,
+  /^[₹$€]?\s?-?[\d,]+(?:\.\d+)?\s?(?:sq\.?\s?ft|sqft|sq\.?\s?m|%|L|Cr|K|lakh|crore|units?|bags?|days?|hrs?|mins?|kg|nos?|pcs)?$/i,
+  /^\d{1,2}:\d{2}(?: ?[AP]M)?$/i,
+];
+const isShortValue = (t: string) =>
+  t.length > 0 && t.length <= 32 && (!/\s/.test(t) || NOWRAP_PATTERNS.some((re) => re.test(t)));
+function markNowrapCells() {
+  document.querySelectorAll<HTMLTableCellElement>("main table td, [role=dialog] table td").forEach((td) => {
+    if (td.hasAttribute("colspan")) return;
+    const candidates: HTMLElement[] = [td, ...Array.from(td.querySelectorAll<HTMLElement>("*"))];
+    candidates.forEach((el) => {
+      // Only elements whose own text (direct text nodes) is the value.
+      let own = "";
+      el.childNodes.forEach((n) => { if (n.nodeType === Node.TEXT_NODE) own += n.textContent; });
+      own = own.replace(/\s+/g, " ").trim();
+      if (!own) return;
+      el.classList.toggle("cell-nowrap", isShortValue(own));
+    });
+  });
+}
+
 let markQueued = false;
 new MutationObserver(() => {
   if (markQueued) return;
@@ -163,6 +195,7 @@ new MutationObserver(() => {
     markQueued = false;
     markRows();
     markStickyActions();
+    markNowrapCells();
   });
 }).observe(document.documentElement, { childList: true, subtree: true });
 
