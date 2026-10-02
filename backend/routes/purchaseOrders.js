@@ -794,6 +794,9 @@ const listPurchaseOrders = async (req, res) => {
       const companyId = req.query.companyId
         ? parseInt(req.query.companyId, 10) || null
         : null;
+      const projectId = req.query.projectId
+        ? parseInt(req.query.projectId, 10) || null
+        : null;
 
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
@@ -803,6 +806,7 @@ const listPurchaseOrders = async (req, res) => {
       if (poTypeFilter) whereConditions.push("po.POType = @poTypeFilter");
       if (!includeShortClosed) whereConditions.push("ISNULL(po.Status, '') != 'Short Closed'");
       if (companyId) whereConditions.push("po.CompanyId = @companyId");
+      if (projectId) whereConditions.push("po.ProjectId = @projectId");
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
         : "";
@@ -816,7 +820,8 @@ const listPurchaseOrders = async (req, res) => {
         .input("fyId", sql.Int, fyId)
         .input("sourceSaleInvoiceId", sql.Int, sourceSaleInvoiceId)
         .input("poTypeFilter", sql.NVarChar(20), poTypeFilter)
-        .input("companyId", sql.Int, companyId).query(`
+        .input("companyId", sql.Int, companyId)
+        .input("projectId", sql.Int, projectId).query(`
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
           ${whereClause}
