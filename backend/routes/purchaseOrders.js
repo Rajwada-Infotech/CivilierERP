@@ -798,6 +798,8 @@ const listPurchaseOrders = async (req, res) => {
         ? parseInt(req.query.projectId, 10) || null
         : null;
 
+      const groupByProject = req.query.groupBy === "project";
+
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
       if (fyId) whereConditions.push("po.fy_id = @fyId");
@@ -822,13 +824,33 @@ const listPurchaseOrders = async (req, res) => {
         .input("poTypeFilter", sql.NVarChar(20), poTypeFilter)
         .input("companyId", sql.Int, companyId)
         .input("projectId", sql.Int, projectId).query(`
+        ${
+          groupByProject
+            ? `
+        -- groupBy=project pages by PROJECT: each page holds @limit whole
+        -- projects (most recent PO first) with every one of their POs.
+        WITH base AS (
+          ${PO_SELECT}
+          ${whereClause}
+        ),
+        proj AS (
+          SELECT ISNULL(ProjectId, 0) AS PKey, MAX(PurchaseOrderID) AS LastId FROM base GROUP BY ISNULL(ProjectId, 0)
+        ),
+        ranked AS (
+          SELECT PKey, ROW_NUMBER() OVER (ORDER BY LastId DESC) AS rn, COUNT(*) OVER () AS _total FROM proj
+        )
+        SELECT b.*, r._total FROM base b JOIN ranked r ON r.PKey = ISNULL(b.ProjectId, 0)
+        WHERE r.rn > @offset AND r.rn <= @offset + @limit
+        ORDER BY r.rn, b.PurchaseOrderID DESC`
+            : `
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
           ${whereClause}
         ) _po
         ORDER BY _po.PurchaseOrderID DESC
         OFFSET @offset ROWS
-        FETCH NEXT @limit ROWS ONLY
+        FETCH NEXT @limit ROWS ONLY`
+        }
       `);
 
       const total = result.recordset[0]?._total ?? 0;
