@@ -22,6 +22,7 @@ import {
 } from "./layoutContexts";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { CompassProvider } from "@/components/compass/CompassProvider";
+import { CalculatorHost } from "@/components/calculator/CalculatorHost";
 import { useSidebarToggleShortcut, useModuleSwitchShortcut } from "@/hooks/useGlobalShortcuts";
 
 // ── Home page detection ───────────────────────────────────────────────────────
@@ -318,6 +319,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
         </NavPanelAutoExpand>
       </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>
+    <CalculatorHost />
     </CompassProvider>
   );
 };
