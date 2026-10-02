@@ -137,7 +137,7 @@ const PortalOverview: React.FC = () => {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard icon={Building2} label="Unit" value={timeline.booking?.UnitNo || "—"} sub={timeline.booking?.ProjectName} />
+        <StatCard icon={Building2} label={timeline.booking?.IsPlotSale ? "Plot" : "Unit"} value={timeline.booking?.UnitNo || "—"} sub={timeline.booking?.ProjectName} />
         <StatCard icon={TrendingUp} label="Payment Progress" value={`${pctPaid}%`} sub={`${fmtMoney(totalPaid)} of ${fmtMoney(totalDue)}`} />
         <StatCard icon={CreditCard} label="Next Payment" value={nextDue ? fmtMoney(nextDue.AmountDue) : "None due"} sub={nextDue?.MilestoneName} />
         <StatCard icon={legalStage.icon} label={legalStage.label} value={legalStage.value || "Not sent"} sub={legalStage.sub} />

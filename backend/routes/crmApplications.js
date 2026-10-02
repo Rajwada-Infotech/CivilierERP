@@ -60,6 +60,10 @@ const APP_SELECT = `
     a.ProjectId, a.PreferredUnitId, a.CompanyId,
     (SELECT STRING_AGG(CAST(UnitId AS NVARCHAR(10)), ',') FROM dbo.CrmApplicationUnit au WHERE au.ApplicationId = a.Id AND au.Status = 'Active') AS PreferredUnitIdsCsv,
     (SELECT STRING_AGG(CAST(PlotId AS NVARCHAR(10)), ',') FROM dbo.CrmApplicationPlot ap WHERE ap.ApplicationId = a.Id AND ap.Status = 'Active') AS PreferredPlotIdsCsv,
+    -- A plot (land) sale: the summary shows land value and no parking / GST.
+    CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmApplicationPlot apx WHERE apx.ApplicationId = a.Id AND apx.Status = 'Active') THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
+    (SELECT SUM(pm.AreaSqFt) FROM dbo.CrmApplicationPlot apa JOIN dbo.PlotMaster pm ON pm.Id = apa.PlotId WHERE apa.ApplicationId = a.Id AND apa.Status = 'Active') AS PlotAreaSqFt,
+    (SELECT STRING_AGG(pm.PlotName, ', ') FROM dbo.CrmApplicationPlot apn JOIN dbo.PlotMaster pm ON pm.Id = apn.PlotId WHERE apn.ApplicationId = a.Id AND apn.Status = 'Active') AS PlotNames,
     a.InterestedProject, a.InterestedUnit, a.PropertyType, a.BhkPreference,
     a.Source, a.PlatformId, a.CampaignId, a.AdId, a.ChannelPartnerId,
     a.AssignedTo, a.AssignedBy, a.Status, a.Notes, a.CurrentStep,

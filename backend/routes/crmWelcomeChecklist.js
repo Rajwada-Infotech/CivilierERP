@@ -67,6 +67,15 @@ const CONDITIONAL_TEMPLATE = [
     existsCol: "HasExtraCharges",
   },
 ];
+// A plot (land) sale confirms the same facts in land terms. Same keys, so
+// saved ticks carry over; only the wording the caller reads changes.
+const PLOT_SALE_LABELS = {
+  unit_no: "Plot number(s), size & facing confirmed",
+  total_value: "Total land value / grand total confirmed (no GST on land)",
+  plan_structure: "Payment schedule (Booking Amount, then the balance) confirmed with customer",
+};
+const PLOT_SALE_SECTION_LABELS = { ProjectUnit: "Project & Plot Details", PaymentPlan: "Payment Schedule" };
+
 const SECTION_LABELS = {
   ProjectUnit: "Project & Unit Details",
   PaymentPlan: "Payment Plan",
@@ -92,13 +101,20 @@ async function getActiveTemplate(pool, bookingId) {
     SELECT
       CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmCoApplicant WHERE BookingId = @bid AND IsActive = 1) THEN 1 ELSE 0 END AS HasCoApplicant,
       CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmParkingAllotment WHERE BookingId = @bid AND IsActive = 1) THEN 1 ELSE 0 END AS HasParking,
-      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmExtraCharge WHERE BookingId = @bid AND IsActive = 1) THEN 1 ELSE 0 END AS HasExtraCharges
+      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmExtraCharge WHERE BookingId = @bid AND IsActive = 1) THEN 1 ELSE 0 END AS HasExtraCharges,
+      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot WHERE BookingId = @bid) THEN 1 ELSE 0 END AS IsPlotSale
   `);
   const flags = ctx.recordset[0] || {};
-  return [
+  const items = [
     ...ALWAYS_TEMPLATE,
     ...CONDITIONAL_TEMPLATE.filter((t) => flags[t.existsCol] === 1),
   ];
+  if (flags.IsPlotSale !== 1) return items;
+  return items.map((t) => ({
+    ...t,
+    label: PLOT_SALE_LABELS[t.key] || t.label,
+    sectionLabel: PLOT_SALE_SECTION_LABELS[t.section],
+  }));
 }
 
 async function loadItems(pool, bookingId) {
@@ -121,7 +137,7 @@ async function loadItems(pool, bookingId) {
     const legacyAllChecked = !s && t.legacyKeys?.length > 0 && t.legacyKeys.every((lk) => savedByKey[lk]?.IsChecked);
     return {
       Section: t.section,
-      SectionLabel: SECTION_LABELS[t.section],
+      SectionLabel: t.sectionLabel || SECTION_LABELS[t.section],
       ItemKey: t.key,
       Label: t.label,
       IsChecked: !!s?.IsChecked || legacyAllChecked,
@@ -144,7 +160,7 @@ async function loadItems(pool, bookingId) {
       const secItems = items.filter((i) => i.Section === section);
       return {
         section,
-        label: SECTION_LABELS[section],
+        label: secItems[0].SectionLabel,
         items: secItems,
         complete: secItems.every((i) => i.IsChecked && i.RecheckStatus !== CrmStatus.OPEN),
         hasOpenRecheck: secItems.some((i) => i.RecheckStatus === CrmStatus.OPEN),

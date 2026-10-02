@@ -541,7 +541,7 @@ const CrmBooking: React.FC = () => {
           RatePerSqFt:   form.RatePerSqFt || null,
           TotalValue:    form.TotalValue   || null,
           TokenValue:    form.TokenValue   || null,
-          PaymentPlanId: form.PaymentPlanId || null,
+          PaymentPlanId: isPlotBooking ? null : (form.PaymentPlanId || null),
           AssignedTo:    form.AssignedTo   || null,
           BookingAmount: form.BookingAmount || null,
           BrokerId:      form.BrokerId || null,
@@ -1060,11 +1060,13 @@ const CrmBooking: React.FC = () => {
                   </div>
                 </div>
                 <div>
-                  <label className={labelCls}>Payment Plan (from the Application — not editable here)</label>
+                  <label className={labelCls}>{isPlotBooking ? "Payment Schedule" : "Payment Plan (from the Application — not editable here)"}</label>
                   <input type="text" readOnly disabled
-                    value={selectedPlan?.PlanName
-                      || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
-                      || "Default 7-stage split"}
+                    value={isPlotBooking
+                      ? "No payment plan — Booking Amount, then the balance"
+                      : (selectedPlan?.PlanName
+                        || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
+                        || "Default 7-stage split")}
                     className={inputClsDisabled} />
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
@@ -1091,13 +1093,15 @@ const CrmBooking: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
                     <label className={labelCls}>
-                      Booking Amount (₹) {selectedPlan ? "(Plan)" : ""}
+                      Booking Amount (₹) {!isPlotBooking && selectedPlan ? "(Plan)" : ""}
                     </label>
+                    {/* A plot sale has no plan: the amount typed here is the
+                        Booking milestone, the rest is the Balance. */}
                     <input type="number" value={form.BookingAmount}
                       onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))}
-                      readOnly={!!selectedPlan} disabled={!!selectedPlan}
-                      placeholder={selectedPlan ? undefined : "From Payment Plan"}
-                      className={selectedPlan ? inputClsDisabled : inputCls} />
+                      readOnly={!isPlotBooking && !!selectedPlan} disabled={!isPlotBooking && !!selectedPlan}
+                      placeholder={isPlotBooking ? "Leave empty for one full payment" : selectedPlan ? undefined : "From Payment Plan"}
+                      className={!isPlotBooking && selectedPlan ? inputClsDisabled : inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Assigned To</label>

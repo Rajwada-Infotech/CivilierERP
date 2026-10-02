@@ -1297,7 +1297,9 @@ const CrmApplication: React.FC = () => {
       }));
       setWizardAppStatus(app.Status || null);
 
-      const hasProject = app.CompanyId != null && app.ProjectId != null && app.PreferredUnitId != null;
+      const hasProject = app.CompanyId != null && app.ProjectId != null && (app.PreferredUnitId != null || !!app.PreferredPlotIdsCsv);
+      // A plot sale has no Parking step (step 2), so it never resumes there.
+      const firstStepAfterProject = app.PreferredPlotIdsCsv ? 3 : 2;
       // Lock the Project/Unit tree the same way Source locks once
       // auto-fetched — there's already a saved pick here, so default to
       // showing it read-only with an Edit control rather than inviting an
@@ -1324,7 +1326,7 @@ const CrmApplication: React.FC = () => {
       // Still clamped: never below step 2 once a project/unit exists (step 1
       // is already done), never above 6, never above 1 without one.
       const savedStep = Number(app.CurrentStep) || 1;
-      const resumeStep = hasProject ? Math.min(6, Math.max(2, savedStep)) : 1;
+      const resumeStep = hasProject ? Math.min(6, Math.max(firstStepAfterProject, savedStep)) : 1;
       setStep(resumeStep);
       setMaxStepReached(resumeStep);
       setDialogOpen(true);
@@ -1416,12 +1418,14 @@ const CrmApplication: React.FC = () => {
       // advanceStep's saveApplicationFields (which reads applicationId
       // from state) would no-op — patch CurrentStep directly against the
       // id we just got back instead.
-      setStep(2);
-      setMaxStepReached((m) => Math.max(m, 2));
+      // A plot sale has no parking — go straight to Extra Charges.
+      const nextStep = form.PreferredPlotIds.length ? 3 : 2;
+      setStep(nextStep);
+      setMaxStepReached((m) => Math.max(m, nextStep));
       fetchWithAuth(`${API}/${data.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ CurrentStep: 2 }),
+        body: JSON.stringify({ CurrentStep: nextStep }),
       }).catch(() => {});
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -2072,8 +2076,10 @@ const CrmApplication: React.FC = () => {
               clickable — steps 2-6 all need applicationId (created in step 1)
               and Bank/KYC intentionally still gates via its own Next/Save. */}
           <div className="flex items-center gap-2 text-xs flex-wrap">
-            {["Project/Unit", "Parking", "Extra Charges", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
+            {[form.PreferredPlotIds.length ? "Project/Plots" : "Project/Unit", "Parking", "Extra Charges", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
               const stepNum = i + 1;
+              // A plot sale has no parking step.
+              if (stepNum === 2 && form.PreferredPlotIds.length) return null;
               const reachable = stepNum === 1 || (applicationId != null && stepNum <= maxStepReached);
               return (
                 <React.Fragment key={label}>
@@ -2087,7 +2093,7 @@ const CrmApplication: React.FC = () => {
                         ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600"
                         : step > stepNum ? "text-green-600" : "text-muted-foreground"
                     } ${reachable ? "cursor-pointer hover:opacity-80" : "cursor-not-allowed opacity-60"}`}>
-                    {step > stepNum ? <CheckCircle2 size={12} /> : <span className="w-4 text-center">{stepNum}</span>}
+                    {step > stepNum ? <CheckCircle2 size={12} /> : <span className="w-4 text-center">{form.PreferredPlotIds.length && stepNum > 2 ? stepNum - 1 : stepNum}</span>}
                     {label}
                   </button>
                 </React.Fragment>
@@ -2729,7 +2735,7 @@ const CrmApplication: React.FC = () => {
 
           <div className="flex justify-between gap-2 pt-3 border-t border-border">
             <button
-              onClick={() => step > 1 && setStep(step - 1)}
+              onClick={() => step > 1 && setStep(step === 3 && form.PreferredPlotIds.length ? 1 : step - 1)}
               disabled={step === 1}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all disabled:opacity-30">
               <ChevronLeft size={14} /> Back
@@ -2810,12 +2816,14 @@ const CrmApplication: React.FC = () => {
           ) : (() => {
             const a = viewingAppDetail.application;
             const booking = (viewingAppDetail.bookings || [])[0];
-            const unitArea = Number(a.UnitAreaSqFt) || 0;
+            const isPlotSale = !!a.IsPlotSale;
+            const unitArea = Number(isPlotSale ? a.PlotAreaSqFt : a.UnitAreaSqFt) || 0;
             const unitRate = Number(a.RatePerSqFt) || 0;
             const unitTotal = unitArea && unitRate ? Math.round(unitArea * unitRate) : 0;
             const parkingRows = viewingAppParking as any[];
             const parkingBase = parkingRows.reduce((s, p) => s + (Number(p.RateSnapshot) || 0) * (Number(p.Quantity) || 1), 0);
-            const unitParkingGst = crmGstRates ? computeUnitParkingGst(unitTotal, parkingBase, crmGstRates) : null;
+            // Land is outside GST, so a plot sale gets no Unit+Parking GST.
+            const unitParkingGst = !isPlotSale && crmGstRates ? computeUnitParkingGst(unitTotal, parkingBase, crmGstRates) : null;
             const plan = (paymentPlans as any[]).find((p: any) => String(p.Id) === String(a.PaymentPlanId)) || null;
             const planMilestones = parseMilestones(plan?.MilestonesJson);
             const planBookingAmount = Number(plan?.BookingAmount || 0);
@@ -2875,12 +2883,23 @@ const CrmApplication: React.FC = () => {
                   <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
                     <Row label="Company" value={a.CompanyName} />
                     <Row label="Project" value={a.ProjectMasterName || a.InterestedProject} />
-                    <Row label="Unit" value={a.PreferredUnitName || a.InterestedUnit} />
-                    <Row label="Type / Area" value={
-                      [a.PropertyType || a.BhkPreference || a.UnitTypeFromMaster, a.UnitAreaSqFt ? `${a.UnitAreaSqFt} sqft` : null].filter(Boolean).join(" · ") || null
-                    } />
-                    <Row label="Rate" value={unitRate ? `₹${unitRate.toLocaleString("en-IN")}/sqft` : null} />
-                    <Row label="Payment Plan" value={a.PaymentPlanName} />
+                    {isPlotSale ? (
+                      <>
+                        <Row label="Plots" value={a.PlotNames} />
+                        <Row label="Area" value={unitArea ? `${unitArea.toLocaleString("en-IN")} sqft (land)` : null} />
+                        <Row label="Rate" value={unitRate ? `₹${unitRate.toLocaleString("en-IN")}/sqft` : null} />
+                        <Row label="Payment" value="Booking Amount, then the balance" />
+                      </>
+                    ) : (
+                      <>
+                        <Row label="Unit" value={a.PreferredUnitName || a.InterestedUnit} />
+                        <Row label="Type / Area" value={
+                          [a.PropertyType || a.BhkPreference || a.UnitTypeFromMaster, a.UnitAreaSqFt ? `${a.UnitAreaSqFt} sqft` : null].filter(Boolean).join(" · ") || null
+                        } />
+                        <Row label="Rate" value={unitRate ? `₹${unitRate.toLocaleString("en-IN")}/sqft` : null} />
+                        <Row label="Payment Plan" value={a.PaymentPlanName} />
+                      </>
+                    )}
                   </div>
                   {/* Parking */}
                   {parkingRows.length > 0 && (
@@ -2907,7 +2926,7 @@ const CrmApplication: React.FC = () => {
                   <div className="px-4 py-3 space-y-1.5">
                     {unitTotal > 0 && (
                       <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">Unit ({unitArea} sqft)</span>
+                        <span className="text-muted-foreground">{isPlotSale ? `Land (${unitArea.toLocaleString("en-IN")} sqft, no GST)` : `Unit (${unitArea} sqft)`}</span>
                         <span className="font-medium">₹{unitTotal.toLocaleString("en-IN")}</span>
                       </div>
                     )}

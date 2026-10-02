@@ -1108,6 +1108,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       `),
       pool.request().input("bid", sql.Int, bid).query(`
         SELECT b.BookingNo, b.Status AS BookingStatus, b.TotalValue,
+               CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
                COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
                b.ProjectId,
                COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,

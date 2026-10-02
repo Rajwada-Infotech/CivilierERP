@@ -63,6 +63,7 @@ const AGR_SELECT = `
     COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
     COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
     b.TotalValue, b.GrandTotal, b.TotalGstAmount,
+    CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
     b.UnitGstAmount, b.ParkingTotal, b.ParkingGstAmount, b.ExtraChargesTotal, b.ExtraWorkGstAmount,
     b.Status AS BookingStatus, b.IsActive AS BookingIsActive,
     a.ApplicantName, a.Mobile, a.Email,

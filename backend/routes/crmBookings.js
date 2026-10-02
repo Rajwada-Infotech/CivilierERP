@@ -112,6 +112,9 @@ async function assertNotFrozen(pool, id, res) {
 const BOOKING_SELECT = `
   SELECT
     b.Id, b.BookingNo, b.ApplicationId, b.UnitId, b.ProjectId,
+    -- A plot (land) sale: no parking, no flat areas, no GST. Every screen
+    -- that shows a booking reads this one flag instead of guessing.
+    CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
     -- Display names: always read from master tables so a rename in Block/Project
     -- Master is immediately reflected on every booking without a data migration.
     -- The stored snapshot column is the COALESCE fallback for legacy rows only.
@@ -320,7 +323,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
-    const [bkRes, milRes, wcRes, agRes, custRes, coAppRes] = await Promise.all([
+    const [bkRes, milRes, wcRes, agRes, custRes, coAppRes, plotRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${BOOKING_SELECT} WHERE b.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
         SELECT m.*,
@@ -347,6 +350,16 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
       // should show the same list, not the intake-time snapshot.
       pool.request().input("id", sql.Int, id).query(
         `SELECT * FROM dbo.CrmCoApplicant WHERE BookingId = @id AND IsActive = 1 ORDER BY CreatedAt`),
+      // The plots on a plot sale, one row each (empty for a unit booking).
+      pool.request().input("id", sql.Int, id).query(`
+        SELECT bp.PlotId, p.PlotName, p.PlotNo, p.SurveyNo, p.Facing, f.Name AS FacingName, p.IsCornerPlot,
+               p.PlotWidthFt, p.PlotDepthFt, p.RoadWidthFt, bp.AreaSqFt, bp.RatePerSqFt, bp.PremiumAmount,
+               bp.AllocatedValue, bp.Status, bp.IsPrimary
+        FROM dbo.CrmBookingPlot bp
+        JOIN dbo.PlotMaster p ON p.Id = bp.PlotId
+        LEFT JOIN dbo.PlotFacingMaster f ON f.Code = p.Facing
+        WHERE bp.BookingId = @id
+        ORDER BY CASE WHEN bp.Status = N'Active' THEN 0 ELSE 1 END, bp.IsPrimary DESC, p.PlotName`),
     ]);
     if (!bkRes.recordset[0]) return res.status(404).json({ error: "Booking not found" });
     const milestones = milRes.recordset;
@@ -360,6 +373,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
       agreement: agRes.recordset[0] || null,
       customer: custRes.recordset[0] || null,
       coApplicants: coAppRes.recordset,
+      plots: plotRes.recordset,
       paymentSummary: { totalDue, totalPaid, balance: totalDue - totalPaid },
       stageState,
     });

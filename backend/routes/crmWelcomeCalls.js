@@ -200,6 +200,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
     const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes, padRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
         SELECT b.Id, b.BookingNo,
+               CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
                COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
                COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
                COALESCE(bn.UnitType, b.UnitType) AS UnitType,
