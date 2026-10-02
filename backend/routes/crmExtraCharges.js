@@ -10,7 +10,7 @@ const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
-const { recalculateBookingGst, resolveExtraWorkHsn, getHsnRate } = require("../services/crmGst");
+const { recalculateBookingGst, resolveExtraWorkHsn, getHsnRate, isLandSale } = require("../services/crmGst");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -57,7 +57,8 @@ async function applyAddExtraCharge(pool, bookingId, b, actorUserId) {
       .query("SELECT Id FROM dbo.ExtraChargeMaster WHERE Id = @id AND IsActive = 1");
     if (!master.recordset.length) throw chargeError("Selected charge type is not active");
   }
-  const gstRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool)).hsnCode);
+  const landSale = await isLandSale(pool, { bookingId });
+  const gstRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool, { landSale })).hsnCode);
   const gstAmount = Math.round((amount * gstRate) / 100 * 100) / 100;
   const totalAmount = amount + gstAmount;
 
@@ -137,7 +138,8 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
       .query("SELECT Id FROM dbo.ExtraChargeMaster WHERE Id = @id AND IsActive = 1");
     if (!master.recordset.length) throw chargeError("Selected charge type is not active");
   }
-  const gstRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool)).hsnCode);
+  const landSale = await isLandSale(pool, { bookingId: BookingId, applicationId: BookingId == null ? ApplicationId : null });
+  const gstRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool, { landSale })).hsnCode);
   const gstAmount = Math.round((amount * gstRate) / 100 * 100) / 100;
   const totalAmount = amount + gstAmount;
 
@@ -202,7 +204,8 @@ async function applyAddExtraChargeToApplication(pool, applicationId, b, actorUse
       .query("SELECT Id FROM dbo.ExtraChargeMaster WHERE Id = @id AND IsActive = 1");
     if (!master.recordset.length) throw chargeError("Selected charge type is not active");
   }
-  const gstRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool)).hsnCode);
+  const landSale = await isLandSale(pool, { applicationId });
+  const gstRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool, { landSale })).hsnCode);
   const gstAmount = Math.round((amount * gstRate) / 100 * 100) / 100;
   const totalAmount = amount + gstAmount;
 

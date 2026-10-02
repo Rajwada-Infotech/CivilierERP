@@ -189,7 +189,13 @@ async function resolveUnitParkingHsn(pool, bracketBase, opts = {}) {
  * resolveUnitParkingHsn: the constant stands in when nothing matches, and
  * fromRule says which answer this is.
  */
-async function resolveExtraWorkHsn(pool) {
+async function resolveExtraWorkHsn(pool, { landSale = false } = {}) {
+  // A plot sale's charges have their own rule (EXTRA_WORK_LAND — 0% by
+  // business decision, migration 524); without one, the ordinary rule applies.
+  if (landSale) {
+    const land = await resolveHsnCode(pool, APPLIES_TO.EXTRA_WORK_LAND, { value: 0 });
+    if (land.hsnCode) return { hsnCode: land.hsnCode, fromRule: true, ruleName: land.ruleName };
+  }
   const resolved = await resolveHsnCode(pool, APPLIES_TO.EXTRA_WORK, { value: 0 });
   if (resolved.hsnCode) return { hsnCode: resolved.hsnCode, fromRule: true, ruleName: resolved.ruleName };
   return { hsnCode: EXTRA_WORK_HSN_CODE, fromRule: false, ruleName: null };
@@ -299,6 +305,15 @@ async function recalculateBookingGst(pool, bookingId) {
       UPDATE dbo.CrmExtraCharge SET GstRate = 0, GstAmount = 0, TotalAmount = Amount
       WHERE BookingId = @bid AND IsActive = 1
     `);
+  } else if (split.isPureLand) {
+    // A plot sale's charges take the EXTRA_WORK_LAND rule's rate (0% by
+    // business decision) — re-applied here so charges added before the rule
+    // existed, or before the rate was changed in the HSN master, follow it.
+    const landRate = await getHsnRate(pool, (await resolveExtraWorkHsn(pool, { landSale: true })).hsnCode);
+    await pool.request().input("bid", sql.Int, bookingId).input("r", sql.Decimal(5, 2), landRate).query(`
+      UPDATE dbo.CrmExtraCharge SET GstRate = @r, GstAmount = ROUND(Amount * @r / 100, 2), TotalAmount = Amount + ROUND(Amount * @r / 100, 2)
+      WHERE BookingId = @bid AND IsActive = 1
+    `);
   }
   const extraRow = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT ISNULL(SUM(TotalAmount), 0) AS Total, ISNULL(SUM(GstAmount), 0) AS Gst
@@ -370,6 +385,22 @@ async function recalculateBookingGst(pool, bookingId) {
 }
 
 /**
+ * Is this booking / application a plot (land) sale? Plot lines are the
+ * structural fact (CrmBookingPlot / CrmApplicationPlot), never a label.
+ */
+async function isLandSale(pool, { bookingId = null, applicationId = null } = {}) {
+  if (bookingId != null) {
+    return (await pool.request().input("id", sql.Int, bookingId)
+      .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @id")).recordset.length > 0;
+  }
+  if (applicationId != null) {
+    return (await pool.request().input("id", sql.Int, applicationId)
+      .query("SELECT TOP 1 1 AS x FROM dbo.CrmApplicationPlot WHERE ApplicationId = @id AND Status = N'Active'")).recordset.length > 0;
+  }
+  return false;
+}
+
+/**
  * GST on the developer's fee for a plot resale / transfer — the only developer
  * income in a resale (the land price passes between the buyers, outside GST).
  *
@@ -380,10 +411,12 @@ async function recalculateBookingGst(pool, bookingId) {
  * error the caller shows to the user.
  */
 class GstSetupError extends Error {}
-async function resolveResaleFeeGst(pool, feeAmount) {
+async function resolveResaleFeeGst(pool, feeAmount, { landSale = false } = {}) {
   const fee = Math.round((Number(feeAmount) || 0) * 100) / 100;
   if (fee <= 0) return { hsnCode: null, rate: 0, gstAmount: 0 };
-  const resolved = await resolveHsnCode(pool, APPLIES_TO.RESALE_FEE, { value: fee });
+  // A plot resale's fee has its own rule (RESALE_FEE_LAND); otherwise RESALE_FEE.
+  let resolved = landSale ? await resolveHsnCode(pool, APPLIES_TO.RESALE_FEE_LAND, { value: fee }) : { hsnCode: null };
+  if (!resolved.hsnCode) resolved = await resolveHsnCode(pool, APPLIES_TO.RESALE_FEE, { value: fee });
   if (!resolved.hsnCode) {
     throw new GstSetupError("No GST rule is set up for the resale fee — add an active RESALE_FEE rule in the GST rules master.");
   }
@@ -397,6 +430,7 @@ async function resolveResaleFeeGst(pool, feeAmount) {
 }
 
 module.exports = {
+  isLandSale,
   resolveResaleFeeGst,
   GstSetupError,
   resolveUnitParkingHsn,

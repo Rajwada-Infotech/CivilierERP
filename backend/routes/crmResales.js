@@ -86,7 +86,7 @@ router.get("/", requirePageRight("crm-resales", "view"), async (req, res) => {
 // HSN masters, so the form shows the same figure the server will store.
 router.get("/fee-gst", requirePageRight("crm-resales", "view"), async (req, res) => {
   try {
-    res.json(await resolveResaleFeeGst(getPool(), req.query.amount));
+    res.json(await resolveResaleFeeGst(getPool(), req.query.amount, { landSale: req.query.plot === "1" }));
   } catch (e) {
     if (e instanceof GstSetupError) return res.status(400).json({ error: e.message });
     console.error("[crm-resales] GET /fee-gst:", e.message);
@@ -145,7 +145,7 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
     // The fee's GST comes from the masters, never from the request.
     let feeGst;
     try {
-      feeGst = await resolveResaleFeeGst(pool, num(b.DeveloperFeeAmount));
+      feeGst = await resolveResaleFeeGst(pool, num(b.DeveloperFeeAmount), { landSale: plotId != null });
     } catch (e) {
       if (e instanceof GstSetupError) return res.status(400).json({ error: e.message });
       throw e;
