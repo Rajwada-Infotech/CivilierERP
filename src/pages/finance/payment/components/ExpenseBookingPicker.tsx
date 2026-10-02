@@ -86,15 +86,26 @@ export function ExpenseBookingPicker({
   const selected = options.find((o) => o.id === value);
   const hasSelection = !!selected || !!selectedContract || !!selectedJVLine || !!mergedSummary;
 
-  const filteredJVLines = jvLines.filter((l) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      (l.JVNo ?? "").toLowerCase().includes(q) ||
-      (l.LHeadName ?? "").toLowerCase().includes(q) ||
-      (l.Narration ?? "").toLowerCase().includes(q)
-    );
-  });
+  // A search like "194" also matches ledger names ("TDS SECTION 194H"), which
+  // buried JV-2026-00194 itself under dozens of unrelated lines — so lines
+  // whose JV number matches are ranked first (array sort is stable, so the
+  // existing newest-first order is kept within each group).
+  const jvSearchQ = search.toLowerCase();
+  const filteredJVLines = jvLines
+    .filter((l) => {
+      if (!search) return true;
+      return (
+        (l.JVNo ?? "").toLowerCase().includes(jvSearchQ) ||
+        (l.LHeadName ?? "").toLowerCase().includes(jvSearchQ) ||
+        (l.Narration ?? "").toLowerCase().includes(jvSearchQ)
+      );
+    })
+    .sort((a, b) => {
+      if (!search) return 0;
+      const am = (a.JVNo ?? "").toLowerCase().includes(jvSearchQ) ? 0 : 1;
+      const bm = (b.JVNo ?? "").toLowerCase().includes(jvSearchQ) ? 0 : 1;
+      return am - bm;
+    });
 
   const clearOthers = () => {
     onChange("");

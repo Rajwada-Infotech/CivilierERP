@@ -344,6 +344,7 @@ const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
 const PostApprovalRights = lazy(
   () => import("./pages/admin/PostApprovalRights"),
 );
+const ProjectAccess = lazy(() => import("./pages/admin/ProjectAccess"));
 const ApprovalInbox = lazy(() => import("./pages/admin/ApprovalInbox"));
 
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
@@ -2147,6 +2148,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <PostApprovalRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/project-access"
+        element={
+          <AdminRoute>
+            <ProjectAccess />
           </AdminRoute>
         }
       />

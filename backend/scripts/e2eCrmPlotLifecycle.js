@@ -55,6 +55,7 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
   app.use("/api/crm/customers", require(path.join(BACKEND, "routes/crmCustomers")));
   app.use("/api/crm/payments", require(path.join(BACKEND, "routes/crmPayments")));
   app.use("/api/crm/parking", require(path.join(BACKEND, "routes/crmParking")));
+  app.use("/api/crm/extra-charges", require(path.join(BACKEND, "routes/crmExtraCharges")));
   app.use("/api/crm/welcome-calls", require(path.join(BACKEND, "routes/crmWelcomeCalls")));
   app.use("/api/crm/welcome-checklist", require(path.join(BACKEND, "routes/crmWelcomeChecklist")));
   app.use("/api/received-payment", require(path.join(BACKEND, "routes/receivedPayment")));
@@ -177,6 +178,15 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
     check("adding parking to the plot booking is refused", r.status === 400 && /plot sale has no parking/i.test(r.data?.error || ""), r);
     r = await call("POST", "/api/crm/parking/standalone", { ApplicationId: run.applicationId, ParkingType: "Covered", RateOverride: 1000, Quantity: 1 });
     check("adding parking to the plot application is refused", r.status === 400 && /plot sale has no parking/i.test(r.data?.error || ""), r);
+    // An extra charge on a plot sale carries no GST (EXTRA_WORK_LAND rule).
+    r = await call("POST", `/api/crm/extra-charges/${bid}`, { Description: `${TAG} development charge`, Amount: 50000 });
+    const xc = (await q("SELECT Id, GstRate, GstAmount, TotalAmount FROM dbo.CrmExtraCharge WHERE BookingId = @b AND IsActive = 1", { b: [sql.Int, bid] }))[0];
+    const bkx = (await q("SELECT ExtraChargesTotal, ExtraWorkGstAmount, TotalGstAmount, GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @b", { b: [sql.Int, bid] }))[0];
+    check("extra charge on a plot sale: 0% GST", (r.status === 200 || r.status === 201) && xc && Number(xc.GstRate) === 0 && money(xc.GstAmount) === 0 && money(xc.TotalAmount) === 50000, { r: r.status, xc });
+    check("booking GST stays zero with the charge", money(bkx.ExtraWorkGstAmount) === 0 && money(bkx.TotalGstAmount) === 0 && money(bkx.GrandTotal) === money(bkx.TotalValue) + 50000, bkx);
+    if (xc) await q("UPDATE dbo.CrmExtraCharge SET IsActive = 0 WHERE Id = @id", { id: [sql.Int, xc.Id] });
+    await require(path.join(BACKEND, "services/crmGst")).recalculateBookingGst(getPool(), bid);
+    await require(path.join(BACKEND, "services/crmWorkflowGuards")).recalculateRemainingMilestones(getPool(), bid);
     check("no parking row was created", (await q("SELECT COUNT(*) n FROM dbo.CrmParkingAllotment WHERE BookingId = @b OR ApplicationId = @a", { b: [sql.Int, bid], a: [sql.Int, run.applicationId] }))[0].n === 0);
 
     console.log("\n[3c] Edits before approval keep value, plot lines and schedule in step");

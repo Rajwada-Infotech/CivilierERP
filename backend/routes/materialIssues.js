@@ -21,6 +21,7 @@ const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const rateLimit = require("express-rate-limit");
 const routeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, message: { error: "Too many requests, please try again later." } });
 router.use(routeLimiter);
@@ -72,6 +73,24 @@ router.get("/companies", authenticateToken, async (req, res) => {
   }
 });
 
+// Any route with :id — refuse an issue whose project is outside the user's
+// scope. /prefill/:type/:id uses :id for a GRN/MR/Work Done source instead.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope || req.path.startsWith("/prefill/")) return next();
+  const issueId = parseInt(id, 10);
+  if (!Number.isFinite(issueId)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, issueId)
+      .query("SELECT ProjectId FROM dbo.MaterialIssues WHERE IssueId = @id");
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /projects ─────────────────────────────────────────────────────────────
 router.get("/projects", authenticateToken, async (req, res) => {
   try {
@@ -81,7 +100,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
              (SELECT STRING_AGG(CAST(pc.CompanyId AS NVARCHAR(20)), ',')
                 FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = enterprise.id) AS tagged_company_ids
       FROM   dbo.enterprise
-      WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)
+      WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)${projectPredicate(req.projectScope, "id")}
       ORDER  BY name
     `);
     res.json(result.recordset);
@@ -252,6 +271,7 @@ router.get(
       if (companyId) {
         conditions.push("mi.CompanyId = @companyId");
       }
+      if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "mi.ProjectId", "").trim());
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
       // Use a single request with COUNT(*) OVER() to avoid executing the same
@@ -401,6 +421,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 router.post("/", authenticateToken, requirePageRight("material-issues", "create"), async (req, res) => {
   try {
     const pool = getPool();
+    if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
     const {
       CompanyId,
       ProjectId,
@@ -649,6 +670,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
     const pool = getPool();
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
     const {
       CompanyId,
       ProjectId,
@@ -905,6 +927,8 @@ router.get("/reference-list/grn", authenticateToken, async (req, res) => {
         grn.GRNID AS id,
         COALESCE(grn.DocNo, grn.GRNNo) AS docNo
       FROM dbo.GoodsReceiptNotes grn
+      LEFT JOIN dbo.PurchaseOrders grnpo ON grnpo.PurchaseOrderID = grn.POID
+      WHERE 1=1${projectPredicate(req.projectScope, "grnpo.ProjectId")}
       ORDER BY grn.CreatedDate DESC
     `);
     res.json(result.recordset);
@@ -923,6 +947,7 @@ router.get("/reference-list/mr", authenticateToken, async (req, res) => {
         mr.DocNo AS docNo,
         mr.Status
       FROM dbo.MaterialRequests mr
+      WHERE 1=1${projectPredicate(req.projectScope, "mr.ProjectId")}
       ORDER BY mr.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -935,6 +960,18 @@ router.get("/reference-list/mr", authenticateToken, async (req, res) => {
 // Returns items pre-filled from a GRN, MR, or Work Done record.
 // :id can be a numeric DB id OR a doc number string (e.g. GRN-2026-00004)
 router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
+  // Sources (GRN / MR / Work Done) each resolve their own project; refuse the
+  // response if it belongs outside the user's scope.
+  if (req.projectScope) {
+    const send = res.json.bind(res);
+    res.json = (body) => {
+      if (body && body.projectId != null && !projectAllowed(req.projectScope, body.projectId)) {
+        res.status(403);
+        return send({ error: "You don't have access to this project." });
+      }
+      return send(body);
+    };
+  }
   try {
     const pool = getPool();
     const type = (req.params.type || "").toUpperCase();

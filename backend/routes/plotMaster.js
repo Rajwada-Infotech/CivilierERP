@@ -32,6 +32,7 @@ const PLOT_SELECT = `
          p.PlotNo, p.PlotName, p.SurveyNo, p.AreaSqFt, p.RatePerSqFt,
          p.PlotWidthFt, p.PlotDepthFt, p.Facing, p.IsCornerPlot, p.RoadWidthFt, p.GuidelineRatePerSqFt,
          p.GridRow, p.GridCol,
+         p.PlannedVillaTypeId, vt.Code AS PlannedVillaTypeCode, vt.Name AS PlannedVillaTypeName,
          p.ConvertedUnitId, p.ConvertedAt, converted.UnitName AS ConvertedUnitName,
          (SELECT COUNT(*) FROM dbo.PlotAdjacency pa
             JOIN dbo.PlotMaster o ON o.Id = CASE WHEN pa.PlotId = p.Id THEN pa.AdjacentPlotId ELSE pa.PlotId END
@@ -41,6 +42,7 @@ const PLOT_SELECT = `
   JOIN dbo.enterprise e ON e.id = p.ProjectId
   JOIN dbo.BlockMaster b ON b.Id = p.BlockId
   LEFT JOIN dbo.UnitMaster converted ON converted.Id = p.ConvertedUnitId
+  LEFT JOIN dbo.VillaTypeMaster vt ON vt.Id = p.PlannedVillaTypeId
   OUTER APPLY (
     SELECT TOP 1 cb.BookingNo
     FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking cb ON cb.Id = bp.BookingId
@@ -187,21 +189,38 @@ router.put("/:id/adjacent", requirePageRight("crm-auto-project-setup", "edit"), 
       const candidateRequest = pool.request();
       adjacentIds.forEach((id, i) => candidateRequest.input(`a${i}`, sql.Int, id));
       const candidates = await candidateRequest.query(`
-        SELECT Id, ProjectId, BlockId FROM dbo.PlotMaster
-        WHERE Id IN (${adjacentIds.map((_, i) => `@a${i}`).join(",")}) AND IsActive = 1 AND ConvertedUnitId IS NULL
+        SELECT Id, ProjectId, BlockId, ConvertedUnitId FROM dbo.PlotMaster
+        WHERE Id IN (${adjacentIds.map((_, i) => `@a${i}`).join(",")}) AND IsActive = 1
       `);
       const origin = source.recordset[0];
       if (candidates.recordset.length !== adjacentIds.length || candidates.recordset.some((p) => p.ProjectId !== origin.ProjectId || p.BlockId !== origin.BlockId)) {
-        return res.status(400).json({ error: "Adjacent plots must be active, unconverted, and in the same project and block" });
+        return res.status(400).json({ error: "Adjacent plots must be active and in the same project and block" });
+      }
+      // A plot already converted to a villa keeps the links it had (they record
+      // which plots the villa stands on) but cannot gain a new one.
+      const converted = candidates.recordset.filter((p) => p.ConvertedUnitId != null).map((p) => p.Id);
+      if (converted.length) {
+        const linked = new Set((await pool.request().input("plotId", sql.Int, plotId).query(`
+          SELECT CASE WHEN PlotId = @plotId THEN AdjacentPlotId ELSE PlotId END AS Other
+          FROM dbo.PlotAdjacency WHERE PlotId = @plotId OR AdjacentPlotId = @plotId`)).recordset.map((r) => r.Other));
+        if (converted.some((id) => !linked.has(id))) {
+          return res.status(400).json({ error: "A plot already converted to a villa cannot get a new neighbour" });
+        }
       }
     }
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Links to converted plots are never removed here — they belong to a villa.
       await tx.request().input("plotId", sql.Int, plotId).query(`
-        DELETE FROM dbo.PlotAdjacency WHERE PlotId = @plotId OR AdjacentPlotId = @plotId
+        DELETE pa FROM dbo.PlotAdjacency pa
+        JOIN dbo.PlotMaster other ON other.Id = CASE WHEN pa.PlotId = @plotId THEN pa.AdjacentPlotId ELSE pa.PlotId END
+        WHERE (pa.PlotId = @plotId OR pa.AdjacentPlotId = @plotId) AND other.ConvertedUnitId IS NULL
       `);
-      for (const adjacentId of adjacentIds) {
+      const kept = new Set((await tx.request().input("plotId", sql.Int, plotId).query(`
+        SELECT CASE WHEN PlotId = @plotId THEN AdjacentPlotId ELSE PlotId END AS Other
+        FROM dbo.PlotAdjacency WHERE PlotId = @plotId OR AdjacentPlotId = @plotId`)).recordset.map((r) => r.Other));
+      for (const adjacentId of adjacentIds.filter((id) => !kept.has(id))) {
         await tx.request().input("left", sql.Int, Math.min(plotId, adjacentId)).input("right", sql.Int, Math.max(plotId, adjacentId))
           .input("by", sql.Int, req.user?.userId || null).query(`
             INSERT INTO dbo.PlotAdjacency (PlotId, AdjacentPlotId, CreatedBy, CreatedAt)
@@ -220,6 +239,33 @@ router.put("/:id/adjacent", requirePageRight("crm-auto-project-setup", "edit"), 
 // Plot-type blocks (not floors/units) so the screen can offer a block that has no plots yet:
 // the filter dropdowns and "Add plot" used to be built from existing plots, which made the
 // very first plot of a new block impossible to create.
+// Plan one villa type for several plots at once (or clear it with null).
+// Converted plots are left alone: their villa already records its own type.
+router.put("/planned-villa-type", requirePageRight(PAGE, "edit"), async (req, res) => {
+  const plotIds = Array.isArray(req.body?.PlotIds) ? [...new Set(req.body.PlotIds.map(Number))] : [];
+  if (!plotIds.length || !plotIds.every((id) => Number.isInteger(id) && id > 0)) return res.status(400).json({ error: "Select one or more plots" });
+  const villaTypeId = req.body?.VillaTypeId == null || req.body.VillaTypeId === "" ? null : parseId(req.body.VillaTypeId);
+  if (req.body?.VillaTypeId != null && req.body.VillaTypeId !== "" && villaTypeId == null) return res.status(400).json({ error: "Invalid villa type" });
+  try {
+    const pool = getPool();
+    const plots = (await pool.request().query(
+      `SELECT Id, ProjectId, ConvertedUnitId FROM dbo.PlotMaster WHERE IsActive = 1 AND Id IN (${plotIds.join(",")})`)).recordset;
+    if (plots.length !== plotIds.length) return res.status(400).json({ error: "One or more plots are not active" });
+    if (plots.some((p) => p.ConvertedUnitId != null)) return res.status(409).json({ error: "Converted plots keep the type their villa was built to" });
+    const projects = new Set(plots.map((p) => p.ProjectId));
+    if (projects.size > 1) return res.status(400).json({ error: "Select plots of one project" });
+    const villaTypeError = await resolveVillaType(pool, villaTypeId, plots[0].ProjectId);
+    if (villaTypeError) return res.status(400).json({ error: villaTypeError });
+    const r = await pool.request().input("vt", sql.Int, villaTypeId).input("by", sql.Int, req.user?.userId || null)
+      .query(`UPDATE dbo.PlotMaster SET PlannedVillaTypeId = @vt, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+              WHERE IsActive = 1 AND ConvertedUnitId IS NULL AND Id IN (${plotIds.join(",")})`);
+    res.json({ success: true, updated: r.rowsAffected[0] });
+  } catch (error) {
+    console.error("[plot-master] PUT planned-villa-type error:", error.message);
+    res.status(500).json({ error: "Failed to set the villa type" });
+  }
+});
+
 router.get("/blocks", requirePageRight(PAGE, "view"), async (_req, res) => {
   try {
     const pool = getPool();
@@ -314,14 +360,23 @@ router.put("/layout/:blockId", requirePageRight(PAGE, "edit"), async (req, res) 
 
     let pairs = null;
     if (Array.isArray(req.body?.Adjacency)) {
+      // Links that already exist are kept even when a side has since been
+      // converted to a villa: plots bought together are linked first and
+      // converted afterwards, and the editor sends every loaded link back on
+      // save. Only a NEW link to a converted plot is refused.
+      const existingPairs = new Set((await pool.request().input("b", sql.Int, blockId).query(`
+        SELECT pa.PlotId, pa.AdjacentPlotId FROM dbo.PlotAdjacency pa
+        JOIN dbo.PlotMaster p ON p.Id = pa.PlotId WHERE p.BlockId = @b`)).recordset
+        .map((r) => `${Math.min(r.PlotId, r.AdjacentPlotId)}-${Math.max(r.PlotId, r.AdjacentPlotId)}`));
       pairs = new Map();
       for (const pair of req.body.Adjacency) {
         const a = Number(pair?.[0]), b = Number(pair?.[1]);
         if (!plotById.has(a) || !plotById.has(b) || a === b) {
           return res.status(400).json({ error: "Neighbours must be two different active plots of this block" });
         }
-        if (plotById.get(a).ConvertedUnitId || plotById.get(b).ConvertedUnitId) {
-          return res.status(400).json({ error: "Converted plots cannot have neighbours" });
+        const key = `${Math.min(a, b)}-${Math.max(a, b)}`;
+        if ((plotById.get(a).ConvertedUnitId || plotById.get(b).ConvertedUnitId) && !existingPairs.has(key)) {
+          return res.status(400).json({ error: "A plot already converted to a villa cannot get a new neighbour" });
         }
         pairs.set(`${Math.min(a, b)}-${Math.max(a, b)}`, [Math.min(a, b), Math.max(a, b)]);
       }
@@ -423,7 +478,19 @@ function parsePlotUpdate(body) {
     if (result.error) return result;
     parsed[key] = result.value;
   }
-  return { plotNo, plotName, surveyNo, facing, isCornerPlot: body?.IsCornerPlot === true, ...parsed };
+  const villaTypeId = body?.PlannedVillaTypeId == null || body.PlannedVillaTypeId === "" ? null : parseId(body.PlannedVillaTypeId);
+  if (body?.PlannedVillaTypeId != null && body.PlannedVillaTypeId !== "" && villaTypeId == null) return { error: "Invalid villa type" };
+  return { plotNo, plotName, surveyNo, facing, villaTypeId, isCornerPlot: body?.IsCornerPlot === true, ...parsed };
+}
+
+// A planned villa type must be an active type of the plot's own project.
+// The current value is accepted unchanged even if the type was since retired.
+async function resolveVillaType(pool, villaTypeId, projectId, current = null) {
+  if (villaTypeId == null) return null;
+  if (current != null && villaTypeId === current) return null;
+  const r = await pool.request().input("id", sql.Int, villaTypeId).input("p", sql.Int, projectId)
+    .query("SELECT Id FROM dbo.VillaTypeMaster WHERE Id = @id AND ProjectId = @p AND IsActive = 1");
+  return r.recordset.length ? null : "Select an active villa type of this project";
 }
 
 router.post("/", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
@@ -444,15 +511,18 @@ router.post("/", requirePageRight("crm-auto-project-setup", "create"), async (re
     const facingCheck = await resolveFacing(pool, value.facing);
     if (facingCheck.error) return res.status(400).json({ error: facingCheck.error });
     value.facing = facingCheck.value;
+    const villaTypeError = await resolveVillaType(pool, value.villaTypeId, projectId);
+    if (villaTypeError) return res.status(400).json({ error: villaTypeError });
     const result = await pool.request()
+      .input("villaType", sql.Int, value.villaTypeId)
       .input("projectId", sql.Int, projectId).input("blockId", sql.Int, blockId).input("plotNo", sql.NVarChar(50), value.plotNo).input("plotName", sql.NVarChar(100), value.plotName)
       .input("surveyNo", sql.NVarChar(100), value.surveyNo).input("area", sql.Decimal(18, 2), value.AreaSqFt).input("rate", sql.Decimal(18, 2), value.RatePerSqFt)
       .input("width", sql.Decimal(18, 2), value.PlotWidthFt).input("depth", sql.Decimal(18, 2), value.PlotDepthFt)
       .input("facing", sql.NVarChar(20), value.facing).input("corner", sql.Bit, value.isCornerPlot).input("road", sql.Decimal(18, 2), value.RoadWidthFt)
       .input("guideline", sql.Decimal(18, 2), value.GuidelineRatePerSqFt).input("by", sql.Int, req.user?.userId || null)
-      .query(`INSERT INTO dbo.PlotMaster (ProjectId, BlockId, PlotNo, PlotName, SurveyNo, AreaSqFt, RatePerSqFt, PlotWidthFt, PlotDepthFt, Facing, IsCornerPlot, RoadWidthFt, GuidelineRatePerSqFt, IsActive, CreatedBy, CreatedAt)
+      .query(`INSERT INTO dbo.PlotMaster (ProjectId, BlockId, PlotNo, PlotName, SurveyNo, AreaSqFt, RatePerSqFt, PlotWidthFt, PlotDepthFt, Facing, IsCornerPlot, RoadWidthFt, GuidelineRatePerSqFt, PlannedVillaTypeId, IsActive, CreatedBy, CreatedAt)
               OUTPUT INSERTED.Id
-              VALUES (@projectId, @blockId, @plotNo, @plotName, @surveyNo, @area, @rate, @width, @depth, @facing, @corner, @road, @guideline, 1, @by, SYSDATETIME())`);
+              VALUES (@projectId, @blockId, @plotNo, @plotName, @surveyNo, @area, @rate, @width, @depth, @facing, @corner, @road, @guideline, @villaType, 1, @by, SYSDATETIME())`);
     res.status(201).json(result.recordset[0]);
   } catch (error) {
     if (error.number === 2627 || error.number === 2601) return res.status(409).json({ error: "Another active plot in this block already uses this plot number" });
@@ -483,7 +553,7 @@ router.put("/:id", requirePageRight("crm-auto-project-setup", "edit"), async (re
   try {
     const pool = getPool();
     const editable = await pool.request().input("id", sql.Int, id).query(`
-      SELECT p.Id, p.BlockId, p.Facing
+      SELECT p.Id, p.BlockId, p.ProjectId, p.Facing, p.PlannedVillaTypeId
       FROM dbo.PlotMaster p
       WHERE p.Id = @id AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.PlotId = p.Id AND bp.Status = N'Active')
@@ -497,7 +567,10 @@ router.put("/:id", requirePageRight("crm-auto-project-setup", "edit"), async (re
     const facingCheck = await resolveFacing(pool, value.facing, editable.recordset[0].Facing);
     if (facingCheck.error) return res.status(400).json({ error: facingCheck.error });
     value.facing = facingCheck.value;
+    const villaTypeError = await resolveVillaType(pool, value.villaTypeId, editable.recordset[0].ProjectId, editable.recordset[0].PlannedVillaTypeId);
+    if (villaTypeError) return res.status(400).json({ error: villaTypeError });
     const updated = await pool.request()
+      .input("villaType", sql.Int, value.villaTypeId)
       .input("id", sql.Int, id).input("plotNo", sql.NVarChar(50), value.plotNo).input("plotName", sql.NVarChar(100), value.plotName)
       .input("surveyNo", sql.NVarChar(100), value.surveyNo).input("area", sql.Decimal(18, 2), value.AreaSqFt).input("rate", sql.Decimal(18, 2), value.RatePerSqFt)
       .input("width", sql.Decimal(18, 2), value.PlotWidthFt).input("depth", sql.Decimal(18, 2), value.PlotDepthFt)
@@ -506,7 +579,7 @@ router.put("/:id", requirePageRight("crm-auto-project-setup", "edit"), async (re
       .query(`UPDATE dbo.PlotMaster
               SET PlotNo = @plotNo, PlotName = @plotName, SurveyNo = @surveyNo, AreaSqFt = @area, RatePerSqFt = @rate,
                   PlotWidthFt = @width, PlotDepthFt = @depth, Facing = @facing, IsCornerPlot = @corner,
-                  RoadWidthFt = @road, GuidelineRatePerSqFt = @guideline, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+                  RoadWidthFt = @road, GuidelineRatePerSqFt = @guideline, PlannedVillaTypeId = @villaType, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
               WHERE Id = @id`);
     if (!updated.rowsAffected[0]) return res.status(404).json({ error: "Plot not found" });
     res.json({ success: true });

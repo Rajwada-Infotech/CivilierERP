@@ -12,6 +12,7 @@ const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
 const authMiddleware = require("./middleware/auth");
+const { attachProjectScope } = require("./services/projectScope");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
 
@@ -151,6 +152,7 @@ const ALL_ROUTES = [
   { path: "/api/roles", file: "./routes/roles" },
   { path: "/api/user-rights", file: "./routes/userRights" },
   { path: "/api/user-widget-rights", file: "./routes/userWidgetRights" },
+  { path: "/api/user-project-access", file: "./routes/userProjectAccess" },
   { path: "/api/account-group", file: "./routes/accountGroup" },
   { path: "/api/account-head", file: "./routes/accountHeadMaster" },
   { path: "/api/activity-master", file: "./routes/activityMaster" },
@@ -274,6 +276,7 @@ const ALL_ROUTES = [
   { path: "/api/project-master", file: "./routes/projectMaster" },
   { path: "/api/project-type-master", file: "./routes/projectTypeMaster" },
   { path: "/api/plot-facing-master", file: "./routes/plotFacingMaster" },
+  { path: "/api/villa-type-master", file: "./routes/villaTypeMaster" },
   { path: "/api/block-master", file: "./routes/blockMaster" },
   { path: "/api/unit-master", file: "./routes/unitMaster" },
   { path: "/api/plot-master", file: "./routes/plotMaster" },
@@ -545,6 +548,9 @@ async function createApp() {
     }
     next();
   });
+
+  // Per-user project scoping (req.projectScope: null = unrestricted).
+  app.use("/api", attachProjectScope);
 
   if (!isTest) logger.info("[ROUTES] Loading routes...");
 

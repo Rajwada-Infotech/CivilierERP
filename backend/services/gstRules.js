@@ -17,6 +17,10 @@ const APPLIES_TO = Object.freeze({
   EXTRA_WORK: "EXTRA_WORK",
   CONSTRUCTION_ON_CUSTOMER_LAND: "CONSTRUCTION_ON_CUSTOMER_LAND",
   RESALE_FEE: "RESALE_FEE",
+  // The same two charges when the sale is a plot (land). Looked up first for a
+  // plot; with no matching rule the ordinary rule applies.
+  EXTRA_WORK_LAND: "EXTRA_WORK_LAND",
+  RESALE_FEE_LAND: "RESALE_FEE_LAND",
 });
 
 /**

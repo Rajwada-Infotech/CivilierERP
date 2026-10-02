@@ -1809,6 +1809,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   const unitType = String(req.body?.UnitType || "").trim();
   const unitKind = String(req.body?.UnitKind || "").trim();
   if (!plotIds.length || !unitName || !unitType || !unitKind) return res.status(400).json({ error: "PlotIds, UnitName, UnitType, and UnitKind are required" });
+  // Merging plots into one villa cannot be undone, so it must be asked for
+  // explicitly; one villa per plot is the default and needs no flag.
+  if (new Set(plotIds).size > 1 && req.body?.Combine !== true) {
+    return res.status(400).json({ error: "Several plots make ONE villa only when Combine is confirmed. To build one villa per plot, convert each plot on its own." });
+  }
   // The villa's own construction rate. Never the plot's land rate: the plot's
   // owner has already paid for the land, and a villa priced at the land rate
   // would charge them for it again.
@@ -1816,9 +1821,27 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   if (!Number.isFinite(villaRate) || villaRate <= 0) {
     return res.status(400).json({ error: "Enter the villa's construction rate per sq ft — the plot's land rate is not used for the villa." });
   }
-  const builtUpArea = req.body?.AreaSqFt != null && req.body.AreaSqFt !== "" ? Number(req.body.AreaSqFt) : null;
-  if (builtUpArea != null && (!Number.isFinite(builtUpArea) || builtUpArea <= 0)) {
-    return res.status(400).json({ error: "Built-up area must be a positive number of sq ft" });
+  // A villa's built-up area is its own (per villa design), never the land
+  // area. Super built-up is optional; when given it is the saleable area, as
+  // for flats (AreaSqFt = SBU), otherwise the built-up area is.
+  // A villa type (dbo.VillaTypeMaster) supplies the areas a field leaves blank.
+  const optArea = (v) => (v != null && v !== "" ? Number(v) : null);
+  const villaTypeId = req.body?.VillaTypeId != null && req.body.VillaTypeId !== "" ? Number(req.body.VillaTypeId) : null;
+  if (villaTypeId != null && !(Number.isInteger(villaTypeId) && villaTypeId > 0)) return res.status(400).json({ error: "Invalid villa type" });
+  let villaType = null;
+  if (villaTypeId != null) {
+    villaType = (await getPool().request().input("id", sql.Int, villaTypeId)
+      .query("SELECT Id, ProjectId, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt FROM dbo.VillaTypeMaster WHERE Id = @id AND IsActive = 1")).recordset[0];
+    if (!villaType) return res.status(400).json({ error: "Select an active villa type" });
+  }
+  const builtUpArea = optArea(req.body?.BuiltUpAreaSqFt ?? req.body?.AreaSqFt) ?? (villaType ? Number(villaType.BuiltUpAreaSqFt) : null);
+  const superBuiltUpArea = optArea(req.body?.SuperBuiltUpAreaSqFt)
+    ?? (villaType && villaType.SuperBuiltUpAreaSqFt != null ? Number(villaType.SuperBuiltUpAreaSqFt) : null);
+  if (builtUpArea == null || !Number.isFinite(builtUpArea) || builtUpArea <= 0) {
+    return res.status(400).json({ error: "Built-up area of the villa is required (sq ft)" });
+  }
+  if (superBuiltUpArea != null && (!Number.isFinite(superBuiltUpArea) || superBuiltUpArea < builtUpArea)) {
+    return res.status(400).json({ error: "Super built-up area must be a number not less than the built-up area" });
   }
   try {
     const pool = getPool();
@@ -1883,6 +1906,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
         invalid.status = 400;
         throw invalid;
       }
+      if (villaType && villaType.ProjectId !== first.ProjectId) {
+        const invalid = new Error("The villa type belongs to a different project");
+        invalid.status = 400;
+        throw invalid;
+      }
       if (plotIds.length > 1) {
         const adjacency = await tx.request().query(`
           SELECT PlotId, AdjacentPlotId FROM dbo.PlotAdjacency
@@ -1907,16 +1935,18 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
           throw invalid;
         }
       }
-      const area = builtUpArea ?? plots.recordset.reduce((sum, p) => sum + Number(p.AreaSqFt || 0), 0);
+      const area = superBuiltUpArea ?? builtUpArea;
       const created = await tx.request()
         .input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId)
         .input("name", sql.NVarChar(100), unitName).input("type", sql.NVarChar(50), resolvedType.unitType)
         .input("layoutTypeId", sql.Int, resolvedType.layoutTypeId)
         .input("kind", sql.NVarChar(20), unitKind)
         .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), villaRate)
+        .input("bua", sql.Decimal(18, 2), builtUpArea).input("sbu", sql.Decimal(18, 2), superBuiltUpArea)
+        .input("villaType", sql.Int, villaType?.Id ?? null)
         .input("by", sql.Int, req.user?.userId || null)
-        .query(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, UnitType, LayoutTypeId, UnitKind, AreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
-                OUTPUT INSERTED.Id VALUES (@pid, @bid, @name, @type, @layoutTypeId, @kind, @area, @rate, 1, @by, SYSDATETIME())`);
+        .query(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, UnitType, LayoutTypeId, UnitKind, AreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, VillaTypeId, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
+                OUTPUT INSERTED.Id VALUES (@pid, @bid, @name, @type, @layoutTypeId, @kind, @area, @bua, @sbu, @villaType, @rate, 1, @by, SYSDATETIME())`);
       const unitId = created.recordset[0].Id;
       await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
       await tx.request().input("uid", sql.Int, unitId)
