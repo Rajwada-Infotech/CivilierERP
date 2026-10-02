@@ -94,7 +94,7 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
     // resolves once a unit is picked, via UnitMaster).
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId)"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
     const where = `WHERE ${conds.join(" AND ")}`;
 
     if (!req.query.page) {
@@ -119,7 +119,7 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
             AND (@srch2 IS NULL OR (c.CustomerName LIKE @srch2 OR c.Mobile LIKE @srch2 OR c.CustomerNo LIKE @srch2 OR c.PanNo LIKE @srch2))
             AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId2))
             AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId2))
-            AND (@blockId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId2))
+            AND (@blockId2 IS NULL OR (EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId2) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId2)))
         `),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
@@ -417,6 +417,15 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     const b = req.body;
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email, id);
+    if (!email) {
+      // The portal login is keyed on this email (CrmCustomerPortalUser.Email
+      // is NOT NULL), so it can't be cleared while a login exists.
+      const portal = await pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 1 AS x FROM dbo.CrmCustomerPortalUser WHERE CustomerId = @id");
+      if (portal.recordset.length) {
+        return res.status(400).json({ error: "This customer has a portal login, which signs in with their email — enter an email address." });
+      }
+    }
 
     const cur = resolveCurrentAddress(b);
 

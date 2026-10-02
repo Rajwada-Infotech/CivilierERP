@@ -59,6 +59,37 @@ function isAdvancePaymentReason(paymentName) {
 // once seeded, so there's no need to hit the DB on every posting call.
 const glHeadIdCache = new Map();
 
+/**
+ * Resolve a GL head by its STABLE CODE, falling back to its name.
+ *
+ * getGLHeadId() below matches on LHeadName, which is a display string a user
+ * can edit from Account Head Master. Renaming "Sale of Land" to anything else
+ * makes every posting that asks for it throw — at posting time, after the
+ * invoice is already approved. LHeadCode is the key that is not meant to change
+ * (migrations 472 / 484 set CRM-SALE-INCOME and CRM-SALE-LAND).
+ *
+ * The name fallback is kept because older databases may predate the codes, so
+ * this is strictly more robust than either lookup alone: it survives a rename,
+ * and still works where the code was never set.
+ */
+async function getGLHeadIdByCode(pool, code, fallbackName) {
+  const cacheKey = `code:${code}`;
+  if (glHeadIdCache.has(cacheKey)) return glHeadIdCache.get(cacheKey);
+  const result = await pool
+    .request()
+    .input("Code", sql.NVarChar(100), code)
+    .query(`SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = @Code AND LHeadType = 'GL'`);
+  const id = result.recordset[0]?.LHeadId ?? null;
+  if (id != null) {
+    glHeadIdCache.set(cacheKey, id);
+    return id;
+  }
+  if (!fallbackName) {
+    throw new Error(`GL account with code "${code}" not found in AccountHeadMaster (LHeadType='GL')`);
+  }
+  return getGLHeadId(pool, fallbackName);
+}
+
 async function getGLHeadId(pool, name) {
   if (glHeadIdCache.has(name)) return glHeadIdCache.get(name);
   const result = await pool
@@ -1546,6 +1577,7 @@ async function postFundTransferApproval(pool, ftId, userEmail) {
 }
 
 module.exports = {
+  getGLHeadIdByCode,
   GL_ACCOUNTS,
   getGLHeadId,
   getCashInHandBankId,

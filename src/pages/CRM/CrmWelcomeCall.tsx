@@ -1696,7 +1696,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "project_name")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
                 <div className="relative">
-                  <label className="text-[0.6875rem] text-muted-foreground block">Unit</label>
+                  <label className="text-[0.6875rem] text-muted-foreground block">{callContext?.booking?.IsPlotSale ? "Plots" : "Unit"}</label>
                   <div className="text-sm font-medium truncate">{callContext?.booking?.UnitNo || booking.UnitNo || "—"}</div>
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "unit_no")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
@@ -1740,10 +1740,10 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                 <button type="button" onClick={() => setExpandedCard((c) => c === "plan" ? null : "plan")}
                   className="w-full text-left p-2.5 text-xs hover:bg-muted/30">
                   <div className="flex items-center justify-between gap-1">
-                    <span className="flex items-center gap-1 text-muted-foreground"><ClipboardCheck size={11} /> Payment Plan</span>
+                    <span className="flex items-center gap-1 text-muted-foreground"><ClipboardCheck size={11} /> {callContext?.booking?.IsPlotSale ? "Payment Schedule" : "Payment Plan"}</span>
                     <ChevronRight size={12} className={`text-muted-foreground transition-transform ${expandedCard === "plan" ? "rotate-90" : ""}`} />
                   </div>
-                  <div className="font-medium text-sm truncate" title={callContext?.booking?.PaymentPlanName}>{callContext?.booking?.PaymentPlanName || "7-stage default"}</div>
+                  <div className="font-medium text-sm truncate" title={callContext?.booking?.PaymentPlanName}>{callContext?.booking?.IsPlotSale ? "Booking Amount, then the balance" : (callContext?.booking?.PaymentPlanName || "7-stage default")}</div>
                 </button>
                 <div className="px-2.5 pb-2">
                   {/* Single merged checklist item — plan structure and its
@@ -1857,7 +1857,9 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                 booking really has a parking allotment / extra charge on
                 file. Nothing to verify → no checkbox, not a forced "N/A" tick. */}
             <div className="rounded-xl border border-border p-3.5 space-y-2.5">
-              <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">Parking &amp; Extra Charges</h4>
+              <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">{callContext?.booking?.IsPlotSale ? "Extra Charges" : <>Parking &amp; Extra Charges</>}</h4>
+              {/* A plot (land) sale has no parking. */}
+              {!callContext?.booking?.IsPlotSale && (
               <div className="relative space-y-1">
                 <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"><Car size={11} /> Parking</span>
                 {parkingAllotments.length === 0 ? (
@@ -1870,6 +1872,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                 ))}
                 <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "parking_selection")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
               </div>
+              )}
               <div className="relative space-y-1 pt-1">
                 <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"><IndianRupee size={11} /> Extra Charges</span>
                 {extraCharges.length === 0 ? (

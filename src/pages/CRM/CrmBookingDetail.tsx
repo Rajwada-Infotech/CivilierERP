@@ -419,6 +419,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchDetail(bookingId),
   });
   const booking = data?.booking;
+  // A plot (land) sale: no parking, no flat areas, no GST, no payment plan.
+  const isPlotSale = !!booking?.IsPlotSale;
+  const plotLines: any[] = (data?.plots ?? []).filter((p: any) => p.Status === "Active");
   const stageState = data?.stageState;
   const { data: checklistData, refetch: refetchChecklist } = useQuery({
     queryKey: ["crm-booking-checklist", bookingId],
@@ -1396,8 +1399,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               return (
                 <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {[
-                    { label: "1. Unit & Value", done: unitConfirmed, t: "Booking" as Tab },
-                    { label: "2. Payment Plan", done: planConfirmed, t: "Payment Plan" as Tab },
+                    { label: isPlotSale ? "1. Plots & Value" : "1. Unit & Value", done: unitConfirmed, t: "Booking" as Tab },
+                    { label: isPlotSale ? "2. Payment Schedule" : "2. Payment Plan", done: planConfirmed, t: "Payment Plan" as Tab },
                   ].map((s, i) => (
                     <React.Fragment key={s.label}>
                       <button onClick={() => setTab(s.t)}
@@ -1445,7 +1448,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                     tab === t ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}>
-                  {t}
+                  {isPlotSale && t === "Parking & Extra Charges" ? "Extra Charges" : isPlotSale && t === "Payment Plan" ? "Payment Schedule" : t}
                 </button>
               ))}
             </div>
@@ -1466,7 +1469,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30">{booking.ProjectName || "—"}</div>
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Unit / Block</label>
+                    <label className="text-xs text-muted-foreground block mb-1">{isPlotSale ? "Plots / Block" : "Unit / Block"}</label>
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30">{[booking.UnitNo, booking.BlockName].filter(Boolean).join(" / ") || "—"}</div>
                   </div>
                   <div>
@@ -1478,6 +1481,39 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30 font-semibold">{fmt(grandTotal)}</div>
                   </div>
                 </div>
+                {isPlotSale ? (
+                  <div className="rounded-lg border border-border/60 overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/30 text-muted-foreground">
+                        <tr>
+                          <th className="px-2.5 py-1.5 text-left font-medium">Plot</th>
+                          <th className="px-2.5 py-1.5 text-left font-medium">Facing</th>
+                          <th className="px-2.5 py-1.5 text-right font-medium">Size (ft)</th>
+                          <th className="px-2.5 py-1.5 text-right font-medium">Area</th>
+                          <th className="px-2.5 py-1.5 text-right font-medium">Value</th>
+                        </tr>
+                      </thead>
+                      <tbody className="tabular-nums">
+                        {plotLines.map((p: any) => (
+                          <tr key={p.PlotId} className="border-t border-border/60">
+                            <td className="px-2.5 py-1.5 font-medium">{p.PlotName}{p.IsCornerPlot ? <span className="ml-1.5 text-[0.625rem] text-muted-foreground">Corner</span> : null}</td>
+                            <td className="px-2.5 py-1.5">{p.FacingName || p.Facing || "—"}</td>
+                            <td className="px-2.5 py-1.5 text-right">{p.PlotWidthFt && p.PlotDepthFt ? `${Number(p.PlotWidthFt)} × ${Number(p.PlotDepthFt)}` : "—"}</td>
+                            <td className="px-2.5 py-1.5 text-right">{p.AreaSqFt != null ? `${Number(p.AreaSqFt).toLocaleString("en-IN")} sqft` : "—"}</td>
+                            <td className="px-2.5 py-1.5 text-right">{fmt(p.AllocatedValue)}</td>
+                          </tr>
+                        ))}
+                        {plotLines.length > 1 && (
+                          <tr className="border-t border-border bg-muted/20 font-semibold">
+                            <td className="px-2.5 py-1.5" colSpan={3}>{plotLines.length} plots, sold together</td>
+                            <td className="px-2.5 py-1.5 text-right">{plotLines.reduce((s: number, p: any) => s + Number(p.AreaSqFt || 0), 0).toLocaleString("en-IN")} sqft</td>
+                            <td className="px-2.5 py-1.5 text-right">{fmt(plotLines.reduce((s: number, p: any) => s + Number(p.AllocatedValue || 0), 0))}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
                 <div className="grid grid-cols-2 md:grid-cols-6 gap-2 rounded-lg border border-border/60 bg-muted/20 p-2 text-xs">
                   <div>
                     <span className="text-muted-foreground block">Carpet</span>
@@ -1504,12 +1540,42 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <span className="font-medium">{booking.RatePerSqFt != null ? `₹${Number(booking.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span>
                   </div>
                 </div>
+                )}
 
                 {/* GST is fixed, HSN-Master-driven — never a per-booking
                     input anywhere in this app. Unit+Parking picks 1% or 5%
                     off the Rs. 45L bracket automatically; Extra Charges is
                     always 18%. The only way to change a rate is editing the
                     HSN Master row itself (9954AFH/9954OTH/9954EXW). */}
+                {isPlotSale ? (
+                <div className="rounded-lg border border-border p-3 space-y-1.5 text-xs">
+                  <p className="text-sm font-medium">Price</p>
+                  <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-2.5 py-1.5">
+                    <Check size={12} className="shrink-0" />
+                    Land sale — GST is not applicable to the plot value
+                  </div>
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Land value</span>
+                    <span>{fmt(Number(booking.TotalValue))}</span>
+                  </div>
+                  {Number(booking.ExtraChargesTotal) > 0 && (
+                    <>
+                      <div className="flex items-center justify-between text-muted-foreground">
+                        <span>Extra Charges</span>
+                        <span>{fmt(Number(booking.ExtraChargesTotal) - Number(booking.ExtraWorkGstAmount || 0))}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground pl-2">
+                        <span>Extra Charges GST</span>
+                        <span>{fmt(booking.ExtraWorkGstAmount)}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex items-center justify-between border-t border-border pt-1 font-semibold">
+                    <span>Total Amount</span>
+                    <span className="text-sky-600 dark:text-sky-400">{fmt(booking.GrandTotal)}</span>
+                  </div>
+                </div>
+                ) : (
                 <div className="rounded-lg border border-border p-3 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium">GST</p>
@@ -1583,6 +1649,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <span className="text-sky-600 dark:text-sky-400">{fmt(booking.GrandTotal)}</span>
                   </div>
                 </div>
+                )}
 
                 {/* Project, Unit and Rate/SqFt — a single checklist item,
                     a single action. See renderChecklistItem's own comment
@@ -1598,8 +1665,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-4 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-sky-600 dark:text-sky-400" /> Payment Plan</h3>
-                    {!planEditOpen && canEdit && booking.Status !== CrmStatus.APPROVED && (
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-sky-600 dark:text-sky-400" /> {isPlotSale ? "Payment Schedule" : "Payment Plan"}</h3>
+                    {!isPlotSale && !planEditOpen && canEdit && booking.Status !== CrmStatus.APPROVED && (
                       <button onClick={() => { setPlanEditOpen(true); setPlanEditValue(booking.PaymentPlanId != null ? String(booking.PaymentPlanId) : ""); }}
                         className="text-xs text-sky-600 dark:text-sky-400 hover:underline shrink-0">
                         Edit
@@ -1628,7 +1695,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </div>
                   ) : (
                     <div className="rounded-lg bg-muted/30 px-2.5 py-2">
-                      <span className="text-sm text-foreground">{booking.PaymentPlanName || "No plan set — 7-stage default schedule"}</span>
+                      <span className="text-sm text-foreground">{isPlotSale
+                        ? "No payment plan — a plot sale is paid as the Booking Amount, then the balance"
+                        : (booking.PaymentPlanName || "No plan set — 7-stage default schedule")}</span>
                     </div>
                   )}
                 </div>
@@ -1643,6 +1712,22 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     Book action itself is checking. */}
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-sky-600 dark:text-sky-400" /> Total Price Breakdown</h3>
+                  {isPlotSale ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                      <div className="text-xs text-muted-foreground mb-0.5">Land Value (no GST)</div>
+                      <div className="font-medium">{fmt(booking.TotalValue)}</div>
+                    </div>
+                    <div className="rounded-lg bg-muted/30 px-2.5 py-2">
+                      <div className="text-xs text-muted-foreground mb-0.5">Extra incl. GST</div>
+                      <div className="font-medium">{fmt(booking.ExtraChargesTotal)}</div>
+                    </div>
+                    <div className="rounded-lg bg-sky-500/10 px-2.5 py-2">
+                      <div className="text-xs text-muted-foreground mb-0.5">Grand Total</div>
+                      <div className="font-semibold text-sky-600 dark:text-sky-400">{fmt(grandTotal)}</div>
+                    </div>
+                  </div>
+                  ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm">
                     <div className="rounded-lg bg-muted/30 px-2.5 py-2">
                       <div className="text-xs text-muted-foreground mb-0.5">Unit Base</div>
@@ -1665,6 +1750,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <div className="font-semibold text-sky-600 dark:text-sky-400">{fmt(grandTotal)}</div>
                     </div>
                   </div>
+                  )}
                 </div>
 
                 {/* Full payment breakdown across every milestone category —
@@ -2129,6 +2215,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
 
                 {/* Parking */}
+                {!isPlotSale && (
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold flex items-center gap-1.5"><Car size={15} className="text-sky-600 dark:text-sky-400" /> Parking Allotments</h3>
@@ -2376,6 +2463,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <ParkingVcSection vc={parkingChecklist} sectionKey="Parking" bookingId={bookingId} onChanged={refetchParkingChecklist} />
                   )}
                 </div>
+                )}
 
                 {/* Extra Charges */}
                 <div className="rounded-xl border border-border p-4 space-y-2">

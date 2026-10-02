@@ -32,6 +32,8 @@ import {
   RotateCcw,
   Check,
   ChevronDown,
+  ChevronRight,
+  Building2,
   Download,
   Upload,
   Loader2,
@@ -213,6 +215,12 @@ export default function MaterialRequest() {
     searchParams.get("status") ?? "",
   );
   const limit = 10;
+  // ListView() below is called as a plain function (not <ListView/>), so a
+  // useState declared inside it would be conditional on viewMode and break
+  // the Rules of Hooks — stays at the top level, same reasoning as
+  // mrIdsOnPage/approvalTrails above.
+  const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Record<string, boolean>>({});
+  const [projectFilter, setProjectFilter] = useState<string>("");
 
   const [header, setHeader] = useState<FormHeader>(defaultHeader);
   const [cart, setCart] = useState<CartItem[]>([blankCartItem()]);
@@ -313,9 +321,16 @@ export default function MaterialRequest() {
   }, [header.docTypeId, finYearStr]);
 
   const { data: listData, isLoading: loadingList } = useQuery({
-    queryKey: ["mr-list", page, search, statusFilter],
+    queryKey: ["mr-list", page, search, statusFilter, projectFilter],
     queryFn: () =>
-      mrApi.getMaterialRequests({ page, limit, search, status: statusFilter }),
+      mrApi.getMaterialRequests({
+        page,
+        limit,
+        search,
+        status: statusFilter,
+        projectId: projectFilter ? Number(projectFilter) : undefined,
+        groupBy: "project",
+      }),
   });
 
   // Bulk pending-qty totals for every MR that's reached the fulfillment
@@ -884,6 +899,24 @@ export default function MaterialRequest() {
     const rows: any[] = listData?.data || [];
     const totalCount = listData?.total || 0;
 
+    // Grouped by Project, same collapsible pattern GRN/Vehicle In/Out use
+    // for their parent PO — groups.set() on first appearance preserves the
+    // order rows arrive in, and the list is already newest-first (server
+    // sort), so a project's group lands wherever its most recently
+    // created request would — the latest-created project naturally ends
+    // up on top with no separate sort step needed.
+    const groupedByProject = (() => {
+      const groups = new Map<string, { key: string; projectName: string | null; rows: any[] }>();
+      for (const r of rows) {
+        const key = r.ProjectName || "no-project";
+        if (!groups.has(key)) {
+          groups.set(key, { key, projectName: r.ProjectName || null, rows: [] });
+        }
+        groups.get(key)!.rows.push(r);
+      }
+      return Array.from(groups.values());
+    })();
+
     return (
       <Card className="border-border shadow-sm">
         <CardHeader className="pb-3 border-b border-border">
@@ -895,24 +928,41 @@ export default function MaterialRequest() {
                 </CardTitle>
                 {!loadingList && (
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {totalCount} record{totalCount !== 1 ? "s" : ""}
+                    {totalCount} project{totalCount !== 1 ? "s" : ""} · {rows.length} request{rows.length !== 1 ? "s" : ""} on this page
                   </p>
                 )}
               </div>
-              <div className="relative w-full sm:w-64">
-                <Search
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                />
-                <Input
-                  value={search}
+              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                <div className="relative w-full sm:w-64">
+                  <Search
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <Input
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Search doc no, company…"
+                    className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                  />
+                </div>
+                <select
+                  value={projectFilter}
                   onChange={(e) => {
-                    setSearch(e.target.value);
+                    setProjectFilter(e.target.value);
                     setPage(1);
                   }}
-                  placeholder="Search doc no, company…"
-                  className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
-                />
+                  className="h-9 w-full sm:w-48 px-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
+                >
+                  <option value="">All projects</option>
+                  {(projects as any[]).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -948,14 +998,49 @@ export default function MaterialRequest() {
             </div>
           ) : (
             <>
-              <DataTable
-                data={rows}
-                columns={columns}
-                searchable={false}
-                paginated={false}
-                emptyMessage="No material requests found. Click 'New Request' to create one."
-                getRowId={(r: any) => String(r.MRId)}
-              />
+              {rows.length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-10">
+                  No material requests found. Click 'New Request' to create one.
+                </p>
+              ) : (
+                groupedByProject.map((group) => {
+                  const collapsed = !!collapsedProjectGroups[group.key];
+                  return (
+                    <div key={group.key} className="border-b border-border last:border-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCollapsedProjectGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))
+                        }
+                        className="w-full flex items-center gap-2.5 px-4 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+                      >
+                        {collapsed ? (
+                          <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                        )}
+                        <Building2 size={13} className="text-primary shrink-0" />
+                        <span className="text-sm font-heading font-semibold text-foreground">
+                          {group.projectName || "No Project"}
+                        </span>
+                        <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                          {group.rows.length} request{group.rows.length !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+                      {!collapsed && (
+                        <DataTable
+                          data={group.rows}
+                          columns={columns}
+                          searchable={false}
+                          paginated={false}
+                          emptyMessage="No material requests found."
+                          getRowId={(r: any) => String(r.MRId)}
+                        />
+                      )}
+                    </div>
+                  );
+                })
+              )}
               {totalPages > 1 && (
                 <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
                   <span className="text-muted-foreground">

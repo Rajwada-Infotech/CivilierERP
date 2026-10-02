@@ -57,6 +57,16 @@ interface MatrixUnit {
   HoldMobile: string | null;
   HoldAssignedToName: string | null;
   HoldAssignedToEmail: string | null;
+  // ── plot-only (dbo.PlotMaster, migration 511) ──
+  // Set when the row came from the plot matrix. Plots have no FloorNo, so
+  // this is what the grouping below branches on rather than inferring
+  // 'plot' from a missing floor, which a floor-less unit would also satisfy.
+  IsPlot?: boolean;
+  PlotNo?: string | null;
+  Facing?: string | null;
+  IsCornerPlot?: boolean | null;
+  SurveyNo?: string | null;
+  ConvertedUnitName?: string | null;
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -85,6 +95,26 @@ async function fetchMatrix(projectId: string, blockId: string): Promise<MatrixUn
   const res = await fetchWithAuth(`${API}?${params}`);
   if (!res.ok) throw new Error("Failed to load unit matrix");
   return res.json();
+}
+
+// Plots live in their own table and are held through CrmBookingPlot, so the
+// unit query cannot see them. The endpoint already returns the same status
+// vocabulary; tagging IsPlot here is what lets one grid render both.
+//
+// A failure is swallowed to an empty list rather than thrown: a tower-only
+// project has no plots, and a sales user looking at units should not lose the
+// whole matrix because the plot half returned nothing useful.
+async function fetchPlotMatrix(projectId: string, blockId: string): Promise<MatrixUnit[]> {
+  const params = new URLSearchParams({ projectId });
+  if (blockId) params.set("blockId", blockId);
+  try {
+    const res = await fetchWithAuth(`${API}/plots?${params}`);
+    if (!res.ok) return [];
+    const rows = await res.json().catch(() => []);
+    return (Array.isArray(rows) ? rows : []).map((r: any) => ({ ...r, IsPlot: true, FloorNo: null }));
+  } catch {
+    return [];
+  }
 }
 
 const NONE = "__none__";
@@ -461,11 +491,23 @@ export function UnitMatrixPage() {
     enabled: !!projectId,
   });
 
-  const { data: units = [], isLoading } = useQuery({
+  const { data: unitRows = [], isLoading } = useQuery({
     queryKey: ["unit-matrix", projectId, blockId],
     queryFn: () => fetchMatrix(projectId, blockId),
     enabled: !!projectId,
   });
+
+  // Fetched separately rather than merged server-side: a mixed township holds
+  // both kinds, and the two come from different tables with different hold
+  // mechanics. Kept under the same "unit-matrix" key prefix so every existing
+  // invalidate() call refreshes plots too.
+  const { data: plotRows = [] } = useQuery({
+    queryKey: ["unit-matrix", "plots", projectId, blockId],
+    queryFn: () => fetchPlotMatrix(projectId, blockId),
+    enabled: !!projectId,
+  });
+
+  const units = useMemo(() => [...unitRows, ...plotRows], [unitRows, plotRows]);
 
   // Block first, then Floor within each block — mirrors the real physical
   // map (Tower A1's floors, then Tower A2's floors, ...) instead of mixing
@@ -475,7 +517,10 @@ export function UnitMatrixPage() {
     const byBlock = new Map<string, Map<string, MatrixUnit[]>>();
     for (const u of units) {
       const blockKey = u.BlockName || "Unassigned Block";
-      const floorKey = u.FloorNo != null ? `Floor ${u.FloorNo}` : "Floor —";
+      // Plots are not on a floor, and lumping them into "Floor —" would
+      // put them beside genuinely floor-less units, which are a data
+      // problem rather than a different product.
+      const floorKey = u.IsPlot ? "Plots" : u.FloorNo != null ? `Floor ${u.FloorNo}` : "Floor —";
       if (!byBlock.has(blockKey)) byBlock.set(blockKey, new Map());
       const floors = byBlock.get(blockKey)!;
       if (!floors.has(floorKey)) floors.set(floorKey, []);

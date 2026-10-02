@@ -10,6 +10,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import {
   Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2,
   Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat, Building2,
@@ -38,6 +39,7 @@ const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
 const SA_LEADS_API = "/api/sa/leads";
 const UNIT_API = "/api/unit-master";
+const PLOT_API = "/api/plot-master";
 const PLAN_API = "/api/crm/payment-plans";
 const PROJECT_BANK_API = "/api/crm/project-banks";
 const BANK_MASTER_API = "/api/bank-master";
@@ -74,7 +76,7 @@ const workflowStageLabel: Record<string, string> = {
 // requires picking a real Application, same as before — this is not a
 // freeform booking with no Application behind it.
 const EMPTY_FORM = {
-  ApplicationId: "", UnitId: "", ProjectName: "", UnitNo: "", BlockName: "",
+  ApplicationId: "", UnitIds: [] as string[], PlotIds: [] as string[], ProjectName: "", UnitNo: "", BlockName: "",
   UnitType: "", AreaSqFt: "", RatePerSqFt: "", TotalValue: "",
   TokenType: "Percentage", TokenValue: "", PaymentPlanId: "",
   BookingDate: "", PaymentMode: "", AssignedTo: "", Notes: "",
@@ -84,6 +86,9 @@ const EMPTY_FORM = {
 
 async function fetchUnits(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchPlots(): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${PLOT_API}?available=1`); return r.ok ? r.json() : []; } catch { return []; }
 }
 // Needed to resolve a tagged plan's fixed Booking Amount — Booking is no
 // longer typed per booking, it's decided when the plan itself was created
@@ -309,6 +314,7 @@ const CrmBooking: React.FC = () => {
   const { data: apps = [] } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 5 * 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
+  const { data: plots = [] } = useQuery({ queryKey: ["plot-master"], queryFn: fetchPlots, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans-active"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
 
   // The plan actually tagged to this booking (via the Application) — its
@@ -328,14 +334,15 @@ const CrmBooking: React.FC = () => {
     setForm((f) => f.BookingAmount === planAmt ? f : { ...f, BookingAmount: planAmt });
   }, [selectedPlan]);
 
-  const selectedUnitProjectId: number | undefined = useMemo(
-    () => (units as any[]).find((u: any) => String(u.Id) === form.UnitId)?.ProjectId,
-    [units, form.UnitId],
+  const selectedAssetProjectId: number | undefined = useMemo(
+    () => (units as any[]).find((u: any) => String(u.Id) === form.UnitIds[0])?.ProjectId
+      || (plots as any[]).find((p: any) => String(p.Id) === form.PlotIds[0])?.ProjectId,
+    [units, plots, form.UnitIds, form.PlotIds],
   );
   const { data: projectBanks = [] } = useQuery({
-    queryKey: ["crm-booking-project-banks", selectedUnitProjectId],
-    queryFn: () => fetchProjectBanks(selectedUnitProjectId),
-    enabled: dialogOpen && !!selectedUnitProjectId,
+    queryKey: ["crm-booking-project-banks", selectedAssetProjectId],
+    queryFn: () => fetchProjectBanks(selectedAssetProjectId),
+    enabled: dialogOpen && !!selectedAssetProjectId,
   });
   const { data: allBanks = [] } = useQuery({
     queryKey: ["bank-master-dropdown"],
@@ -348,7 +355,7 @@ const CrmBooking: React.FC = () => {
   // back further to the raw, unfiltered bank list here would silently
   // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
   // the raw list when this unit's Project isn't known yet.
-  const bankOptions = selectedUnitProjectId ? projectBanks : allBanks;
+  const bankOptions = selectedAssetProjectId ? projectBanks : allBanks;
   React.useEffect(() => {
     if (projectBanks.length === 1) {
       // (no deposit bank auto-pick — Accounts assigns it before approval)
@@ -364,9 +371,15 @@ const CrmBooking: React.FC = () => {
     // system-wide, not scoped to this page's filters) is the reliable
     // source — same fields CrmApplication.tsx's own unit picker now uses.
     return (units as any[]).filter((u: any) =>
-      u.IsActive && (!(u.LockBookingNo || u.LockHoldId) || String(u.Id) === form.UnitId)
+      u.IsActive && (!(u.LockBookingNo || u.LockHoldId) || form.UnitIds.includes(String(u.Id)))
     );
-  }, [units, form.UnitId]);
+  }, [units, form.UnitIds]);
+
+  const availablePlots = useMemo(() => (
+    (plots as any[]).filter((p: any) =>
+      !(p.LockBookingNo || p.LockApplicationNo || p.LockHoldId) || form.PlotIds.includes(String(p.Id))
+    )
+  ), [plots, form.PlotIds]);
 
   // The selected Application's own PreferredUnitId — auto-fetched and locked
   // here just like its other fields, since it's already been decided. Only
@@ -380,9 +393,21 @@ const CrmBooking: React.FC = () => {
     [apps, form.ApplicationId]
   );
   const appPreferredUnitId: number | undefined = selectedApp?.PreferredUnitId;
-  const appPreferredUnitAvailable = appPreferredUnitId != null
-    && (availableUnits as any[]).some((u: any) => u.Id === appPreferredUnitId);
-  const unitLockedFromApp = !!appPreferredUnitId && appPreferredUnitAvailable;
+  const appPreferredUnitIds = useMemo(() => {
+    const primary = selectedApp?.PreferredUnitId != null ? String(selectedApp.PreferredUnitId) : null;
+    const saved = String(selectedApp?.PreferredUnitIdsCsv || "").split(",").filter(Boolean);
+    return primary ? [primary, ...saved.filter((id) => id !== primary)] : saved;
+  }, [selectedApp]);
+  const appPreferredUnitAvailable = appPreferredUnitIds.length > 0
+    && appPreferredUnitIds.every((id) => (availableUnits as any[]).some((u: any) => String(u.Id) === id));
+  const unitLockedFromApp = appPreferredUnitIds.length > 0 && appPreferredUnitAvailable;
+  const appPreferredPlotIds = useMemo(
+    () => String(selectedApp?.PreferredPlotIdsCsv || "").split(",").filter(Boolean),
+    [selectedApp],
+  );
+  const appPreferredPlotsAvailable = appPreferredPlotIds.length > 0
+    && appPreferredPlotIds.every((id) => (availablePlots as any[]).some((p: any) => String(p.Id) === id));
+  const plotLockedFromApp = appPreferredPlotIds.length > 0 && appPreferredPlotsAvailable;
 
   // Everything the Application already captured (rate, token, booking
   // amount, payment mode, assignee, plan, brokerage, notes) is auto-fetched
@@ -393,21 +418,30 @@ const CrmBooking: React.FC = () => {
   // should be re-typed or drift from what was already approved.
   const handleApplicationSelect = (applicationId: string) => {
     const app = (apps as any[]).find((a: any) => String(a.Id) === applicationId);
-    const appUnit = app?.PreferredUnitId
-      ? (units as any[]).find((u: any) => u.Id === app.PreferredUnitId)
-      : null;
-    const area = appUnit?.AreaSqFt != null ? String(appUnit.AreaSqFt) : "";
+    const plotIds = String(app?.PreferredPlotIdsCsv || "").split(",").filter(Boolean);
+    const appPlots = (plots as any[]).filter((p: any) => plotIds.includes(String(p.Id)));
+    const primaryId = app?.PreferredUnitId != null ? String(app.PreferredUnitId) : null;
+    const savedIds = String(app?.PreferredUnitIdsCsv || "").split(",").filter(Boolean);
+    const unitIds = primaryId ? [primaryId, ...savedIds.filter((id) => id !== primaryId)] : savedIds;
+    const appUnits = (units as any[]).filter((u: any) => unitIds.includes(String(u.Id)));
+    const appUnit = appUnits.find((u: any) => String(u.Id) === primaryId) || appUnits[0] || null;
+    const isPlotApplication = plotIds.length > 0;
+    const selectedAssets = isPlotApplication ? appPlots : appUnits;
+    const primaryAsset = isPlotApplication ? appPlots[0] : appUnit;
+    const combinedArea = selectedAssets.reduce((total: number, asset: any) => total + (parseFloat(asset.AreaSqFt) || 0), 0);
+    const area = combinedArea > 0 ? String(combinedArea) : "";
     const rate = app?.RatePerSqFt != null ? String(app.RatePerSqFt) : "";
     const areaNum = parseFloat(area);
     const rateNum = parseFloat(rate);
     setForm((f) => ({
       ...f,
       ApplicationId: applicationId,
-      UnitId: appUnit ? String(appUnit.Id) : "",
-      UnitNo: appUnit?.UnitName || "",
-      ProjectName: appUnit?.ProjectName || "",
-      BlockName: appUnit?.BlockName || "",
-      UnitType: appUnit?.UnitType || "",
+      UnitIds: isPlotApplication ? [] : unitIds,
+      PlotIds: isPlotApplication ? plotIds : [],
+      UnitNo: selectedAssets.map((asset: any) => asset.PlotName || asset.UnitName).join(", ") || "",
+      ProjectName: primaryAsset?.ProjectName || "",
+      BlockName: primaryAsset?.BlockName || "",
+      UnitType: isPlotApplication ? "Plot" : (appUnit?.UnitType || ""),
       AreaSqFt: area,
       RatePerSqFt: rate,
       TotalValue: !isNaN(areaNum) && !isNaN(rateNum) ? String(Math.round(areaNum * rateNum)) : "",
@@ -424,24 +458,45 @@ const CrmBooking: React.FC = () => {
     }));
   };
 
-  const handleUnitSelect = (unitId: string) => {
-    const u = (units as any[]).find((x: any) => String(x.Id) === unitId);
-    const area = u?.AreaSqFt != null ? String(u.AreaSqFt) : "";
+  const handleUnitsChange = (nextIds: string[]) => {
+    const selectedUnits = (units as any[]).filter((u: any) => nextIds.includes(String(u.Id)));
+    const primary = selectedUnits[0] || null;
+    
+    // Multi-unit pricing: combined area is the sum of all selected units
+    const combinedArea = selectedUnits.reduce((acc, u) => acc + (parseFloat(u.AreaSqFt) || 0), 0);
+    const areaStr = combinedArea > 0 ? String(combinedArea) : "";
+    
     const rate = parseFloat(form.RatePerSqFt);
-    const areaNum = parseFloat(area);
+    
     setForm((f) => ({
       ...f,
-      UnitId: unitId,
-      UnitNo: u?.UnitName || f.UnitNo,
-      ProjectName: u?.ProjectName || f.ProjectName,
-      BlockName: u?.BlockName || f.BlockName,
-      UnitType: u?.UnitType || "",
-      AreaSqFt: area,
-      // PaymentPlanId comes from the Application (mandatory there) — a Unit
-      // no longer has a single "default" plan, only 1+ tagged plans, so
-      // there's nothing to fall back to here.
+      UnitIds: nextIds,
+      PlotIds: [],
+      UnitNo: selectedUnits.map((u: any) => u.UnitName).join(", ") || f.UnitNo,
+      ProjectName: primary?.ProjectName || f.ProjectName,
+      BlockName: primary?.BlockName || f.BlockName,
+      UnitType: primary?.UnitType || "",
+      AreaSqFt: areaStr,
       PaymentPlanId: f.PaymentPlanId,
-      TotalValue: !isNaN(areaNum) && !isNaN(rate) ? String(Math.round(areaNum * rate)) : f.TotalValue,
+      TotalValue: !isNaN(combinedArea) && combinedArea > 0 && !isNaN(rate) ? String(Math.round(combinedArea * rate)) : (nextIds.length === 0 ? "" : f.TotalValue),
+    }));
+  };
+
+  const handlePlotsChange = (nextIds: string[]) => {
+    const selectedPlots = (plots as any[]).filter((p: any) => nextIds.includes(String(p.Id)));
+    const primary = selectedPlots[0] || null;
+    const combinedArea = selectedPlots.reduce((acc, p) => acc + (parseFloat(p.AreaSqFt) || 0), 0);
+    const rate = parseFloat(form.RatePerSqFt);
+    setForm((f) => ({
+      ...f,
+      UnitIds: [],
+      PlotIds: nextIds,
+      UnitNo: selectedPlots.map((p: any) => p.PlotName).join(", ") || f.UnitNo,
+      ProjectName: primary?.ProjectName || f.ProjectName,
+      BlockName: primary?.BlockName || f.BlockName,
+      UnitType: "Plot",
+      AreaSqFt: combinedArea > 0 ? String(combinedArea) : "",
+      TotalValue: combinedArea > 0 && !isNaN(rate) ? String(Math.round(combinedArea * rate)) : (nextIds.length === 0 ? "" : f.TotalValue),
     }));
   };
 
@@ -457,13 +512,15 @@ const CrmBooking: React.FC = () => {
     }));
   };
 
+  const isPlotBooking = form.PlotIds.length > 0 || appPreferredPlotIds.length > 0;
+
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
 
   const handleSave = async () => {
     if (!form.ApplicationId) { toast.error("Please select an Application"); return; }
-    if (!form.UnitId)  { toast.error("A unit must be selected from Unit Master"); return; }
+    if (form.UnitIds.length === 0 && form.PlotIds.length === 0) { toast.error("Select at least one unit or plot"); return; }
     // DepositBankId/DepositBankName were never persisted or read anywhere in
     // the actual booking-creation path (createCrmBookingRecord in
     // crmEntityCreation.js) — CrmBooking has no such columns at all. This
@@ -479,12 +536,13 @@ const CrmBooking: React.FC = () => {
         body: JSON.stringify({
           ...form,
           ApplicationId: parseInt(form.ApplicationId),
-          UnitId:        parseInt(form.UnitId),
+          UnitIds:       form.UnitIds.map(id => parseInt(id)),
+          PlotIds:       form.PlotIds.map(id => parseInt(id)),
           AreaSqFt:      form.AreaSqFt    || null,
           RatePerSqFt:   form.RatePerSqFt || null,
           TotalValue:    form.TotalValue   || null,
           TokenValue:    form.TokenValue   || null,
-          PaymentPlanId: form.PaymentPlanId || null,
+          PaymentPlanId: isPlotBooking ? null : (form.PaymentPlanId || null),
           AssignedTo:    form.AssignedTo   || null,
           BookingAmount: form.BookingAmount || null,
           BrokerId:      form.BrokerId || null,
@@ -752,7 +810,7 @@ const CrmBooking: React.FC = () => {
                         <AlertTriangle size={14} /> Request Cancellation
                       </DropdownMenuItem>
                     )}
-                    {canEdit && (
+                    {canEdit && !b.IsPlotSale && (
                     <DropdownMenuItem onClick={() => { setUnitChangeBooking(b); setUnitChangeNewId(""); setUnitChangeReason(""); }} className="gap-2 text-rose-600 focus:text-rose-600">
                       <Repeat size={14} /> Change Unit
                     </DropdownMenuItem>
@@ -872,30 +930,50 @@ const CrmBooking: React.FC = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               {/* ── LEFT: Unit / Project + Pricing ── */}
               <div className="rounded-lg border border-border p-2.5 space-y-2.5">
-                <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">Unit / Project</p>
+                <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">{isPlotBooking ? "Plot / Project" : "Unit / Project"}</p>
                 <div>
                   <label className={labelCls}>
-                    Unit * {unitLockedFromApp ? "(from Application — already selected)" : "(from Unit Master — mandatory)"}
+                    {isPlotBooking ? "Plot" : "Unit"} * {(unitLockedFromApp || plotLockedFromApp) ? "(from Application — already selected)" : `(from ${isPlotBooking ? "Plot" : "Unit"} Master — mandatory)`}
                   </label>
-                  {unitLockedFromApp ? (
+                  {(unitLockedFromApp || plotLockedFromApp) ? (
                     <input type="text" readOnly disabled
                       value={`${form.ProjectName} — ${form.BlockName} — ${form.UnitNo}`}
                       className={inputClsDisabled} />
                   ) : (
                     <>
-                      <Select value={form.UnitId || undefined} onValueChange={handleUnitSelect}>
-                        <SelectTrigger className={inputCls}>
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                        <SelectContent className="max-w-[min(90vw,420px)]">
-                          {(availableUnits as any[]).map((u: any) => (
-                            <SelectItem key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {isPlotBooking ? (
+                        <MultiSelectDropdown
+                          options={(availablePlots as any[]).map((p: any) => ({
+                            id: String(p.Id),
+                            label: `${p.ProjectName} — ${p.BlockName} — ${p.PlotName}`,
+                            group: p.BlockName
+                          }))}
+                          value={form.PlotIds}
+                          onChange={handlePlotsChange}
+                          placeholder="Select plots"
+                          searchPlaceholder="Search plots..."
+                          itemNoun="plot"
+                        />
+                      ) : (
+                        <Select value={form.UnitIds[0] || undefined} onValueChange={(id) => handleUnitsChange([id])}>
+                          <SelectTrigger className={inputCls}>
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                          <SelectContent className="max-w-[min(90vw,420px)]">
+                            {(availableUnits as any[]).map((u: any) => (
+                              <SelectItem key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                       {appPreferredUnitId != null && !appPreferredUnitAvailable && (
                         <p className="text-[0.6875rem] text-sky-600 mt-1">
                           This Application's preferred unit is no longer available — select a different one.
+                        </p>
+                      )}
+                      {appPreferredPlotIds.length > 0 && !appPreferredPlotsAvailable && (
+                        <p className="text-[0.6875rem] text-sky-600 mt-1">
+                          This Application's preferred plot is no longer available — select a different one.
                         </p>
                       )}
                     </>
@@ -985,11 +1063,13 @@ const CrmBooking: React.FC = () => {
                   </div>
                 </div>
                 <div>
-                  <label className={labelCls}>Payment Plan (from the Application — not editable here)</label>
+                  <label className={labelCls}>{isPlotBooking ? "Payment Schedule" : "Payment Plan (from the Application — not editable here)"}</label>
                   <input type="text" readOnly disabled
-                    value={selectedPlan?.PlanName
-                      || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
-                      || "Default 7-stage split"}
+                    value={isPlotBooking
+                      ? "No payment plan — Booking Amount, then the balance"
+                      : (selectedPlan?.PlanName
+                        || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
+                        || "Default 7-stage split")}
                     className={inputClsDisabled} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1016,13 +1096,15 @@ const CrmBooking: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className={labelCls}>
-                      Booking Amount (₹) {selectedPlan ? "(Plan)" : ""}
+                      Booking Amount (₹) {!isPlotBooking && selectedPlan ? "(Plan)" : ""}
                     </label>
+                    {/* A plot sale has no plan: the amount typed here is the
+                        Booking milestone, the rest is the Balance. */}
                     <input type="number" value={form.BookingAmount}
                       onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))}
-                      readOnly={!!selectedPlan} disabled={!!selectedPlan}
-                      placeholder={selectedPlan ? undefined : "From Payment Plan"}
-                      className={selectedPlan ? inputClsDisabled : inputCls} />
+                      readOnly={!isPlotBooking && !!selectedPlan} disabled={!isPlotBooking && !!selectedPlan}
+                      placeholder={isPlotBooking ? "Leave empty for one full payment" : selectedPlan ? undefined : "From Payment Plan"}
+                      className={!isPlotBooking && selectedPlan ? inputClsDisabled : inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Assigned To</label>
@@ -1141,3 +1223,6 @@ const CrmBooking: React.FC = () => {
 };
 
 export default CrmBooking;
+
+
+

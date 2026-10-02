@@ -62,7 +62,7 @@ router.get("/booking-register", requirePageRight("crm-bookings", "view"), async 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(b.BookingDate AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const conds = ["b.IsActive = 1", `b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')`, ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -86,7 +86,7 @@ router.get("/payment-collection", requirePageRight("crm-payments", "view"), asyn
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(m.DueDate AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const conds = ["b.IsActive = 1", `b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')`, ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -111,7 +111,7 @@ router.get("/receipt-register", requirePageRight("crm-payments", "view"), async 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(r.ReceivedDate AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const conds = [...dr.clauses, ...cpb.clauses];
     const req0 = pool.request();
     dr.bind(req0); cpb.bind(req0);
@@ -158,7 +158,7 @@ router.get("/receipt-register", requirePageRight("crm-payments", "view"), async 
 router.get("/overdue-payments", requirePageRight("crm-payments", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
     const result = await req0.query(`
@@ -187,7 +187,7 @@ router.get("/brokerage-report", requirePageRight("crm-brokerage", "view"), async
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(br.CreatedAt AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const conds = [...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -216,7 +216,7 @@ router.get("/cancellation-report", requirePageRight("crm-cancellations", "view")
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(c.CreatedAt AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const conds = [...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -240,7 +240,7 @@ router.get("/cancellation-report", requirePageRight("crm-cancellations", "view")
 router.get("/booking-status-summary", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
     const result = await req0.query(`
@@ -271,7 +271,18 @@ router.get("/customer-report", requirePageRight("crm-customers", "view"), async 
     // EXISTS-against-CrmApplication pattern as crmCustomers.js.
     if (companyId) { r.input("cpbCompanyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication ap WHERE ap.CustomerId = c.Id AND ap.CompanyId = @cpbCompanyId)"); }
     if (projectId) { r.input("cpbProjectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication ap WHERE ap.CustomerId = c.Id AND ap.ProjectId = @cpbProjectId)"); }
-    if (blockId) { r.input("cpbBlockId", sql.Int, blockId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication ap JOIN dbo.UnitMaster um ON um.Id = ap.PreferredUnitId WHERE ap.CustomerId = c.Id AND um.BlockId = @cpbBlockId)"); }
+    // Either linkage: a flat application reaches its block through
+    // PreferredUnitId, a land application through its CrmApplicationPlot rows.
+    // Checking only the first silently hid every plot customer from a
+    // block-filtered Customer Master report.
+    if (blockId) { r.input("cpbBlockId", sql.Int, blockId); conds.push(`(
+      EXISTS (SELECT 1 FROM dbo.CrmApplication ap JOIN dbo.UnitMaster um ON um.Id = ap.PreferredUnitId
+              WHERE ap.CustomerId = c.Id AND um.BlockId = @cpbBlockId)
+      OR EXISTS (SELECT 1 FROM dbo.CrmApplication ap2
+                 JOIN dbo.CrmApplicationPlot app ON app.ApplicationId = ap2.Id AND app.Status = N'Active'
+                 JOIN dbo.PlotMaster pm ON pm.Id = app.PlotId
+                 WHERE ap2.CustomerId = c.Id AND pm.BlockId = @cpbBlockId)
+    )`); }
     const result = await r.query(`
       SELECT c.CustomerNo, c.CustomerName, c.Mobile, c.Email,
         (SELECT COUNT(*) FROM dbo.CrmBooking bk JOIN dbo.CrmApplication ap ON ap.Id = bk.ApplicationId
@@ -290,7 +301,7 @@ router.get("/application-funnel", requirePageRight("crm-applications", "view"), 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(a.CreatedAt AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "a.CompanyId", projectCol: "a.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "a.CompanyId", projectCol: "a.ProjectId", blockCol: "b.BlockId" });
     const conds = ["a.IsActive = 1", ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -314,7 +325,7 @@ router.get("/service-tickets", requirePageRight("crm-service-tickets", "view"), 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(t.CreatedAt AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const conds = [...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -338,7 +349,7 @@ router.get("/service-tickets", requirePageRight("crm-service-tickets", "view"), 
 router.get("/legal-milestones", requirePageRight("crm-legal-milestones", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
     const result = await req0.query(`
@@ -361,7 +372,7 @@ router.get("/noc-report", requirePageRight("crm-noc", "view"), async (req, res) 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(n.CreatedAt AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const conds = [...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -384,7 +395,7 @@ router.get("/noc-report", requirePageRight("crm-noc", "view"), async (req, res) 
 router.get("/sales-deed-report", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
     const result = await req0.query(`
@@ -415,7 +426,7 @@ router.get("/sales-deed-report", requirePageRight("crm-sales-deed", "view"), asy
 router.get("/handover-report", requirePageRight("crm-handover", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
     const result = await req0.query(`
@@ -441,7 +452,7 @@ router.get("/handover-report", requirePageRight("crm-handover", "view"), async (
 router.get("/agreement-report", requirePageRight("crm-agreements", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
     const result = await req0.query(`
@@ -465,7 +476,7 @@ router.get("/welcome-call-report", requirePageRight("crm-welcome-calls", "view")
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(wc.CallDate AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const conds = [...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -520,7 +531,7 @@ router.get("/parking-report", requirePageRight("crm-parking-booking", "view"), a
 router.get("/possession-notice-report", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
     const result = await req0.query(`
@@ -544,7 +555,7 @@ router.get("/possession-notice-report", requirePageRight("crm-possession-notice"
 router.get("/pre-possession-report", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
     const result = await req0.query(`
@@ -592,7 +603,7 @@ router.get("/construction-updates", requirePageRight("crm-construction-updates",
 router.get("/aging-analysis", requirePageRight("crm-payments", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "um.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
     const req0 = pool.request();
     cpb.bind(req0);
     const result = await req0.query(`

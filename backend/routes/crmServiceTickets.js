@@ -59,7 +59,7 @@ router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res
     if (category) { req0.input("ct", sql.NVarChar(50), category); conds.push("t.Category = @ct"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR t.TicketNo LIKE @search OR t.Subject LIKE @search)");
@@ -110,7 +110,7 @@ router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res
           AND (@ct2 IS NULL OR t.Category = @ct2)
           AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
           AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-          AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+          AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
           AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR t.TicketNo LIKE @search2 OR t.Subject LIKE @search2))
           ${handedOverOnlyClause}
       `),

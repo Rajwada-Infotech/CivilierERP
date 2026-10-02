@@ -1571,13 +1571,13 @@ const CrmAgreement: React.FC = () => {
                     </div>
                   )}
                   <div className="col-span-2 pt-1 border-t border-border/60">
-                    <span className="text-[0.6875rem] text-muted-foreground block">Total Value (incl. GST)</span>
+                    <span className="text-[0.6875rem] text-muted-foreground block">{detail.agreement?.IsPlotSale ? "Total Value (land — no GST)" : "Total Value (incl. GST)"}</span>
                     <span className="text-sm font-bold font-mono">
                       {detail.agreement?.GrandTotal ? `₹${Number(detail.agreement.GrandTotal).toLocaleString("en-IN")}` : "—"}
                     </span>
                     {detail.agreement?.GrandTotal > 0 && (
                       <span className="text-[0.6875rem] text-muted-foreground block mt-0.5">
-                        Unit ₹{Number(detail.agreement.TotalValue).toLocaleString("en-IN")}
+                        {detail.agreement?.IsPlotSale ? "Land" : "Unit"} ₹{Number(detail.agreement.TotalValue).toLocaleString("en-IN")}
                         {detail.agreement?.UnitGstAmount > 0 && ` + GST ₹${Number(detail.agreement.UnitGstAmount).toLocaleString("en-IN")}`}
                         {detail.agreement?.ParkingTotal > 0 && ` + Parking ₹${Number(detail.agreement.ParkingTotal).toLocaleString("en-IN")}`}
                         {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra ₹${Number(detail.agreement.ExtraChargesTotal).toLocaleString("en-IN")}`}

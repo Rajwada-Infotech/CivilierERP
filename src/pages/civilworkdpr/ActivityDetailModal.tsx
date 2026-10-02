@@ -17,7 +17,6 @@ import {
   ChevronRight,
   ZoomIn,
   ZoomOut,
-  Upload,
   Package,
   UserRound,
   CalendarDays,
@@ -50,6 +49,7 @@ import {
   restoreCancelledActivity,
   getProgressLog,
   getDailyLog,
+  deleteDailyLogEntry,
   startDelayInfo,
   ASSIGNMENT_STATUS_META,
   type PhotoPhase,
@@ -247,7 +247,6 @@ function PhotosTab({ rungId }: { rungId: number }) {
   const [activeTag, setActiveTag] = useState<PhotoPhase>("after");
   const [lightboxPhoto, setLightboxPhoto] = useState<ActivityPhotoMeta | null>(null);
   const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const camera = useCameraCapture();
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["activity-photos", rungId] });
@@ -295,6 +294,10 @@ function PhotosTab({ rungId }: { rungId: number }) {
       const note = await getGeoTag();
       const file = new File([blob], `${activeTag}-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" });
       await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
+      // Upload had no success feedback at all before this — only a failure
+      // toast existed, so a working upload and a silently-swallowed one
+      // looked identical to the user (nothing visibly happens either way).
+      toast.success(`${TAG_META[activeTag].label} photo saved.`);
       refresh();
     } catch (err: any) {
       toast.error(err.message || "Upload failed");
@@ -308,32 +311,17 @@ function PhotosTab({ rungId }: { rungId: number }) {
     if (blob) await addPhoto(blob);
   };
 
-  const handleFilePicked = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    await carryForwardBeforeIfNeeded();
-    for (const file of Array.from(files)) {
-      setUploading(true);
-      try {
-        const note = await getGeoTag();
-        await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
-      } catch (err: any) {
-        toast.error(err.message || "Upload failed");
-      } finally {
-        setUploading(false);
-      }
-    }
-    refresh();
-  };
-
   const openCamera = async () => {
     const ok = await camera.start();
     if (!ok) {
-      // Used to fall straight to the file picker with zero explanation —
-      // looked exactly like "the camera doesn't work" with no way to tell
-      // permission-denied from no-device from a plain HTTP (non-secure)
-      // deployment, which getUserMedia refuses outright.
+      // This used to also fire fileInputRef.current?.click() right here as
+      // a fallback — but by the time an awaited getUserMedia() call settles,
+      // the click that triggered this handler is no longer "fresh" user
+      // activation. Safari in particular silently refuses to open the file
+      // picker from a .click() that happens after an await, so the fallback
+      // looked exactly like "neither button does anything": the toast below
+      // fired, but no picker ever appeared.
       toast.error(CAMERA_ERROR_TEXT[camera.error ?? "other"]);
-      fileInputRef.current?.click();
     }
   };
 
@@ -393,32 +381,8 @@ function PhotosTab({ rungId }: { rungId: number }) {
             >
               <CameraIcon size={13} /> Open camera
             </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground bg-background hover:bg-muted transition-colors"
-            >
-              <Upload size={13} /> Upload instead
-            </button>
           </div>
         )}
-        {/* No `capture` attribute here — on mobile browsers that forces the
-            OS straight into the camera app, skipping the gallery/file
-            picker entirely, which is exactly backwards for a button whose
-            whole point is "let me pick an existing photo instead." Desktop
-            ignores `capture` either way, which is why this only ever broke
-            on phones. */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            handleFilePicked(e.target.files);
-            e.target.value = "";
-          }}
-        />
       </div>
 
       {/* Gallery, grouped by tag */}
@@ -1109,6 +1073,9 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
                       {new Date(entry.loggedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                     </span>
                   </div>
+                  {entry.remarks && (
+                    <p className="text-foreground/90 whitespace-pre-wrap break-words mt-0.5">{entry.remarks}</p>
+                  )}
                   <p className="text-muted-foreground/80 truncate">{entry.loggedBy || "—"}</p>
                 </div>
               ))}
@@ -1226,6 +1193,22 @@ function DailyLogTab({ rungId }: { rungId: number }) {
     queryFn: () => getDailyLog(rungId),
   });
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const queryClient = useQueryClient();
+
+  const handleDelete = async (entry: DailyLogEntry) => {
+    if (!window.confirm("Delete this daily log entry?")) return;
+    setDeletingId(entry.id);
+    try {
+      await deleteDailyLogEntry(rungId, entry.id);
+      toast.success("Daily log entry deleted.");
+      queryClient.invalidateQueries({ queryKey: ["activity-daily-log", rungId] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete entry");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -1253,10 +1236,11 @@ function DailyLogTab({ rungId }: { rungId: number }) {
         const isOpen = expanded === entry.logDate;
         return (
           <div key={entry.id} className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+            <div className="flex items-center hover:bg-muted/30 transition-colors">
             <button
               type="button"
               onClick={() => setExpanded(isOpen ? null : entry.logDate)}
-              className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-muted/30 transition-colors"
+              className="flex-1 min-w-0 flex items-center gap-3 px-3.5 py-2.5 text-left"
             >
               <div className="flex flex-col items-start shrink-0 w-24">
                 <span className="text-sm font-heading font-semibold text-foreground">
@@ -1286,6 +1270,16 @@ function DailyLogTab({ rungId }: { rungId: number }) {
               </div>
               {isOpen ? <ChevronLeft size={14} className="rotate-90 text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
             </button>
+            <button
+              type="button"
+              title="Delete entry"
+              onClick={() => handleDelete(entry)}
+              disabled={deletingId === entry.id}
+              className="shrink-0 mr-2 w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+            >
+              {deletingId === entry.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+            </button>
+            </div>
             {isOpen && (
               <div className="px-3.5 pb-3 border-t border-border">
                 <DailyLogDayPhotos rungId={rungId} logDate={entry.logDate} />

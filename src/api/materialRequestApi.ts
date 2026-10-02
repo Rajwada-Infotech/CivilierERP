@@ -83,14 +83,18 @@ export const getMaterialRequests = (
     limit?: number;
     search?: string;
     status?: string;
+    projectId?: number;
+    groupBy?: "project";
   } = {},
 ) => {
-  const { page = 1, limit = 10, search = "", status = "" } = query;
+  const { page = 1, limit = 10, search = "", status = "", projectId, groupBy } = query;
   const qs = new URLSearchParams({
     page: String(page),
     limit: String(limit),
     ...(search ? { search } : {}),
     ...(status ? { status } : {}),
+    ...(projectId ? { projectId: String(projectId) } : {}),
+    ...(groupBy ? { groupBy } : {}),
   });
   return fetchWithAuth(`${BASE}?${qs}`).then((r) =>
     handleResponse<MRListResponse>(r),

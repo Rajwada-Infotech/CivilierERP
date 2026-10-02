@@ -375,7 +375,7 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
     }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const BASE_SELECT = `
       SELECT m.Id, m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.[Percent], m.DueDate, m.Status,
@@ -450,7 +450,7 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
           AND (@q IS NULL OR (a.ApplicantName LIKE @q OR b.BookingNo LIKE @q OR m.DemandNo LIKE @q OR m.MilestoneName LIKE @q))
           AND (@companyId IS NULL OR b.CompanyId = @companyId)
           AND (@projectId IS NULL OR b.ProjectId = @projectId)
-          AND (@blockId IS NULL OR um.BlockId = @blockId)
+          AND (@blockId IS NULL OR b.BlockId = @blockId)
       `),
     ]);
     res.json({
@@ -1108,6 +1108,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       `),
       pool.request().input("bid", sql.Int, bid).query(`
         SELECT b.BookingNo, b.Status AS BookingStatus, b.TotalValue,
+               CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
                COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
                b.ProjectId,
                COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
@@ -1614,11 +1615,11 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     else           { where += " AND ISNULL(o.Status,'') <> 'Held'"; }
     if (projectId) { where += " AND b.ProjectId = @pid";     req_.input("pid",       sql.Int, parseInt(projectId)); }
     if (companyId) { where += " AND b.CompanyId = @cid";     req_.input("cid",       sql.Int, parseInt(companyId)); }
-    if (blockId)   { where += " AND um.BlockId = @bid2";     req_.input("bid2",      sql.Int, parseInt(blockId)); }
+    if (blockId)   { where += " AND b.BlockId = @bid2";     req_.input("bid2",      sql.Int, parseInt(blockId)); }
     if (dateFrom)  { where += " AND o.ReceivedDate >= @df";  req_.input("df",        sql.Date, dateFrom); }
     if (dateTo)    { where += " AND o.ReceivedDate <= @dt";  req_.input("dt",        sql.Date, dateTo); }
     if (search) {
-      where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR um.UnitName LIKE @s)";
+      where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
       req_.input("s", sql.NVarChar(200), `%${search}%`);
     }
 
@@ -1651,11 +1652,11 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     else           { countWhere += " AND ISNULL(o.Status,'') <> 'Held'"; }
     if (projectId) { countWhere += " AND b.ProjectId = @pid";     countReq.input("pid",       sql.Int, parseInt(projectId)); }
     if (companyId) { countWhere += " AND b.CompanyId = @cid";     countReq.input("cid",       sql.Int, parseInt(companyId)); }
-    if (blockId)   { countWhere += " AND um.BlockId = @bid2";     countReq.input("bid2",      sql.Int, parseInt(blockId)); }
+    if (blockId)   { countWhere += " AND b.BlockId = @bid2";     countReq.input("bid2",      sql.Int, parseInt(blockId)); }
     if (dateFrom)  { countWhere += " AND o.ReceivedDate >= @df";  countReq.input("df",        sql.Date, dateFrom); }
     if (dateTo)    { countWhere += " AND o.ReceivedDate <= @dt";  countReq.input("dt",        sql.Date, dateTo); }
     if (search) {
-      countWhere += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR um.UnitName LIKE @s)";
+      countWhere += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
       countReq.input("s", sql.NVarChar(200), `%${search}%`);
     }
     const countResult = await countReq.query(`

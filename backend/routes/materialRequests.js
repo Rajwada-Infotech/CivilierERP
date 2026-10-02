@@ -347,6 +347,8 @@ router.get("/", authenticateToken, async (req, res) => {
     const search = req.query.search || "";
     const statusFilter = req.query.status || ""; // exact status filter from dashboard
     const companyId = parseInt(req.query.companyId, 10) || null;
+    const projectId = parseInt(req.query.projectId, 10) || null;
+    const groupByProject = req.query.groupBy === "project";
 
     const request = pool.request();
     request.input("offset", sql.Int, offset);
@@ -354,10 +356,11 @@ router.get("/", authenticateToken, async (req, res) => {
     request.input("search", sql.NVarChar, `%${search}%`);
     request.input("statusFilter", sql.NVarChar, statusFilter);
     request.input("companyId", sql.Int, companyId);
+    request.input("projectId", sql.Int, projectId);
 
-    const result = await request.query(`
+    const baseSelect = `
       SELECT
-        mr.MRId, mr.DocNo, mr.Status, mr.Priority,
+        mr.MRId, mr.ProjectId, mr.DocNo, mr.Status, mr.Priority,
         mr.RequestDate, mr.RequiredByDate,
         mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
         ec.name  AS CompanyName,
@@ -387,8 +390,7 @@ router.get("/", authenticateToken, async (req, res) => {
             GROUP BY ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
             FOR XML PATH('')
           ), 1, 2, '')
-        )                        AS QtyByUom,
-        COUNT(*)  OVER ()        AS _total
+        )                        AS QtyByUom
       FROM       dbo.MaterialRequests mr WITH (NOLOCK)
       LEFT JOIN  dbo.enterprise  ec  WITH (NOLOCK) ON ec.id  = mr.CompanyId
       LEFT JOIN  dbo.enterprise  ep  WITH (NOLOCK) ON ep.id  = mr.ProjectId
@@ -397,13 +399,37 @@ router.get("/", authenticateToken, async (req, res) => {
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
         AND (@statusFilter = '' OR mr.Status = @statusFilter)
         AND (@companyId IS NULL OR mr.CompanyId = @companyId)
+        AND (@projectId IS NULL OR mr.ProjectId = @projectId)
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,
                mr.RequestDate, mr.RequiredByDate,
-               mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
+               mr.ProjectId, mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
                ec.name, ep.name, fy.FName
-      ORDER BY mr.CreatedAt DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-    `);
+    `;
+
+
+    // groupBy=project pages by PROJECT, not by row: each page holds `limit`
+    // whole projects (newest-activity first) with every one of their MRs, so
+    // a project's folder is never split across pages.
+    const result = await request.query(
+      groupByProject
+        ? `
+      WITH base AS (${baseSelect}),
+      proj AS (
+        SELECT ISNULL(ProjectId, 0) AS PKey, MAX(CreatedAt) AS LastAt FROM base GROUP BY ISNULL(ProjectId, 0)
+      ),
+      ranked AS (
+        SELECT PKey, ROW_NUMBER() OVER (ORDER BY LastAt DESC) AS rn, COUNT(*) OVER () AS _total FROM proj
+      )
+      SELECT b.*, r._total
+      FROM base b JOIN ranked r ON r.PKey = ISNULL(b.ProjectId, 0)
+      WHERE r.rn > @offset AND r.rn <= @offset + @limit
+      ORDER BY r.rn, b.CreatedAt DESC`
+        : `
+      WITH base AS (${baseSelect})
+      SELECT *, COUNT(*) OVER () AS _total FROM base
+      ORDER BY CreatedAt DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`,
+    );
 
     const total = result.recordset[0]?._total ?? 0;
     const data = result.recordset.map(({ _total, ...row }) => row);

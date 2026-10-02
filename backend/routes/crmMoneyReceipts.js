@@ -93,7 +93,7 @@ function applyReceiptFilters(request, query) {
   }
   if (blockId) {
     request.input("blockId", sql.Int, parseInt(blockId, 10));
-    conds.push("um.BlockId = @blockId");
+    conds.push("b.BlockId = @blockId");
   }
   if (search) {
     // NOTE (scale): a leading-wildcard LIKE can't use a standard b-tree

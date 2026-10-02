@@ -143,7 +143,7 @@ export function translateError(raw: string | undefined | null): string {
   const sanitized = raw
     .split("\n")[0]                          // first line only
     .replace(/at\s+\w+\s*\(.*?\)/g, "")     // remove stack trace refs
-    .replace(/SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN/gi, "") // remove SQL
+    .replace(/\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN)\b/g, "") // remove SQL keywords (whole uppercase words only — never "selected", "from", "where" in a sentence)
     .replace(/\s{2,}/g, " ")
     .trim();
 

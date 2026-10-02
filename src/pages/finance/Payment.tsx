@@ -1845,6 +1845,8 @@ const Payment: React.FC = () => {
     (selected: ExpenseOption[]) => {
       setFormKnownTotalPaid(null);
       setFormKnownTdsAmount(null);
+      setSelectedContract(null);
+      setSelectedJVLine(null);
       const mergedInvoices: MergedInvoiceSelection[] = selected.map((o) => {
         const payable = o.amount != null ? Math.max(0, o.amount - (o.tdsAmount ?? 0)) : 0;
         const due = o.remainingAmount != null && o.remainingAmount > 0 && o.remainingAmount < payable
@@ -1861,8 +1863,11 @@ const Payment: React.FC = () => {
         parentDocNo: "",
         rootExBDocNo: "",
         mergedInvoices,
+        contractId: "",
+        jvLineId: null,
         amount: total,
         project: anchor?.projectName || prev.project,
+        projectSite: anchor?.projectName || prev.projectSite,
         company: (() => {
           const name = anchor?.companyName;
           if (name && name.trim()) return name.trim();
@@ -2701,6 +2706,7 @@ const Payment: React.FC = () => {
                           onMergeConfirm={handleMergeConfirm}
                           mergedSummary={mergedSummary}
                           onMergeClear={handleMergeClear}
+                          onRefreshOptions={refetchExpenseOptions}
                         />
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (

@@ -14,7 +14,7 @@ const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
-const { recalculateBookingGst, getHsnRate, UNIT_PARKING_THRESHOLD, AFFORDABLE_HSN_CODE, OTHER_RESIDENTIAL_HSN_CODE } = require("../services/crmGst");
+const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -132,6 +132,9 @@ const ALLOTMENT_SELECT = `
 // standalone sale, which never has an Agreement to gate on), and again from
 // crmBookingAmendments.js when an approver signs off on a queued request.
 
+// Land is sold without parking; parking belongs to a built unit.
+const PLOT_SALE_NO_PARKING = "A plot sale has no parking — parking can only be added to a unit booking.";
+
 async function applyAddParking(pool, bookingId, b, actorUserId) {
   if ((b.ParkingMasterId === undefined || b.ParkingMasterId === null || b.ParkingMasterId === "") && !b.ParkingType) throw parkingError("ParkingMasterId or ParkingType is required");
   const qty = b.Quantity != null && b.Quantity !== "" ? parseInt(b.Quantity) : 1;
@@ -143,6 +146,9 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   const booking = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id, BookingNo, ApplicationId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
   if (!booking.recordset.length) throw parkingError("Booking not found", 404);
+  const plotSale = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
+  if (plotSale.recordset.length) throw parkingError(PLOT_SALE_NO_PARKING);
 
   let ParkingType, GstRate, Charge;
 
@@ -675,7 +681,11 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
       const allotmentBase = allotments.reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
       const holdBase = holdLineAmounts.reduce((s, x) => s + x.lineAmount, 0);
       const combinedBase = unitTotal + allotmentBase + holdBase;
-      const hsnCode = combinedBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE;
+      // Through the shared resolver so dbo.CrmGstRule governs here too. This
+      // used to compare against UNIT_PARKING_THRESHOLD directly, which meant
+      // moving the threshold in the master repriced the booking but not this
+      // quote.
+      const hsnCode = (await resolveUnitParkingHsn(pool, combinedBase)).hsnCode;
       unitParkingRate = await getHsnRate(pool, hsnCode);
     }
 
@@ -712,6 +722,9 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
       .query("SELECT Id, ProjectId, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const plotApp = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
+      .query("SELECT TOP 1 1 AS x FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid AND Status = N'Active'");
+    if (plotApp.recordset.length) return res.status(400).json({ error: PLOT_SALE_NO_PARKING });
 
     let ParkingType, Charge, GstRate;
 
