@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API        = "/api/crm/handover";
 const SA_LEADS_API = "/api/sa/leads";
@@ -501,7 +502,7 @@ const CrmHandover: React.FC = () => {
                 Booking *{" "}
                 <span className="text-[0.625rem] text-primary">(only eligible bookings shown — AFS Registered, Possession Notice Acknowledged, no NOC left Pending/Approved, no overdue dues)</span>
               </label>
-              <select value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <SearchableNativeSelect value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(eligibleBookings as any[]).length === 0 && (
@@ -510,7 +511,7 @@ const CrmHandover: React.FC = () => {
                 {(eligibleBookings as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} ({b.UnitNo})</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Scheduled Date</label>
@@ -582,14 +583,14 @@ const CrmHandover: React.FC = () => {
             </div>
             <div>
               <label className="text-xs font-medium block mb-1">Key Handed Over By (Staff Member) *</label>
-              <select value={completeForm.KeyHandoverBy}
+              <SearchableNativeSelect value={completeForm.KeyHandoverBy}
                 onChange={(e) => setCompleteForm((f) => ({ ...f, KeyHandoverBy: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">— Select staff member —</option>
                 {(users as any[]).map((u: any) => (
                   <option key={u.value} value={u.value}>{u.label}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div className="rounded-lg border border-border p-3 space-y-2.5">
               <p className="text-xs font-semibold text-foreground">Handover Confirmations *</p>

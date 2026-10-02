@@ -119,6 +119,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
 const PO_TEMPLATE_COLUMNS = [
@@ -4353,7 +4354,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   </div>
                 ) : (
                   <div className="relative">
-                    <select
+                    <SearchableNativeSelect
                       value={form.supplierId}
                       onChange={(e) => setField("supplierId", e.target.value)}
                       className={`${selectCls} ${errors.supplierId ? "border-red-400" : ""}`}
@@ -4364,7 +4365,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           {s.name}
                         </option>
                       ))}
-                    </select>
+                    </SearchableNativeSelect>
                     <ChevronDown
                       size={13}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"

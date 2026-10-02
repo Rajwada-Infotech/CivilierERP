@@ -12,6 +12,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { CheckCircle2, IndianRupee, LayoutList, Kanban, GitMerge, ArrowRightLeft, Clock, Printer } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/leads";
 
@@ -743,7 +744,7 @@ const SaLeadManagement: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1.5">Transfer To Team Lead <span className="text-destructive">*</span></label>
-                <select
+                <SearchableNativeSelect
                   value={transferToTLId}
                   onChange={(e) => setTransferToTLId(e.target.value)}
                   className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background"
@@ -752,7 +753,7 @@ const SaLeadManagement: React.FC = () => {
                   {(tlOptions as any[]).map((tl: any) => (
                     <option key={tl.Id} value={tl.Id}>{tl.Name}</option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1.5">Notes (optional)</label>

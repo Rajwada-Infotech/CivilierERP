@@ -45,6 +45,7 @@ import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const REPORT_API = "/api/task-performance-report";
 const ACCENT = "#0d9488";
@@ -680,10 +681,10 @@ const TagPerformanceReport: React.FC = () => {
               </select>
             </FilterField>
             <FilterField icon={Users} label="User">
-              <select className={selectCls} value={filters.userId} onChange={(e) => updateFilter({ userId: e.target.value })}>
+              <SearchableNativeSelect className={selectCls} value={filters.userId} onChange={(e) => updateFilter({ userId: e.target.value })}>
                 <option value="">All Users</option>
                 {users.map((u) => <option key={u.id} value={String(u.id)}>{u.name}</option>)}
-              </select>
+              </SearchableNativeSelect>
             </FilterField>
             <FilterField icon={Activity} label="Status">
               <select className={selectCls} value={filters.status} onChange={(e) => updateFilter({ status: e.target.value })}>

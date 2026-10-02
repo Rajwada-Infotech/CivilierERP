@@ -25,6 +25,7 @@ import {
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/afs-registry";
 const BKG_API = "/api/crm/bookings";
@@ -666,13 +667,13 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                   </button>
                 </div>
               ) : (
-                <select value={bookingId} onChange={(e) => setBookingId(e.target.value)}
+                <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)}
                   className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40">
                   <option value="">Select booking</option>
                   {startableBookings.map((b: any) => (
                     <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ApplicantName} ({b.UnitNo})</option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
               )}
             </div>
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">

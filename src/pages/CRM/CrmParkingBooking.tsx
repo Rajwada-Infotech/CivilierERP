@@ -22,6 +22,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
@@ -797,7 +798,7 @@ const CrmParkingBooking: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="text-sm font-medium block mb-1.5">Customer Application <span className="text-red-500">*</span></label>
-              <select value={form.ApplicationId} onChange={(e) => setForm((f) => ({ ...f, ApplicationId: e.target.value }))}
+              <SearchableNativeSelect value={form.ApplicationId} onChange={(e) => setForm((f) => ({ ...f, ApplicationId: e.target.value }))}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary">
                 <option value="">Select application</option>
                 {(applications as any[]).map((a: any) => (
@@ -805,7 +806,7 @@ const CrmParkingBooking: React.FC = () => {
                     {a.ApplicantName} — {a.Mobile} ({a.ApplicationNo})
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>

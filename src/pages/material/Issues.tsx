@@ -71,6 +71,7 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
 const ISSUES_TEMPLATE_COLUMNS = [
@@ -1337,7 +1338,7 @@ export default function Issues() {
                     size={13}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
-                  <select
+                  <SearchableNativeSelect
                     value={header.issuedTo}
                     onChange={(e) => setH("issuedTo", e.target.value)}
                     className={`${selectCls} pl-9`}
@@ -1346,7 +1347,7 @@ export default function Issues() {
                     {contractors.map((c) => (
                       <option key={c.id} value={c.label}>{c.label}</option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                 </div>
               </Field>
 

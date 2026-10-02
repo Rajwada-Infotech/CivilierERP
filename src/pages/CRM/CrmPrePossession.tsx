@@ -23,6 +23,7 @@ import { CrmDataTable, type CrmColumn } from "@/components/crm/CrmDataTable";
 import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
 import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
 import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/pre-possession";
 
@@ -314,7 +315,7 @@ function CreateDialog({ onClose, onCreated, onViewGateway, prefillBookingId }: C
                 </button>
               </div>
             ) : (
-              <select value={bookingId} onChange={(e) => setBookingId(e.target.value)}
+              <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(eligible as any[]).map((b: any) => (
@@ -322,7 +323,7 @@ function CreateDialog({ onClose, onCreated, onViewGateway, prefillBookingId }: C
                     {b.BookingNo} — {b.ApplicantName} ({b.UnitNo})
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             )}
           </div>
           {(eligible as any[]).length > 0 && (

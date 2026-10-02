@@ -10,6 +10,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/lead-activities";
 const ACTIVITY_TYPES = ["Call", "WhatsApp", "Email", "Meeting", "Note", "SMS", "SiteVisit"];
@@ -101,10 +102,10 @@ const SaLeadActivities: React.FC = () => {
       <div className="space-y-5">
         {canDoAction("sa-lead-activities", "create") && (
           <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-6 gap-3 rounded-lg border border-border p-4 bg-background">
-            <select value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
+            <SearchableNativeSelect value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
               <option value="">Select lead</option>
               {leads.map((l: any) => <option key={l.Id} value={l.Id}>{l.LeadUid} - {l.CustomerName}</option>)}
-            </select>
+            </SearchableNativeSelect>
             <select value={form.ActivityType} onChange={(e) => setForm({ ...form, ActivityType: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
               {ACTIVITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>

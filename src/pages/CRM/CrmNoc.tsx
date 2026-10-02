@@ -23,6 +23,7 @@ import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/noc";
 
@@ -481,7 +482,7 @@ const CrmNoc: React.FC = () => {
                     <span>No eligible bookings. Requires: AFS Registered at Sub-Registrar + no NOC already on file for the booking.</span>
                   </div>
                 ) : (
-                  <select value={form.BookingId}
+                  <SearchableNativeSelect value={form.BookingId}
                     onChange={(e) => handleBookingChange(e.target.value)}
                     className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
                     <option value="">Select booking…</option>
@@ -490,7 +491,7 @@ const CrmNoc: React.FC = () => {
                         {b.BookingNo} — {b.ApplicantName} · {b.UnitNo}{b.HasLoan ? " (Home Loan)" : ""}
                       </option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                 )}
               </div>
 

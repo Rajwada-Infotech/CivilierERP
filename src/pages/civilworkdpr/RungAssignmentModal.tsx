@@ -22,6 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -505,7 +506,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   <HardHat size={11} /> Labour Given By
                 </label>
                 <div className="flex items-center gap-2">
-                  <select
+                  <SearchableNativeSelect
                     value={givenByValue(labourSource, labourContractorId)}
                     onChange={(e) => {
                       const { source, contractorId } = parseGivenBy(e.target.value);
@@ -521,7 +522,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                   {labourSource && (
                     <span
                       className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[labourSource].className}`}
@@ -536,7 +537,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   <Package size={11} /> Material Given By
                 </label>
                 <div className="flex items-center gap-2">
-                  <select
+                  <SearchableNativeSelect
                     value={givenByValue(materialSource, materialContractorId)}
                     onChange={(e) => {
                       const { source, contractorId } = parseGivenBy(e.target.value);
@@ -552,7 +553,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                   {materialSource && (
                     <span
                       className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[materialSource].className}`}

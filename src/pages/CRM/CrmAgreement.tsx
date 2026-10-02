@@ -20,6 +20,7 @@ import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import CrmAfsQueryPayment from "@/pages/CRM/CrmAfsQueryPayment";
 import CrmAfsRegistry from "@/pages/CRM/CrmAfsRegistry";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/agreements";
 const USERS_API = "/api/users";
@@ -1712,7 +1713,7 @@ const CrmAgreement: React.FC = () => {
                           <div className="font-medium text-sm">{a?.LegalExecutiveName || <span className="text-sky-600">Unassigned</span>}</div>
                         ) : (
                           <div className="flex items-center gap-2">
-                            <select
+                            <SearchableNativeSelect
                               value={a?.LegalExecutiveId != null ? String(a.LegalExecutiveId) : ""}
                               disabled={assigningLegal}
                               onChange={(e) => handleAssignLegal(e.target.value)}
@@ -1720,7 +1721,7 @@ const CrmAgreement: React.FC = () => {
                                 a?.LegalExecutiveId != null ? "border-border" : "border-sky-300 text-sky-600"}`}>
                               <option value="">— Unassigned —</option>
                               {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                            </select>
+                            </SearchableNativeSelect>
                             {editingLegalExec && (
                               <button
                                 onClick={() => setEditingLegalExec(false)}
@@ -2181,7 +2182,7 @@ const CrmAgreement: React.FC = () => {
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={agrForm.BookingId} onChange={(e) => setAgrForm((f) => ({
+              <SearchableNativeSelect value={agrForm.BookingId} onChange={(e) => setAgrForm((f) => ({
                   ...f,
                   BookingId: e.target.value,
                   LegalName: "", PanNo: "", AadhaarNo: "", LegalAddress: "",
@@ -2191,7 +2192,7 @@ const CrmAgreement: React.FC = () => {
                 {(bookings as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
               {bookings.length === 0 && (
                 <p className="text-xs text-muted-foreground mt-1">
                   No bookings are eligible yet — a booking needs to be Approved, have its welcome call marked
@@ -2207,11 +2208,11 @@ const CrmAgreement: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
-              <select value={agrForm.LegalExecutiveId} onChange={(e) => setAgrForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
+              <SearchableNativeSelect value={agrForm.LegalExecutiveId} onChange={(e) => setAgrForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">— Unassigned —</option>
                 {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
@@ -2581,11 +2582,11 @@ const CrmAgreement: React.FC = () => {
                 <div className="space-y-3">
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
-                    <select value={editForm.LegalExecutiveId} disabled={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
+                    <SearchableNativeSelect value={editForm.LegalExecutiveId} disabled={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
                       className={editInputCls}>
                       <option value="">— Unassigned —</option>
                       {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                    </select>
+                    </SearchableNativeSelect>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>

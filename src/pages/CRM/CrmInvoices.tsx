@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // Same approver set the backend's INVOICE_VOID_ROLES enforces
 // (crmBookings.js PUT /:id/invoices/:invoiceId/void) — this only controls
@@ -735,13 +736,13 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                   <Wallet size={13} className="text-primary shrink-0" />
                   On Account balance available: <span className="font-semibold text-foreground">{fmtMoney(onAccountData?.availableBalance ?? 0)}</span>
                 </div>
-                <select value={form.OnAccountPaymentId} onChange={(e) => setForm((f) => ({ ...f, OnAccountPaymentId: e.target.value }))}
+                <SearchableNativeSelect value={form.OnAccountPaymentId} onChange={(e) => setForm((f) => ({ ...f, OnAccountPaymentId: e.target.value }))}
                   className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
                   <option value="">— Select an on-account payment —</option>
                   {eligibleOnAccount.map((p: any) => (
                     <option key={p.Id} value={String(p.Id)}>{p.ReceiptNo} — {fmtMoney(p.Amount)}</option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
               </div>
             )}
             {(form.InvoiceType === "Maintenance" || form.InvoiceType === "Other") && (

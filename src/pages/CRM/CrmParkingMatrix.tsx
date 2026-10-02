@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/parking-matrix";
 const RATE_API = "/api/parking-master/rate";
@@ -191,13 +192,13 @@ function BookParkingDialog({
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Customer (Application) *</label>
-            <select value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
+            <SearchableNativeSelect value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select customer</option>
               {apps.map((a: any) => (
                 <option key={a.Id} value={String(a.Id)}>{a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})</option>
               ))}
-            </select>
+            </SearchableNativeSelect>
             <p className="text-[0.6875rem] text-muted-foreground mt-1">This customer does not need an existing unit booking — parking can be sold on its own. Only Applications for this same Project are shown.</p>
           </div>
           <div>
@@ -272,13 +273,13 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
         <div className="space-y-3">
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Customer (Application) *</label>
-            <select value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
+            <SearchableNativeSelect value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select customer</option>
               {apps.map((a: any) => (
                 <option key={a.Id} value={String(a.Id)}>{a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})</option>
               ))}
-            </select>
+            </SearchableNativeSelect>
             {apps.length === 0 && (
               <p className="text-[0.6875rem] text-amber-600 mt-1">No open Applications for this Project yet — only Applications for the same Project as this slot can hold it.</p>
             )}

@@ -24,6 +24,7 @@ import { getUnlinkedEmployeeCandidates, type UnlinkedEmployeeCandidate } from "@
 import { getSalaryStructureFamilies } from "@/api/salaryStructureApi";
 import { Wallet3 } from "iconsax-react";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Contract", "Consultant", "Intern"];
 const GENDERS = ["Male", "Female", "Other"];
@@ -396,7 +397,7 @@ export default function EmployeeMaster() {
         }
         return (
           <div>
-            <select
+            <SearchableNativeSelect
               value={(p.value as string) || ""}
               onChange={(e) => {
                 p.onChange(e.target.value);
@@ -410,7 +411,7 @@ export default function EmployeeMaster() {
                   {c.CandidateCode} — {c.CandidateName}
                 </option>
               ))}
-            </select>
+            </SearchableNativeSelect>
             <p className="text-[0.6875rem] text-muted-foreground mt-1">
               Only candidates with a confirmed Offer Letter &amp; Joining who aren't already an employee are listed. Picking one fills in the fields below.
             </p>
