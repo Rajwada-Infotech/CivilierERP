@@ -2924,7 +2924,7 @@ export default function MaterialExpenseBooking() {
                                         submitOnly
                                         onSuccess={() => fetchRecords(page)}
                                       />
-                                      <button
+                                      <button data-row-view
                                         type="button"
                                         className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
                                         onClick={() => openPreview(rec)}

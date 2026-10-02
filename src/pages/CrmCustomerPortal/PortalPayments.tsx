@@ -144,7 +144,7 @@ const PortalPayments: React.FC = () => {
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <p className="text-sm font-bold" style={{ color: TEXT }}>{fmtMoney(inv.Amount)}</p>
-                <button onClick={() => setPreviewInvoice(inv)}
+                <button data-row-view onClick={() => setPreviewInvoice(inv)}
                   className="flex items-center gap-1 text-xs font-medium hover:underline" style={{ color: GOLD }}>
                   <Eye size={13} /> View
                 </button>

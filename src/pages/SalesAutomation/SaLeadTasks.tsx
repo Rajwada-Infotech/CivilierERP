@@ -136,7 +136,7 @@ const SaLeadTasks: React.FC = () => {
               {["Low", "Normal", "High", "Urgent"].map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
             <textarea value={form.Description} onChange={(e) => setForm({ ...form, Description: e.target.value })} placeholder="Task notes" className="md:col-span-4 min-h-20 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <button className="md:col-span-1 inline-flex items-center justify-center gap-2 rounded-md btn-module text-white px-3 py-2 text-sm font-medium">
+            <button className="md:col-span-1 inline-flex items-center justify-center gap-2 self-end h-10 rounded-md btn-module text-white px-4 text-sm font-medium shadow-sm">
               <Plus size={15} /> Add
             </button>
           </form>

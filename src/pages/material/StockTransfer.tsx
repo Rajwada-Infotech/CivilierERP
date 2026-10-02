@@ -655,7 +655,7 @@ function TransferPreviewModal({
         <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
           <div className="flex items-center gap-2.5">
             <div className="p-1.5 rounded-lg bg-muted">
-              <Eye size={16} className="text-muted-foreground" />
+              
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground">
@@ -1309,7 +1309,7 @@ function TransferHistory() {
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center justify-end gap-1.5">
-                            <button
+                            <button data-row-view
                               onClick={() => setPreviewIctId(t.ICTId)}
                               title="Preview"
                               className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
@@ -1380,7 +1380,7 @@ function TransferHistory() {
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
+                          <button data-row-view
                             onClick={() => setPreviewTransfer(t)}
                             title="Preview"
                             className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"

@@ -145,7 +145,7 @@ export function RecordCard({
               submitOnly
               onSuccess={onApprovalSuccess}
             />
-            <button
+            <button data-row-view
               type="button"
               onClick={onPreview}
               className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 border border-transparent hover:border-sky-500/20 transition-colors"

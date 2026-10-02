@@ -705,7 +705,7 @@ const CrmAfsQueryPayment: React.FC<{
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuItem onClick={() => setSelectedId(r.Id)} className="gap-2">
-                  <Eye size={14} className="text-muted-foreground" /> View / Manage
+                   View / Manage
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => copyToClipboard(r.AfsQPNo, "AQP No.")} className="gap-2">
                   <Copy size={14} className="text-muted-foreground" /> Copy AQP No.
