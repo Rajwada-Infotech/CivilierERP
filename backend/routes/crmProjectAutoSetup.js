@@ -1320,6 +1320,9 @@ router.get("/naming", requirePageRight("crm-auto-project-setup", "view"), async 
     const pool = getPool();
     const projectId = parseInt(req.query.ProjectId, 10);
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: "ProjectId is required" });
+    if (!(await require("../services/namingPattern").namingAvailable(pool))) {
+      return res.status(409).json({ error: "Unit naming needs database migration 527 — run the migrations and reload. Units still generate with the default names." });
+    }
     const [patterns, project, blocks, floors] = await Promise.all([
       pool.request().query(`SELECT Id, Name, Scope, Template, GroundLabel, SkipLetters, NumberStart
                             FROM dbo.CrmNamingPattern WHERE IsActive = 1 ORDER BY Scope, SortOrder, Name`),

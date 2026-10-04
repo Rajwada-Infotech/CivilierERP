@@ -86,7 +86,23 @@ async function towerNumbers(pool, projectId) {
  * specific assignment that points at an ACTIVE pattern of the right scope.
  * Returns null when nothing is assigned (legacy naming).
  */
+// True once migration 527 has run. Until then every caller gets the legacy
+// names, so generation keeps working on a database that isn't migrated yet.
+let namingReady = null;
+async function namingAvailable(pool) {
+  if (namingReady) return true;
+  const r = await pool.request().query(`
+    SELECT CASE WHEN OBJECT_ID('dbo.CrmNamingPattern') IS NOT NULL
+                 AND COL_LENGTH('dbo.enterprise', 'UnitNamingPatternId') IS NOT NULL
+                 AND COL_LENGTH('dbo.BlockMaster', 'UnitNamingPatternId') IS NOT NULL
+                 AND COL_LENGTH('dbo.CrmProjectAutoSetupFloor', 'UnitNamingPatternId') IS NOT NULL
+            THEN 1 ELSE 0 END AS ok`);
+  namingReady = r.recordset[0].ok === 1 ? true : null; // re-checked until it's there
+  return !!namingReady;
+}
+
 async function resolvePattern(pool, { projectId, blockId, floorId = null, scope = SCOPE.UNIT }) {
+  if (!(await namingAvailable(pool))) return null;
   const col = scope === SCOPE.PARKING ? "ParkingNamingPatternId" : "UnitNamingPatternId";
   const r = await pool.request()
     .input("pid", sql.Int, projectId).input("bid", sql.Int, blockId).input("fid", sql.Int, floorId)
@@ -108,4 +124,4 @@ function nameFor(pattern, scope, ctx) {
   return pattern ? renderName(pattern, ctx) : legacyName(scope, ctx);
 }
 
-module.exports = { SCOPE, validateTemplate, letterAt, renderName, legacyName, towerNumbers, resolvePattern, nameFor };
+module.exports = { SCOPE, validateTemplate, letterAt, renderName, legacyName, towerNumbers, resolvePattern, nameFor, namingAvailable };
