@@ -31,25 +31,25 @@ const fields: FieldDef[] = [
   { name: "Description", label: "Description", type: "text", fullWidth: true },
   {
     name: "HasFloors",
-    label: "Units stack on floors",
+    label: "Units stack on floors (tower: block › floor › flat) — off = plots on a site map",
     type: "toggle",
     defaultValue: true,
   },
   {
     name: "SellsLand",
-    label: "Sells land (outside GST)",
+    label: "Sells land — plots allowed on bookings (no GST)",
     type: "toggle",
     defaultValue: false,
   },
   {
     name: "SellsConstruction",
-    label: "Sells construction (taxable)",
+    label: "Sells construction — flats / villas allowed on bookings (GST)",
     type: "toggle",
     defaultValue: true,
   },
   {
     name: "AllowsMultiUnitSale",
-    label: "Several units per booking",
+    label: "Several units per booking — off = one unit per booking",
     type: "toggle",
     defaultValue: false,
   },
@@ -60,13 +60,20 @@ const fields: FieldDef[] = [
 const columns = [
   { key: "Name", label: "Type Name" },
   { key: "Code", label: "Code" },
-  { key: "HasFloors", label: "Floors" },
-  { key: "SellsLand", label: "Land", hideOnMobile: true },
-  { key: "SellsConstruction", label: "Construction", hideOnMobile: true },
-  { key: "AllowsMultiUnitSale", label: "Multi-unit", hideOnMobile: true },
-  { key: "UsedBy", label: "In Use" },
+  { key: "Behaviour", label: "What it does", sortable: false },
+  { key: "UsedBy", label: "Used By" },
   { key: "IsActive", label: "Status" },
 ];
+
+const yesNo = (v: unknown) => (v ? "Yes" : "No");
+// One readable line from the flags — the same flags booking and auto-setup
+// act on, so this is exactly what the system will do for the type.
+const behaviour = (r: any) =>
+  [
+    r.HasFloors ? "Tower (floors)" : "Site map (plots)",
+    [r.SellsLand && "land (no GST)", r.SellsConstruction && "construction (GST)"].filter(Boolean).join(" + ") || "sells nothing",
+    r.AllowsMultiUnitSale ? "many units / booking" : "1 unit / booking",
+  ].join(" · ");
 
 async function fetchProjectTypes(): Promise<RecordWithId[]> {
   const res = await fetchWithAuth(API);
@@ -79,8 +86,13 @@ async function fetchProjectTypes(): Promise<RecordWithId[]> {
     // the API refuses to remove one that projects or blocks still point at.
     UsedBy:
       r.ProjectCount || r.BlockCount
-        ? `${r.ProjectCount} project(s), ${r.BlockCount} block(s)`
-        : "—",
+        ? [r.ProjectNames, r.BlockCount ? `${r.BlockCount} block(s)` : ""].filter(Boolean).join(" · ")
+        : "Not used yet",
+    Behaviour: behaviour(r),
+    FloorsText: yesNo(r.HasFloors),
+    LandText: yesNo(r.SellsLand),
+    ConstructionText: yesNo(r.SellsConstruction),
+    MultiText: yesNo(r.AllowsMultiUnitSale),
   }));
 }
 
@@ -147,11 +159,12 @@ const ProjectTypeMaster: React.FC = () => {
             { key: "Name", label: "Type Name" },
             { key: "Code", label: "Code" },
             { key: "Description", label: "Description" },
-            { key: "HasFloors", label: "Units stack on floors" },
-            { key: "SellsLand", label: "Sells land (outside GST)" },
-            { key: "SellsConstruction", label: "Sells construction (taxable)" },
-            { key: "AllowsMultiUnitSale", label: "Several units per booking" },
-            { key: "UsedBy", label: "In use by" },
+            { key: "Behaviour", label: "What it does" },
+            { key: "FloorsText", label: "Units stack on floors" },
+            { key: "LandText", label: "Sells land (no GST)" },
+            { key: "ConstructionText", label: "Sells construction (GST)" },
+            { key: "MultiText", label: "Several units per booking" },
+            { key: "UsedBy", label: "Used by" },
             { key: "IsActive", label: "Status" },
           ],
         }}

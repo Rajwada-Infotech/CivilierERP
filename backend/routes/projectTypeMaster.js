@@ -37,7 +37,8 @@ const SELECT = `
          t.HasFloors, t.SellsLand, t.SellsConstruction, t.AllowsMultiUnitSale,
          t.SortOrder, t.IsActive,
          (SELECT COUNT(*) FROM dbo.enterprise e WHERE e.project_type_id = t.Id) AS ProjectCount,
-         (SELECT COUNT(*) FROM dbo.BlockMaster b WHERE b.ProjectTypeId = t.Id)  AS BlockCount
+         (SELECT COUNT(*) FROM dbo.BlockMaster b WHERE b.ProjectTypeId = t.Id)  AS BlockCount,
+         (SELECT STRING_AGG(LTRIM(RTRIM(e.name)), ', ') FROM dbo.enterprise e WHERE e.project_type_id = t.Id) AS ProjectNames
   FROM dbo.ProjectTypeMaster t
 `;
 
