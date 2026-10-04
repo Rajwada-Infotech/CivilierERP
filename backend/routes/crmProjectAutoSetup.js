@@ -1462,7 +1462,7 @@ router.get("/kinds", requirePageRight("crm-auto-project-setup", "view"), async (
       .query("SELECT Id FROM dbo.BlockMaster WHERE ProjectId = @p AND IsActive = 1")).recordset) {
       blocks[b.Id] = shape(await uk.allowedKinds(pool, { projectId, blockId: b.Id }));
     }
-    res.json({ project: shape(await uk.allowedKinds(pool, { projectId })), blocks });
+    res.json({ project: shape(await uk.allowedKinds(pool, { projectId })), blocks, defaultKind: await uk.defaultKind(pool) });
   } catch (err) {
     console.error("[auto-setup] GET kinds:", err.message);
     res.status(500).json({ error: err.message });

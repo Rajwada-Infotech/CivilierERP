@@ -85,4 +85,15 @@ async function allowedKinds(pool, { projectId = null, blockId = null } = {}) {
   return kinds.filter((k) => (k.IsCommercial ? t.SellsCommercial : t.SellsResidential));
 }
 
-module.exports = { parseKind, listKinds, createKind, updateKind, allowedKinds };
+/** The kind a unit gets when none is chosen — read from the UnitMaster.UnitKind
+ *  column default in the database, so nothing here names it. */
+async function defaultKind(pool) {
+  const r = await pool.request().query(`
+    SELECT dc.definition AS d FROM sys.default_constraints dc
+    JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+    WHERE dc.parent_object_id = OBJECT_ID('dbo.UnitMaster') AND c.name = 'UnitKind'`);
+  const m = String(r.recordset[0]?.d || "").match(/'([^']+)'/);
+  return m ? m[1].toUpperCase() : null;
+}
+
+module.exports = { parseKind, listKinds, createKind, updateKind, allowedKinds, defaultKind };

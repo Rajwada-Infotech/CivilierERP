@@ -808,11 +808,11 @@ const CrmProjectAutoSetup: React.FC = () => {
 
   // Unit kinds this project's type may use — drives the per-floor "use" picker.
   type KindRow = { Code: string; Name: string; IsCommercial: boolean };
-  const { data: kindsData } = useQuery<{ project: KindRow[]; blocks: Record<string, KindRow[]> }>({
+  const { data: kindsData } = useQuery<{ project: KindRow[]; blocks: Record<string, KindRow[]>; defaultKind?: string | null }>({
     queryKey: ["auto-setup-kinds", projectId, status?.blocks?.map((b: any) => `${b.Id}:${b.OwnTypeId ?? ""}`).join(",")],
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/kinds?ProjectId=${projectId}`);
-      return r.ok ? r.json() : { project: [], blocks: {} };
+      return r.ok ? r.json() : { project: [], blocks: {}, defaultKind: null };
     },
     enabled: !!projectId,
     staleTime: 60 * 1000,
@@ -2056,10 +2056,11 @@ const CrmProjectAutoSetup: React.FC = () => {
                               {[groundFloor, ...nonGroundFloors].filter((f: any) => f && f.HasUnits && !f.IsGenerated).map((f: any) => (
                                 <label key={f.Id} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border/50 bg-muted/40 text-xs">
                                   <span className="text-muted-foreground">{f.FloorNo === 0 ? "G" : f.FloorLabel}</span>
-                                  <select value={f.UnitKind || ""} disabled={!rights.canEdit}
-                                    onChange={(e) => handleFloorFieldSave(f, { UnitKind: e.target.value })}
+                                  <select value={f.UnitKind || kindsData?.defaultKind || ""} disabled={!rights.canEdit}
+                                    // The default kind = "no override": the floor follows the unit mix.
+                                    onChange={(e) => handleFloorFieldSave(f, { UnitKind: e.target.value === kindsData?.defaultKind ? "" : e.target.value })}
                                     className="bg-transparent outline-none">
-                                    <option value="">As the unit mix</option>
+                                    {!kindsFor(b.Id).some((k) => k.Code === kindsData?.defaultKind) && <option value="">As the unit mix</option>}
                                     {kindsFor(b.Id).map((k) => <option key={k.Code} value={k.Code}>{k.Name}{k.IsCommercial ? " · commercial" : ""}</option>)}
                                   </select>
                                 </label>
