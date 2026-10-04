@@ -63,6 +63,43 @@ router.get("/", async (_req, res) => {
   }
 });
 
+// GET /impact?projectId=&typeId= — what giving a project this type would make
+// unbookable: unsold units / plots whose kind the type doesn't sell (blocks
+// with their own type keep it). Mirrors bookingTypeViolation's rules, read-only.
+router.get("/impact", async (req, res) => {
+  const projectId = parseId(req.query.projectId);
+  const typeId = parseId(req.query.typeId);
+  if (projectId === null || typeId === null) return res.json({ blocked: [], total: 0 });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("p", sql.Int, projectId).input("t", sql.Int, typeId).query(`
+      DECLARE @land BIT, @constr BIT;
+      SELECT @land = SellsLand, @constr = SellsConstruction FROM dbo.ProjectTypeMaster WHERE Id = @t;
+      SELECT Reason, COUNT(*) AS Units FROM (
+        SELECT CASE
+          WHEN ISNULL(u.UnitKind, 'FLAT') IN (SELECT Code FROM dbo.CrmConstructedAssetKind WHERE IsLand = 1)
+            THEN CASE WHEN @land = 0 THEN 'land units (type does not sell land)' END
+          ELSE CASE WHEN @constr = 0 THEN CONCAT(LOWER(ISNULL(u.UnitKind, 'FLAT')), ' units (type does not sell construction)') END
+        END AS Reason
+        FROM dbo.UnitMaster u LEFT JOIN dbo.BlockMaster b ON b.Id = u.BlockId
+        WHERE u.ProjectId = @p AND u.IsActive = 1 AND b.ProjectTypeId IS NULL
+          AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1)
+          AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingUnit l WHERE l.UnitId = u.Id AND l.Status = N'Active')
+        UNION ALL
+        SELECT CASE WHEN @land = 0 THEN 'plots (type does not sell land)' END
+        FROM dbo.PlotMaster pl LEFT JOIN dbo.BlockMaster b ON b.Id = pl.BlockId
+        WHERE pl.ProjectId = @p AND pl.IsActive = 1 AND pl.ConvertedUnitId IS NULL AND b.ProjectTypeId IS NULL
+          AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.PlotId = pl.Id AND bp.Status = N'Active')
+      ) x WHERE Reason IS NOT NULL GROUP BY Reason
+    `);
+    const blocked = r.recordset.map((x) => ({ reason: x.Reason, units: x.Units }));
+    res.json({ blocked, total: blocked.reduce((s, x) => s + x.units, 0) });
+  } catch (e) {
+    console.error("[project-type-master] GET impact:", e.message);
+    res.status(500).json({ error: "Failed to check project type impact" });
+  }
+});
+
 router.post("/", adminOnly, async (req, res) => {
   const b = req.body || {};
   const name = String(b.name || b.Name || "").trim();

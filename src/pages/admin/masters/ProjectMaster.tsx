@@ -817,6 +817,22 @@ export default function ProjectMaster() {
     (t) => String(t.Id) === form.projectTypeId,
   );
 
+  // What this type would make unbookable for an existing project — unsold
+  // units / plots whose kind the type doesn't sell (same rule the booking
+  // check enforces), so a wrong type is caught here, not at a sale.
+  const { data: typeImpact } = useQuery<{ blocked: { reason: string; units: number }[]; total: number }>({
+    queryKey: ["project-type-impact", editId, form.projectTypeId],
+    enabled: editId != null && !!form.projectTypeId,
+    queryFn: async () => {
+      const res = await fetchWithAuth(
+        `/api/project-type-master/impact?projectId=${editId}&typeId=${form.projectTypeId}`,
+      );
+      if (!res.ok) throw new Error("Failed to check project type");
+      return res.json();
+    },
+    staleTime: 30 * 1000,
+  });
+
   // Companies filtered to those belonging to the selected enterprise
   const filteredCompanies = useMemo(() => {
     if (!form.enterpriseId) return companies as any[];
@@ -1348,6 +1364,13 @@ export default function ProjectMaster() {
                         ]
                           .filter(Boolean)
                           .join(" · ")}
+                      </p>
+                    )}
+                    {typeImpact && typeImpact.total > 0 && (
+                      <p className="mt-1 text-[0.6875rem] text-amber-600 dark:text-amber-400">
+                        ⚠ With this type, {typeImpact.total} unsold unit(s) could not be booked:{" "}
+                        {typeImpact.blocked.map((b) => `${b.units} ${b.reason}`).join(", ")}.
+                        Pick a type that sells them, or fix the units' kind.
                       </p>
                     )}
                   </div>
