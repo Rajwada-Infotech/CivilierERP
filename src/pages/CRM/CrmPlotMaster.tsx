@@ -223,7 +223,9 @@ const CrmPlotMaster: React.FC = () => {
     if (only != null) {
       fetchVillaTypes(selectedPlots[0].ProjectId).then((types) => applyVillaType(String(only), types)).catch(() => {});
     }
-    if (!unitKind) { const villa = constructedAssetKinds.find((kind) => kind.Code === "VILLA"); if (villa) setUnitKind(villa.Code); }
+    // No kind is assumed here (kinds are master data): a single active kind is
+    // pre-picked, otherwise the user chooses — the form already requires it.
+    if (!unitKind) { const usable = constructedAssetKinds.filter((kind) => !kind.IsLand && kind.IsActive !== false); if (usable.length === 1) setUnitKind(usable[0].Code); }
     setConvertOpen(true);
   };
 
