@@ -4,6 +4,8 @@ import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
+import { UnitKindsDialog } from "@/components/UnitKindsDialog";
+import { Settings2 } from "lucide-react";
 import { safeHtml } from "@/utils/escapeHtml";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -284,6 +286,7 @@ const columns = [
   { key: "unitName", label: "Unit Name" },
   { key: "floorNo", label: "Floor" },
   { key: "unitType", label: "Type" },
+  { key: "unitKindName", label: "Kind" },
   { key: "saleableAreaSqFt", label: "Saleable Area" },
   { key: "ratePerSqFt", label: "Inclusive Rate/sqft" },
   { key: "paymentPlanNames", label: "Payment Plans" },
@@ -309,6 +312,7 @@ const exportColumns: ExportColumn[] = [
 // ── Component ─────────────────────────────────────────────────────────────────
 const UnitMaster: React.FC = () => {
   const rights = usePageRights("followup-unit-master");
+  const [kindsOpen, setKindsOpen] = React.useState(false);
   const queryClient = useQueryClient();
 
   const {
@@ -416,6 +420,7 @@ const UnitMaster: React.FC = () => {
       floorNo: item.FloorNo != null ? String(item.FloorNo) : "",
       unitType: item.UnitType ?? "",
       unitKind: item.UnitKind ?? "",
+      unitKindName: unitKinds.find((k) => k.Code === item.UnitKind)?.Name ?? item.UnitKind ?? "",
       areaSqFt: item.AreaSqFt != null ? String(item.AreaSqFt) : "",
       // 2-tier: unit's own explicit value → block spec default → empty
       carpetAreaSqFt:       (item.CarpetAreaSqFt       ?? item.SpecCarpetAreaSqFt)       != null ? String(item.CarpetAreaSqFt       ?? item.SpecCarpetAreaSqFt)       : "",
@@ -446,7 +451,7 @@ const UnitMaster: React.FC = () => {
             : "Available",
       };
     });
-  }, [units, projectsList]);
+  }, [units, projectsList, unitKinds]);
 
   // externalFormPatch injects __blocks/__paymentPlans into the form so each
   // field's optionsProvider can filter off the current project/block
@@ -523,6 +528,16 @@ const UnitMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Follow-Up", "Setup", "Unit Master"]} />
+      {/* Unit kinds (flat, villa, shop, office…) live with the units they describe. */}
+      {rights.canEdit && (
+        <div className="flex justify-end -mb-2">
+          <button type="button" onClick={() => setKindsOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted">
+            <Settings2 size={14} /> Unit kinds
+          </button>
+        </div>
+      )}
+      <UnitKindsDialog open={kindsOpen} onOpenChange={setKindsOpen} />
       <FollowupShell title="Unit Master">
       <MasterPage
         title="Unit"

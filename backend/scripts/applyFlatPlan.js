@@ -16,7 +16,7 @@
 // from the layout's current composition; the rest is read from Unit Composition.
 // A flat's optional "kind" = the unit kind as the source list names it (e.g. the
 // sheet's own "SHOP NO" heading). It is matched to the unit kind master by code
-// or name — the master (Plot Master › Unit kinds) is the only place kinds are
+// or name — the master (Unit Master › Unit kinds) is the only place kinds are
 // defined; nothing is created here, and the run refuses if there's no match.
 // A flat's optional "rooms" = its full room list; when it differs from its
 // layout's composition it is saved as a UNIT override (Unit Composition), so
@@ -110,7 +110,7 @@ async function main() {
   for (const w of kindWords) {
     const row = await one(pool, `SELECT Code, IsLand FROM dbo.CrmConstructedAssetKind
       WHERE IsActive = 1 AND (UPPER(Code) = UPPER(@w) OR UPPER(LTRIM(RTRIM(Name))) = UPPER(LTRIM(RTRIM(@w))))`, { w: [sql.NVarChar(100), w] });
-    if (row.length !== 1) throw new Error(`the list calls these units "${w}", but ${row.length ? "more than one" : "no"} active unit kind has that name/code — add it in Plot Master › Unit kinds`);
+    if (row.length !== 1) throw new Error(`the list calls these units "${w}", but ${row.length ? "more than one" : "no"} active unit kind has that name/code — add it in Unit Master › Unit kinds`);
     if (row[0].IsLand) throw new Error(`"${w}" is a land kind — land belongs in Plot Master, not Unit Master`);
     kindCode.set(w, row[0].Code);
   }
