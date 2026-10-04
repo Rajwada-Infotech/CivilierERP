@@ -1381,7 +1381,8 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
     // All other floors use the normal equality join.
     const unitsQuery = FloorNo === -1
       ? pool.request().input("bid", sql.Int, BlockId).query(`
-          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType,
+          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType, u.UnitKind,
+            (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind) AS KindName,
             u.AreaSqFt, u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
             u.IsActive,
             tags.PlanIds AS PaymentPlanIds,
@@ -1399,7 +1400,8 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
           ORDER BY u.UnitName
         `)
       : pool.request().input("bid", sql.Int, BlockId).input("fno", sql.Int, FloorNo).query(`
-          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType,
+          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType, u.UnitKind,
+            (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind) AS KindName,
             u.AreaSqFt, u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
             u.IsActive,
             tags.PlanIds AS PaymentPlanIds,

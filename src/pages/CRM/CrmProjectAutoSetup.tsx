@@ -30,7 +30,7 @@ function firstPickableType(types: LayoutType[]): string {
 
 type TemplateRow = { UnitType: string; UnitKind?: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 type PaymentPlan = { Id: number; PlanName: string; IsActive: boolean };
-type UnitEdit = { UnitName: string; FloorNo: string; UnitType: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
+type UnitEdit = { UnitName: string; FloorNo: string; UnitType: string; UnitKind?: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 
 async function fetchApplicablePlans(projectId: string): Promise<PaymentPlan[]> {
   try {
@@ -820,6 +820,10 @@ const CrmProjectAutoSetup: React.FC = () => {
   });
   // Each block allows what its OWN effective type sells (block override, else project).
   const kindsFor = (blockId: number): KindRow[] => kindsData?.blocks?.[blockId] ?? kindsData?.project ?? [];
+  // Commercial kinds any block here may use — offered when editing a unit;
+  // the server refuses a kind the unit's own block type doesn't sell.
+  const projectCommercialKinds: KindRow[] = Object.values(kindsData?.blocks ?? {}).flat()
+    .filter((k, i, all) => k.IsCommercial && all.findIndex((x) => x.Code === k.Code) === i);
 
   // Per-floor kind, only where the block's type sells commercial: the floor's
   // default kind (from the database) means "follow the unit mix".
@@ -948,7 +952,8 @@ const CrmProjectAutoSetup: React.FC = () => {
     setEditingUnit({
       UnitName: unit.UnitName || "",
       FloorNo: unit.FloorNo != null ? String(unit.FloorNo) : "",
-      UnitType: unit.UnitType || firstPickableType(unitTypesMaster),
+      UnitKind: projectCommercialKinds.some((k) => k.Code === unit.UnitKind) ? unit.UnitKind : "",
+      UnitType: projectCommercialKinds.some((k) => k.Code === unit.UnitKind) ? "" : (unit.UnitType || firstPickableType(unitTypesMaster)),
       AreaSqFt: unit.AreaSqFt != null ? String(unit.AreaSqFt) : "",
       CarpetAreaSqFt: unit.CarpetAreaSqFt != null ? String(unit.CarpetAreaSqFt) : "",
       BuiltUpAreaSqFt: unit.BuiltUpAreaSqFt != null ? String(unit.BuiltUpAreaSqFt) : "",
@@ -974,7 +979,8 @@ const CrmProjectAutoSetup: React.FC = () => {
           BlockId: unit.BlockId,
           UnitName: unitName,
           FloorNo: floorNo,
-          UnitType: editingUnit.UnitType || null,
+          UnitType: editingUnit.UnitKind ? null : (editingUnit.UnitType || null),
+          UnitKind: editingUnit.UnitKind || kindsData?.defaultKind || undefined,
           AreaSqFt: editingUnit.AreaSqFt || null,
           CarpetAreaSqFt: editingUnit.CarpetAreaSqFt || null,
           BuiltUpAreaSqFt: editingUnit.BuiltUpAreaSqFt || null,
@@ -1000,7 +1006,9 @@ const CrmProjectAutoSetup: React.FC = () => {
       setFloorUnits((m) => ({
         ...m,
         [floorId]: (m[floorId] || []).map((u) => u.Id === unit.Id
-          ? { ...u, UnitName: unitName, UnitType: editingUnit.UnitType,
+          ? { ...u, UnitName: unitName, UnitType: editingUnit.UnitKind ? null : editingUnit.UnitType,
+              UnitKind: editingUnit.UnitKind || kindsData?.defaultKind || u.UnitKind,
+              KindName: editingUnit.UnitKind ? projectCommercialKinds.find((k) => k.Code === editingUnit.UnitKind)?.Name : null,
               CarpetAreaSqFt: editingUnit.CarpetAreaSqFt || null,
               BuiltUpAreaSqFt: editingUnit.BuiltUpAreaSqFt || null,
               SuperBuiltUpAreaSqFt: editingUnit.SuperBuiltUpAreaSqFt || null,
@@ -1433,6 +1441,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onSaveUnit={handleSaveUnit}
                                 onDeleteUnit={handleDeleteUnit}
                                 unitTypesMaster={unitTypesMaster}
+                                commercialKinds={projectCommercialKinds}
                               />
                             </div>
                           )}
@@ -1556,6 +1565,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     onSaveUnit={handleSaveUnit}
                     onDeleteUnit={handleDeleteUnit}
                     unitTypesMaster={unitTypesMaster}
+                    commercialKinds={projectCommercialKinds}
                   />
                 </div>
               ))}
@@ -1746,6 +1756,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   editingUnit={editingUnit}
                                   savingUnitId={savingUnitId}
                                   unitTypesMaster={unitTypesMaster}
+                                  commercialKinds={projectCommercialKinds}
                                   onStartEdit={startEditUnit}
                                   onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
                                   onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
@@ -1801,6 +1812,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   editingUnit={editingUnit}
                                   savingUnitId={savingUnitId}
                                   unitTypesMaster={unitTypesMaster}
+                                  commercialKinds={projectCommercialKinds}
                                   onStartEdit={startEditUnit}
                                   onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
                                   onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
@@ -1903,6 +1915,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onSave={handleSaveUnit}
                                 onDelete={handleDeleteUnit}
                                 unitTypesMaster={unitTypesMaster}
+                                commercialKinds={projectCommercialKinds}
                               />
                             ))}
                           </div>
@@ -1986,7 +1999,8 @@ const BlockFloorTree: React.FC<{
   onSaveUnit: (floorId: number, unit: any) => void;
   onDeleteUnit: (floorId: number, unit: any) => void;
   unitTypesMaster: LayoutType[];
-}> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit, unitTypesMaster }) => (
+  commercialKinds?: { Code: string; Name: string }[];
+}> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit, unitTypesMaster, commercialKinds: projectCommercialKinds = [] }) => (
   <div className="space-y-0.5">
     {blockFloors.length === 0 ? (
       <div className="text-muted-foreground py-0.5">No floors yet.</div>
@@ -2036,6 +2050,7 @@ const BlockFloorTree: React.FC<{
               editingUnit={editingUnit}
               savingUnitId={savingUnitId}
               unitTypesMaster={unitTypesMaster}
+              commercialKinds={projectCommercialKinds}
               onStartEdit={onStartEditUnit}
               onEditChange={onEditUnitChange}
               onCancelEdit={onCancelEditUnit}
@@ -2062,7 +2077,8 @@ const FloorUnitList: React.FC<{
   onCancelEdit: () => void;
   onSave: (floorId: number, unit: any) => void;
   onDelete: (floorId: number, unit: any) => void;
-}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, unitTypesMaster, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => {
+  commercialKinds?: { Code: string; Name: string }[];
+}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, unitTypesMaster, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete, commercialKinds = [] }) => {
   // Tapping a unit expands it into a small detail panel (status + real
   // Edit/Delete buttons) instead of always showing a bare pencil/× stranded
   // at the far edge of the row. Local to this floor's list — each floor
@@ -2100,12 +2116,24 @@ const FloorUnitList: React.FC<{
                       onChange={(e) => onEditChange({ UnitName: e.target.value })}
                       placeholder="Unit name"
                       className="h-7 rounded border border-border bg-background px-2 text-[0.6875rem] font-mono outline-none focus:border-primary" />
-                    <select value={editingUnit.UnitType}
-                      onChange={(e) => onEditChange({ UnitType: e.target.value })}
+                    <select value={editingUnit.UnitKind ? `kind:${editingUnit.UnitKind}` : editingUnit.UnitType}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        onEditChange(v.startsWith("kind:") ? { UnitKind: v.slice(5), UnitType: "" } : { UnitKind: "", UnitType: v });
+                      }}
                       title={unitTypesMaster.find((t) => t.label === editingUnit.UnitType)?.summary || undefined}
                       className="h-7 rounded border border-border bg-background px-1 text-[0.6875rem] outline-none focus:border-primary">
                       {!editingUnit.UnitType && <option value="" disabled>Select Unit Type</option>}
-                      {unitTypeOptions(unitTypesMaster, u.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
+                      {commercialKinds.length ? (
+                        <>
+                          <optgroup label="Residential">
+                            {unitTypeOptions(unitTypesMaster, u.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
+                          </optgroup>
+                          <optgroup label="Commercial">
+                            {commercialKinds.map((k) => <option key={k.Code} value={`kind:${k.Code}`}>{k.Name}</option>)}
+                          </optgroup>
+                        </>
+                      ) : unitTypeOptions(unitTypesMaster, u.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
                     </select>
                   </div>
                   {/* Floor No. input — only shown for Unassigned units (FloorNo IS NULL)
@@ -2183,7 +2211,7 @@ const FloorUnitList: React.FC<{
                   <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} title={lockReason || "Available"} />
                 </div>
                 <div className="text-muted-foreground truncate">
-                  {u.UnitType || "No type set"}
+                  {commercialKinds.some((k) => k.Code === u.UnitKind) ? (u.KindName || u.UnitKind) : (u.UnitType || "No type set")}
                   {u.AreaSqFt ? ` · ${u.AreaSqFt} sqft` : ""}
                   {u.RatePerSqFt ? ` · ₹${Number(u.RatePerSqFt).toLocaleString("en-IN")}/sqft` : ""}
                 </div>
