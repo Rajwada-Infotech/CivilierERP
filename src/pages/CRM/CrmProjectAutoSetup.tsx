@@ -9,6 +9,7 @@ import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil
 import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { NamingPanel } from "./autoSetup/NamingPanel";
 import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 
 const API = "/api/crm/project-auto-setup";
@@ -1729,6 +1730,10 @@ const CrmProjectAutoSetup: React.FC = () => {
               <div className={`${cardCls} border-l-4 border-l-sky-500`}>
                 <SectionHeader icon={Ruler} colorClass="bg-sky-500/10 text-sky-600" title="3 · Unit Types & Generation"
                   hint="Define the unit mix per floor for each block, apply it to the floors, then generate the units." />
+
+                {/* How the units will be named — project default, block and
+                    floor overrides, with the exact names previewed first. */}
+                <NamingPanel projectId={Number(projectId)} blocks={blocks} floorsByBlock={floorsByBlock} canEdit={rights.canEdit} />
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {blocks.map((b) => {
