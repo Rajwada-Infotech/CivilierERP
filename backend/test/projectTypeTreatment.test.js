@@ -139,3 +139,37 @@ describe("land kinds come from the master, not a literal", () => {
     expect(t.isMixed).toBe(true);
   });
 });
+
+describe("bookingTypeViolation", () => {
+  const { bookingTypeViolation } = require("../services/projectType");
+  // Minimal pool: every getEffectiveType lookup returns the given type row.
+  const poolWith = (row) => ({
+    request() {
+      const r = { input: () => r, query: async () => ({ recordset: row ? [row] : [] }) };
+      return r;
+    },
+  });
+  const tower = { Id: 1, Code: "HIGHRISE", Name: "High Rise Apartments", HasFloors: true, SellsLand: false, SellsConstruction: true, AllowsMultiUnitSale: false };
+  const plotted = { Id: 3, Code: "PLOTTED", Name: "Plotted Development", HasFloors: false, SellsLand: true, SellsConstruction: false, AllowsMultiUnitSale: true };
+  const flat = (id) => ({ Id: id, UnitName: `F${id}`, ProjectId: 1, BlockId: 1, UnitKind: "FLAT" });
+  const plot = (id) => ({ Id: id, UnitName: `P${id}`, ProjectId: 2, BlockId: 2, UnitKind: "PLOT" });
+
+  test("an unset type is never enforced (legacy behaviour)", async () => {
+    expect(await bookingTypeViolation(poolWith(null), [flat(1), flat(2), plot(3)])).toBeNull();
+  });
+  test("one flat in a high-rise is fine", async () => {
+    expect(await bookingTypeViolation(poolWith(tower), [flat(1)])).toBeNull();
+  });
+  test("two flats are refused where the type allows one unit per booking", async () => {
+    expect(await bookingTypeViolation(poolWith(tower), [flat(1), flat(2)])).toMatch(/one unit per booking/);
+  });
+  test("several plots are fine where the type allows it", async () => {
+    expect(await bookingTypeViolation(poolWith(plotted), [plot(1), plot(2)], { isPlotBooking: true })).toBeNull();
+  });
+  test("land is refused where the type does not sell land", async () => {
+    expect(await bookingTypeViolation(poolWith(tower), [plot(1)])).toMatch(/does not sell land/);
+  });
+  test("a flat is refused where the type does not sell construction", async () => {
+    expect(await bookingTypeViolation(poolWith(plotted), [flat(1)])).toMatch(/does not sell construction/);
+  });
+});

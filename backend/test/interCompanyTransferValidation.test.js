@@ -88,6 +88,7 @@ let storedIctRow;
 let storedIctItems;
 let senderStockAvailable;
 let stockLedgerInserts;
+let mockMrRow;
 
 function makeFakePool() {
   const plainRequest = () => {
@@ -113,6 +114,9 @@ function makeFakePool() {
         }
         if (/UPDATE dbo\.InterCompanyTransfer/i.test(text)) {
           return { recordset: [], rowsAffected: [1] };
+        }
+        if (/FROM dbo\.MaterialRequests WHERE MRId/i.test(text)) {
+          return { recordset: mockMrRow ? [mockMrRow] : [] };
         }
         if (/SELECT ISNULL\(SUM.*FROM dbo\.StockLedger/is.test(text)) {
           return { recordset: [{ Available: senderStockAvailable }] };
@@ -189,6 +193,8 @@ beforeEach(() => {
   godownsAvailable = true;
   senderStockAvailable = 1000;
   stockLedgerInserts = [];
+  mockMrRow = null;
+  txSpy = undefined;
   mockFakePool = makeFakePool();
   storedIctRow = {
     ICTId: 999,
@@ -388,5 +394,65 @@ describe("Inter-Company Transfer: header+items transaction atomicity", () => {
     expect(res.status).toBe(500);
     expect(txSpy.rollback).toHaveBeenCalledTimes(1);
     expect(txSpy.commit).not.toHaveBeenCalled();
+  });
+});
+
+describe("Inter-Company Transfer: stock and Material Request checks at creation", () => {
+  const post = async (body) => {
+    const { createApp } = require("../server");
+    const app = await createApp();
+    return request(app)
+      .post("/api/inter-company-transfer")
+      .set("Authorization", `Bearer ${superAdminToken()}`)
+      .send(body);
+  };
+
+  test("refuses a transfer the source godown cannot cover - up front, not at approval", async () => {
+    senderStockAvailable = 2; // asking for 5
+    const res = await post(validPayload());
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/insufficient stock/i);
+    expect(res.body.error).toMatch(/available 2, requested 5/i);
+    expect(txSpy).toBeUndefined(); // nothing was recorded
+  });
+
+  test("refuses when there is no stock at all", async () => {
+    senderStockAvailable = 0;
+    const res = await post(validPayload());
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/insufficient stock/i);
+  });
+
+  test("checks an item that appears on two lines on its combined quantity", async () => {
+    senderStockAvailable = 8; // 5 + 5 = 10 needed
+    const res = await post({
+      ...validPayload(),
+      Items: [
+        { itemId: "ITEM-1", itemName: "Test Item", qty: 5 },
+        { itemId: "ITEM-1", itemName: "Test Item", qty: 5 },
+      ],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/available 8, requested 10/i);
+  });
+
+  test("refuses an MR that belongs to a project other than the receiver", async () => {
+    mockMrRow = { DocNo: "REQ-2026-00001", Status: "Approved", ProjectId: 99 };
+    const res = await post({ ...validPayload(), SourceMRId: 5 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/different project than the receiving project/i);
+  });
+
+  test("still refuses an MR that is not approved", async () => {
+    mockMrRow = { DocNo: "REQ-2026-00001", Status: "Pending", ProjectId: 7 };
+    const res = await post({ ...validPayload(), SourceMRId: 5 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Only Approved/i);
+  });
+
+  test("accepts an approved MR of the receiving project when stock is there", async () => {
+    mockMrRow = { DocNo: "REQ-2026-00001", Status: "Approved", ProjectId: 7 };
+    const res = await post({ ...validPayload(), SourceMRId: 5 });
+    expect(res.status).toBe(201);
   });
 });

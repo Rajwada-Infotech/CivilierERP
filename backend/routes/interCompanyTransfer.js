@@ -322,6 +322,41 @@ async function priceItems(pool, senderCompanyId, senderCompanyName, items, apply
   return pricedItems;
 }
 
+// Throws a 400 naming every short item when the sender's godown can't cover
+// the transfer. An item that appears on several lines is checked on its
+// combined quantity. Used both when the request is created (so a shortfall is
+// refused up front instead of sitting in the approval queue) and again at
+// approval (stock can change while a request is Pending).
+async function assertStockAvailable(pool, senderGodown, sender, pricedItems) {
+  const demand = new Map();
+  for (const item of pricedItems) {
+    const key = String(item.itemId);
+    const cur = demand.get(key) || { qty: 0, name: item.itemName || item.itemId };
+    cur.qty += Number(item.qty) || 0;
+    demand.set(key, cur);
+  }
+  const short = [];
+  for (const [itemId, d] of demand) {
+    const avail = await pool.request()
+      .input("itemId", sql.NVarChar(100), itemId)
+      .input("godownId", sql.Int, senderGodown.GodownID).query(`
+        SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+        FROM dbo.StockLedger
+        WHERE ItemID = @itemId AND GodownID = @godownId
+      `);
+    const available = Number(avail.recordset[0]?.Available || 0);
+    if (available < d.qty - 0.0001) short.push({ name: d.name, available, requested: d.qty });
+  }
+  if (short.length) {
+    const err = new Error(
+      `Insufficient stock in sender project ${sender.ProjectName}: ` +
+        short.map((s) => `${s.name} (available ${s.available}, requested ${s.requested})`).join("; ") + ".",
+    );
+    err.status = 400;
+    throw err;
+  }
+}
+
 // Runs for an already-Approved ICT header: moves stock directly (no GRN/SO
 // needed) and posts the two-sided GL voucher. Only called from
 // PUT /:id/approve — no further manual steps after approval.
@@ -330,23 +365,7 @@ async function executeTransfer(pool, ctx, createdBy, opts = {}) {
   const { docNo = null, ictId = null } = opts;
 
   // Validate stock is actually available before moving anything.
-  for (const item of pricedItems) {
-    const avail = await pool.request()
-      .input("itemId", sql.NVarChar(100), String(item.itemId))
-      .input("godownId", sql.Int, senderGodown.GodownID).query(`
-        SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
-        FROM dbo.StockLedger
-        WHERE ItemID = @itemId AND GodownID = @godownId
-      `);
-    const available = Number(avail.recordset[0].Available || 0);
-    if (available < item.qty) {
-      const err = new Error(
-        `Insufficient stock for item ${item.itemName || item.itemId} in sender project ${sender.ProjectName}: available=${available}, requested=${item.qty}.`,
-      );
-      err.status = 400;
-      throw err;
-    }
-  }
+  await assertStockAvailable(pool, senderGodown, sender, pricedItems);
 
   // Credit the sender's godown OUT, debit the receiver's godown IN —
   // straight StockLedger movement, same shape stockTransfers.js already
@@ -596,7 +615,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     let sourceMRDocNo = null;
     if (sourceMRId) {
       const mrCheck = await pool.request().input("MRId", sql.Int, sourceMRId)
-        .query("SELECT DocNo, Status FROM dbo.MaterialRequests WHERE MRId = @MRId");
+        .query("SELECT DocNo, Status, ProjectId FROM dbo.MaterialRequests WHERE MRId = @MRId");
       if (!mrCheck.recordset.length) {
         return res.status(404).json({ error: "Source Material Request not found." });
       }
@@ -604,6 +623,13 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       if (!["Approved", "Partially Fulfilled"].includes(mrRow.Status)) {
         return res.status(400).json({
           error: `Cannot create an Inter-Company Transfer: Material Request is "${mrRow.Status}". Only Approved or Partially Fulfilled Material Requests can be used.`,
+        });
+      }
+      // An MR is raised by the project that needs the material, i.e. the
+      // RECEIVING project of this transfer.
+      if (mrRow.ProjectId != null && Number(mrRow.ProjectId) !== Number(receiverProjectId)) {
+        return res.status(400).json({
+          error: `Material Request ${mrRow.DocNo} belongs to a different project than the receiving project — pick that project as the receiver, or choose another request.`,
         });
       }
       sourceMRDocNo = mrRow.DocNo;
@@ -622,6 +648,10 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
         }
       }
     }
+
+    // Refuse a transfer the source godown can't cover — at creation, not only
+    // at approval.
+    await assertStockAvailable(pool, ctx.senderGodown, ctx.sender, pricedItems);
 
     const totalAmount        = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
     const totalGstAmount     = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;

@@ -406,4 +406,71 @@ router.get("/activity-feed", cache("home-activity-feed", 45), async (req, res) =
   }
 });
 
+// ── Per-day totals for the "Actions this week" charts ────────────────────────
+// Counts and rupee value of everything created on each of the last 7 days
+// (India days, UTC+5:30), across the same module sources as the feed. The feed
+// itself is only the newest ~50 rows, which spans a day or two on a busy site —
+// charting that made every earlier day read zero — so this aggregates in SQL
+// instead. Each source contributes up to PER_SOURCE of its newest rows (a
+// week of activity in any one table is far below that), then they are bucketed
+// by day.
+const WEEK_PER_SOURCE = 3000;
+const IST_MINUTES = 330;
+
+router.get("/activity-week", cache("home-activity-week", 60), async (req, res) => {
+  try {
+    const pool = getPool();
+    const requested = String(req.query.modules || "")
+      .split(",")
+      .map((m) => m.trim().toLowerCase())
+      .filter(Boolean);
+    const allow = requested.length ? new Set(requested) : null;
+
+    // The last 7 India calendar days, oldest first, as "YYYY-MM-DD".
+    const istNow = new Date(Date.now() + IST_MINUTES * 60_000);
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(istNow);
+      d.setUTCDate(d.getUTCDate() - (6 - i));
+      return d.toISOString().slice(0, 10);
+    });
+
+    const branches = Object.values(SOURCES)
+      .filter((s) => !allow || allow.has(s.module))
+      .map((s) => `SELECT * FROM (${s.sql}) x`);
+    if (!branches.length) {
+      return res.json({ days: days.map((date) => ({ date, count: 0, amount: 0 })) });
+    }
+
+    // Stamps are the database clock (UTC): shift to IST before taking the date.
+    // Start a day early so IST-day edges are never cut off.
+    const from = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+    const result = await pool.request()
+      .input("perSource", sql.Int, WEEK_PER_SOURCE)
+      .input("from", sql.DateTime2, from)
+      .query(`
+        SELECT CAST(DATEADD(MINUTE, ${IST_MINUTES}, feed.At) AS DATE) AS Day,
+               COUNT(*) AS Cnt,
+               ISNULL(SUM(feed.Amount), 0) AS Amt
+        FROM (
+          ${branches.join(" UNION ALL ")}
+        ) feed
+        WHERE feed.At >= @from
+        GROUP BY CAST(DATEADD(MINUTE, ${IST_MINUTES}, feed.At) AS DATE)`);
+
+    const byDay = new Map(
+      result.recordset.map((r) => [new Date(r.Day).toISOString().slice(0, 10), r]),
+    );
+    res.json({
+      days: days.map((date) => ({
+        date,
+        count: Number(byDay.get(date)?.Cnt || 0),
+        amount: Math.round(Number(byDay.get(date)?.Amt || 0)),
+      })),
+    });
+  } catch (err) {
+    console.error("[homeActivity] GET /activity-week:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

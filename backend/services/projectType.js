@@ -279,8 +279,46 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
   };
 }
 
+/**
+ * Booking-time guard: the units on a booking must be something their project
+ * (or block) type actually sells, and several units may share one booking only
+ * when the type allows it. Rules come from the type's own flags, never its
+ * code or name, so a type added in Project Type Master is enforced as-is.
+ *
+ * Only an EXPLICITLY set type is enforced. An unset type (LEGACY_DEFAULT) keeps
+ * today's behaviour untouched, so nothing already live starts failing.
+ *
+ * @param {Array<{Id:number, UnitName:string, ProjectId:number, BlockId:number, UnitKind?:string}>} units
+ * @param {{isPlotBooking?:boolean, landKinds?:Set<string>}} opts
+ * @returns {Promise<string|null>} a user-facing reason, or null when allowed
+ */
+async function bookingTypeViolation(pool, units, { isPlotBooking = false, landKinds = null } = {}) {
+  const cache = new Map();
+  const typeOf = async (u) => {
+    const key = `${u.ProjectId}|${u.BlockId}`;
+    if (!cache.has(key)) cache.set(key, await getEffectiveType(pool, { projectId: u.ProjectId ?? null, blockId: u.BlockId ?? null }));
+    return cache.get(key);
+  };
+  for (const u of units) {
+    const t = await typeOf(u);
+    if (t.Id == null) continue; // unset -> legacy behaviour, not enforced
+    if (units.length > 1 && !t.AllowsMultiUnitSale) {
+      return `${t.Name} allows one unit per booking — ${units.length} were selected. Turn on "Several units per booking" for this type in Project Type Master, or book them separately.`;
+    }
+    const isLand = isPlotBooking || unitSaleTreatment(u.UnitKind, landKinds).isLand;
+    if (isLand && !t.SellsLand) {
+      return `${u.UnitName} is land, but ${t.Name} does not sell land. Check the unit's kind, or turn on "Sells land" for this type.`;
+    }
+    if (!isLand && !t.SellsConstruction) {
+      return `${u.UnitName} is a constructed unit, but ${t.Name} does not sell construction. Check the unit's kind, or turn on "Sells construction" for this type.`;
+    }
+  }
+  return null;
+}
+
 module.exports = {
   LEGACY_DEFAULT,
+  bookingTypeViolation,
   UNIT_KIND,
   INCOME_ACCOUNT,
   getEffectiveType,
