@@ -25,6 +25,10 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://civiliererp.in"
       }
+    },
+    "user": {
+      "extends": "production",
+      "distribution": "internal"
     }
   },
   "submit": {
