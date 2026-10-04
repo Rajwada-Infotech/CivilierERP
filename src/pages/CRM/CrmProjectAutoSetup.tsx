@@ -1733,7 +1733,7 @@ const CrmProjectAutoSetup: React.FC = () => {
 
                 {/* How the units will be named — project default, block and
                     floor overrides, with the exact names previewed first. */}
-                <NamingPanel projectId={Number(projectId)} blocks={blocks} floorsByBlock={floorsByBlock} canEdit={rights.canEdit} />
+                <NamingPanel projectId={Number(projectId)} shortName={status?.project?.ShortCode} blocks={blocks} floorsByBlock={floorsByBlock} canEdit={rights.canEdit} />
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {blocks.map((b) => {
