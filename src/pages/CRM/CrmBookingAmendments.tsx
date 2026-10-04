@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { fmtIstDateTime } from "@/lib/istTime";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -54,16 +55,7 @@ interface AmendmentRow {
 }
 
 function fmtDate(v: string | null) {
-  if (!v) return "—";
-  const d = new Date(v.replace(/Z$/, ""));
-  if (isNaN(d.getTime())) return v;
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return fmtIstDateTime(v);
 }
 
 function formatChangeType(type: string, action: string) {

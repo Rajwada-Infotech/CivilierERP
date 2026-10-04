@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -1994,7 +1995,7 @@ const CrmSalesDeed: React.FC = () => {
                                 </p>
                                 {sent && (
                                   <p className="text-xs text-blue-600 flex items-center gap-1">
-                                    <Send size={11} /> Sent {String(detail.SentToCustomerAt).slice(0,16).replace("T"," ")}
+                                    <Send size={11} /> Sent {fmtIstIso(detail.SentToCustomerAt)}
                                   </p>
                                 )}
                                 {seniorApproved && detail.BookingStatus !== 'Cancelled' && (

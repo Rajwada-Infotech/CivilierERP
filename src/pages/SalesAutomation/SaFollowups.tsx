@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { fmtIstIso } from "@/lib/istTime";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -275,7 +276,7 @@ const SaFollowups: React.FC = () => {
                   <div key={h.Id} className="px-4 py-3 border-b border-border last:border-0">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-foreground">{h.ActivityType}</span>
-                      <span className="text-xs text-muted-foreground">{h.CreatedAt ? String(h.CreatedAt).slice(0, 16).replace("T", " ") : "—"}</span>
+                      <span className="text-xs text-muted-foreground">{h.CreatedAt ? fmtIstIso(h.CreatedAt) : "—"}</span>
                     </div>
                     {h.Summary && <p className="text-xs text-muted-foreground mt-1">{h.Summary}</p>}
                     {h.NextFollowupDate && <p className="text-xs text-amber-600 mt-0.5">Next reminder: {String(h.NextFollowupDate).slice(0, 10)}</p>}
