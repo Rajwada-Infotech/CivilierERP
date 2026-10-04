@@ -576,6 +576,9 @@ router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (
       request.input("bid", sql.Int, blockId);
       where += " AND u.BlockId = @bid";
     }
+    // Commercial units (shops, offices…) have no rooms by design — leave them out.
+    const commercialCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c")).recordset[0].c != null;
+    if (commercialCol) where += " AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind AND k.IsCommercial = 1)";
     const units = await request.query(`SELECT u.Id FROM dbo.UnitMaster u WHERE ${where} ORDER BY u.BlockId, u.FloorNo, u.UnitName`);
     const totals = await syncRoomsForUnits(pool, units.recordset.map((u) => u.Id), { removeUnused: true, createdBy: req.user?.userId || null });
     if (totals.created || totals.reactivated || totals.renamed || totals.deactivated) await bumpFlatMasterCaches();

@@ -52,6 +52,17 @@ async function updateKind(id, body, userId) {
   if (!Number.isInteger(id) || id <= 0) return { status: 400, body: { error: "Invalid unit kind id" } };
   const v = parseKind(body);
   if (v.error) return { status: 400, body: { error: v.error } };
+  // Units still pointing at this kind keep its meaning: no switching it off,
+  // no recoding, no flipping land / commercial under them (GST depends on it).
+  const cur = (await getPool().request().input("id", sql.Int, id).query(`
+    SELECT k.Code, k.IsLand, k.IsCommercial,
+      (SELECT COUNT(*) FROM dbo.UnitMaster u WHERE u.UnitKind = k.Code AND u.IsActive = 1) AS Units
+    FROM dbo.CrmConstructedAssetKind k WHERE k.Id = @id`)).recordset[0];
+  if (cur && cur.Units > 0) {
+    if (body?.IsActive === false) return { status: 409, body: { error: `${cur.Units} unit(s) are ${cur.Code} — move them to another kind before switching it off.` } };
+    if (v.code !== cur.Code) return { status: 409, body: { error: `${cur.Units} unit(s) use the code ${cur.Code} — it can't be changed while they do.` } };
+    if (!!cur.IsLand !== v.isLand || !!cur.IsCommercial !== v.isCommercial) return { status: 409, body: { error: `${cur.Units} unit(s) are ${cur.Code} — changing land / commercial would change their GST. Create a new kind instead.` } };
+  }
   try {
     const r = await getPool().request()
       .input("id", sql.Int, id).input("code", sql.NVarChar(20), v.code).input("name", sql.NVarChar(100), v.name)

@@ -286,6 +286,7 @@ const columns = [
   { key: "unitName", label: "Unit Name" },
   { key: "floorNo", label: "Floor" },
   { key: "unitType", label: "Type" },
+  { key: "unitKindName", label: "Kind" },
   { key: "saleableAreaSqFt", label: "Saleable Area" },
   { key: "ratePerSqFt", label: "Inclusive Rate/sqft" },
   { key: "paymentPlanNames", label: "Payment Plans" },
@@ -419,6 +420,7 @@ const UnitMaster: React.FC = () => {
       floorNo: item.FloorNo != null ? String(item.FloorNo) : "",
       unitType: item.UnitType ?? "",
       unitKind: item.UnitKind ?? "",
+      unitKindName: unitKinds.find((k) => k.Code === item.UnitKind)?.Name ?? item.UnitKind ?? "",
       areaSqFt: item.AreaSqFt != null ? String(item.AreaSqFt) : "",
       // 2-tier: unit's own explicit value → block spec default → empty
       carpetAreaSqFt:       (item.CarpetAreaSqFt       ?? item.SpecCarpetAreaSqFt)       != null ? String(item.CarpetAreaSqFt       ?? item.SpecCarpetAreaSqFt)       : "",
@@ -449,7 +451,7 @@ const UnitMaster: React.FC = () => {
             : "Available",
       };
     });
-  }, [units, projectsList]);
+  }, [units, projectsList, unitKinds]);
 
   // externalFormPatch injects __blocks/__paymentPlans into the form so each
   // field's optionsProvider can filter off the current project/block

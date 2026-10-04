@@ -127,7 +127,7 @@ const BOOKING_SELECT = `
     -- the booking itself carries (migration 519).
     COALESCE(um.BlockId, b.BlockId) AS BlockId,
     b.FloorName,
-    COALESCE(um.UnitType,   b.UnitType)  AS UnitType,
+    COALESCE(um.UnitType,   b.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = um.UnitKind))  AS UnitType,
     b.AreaSqFt,
     b.CarpetAreaSqFt, b.BuiltUpAreaSqFt, b.SuperBuiltUpAreaSqFt, b.OpenTerraceAreaSqFt,
     b.RatePerSqFt, b.TotalValue, b.BookingAmount, b.TokenType, b.TokenValue,
@@ -630,7 +630,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     // Same lookup + availability checks as booking creation — the new unit
     // must be real, active, and not already locked by another booking.
     const unit = await pool.request().input("uid", sql.Int, newUnitId).query(`
-      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind)) AS UnitType, u.AreaSqFt,
              u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
              proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
       FROM dbo.UnitMaster u
