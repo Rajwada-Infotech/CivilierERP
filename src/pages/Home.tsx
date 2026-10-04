@@ -1684,6 +1684,23 @@ export default function HomePage() {
     retry: 1,
   });
 
+  // Per-day totals for the last 7 days (counts + rupee value), aggregated on
+  // the server. The charts used to be bucketed from the 50-item feed above,
+  // which on a busy site only reaches back a day or two — so every earlier day
+  // read zero.
+  const { data: weekActivity } = useQuery<{ days: Array<{ date: string; count: number; amount: number }> }>({
+    queryKey: ["home-activity-week", feedModules],
+    queryFn: async () => {
+      const qs = feedModules ? `?modules=${encodeURIComponent(feedModules)}` : "";
+      const res = await fetchWithAuth(`/api/home/activity-week${qs}`);
+      if (!res.ok) throw new Error("activity totals unavailable");
+      return res.json();
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    retry: 1,
+  });
+
   const fin  = data?.finance;
   const mat  = data?.material;
   const adm  = data?.admin;
@@ -1746,30 +1763,21 @@ export default function HomePage() {
 
   const feedItems: LiveActivityItem[] = liveFeed?.items ?? [];
 
-  // ── Last-7-days activity series — bucketed from the same universal feed
-  // the "Live activity" list already renders, so the bar/area charts show
-  // genuinely real counts/values instead of an invented time series.
-  const dayKey = (d: Date) => d.toISOString().slice(0, 10);
-  const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    d.setHours(0, 0, 0, 0);
-    return d;
+  // ── Last-7-days activity series — real per-day totals from the server
+  // (India days), not bucketed from the short live feed. Until they load, the
+  // axis still shows the last 7 days (all zero).
+  const dayLabel = (isoDate: string) =>
+    new Date(`${isoDate}T12:00:00Z`).toLocaleDateString("en-IN", { weekday: "short", timeZone: "UTC" });
+  const fallbackDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(Date.now() + 330 * 60_000);
+    d.setUTCDate(d.getUTCDate() - (6 - i));
+    return { date: d.toISOString().slice(0, 10), count: 0, amount: 0 };
   });
-  const byDay = new Map<string, { count: number; amount: number }>();
-  last7Days.forEach((d) => byDay.set(dayKey(d), { count: 0, amount: 0 }));
-  feedItems.forEach((it) => {
-    const k = dayKey(new Date(it.At));
-    const bucket = byDay.get(k);
-    if (bucket) {
-      bucket.count += 1;
-      bucket.amount += it.Amount ?? 0;
-    }
-  });
-  const activitySeries = last7Days.map((d) => {
-    const b = byDay.get(dayKey(d))!;
-    return { day: d.toLocaleDateString("en-IN", { weekday: "short" }), count: b.count, amount: Math.round(b.amount) };
-  });
+  const activitySeries = (weekActivity?.days?.length ? weekActivity.days : fallbackDays).map((d) => ({
+    day: dayLabel(d.date),
+    count: d.count,
+    amount: d.amount,
+  }));
 
   // ── Work Order completion — the one genuinely percentage-shaped metric
   // available, given the hero gauge (mirrors "Profit Analysis" in the
