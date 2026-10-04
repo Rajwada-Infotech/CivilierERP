@@ -19,10 +19,22 @@ const { getPool, sql } = require("../db");
 //   approved_by       nvarchar(300) → sql.NVarChar(300)
 //   belongsTo         nvarchar(200) → sql.NVarChar(200)
 //   gl_head_id        int NULL      → sql.Int   (migration 315, Activities only)
+//   days_of_completion int NULL     → sql.Int   (migration 533, Activities only, 1-3650)
 //
 // activity_type:  0 = Group    → group_id = NULL,      belongsTo = NULL
 // activity_type:  1 = Activity → group_id = INT id,    belongsTo = String(group_id)
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Days an activity is expected to take: blank = not set, else a whole number 1-3650.
+// Returns { value } or { error }.
+function parseDaysOfCompletion(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return { value: null };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 3650) {
+    return { error: "days_of_completion must be a whole number of days between 1 and 3650." };
+  }
+  return { value: n };
+}
 
 // ─── GET ALL ─────────────────────────────────────────────────────────────────
 router.get("/", cache("activity-master", 300), async (req, res) => {
@@ -45,6 +57,7 @@ router.get("/", cache("activity-master", 300), async (req, res) => {
         am.belongsTo,
         am.hsn_code,
         am.gl_head_id,
+        am.days_of_completion,
         gl.LHeadName AS gl_head_name
       FROM dbo.ActivityMaster am
       LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = am.gl_head_id
@@ -79,6 +92,7 @@ router.get("/:id", async (req, res) => {
           am.belongsTo,
           am.hsn_code,
           am.gl_head_id,
+          am.days_of_completion,
           gl.LHeadName AS gl_head_name
         FROM dbo.ActivityMaster am
         LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = am.gl_head_id
@@ -105,6 +119,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     is_active,
     hsn_code, // only for Activity (activity_type === 1)
     gl_head_id, // only for Activity (activity_type === 1)
+    days_of_completion, // only for Activity (activity_type === 1)
   } = req.body;
 
   // ── Validation ───────────────────────────────────────────────────────────
@@ -117,6 +132,9 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .json({ error: "activity_type is required (0=Group, 1=Activity)" });
   }
 
+  const days = parseDaysOfCompletion(activity_type === 1 ? days_of_completion : null);
+  if (days.error) return res.status(400).json({ error: days.error });
+
   // ── belongsTo logic ───────────────────────────────────────────────────────
   // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL, hsn_code/gl_head_id = NULL
   // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id), hsn_code/gl_head_id = optional
@@ -125,6 +143,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     activity_type === 1 ? (group_id ? String(group_id) : null) : null;
   const resolvedHsnCode = activity_type === 1 ? hsn_code || null : null;
   const resolvedGlHeadId = activity_type === 1 ? gl_head_id || null : null;
+  const resolvedDays = days.value; // already NULL for Groups
 
   try {
     const pool = getPool();
@@ -143,16 +162,17 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("belongsTo", sql.NVarChar(200), resolvedBelongsTo) // nvarchar(200) — group id as string
       .input("hsn_code", sql.NVarChar(50), resolvedHsnCode) // nvarchar(50) — null for Groups
       .input("gl_head_id", sql.Int, resolvedGlHeadId) // null for Groups
+      .input("days_of_completion", sql.Int, resolvedDays) // null for Groups / when not set
       .query(`
         INSERT INTO dbo.ActivityMaster
           (activity_name, short_description, activity_type, group_id,
            is_active, created_by, created_datetime, belongsTo, hsn_code,
-           gl_head_id)
+           gl_head_id, days_of_completion)
         OUTPUT INSERTED.id AS id
         VALUES
           (@activity_name, @short_description, @activity_type, @group_id,
            @is_active, @created_by, @created_datetime, @belongsTo, @hsn_code,
-           @gl_head_id)
+           @gl_head_id, @days_of_completion)
       `);
 
     await bumpCacheVersion("activity-master");
@@ -176,6 +196,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     is_active,
     hsn_code, // only for Activity (activity_type === 1)
     gl_head_id, // only for Activity (activity_type === 1)
+    days_of_completion, // only for Activity (activity_type === 1)
   } = req.body;
 
   // ── Validation ───────────────────────────────────────────────────────────
@@ -188,6 +209,9 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .json({ error: "activity_type is required (0=Group, 1=Activity)" });
   }
 
+  const days = parseDaysOfCompletion(activity_type === 1 ? days_of_completion : null);
+  if (days.error) return res.status(400).json({ error: days.error });
+
   // ── belongsTo logic ───────────────────────────────────────────────────────
   // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL, hsn_code/gl_head_id = NULL
   // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id), hsn_code/gl_head_id = optional
@@ -197,6 +221,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     activity_type === 1 ? (group_id ? String(group_id) : null) : null;
   const resolvedHsnCode = activity_type === 1 ? hsn_code || null : null;
   const resolvedGlHeadId = activity_type === 1 ? gl_head_id || null : null;
+  const resolvedDays = days.value; // already NULL for Groups
 
   try {
     const pool = getPool();
@@ -216,6 +241,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("belongsTo", sql.NVarChar(200), resolvedBelongsTo) // nvarchar(200) — group id as string
       .input("hsn_code", sql.NVarChar(50), resolvedHsnCode) // nvarchar(50) — null for Groups
       .input("gl_head_id", sql.Int, resolvedGlHeadId) // null for Groups
+      .input("days_of_completion", sql.Int, resolvedDays) // null for Groups / when not set
       .query(`
         UPDATE dbo.ActivityMaster SET
           activity_name     = @activity_name,
@@ -227,7 +253,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           updated_at        = @updated_at,
           belongsTo         = @belongsTo,
           hsn_code          = @hsn_code,
-          gl_head_id        = @gl_head_id
+          gl_head_id        = @gl_head_id,
+          days_of_completion = @days_of_completion
         WHERE id = @id
       `);
 
