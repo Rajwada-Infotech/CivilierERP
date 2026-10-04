@@ -9,6 +9,7 @@
 // polish — see purchaseOrdersApi.ts's resolveLineGstSplit/convert* exports.
 // Payment Terms is a plain text field here (web also offers a T&C-master
 // multi-select — dropped for v1, non-essential to correctness).
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -151,6 +152,14 @@ export function PurchaseOrderFormModal({
   const { data: itemUomAlternates = [] } = useQuery({ queryKey: ["po-form-item-uom-alt"], queryFn: getAllItemUomAlternates, enabled: visible });
   const { data: costCenters = [] } = useQuery({ queryKey: ["po-form-cost-centers"], queryFn: getCostCenterOptions, enabled: visible });
   const { data: finYears = [] } = useQuery({ queryKey: ["po-form-finyears"], queryFn: fetchFinYearOptions, enabled: visible });
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(visible && editingId == null);
+  const finYearLocked = (visible && editingId == null) && !!lockedFY;
+  useEffect(() => {
+    if (!(visible && editingId == null) || !lockedFY) return;
+    set("finYear", lockedFY.label);
+  }, [visible, editingId == null, lockedFY?.id]);
 
   const { data: existing, isLoading: loadingExisting } = useQuery({
     queryKey: ["po-editing-record", editingId],
@@ -501,7 +510,7 @@ export function PurchaseOrderFormModal({
             <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
             <PickerRow label="Supplier" value={form.supplierName} onPress={() => setPicker("supplier")} />
             <PickerRow label="Cost Center" value={form.costCenterName} onPress={() => setPicker("costCenter")} />
-            <PickerRow label="Financial Year" value={form.finYear} placeholder="Auto" onPress={() => setPicker("finYear")} />
+            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} placeholder="Auto" onPress={() => setPicker("finYear")} disabled={finYearLocked} />
 
             <FieldLabel required>PO Date</FieldLabel>
             <TextField value={form.poDate} onChangeText={(v) => set("poDate", v)} placeholder="YYYY-MM-DD" />

@@ -4,6 +4,7 @@
 // OTHER cart rows on the same item (getStockForRow on web) — kept 1:1.
 // Changing the godown resets the cart (web enforces this too, since stock
 // figures are godown-scoped). Dropped vs. web: CSV import/export, print.
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -98,6 +99,14 @@ export function MaterialIssueFormModal({
   const { data: uoms = [] } = useQuery({ queryKey: ["issue-form-uoms"], queryFn: getUomOptions, enabled: visible });
   const { data: issuedToOptions = [] } = useQuery({ queryKey: ["issue-form-issued-to"], queryFn: getIssuedToOptions, enabled: visible });
   const { data: finYears = [] } = useQuery({ queryKey: ["issue-form-finyears"], queryFn: fetchFinYearOptions, enabled: visible });
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(visible && editingId == null);
+  const finYearLocked = (visible && editingId == null) && !!lockedFY;
+  useEffect(() => {
+    if (!(visible && editingId == null) || !lockedFY) return;
+    set("finYear", lockedFY.label);
+  }, [visible, editingId == null, lockedFY?.id]);
   const { data: itemOptions = [] } = useQuery({
     queryKey: ["issue-form-items", form.godownId],
     queryFn: () => getIssueItemOptions(form.godownId),
@@ -275,7 +284,7 @@ export function MaterialIssueFormModal({
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
             <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
             <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} disabled={!form.companyId} />
-            <PickerRow label="Financial Year" value={form.finYear} placeholder="Auto" onPress={() => setPicker("finYear")} />
+            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} placeholder="Auto" onPress={() => setPicker("finYear")} disabled={finYearLocked} />
             <PickerRow
               label="Source Godown" value={form.godownName} placeholder="Select godown"
               onPress={() => setPicker("godown")} disabled={!form.companyId || !form.projectId}

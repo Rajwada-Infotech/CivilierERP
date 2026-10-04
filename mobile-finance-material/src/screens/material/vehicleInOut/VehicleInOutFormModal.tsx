@@ -3,6 +3,7 @@
 // page; mobile uses a full-screen modal, matching this app's established
 // convention (PaymentFormModal.tsx, ReceivedPaymentFormModal.tsx).
 // Deferred vs. web: CSV import/export, Print — both stay web-only.
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Image } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -152,6 +153,15 @@ export function VehicleInOutFormModal({
   }, [visible, editingId, existing]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
+  // Declared after the reset effect above so the locked year isn't wiped by it.
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(visible && !editingId);
+  const finYearLocked = (visible && !editingId) && !!lockedFY;
+  useEffect(() => {
+    if (!(visible && !editingId) || !lockedFY) return;
+    set("finYear", lockedFY.label);
+  }, [visible, editingId, lockedFY?.id]);
 
   const filteredProjects = useMemo(
     () => (form.companyId ? projects.filter((p) => String(p.company_id ?? "") === form.companyId) : projects),
@@ -351,7 +361,7 @@ export function VehicleInOutFormModal({
             </Text>
             <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
             <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label="Financial Year" value={form.finYear} onPress={() => setPicker("finYear")} />
+            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} onPress={() => setPicker("finYear")} disabled={finYearLocked} />
             <View className="rounded-xl px-3.5 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
               <Text style={{ color: colors.mutedForeground, fontSize: 10, textTransform: "uppercase" }}>Doc Number</Text>
               <Text style={{ color: colors.primary, fontSize: 13, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
