@@ -224,6 +224,21 @@ const MODULE_TABLE_MAP = {
 // on every refetch) — ApprovalStatusChain's fallback prop masked it as a
 // plain "Pending"/"Approved" badge instead of an error, which is why it
 // looked like the richer badge was silently "reverting" on its own.
+// Statuses a record only reaches AFTER it was fully approved: a PO becomes
+// "Received" once its GRNs cover the PO total, and a Material Request becomes
+// "Partially Fulfilled"/"Completed" as POs and transfers draw it down. The
+// trail must keep showing these as approved — matching only "Approved" left
+// them on "Final Level · Pending" whenever the final level had no audit row.
+// Scoped per module: "Completed" means something else on other documents.
+const POST_APPROVAL_STATUSES = {
+  PurchaseOrders: ["Received"],
+  MaterialRequests: ["Partially Fulfilled", "Completed"],
+};
+function isApprovedOutcome(module, status) {
+  const s = String(status ?? "");
+  return s === "Approved" || (POST_APPROVAL_STATUSES[module] || []).includes(s);
+}
+
 async function buildApprovalTrail(pool, module, recordId) {
   const entry = MODULE_TABLE_MAP[module];
   if (!entry) return { error: `Unknown module table: ${module}` };
@@ -441,7 +456,8 @@ async function buildApprovalTrail(pool, module, recordId) {
         // the step-derived computation below rather than erroring the badge.
       }
     }
-    if (actualStatus === "Approved") {
+    const approvedOutcome = isApprovedOutcome(module, actualStatus);
+    if (approvedOutcome) {
       for (const s of steps) {
         if (s.status !== "Approved") {
           s.status = "Approved";
@@ -455,10 +471,10 @@ async function buildApprovalTrail(pool, module, recordId) {
     const currentLevel =
       steps.findIndex((s) => s.status !== "Approved") + 1 || steps.length;
     const fullyApproved =
-      actualStatus === "Approved" ||
+      approvedOutcome ||
       (steps.length > 0 && steps.every((s) => s.status === "Approved"));
     const hasRejection =
-      actualStatus !== "Approved" &&
+      !approvedOutcome &&
       (actualStatus === "Rejected" || rejectedMarkers.length > 0 || steps.some((s) => s.status === "Rejected"));
 
     return {
