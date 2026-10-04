@@ -70,4 +70,19 @@ async function updateKind(id, body, userId) {
   }
 }
 
-module.exports = { parseKind, listKinds, createKind, updateKind };
+/**
+ * The unit kinds a project (or block) may use, from its effective project
+ * type's flags: commercial kinds need "Sells commercial", the rest need
+ * "Sells residential"; land kinds belong to plots, never units. A project
+ * with no type set keeps today's freedom (every non-land kind).
+ */
+async function allowedKinds(pool, { projectId = null, blockId = null } = {}) {
+  const { getEffectiveType } = require("./projectType");
+  const kinds = (await listKinds({ activeOnly: true })).filter((k) => !k.IsLand);
+  if (projectId == null && blockId == null) return kinds;
+  const t = await getEffectiveType(pool, { projectId, blockId });
+  if (t.Id == null) return kinds;
+  return kinds.filter((k) => (k.IsCommercial ? t.SellsCommercial : t.SellsResidential));
+}
+
+module.exports = { parseKind, listKinds, createKind, updateKind, allowedKinds };

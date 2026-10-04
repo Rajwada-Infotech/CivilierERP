@@ -795,7 +795,19 @@ const CrmProjectAutoSetup: React.FC = () => {
     }
   };
 
-  const handleFloorFieldSave = async (floor: any, patch: { UnitCount?: number; HasUnits?: boolean }) => {
+  // Unit kinds this project's type may use — drives the per-floor "use" picker.
+  const { data: allowedKinds = [] } = useQuery<{ Code: string; Name: string; IsCommercial: boolean }[]>({
+    queryKey: ["auto-setup-kinds", projectId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/kinds?ProjectId=${projectId}`);
+      return r.ok ? r.json() : [];
+    },
+    enabled: !!projectId,
+    staleTime: 60 * 1000,
+  });
+  const showFloorUse = allowedKinds.some((k) => k.IsCommercial);
+
+  const handleFloorFieldSave = async (floor: any, patch: { UnitCount?: number; HasUnits?: boolean; UnitKind?: string }) => {
     try {
       const res = await fetchWithAuth(`${API}/floors/${floor.Id}`, {
         method: "PUT",
@@ -1995,6 +2007,29 @@ const CrmProjectAutoSetup: React.FC = () => {
                             </div>
                           )}
                         </div>
+
+                        {/* Floor use — only for project types that sell commercial
+                            units: which floors are shops / offices instead of flats.
+                            Commercial floors take no BHK from the unit mix. */}
+                        {showFloorUse && (
+                          <div className="pt-3 border-t border-border/60 space-y-2">
+                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Floor use</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[groundFloor, ...nonGroundFloors].filter((f: any) => f && f.HasUnits && !f.IsGenerated).map((f: any) => (
+                                <label key={f.Id} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border/50 bg-muted/40 text-xs">
+                                  <span className="text-muted-foreground">{f.FloorNo === 0 ? "G" : f.FloorLabel}</span>
+                                  <select value={f.UnitKind || ""} disabled={!rights.canEdit}
+                                    onChange={(e) => handleFloorFieldSave(f, { UnitKind: e.target.value })}
+                                    className="bg-transparent outline-none">
+                                    <option value="">Default (residential)</option>
+                                    {allowedKinds.map((k) => <option key={k.Code} value={k.Code}>{k.Name}{k.IsCommercial ? " · commercial" : ""}</option>)}
+                                  </select>
+                                </label>
+                              ))}
+                            </div>
+                            <p className="text-[0.625rem] text-muted-foreground">Floors set to a commercial kind are created as that kind, without a BHK or rooms.</p>
+                          </div>
+                        )}
 
                         {/* Ground floor stays its own explicit row — never
                             covered by the block template above. */}

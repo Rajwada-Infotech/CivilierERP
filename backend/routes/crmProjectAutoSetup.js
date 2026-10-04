@@ -414,9 +414,11 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
       ORDER BY b.Id
     `);
 
+    const floorKindCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupFloor', 'UnitKind') AS c")).recordset[0].c != null;
     const floors = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT
         f.Id, f.BlockId, f.FloorNo, f.FloorLabel, f.UnitCount, f.HasUnits, f.IsGenerated,
+        ${floorKindCol ? "f.UnitKind" : "CAST(NULL AS NVARCHAR(20)) AS UnitKind"},
         (SELECT COUNT(*) FROM dbo.UnitMaster u
          WHERE u.BlockId = f.BlockId AND u.IsActive = 1
            AND (
@@ -1144,6 +1146,21 @@ router.put("/floors/:id", requirePageRight("crm-auto-project-setup", "edit"), as
       return res.status(400).json({ error: "UnitCount must be between 0 and 500" });
     }
 
+    // What the floor's units are (Unit Master › Unit kinds), limited to what
+    // the project type sells. "" = back to the default (flats).
+    if (req.body.UnitKind !== undefined) {
+      const hasCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupFloor', 'UnitKind') AS c")).recordset[0].c != null;
+      if (!hasCol) return res.status(409).json({ error: "Floor use needs database migration 528 — run the migrations and reload." });
+      const code = req.body.UnitKind ? String(req.body.UnitKind).trim().toUpperCase() : null;
+      if (code) {
+        const fl = (await pool.request().input("id", sql.Int, id).query("SELECT ProjectId, BlockId FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id")).recordset[0];
+        const allowed = await require("../services/unitKind").allowedKinds(pool, { projectId: fl.ProjectId, blockId: fl.BlockId });
+        if (!allowed.some((k) => k.Code === code)) return res.status(400).json({ error: `"${code}" isn't a unit kind this project's type sells.` });
+      }
+      await pool.request().input("id", sql.Int, id).input("k", sql.NVarChar(20), code)
+        .query("UPDATE dbo.CrmProjectAutoSetupFloor SET UnitKind = @k WHERE Id = @id");
+    }
+
     await pool.request()
       .input("id", sql.Int, id)
       .input("uc", sql.Int, unitCount)
@@ -1312,6 +1329,19 @@ async function getBlockParkingSequence(pool, blockId) {
 // Block's own Unit Type template (see getBlockUnitSequence above) if one has
 // been set up; otherwise left NULL exactly like before this feature
 // existed, filled in afterward via the existing Unit Master edit page.
+// GET /kinds?ProjectId= — unit kinds this project's type may use (for the
+// per-floor "use" picker). Same rule as Unit Master and the booking guard.
+router.get("/kinds", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  try {
+    const projectId = parseInt(req.query.ProjectId, 10);
+    const kinds = await require("../services/unitKind").allowedKinds(getPool(), { projectId: Number.isFinite(projectId) ? projectId : null });
+    res.json(kinds.map((k) => ({ Code: k.Code, Name: k.Name, IsCommercial: !!k.IsCommercial })));
+  } catch (err) {
+    console.error("[auto-setup] GET kinds:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Naming patterns (migration 527) ──────────────────────────────────────────
 // GET /naming?ProjectId= — active patterns + what's assigned at project, block
 // and floor level, so the wizard can show and change it at every stage.
@@ -1436,7 +1466,8 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
 
     const req0 = pool.request().input("pid", sql.Int, projectId);
     let query = `
-      SELECT f.Id, f.BlockId, f.FloorNo, f.FloorLabel, f.UnitCount, b.BlockName
+      SELECT f.Id, f.BlockId, f.FloorNo, f.FloorLabel, f.UnitCount, b.BlockName,
+             ${(await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupFloor', 'UnitKind') AS c")).recordset[0].c != null ? "f.UnitKind" : "CAST(NULL AS NVARCHAR(20)) AS UnitKind"}
       FROM dbo.CrmProjectAutoSetupFloor f
       JOIN dbo.BlockMaster b ON b.Id = f.BlockId
       WHERE f.ProjectId = @pid AND f.IsActive = 1 AND f.IsGenerated = 0 AND f.HasUnits = 1 AND f.UnitCount > 0
@@ -1466,6 +1497,7 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
     // Naming pattern per floor (floor → block → project; none = legacy names).
     const { SCOPE, towerNumbers, resolvePattern, nameFor } = require("../services/namingPattern");
     const towers = await towerNumbers(pool, projectId);
+    const commercialKinds = await require("../services/projectType").loadCommercialKinds(pool);
     // Pre-fetch payment plan tags per block — forward-fill to each generated unit.
     const plansByBlock = new Map();
     for (const floor of floors.recordset) {
@@ -1486,7 +1518,10 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
         const unitName = nameFor(pattern, SCOPE.UNIT, {
           shortCode, blockName: floor.BlockName, towerNo: towers.get(floor.BlockId), floorNo: floor.FloorNo, floorLabel: floor.FloorLabel, seq,
         });
-        const typeSlot = sequence.length ? sequence[(seq - 1) % sequence.length] : null;
+        // A commercial floor (shops, offices…) takes no BHK from the block's
+        // unit mix — those units have no layout or rooms by design.
+        const typeSlot = commercialKinds.has(String(floor.UnitKind || "").toUpperCase()) ? null
+          : (sequence.length ? sequence[(seq - 1) % sequence.length] : null);
         const blockPlanIds = plansByBlock.get(floor.BlockId) || [];
 
         // Wrap the check+INSERT in a transaction with UPDLOCK so that two
@@ -1566,6 +1601,11 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                    @area, @carpetArea, @builtUp, @superBuiltUp, @openTerrace, @rate,
                    1, @cb, SYSDATETIME())
               `);
+            // The floor's use, when set — otherwise the column default (flat) stands.
+            if (floor.UnitKind && ins.recordset[0]?.Id) {
+              await tx.request().input("id", sql.Int, ins.recordset[0].Id).input("kind", sql.NVarChar(20), floor.UnitKind)
+                .query("UPDATE dbo.UnitMaster SET UnitKind = @kind WHERE Id = @id");
+            }
             const newId = ins.recordset[0]?.Id;
             // The new unit's rooms (Bedroom 1, Kitchen, ...) from its layout,
             // in the same transaction as the unit itself.
