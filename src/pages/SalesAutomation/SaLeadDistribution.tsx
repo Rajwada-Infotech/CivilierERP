@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { fmtIstIso } from "@/lib/istTime";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -182,7 +183,7 @@ const SaLeadDistribution: React.FC = () => {
       cell: (i) => <span className="text-muted-foreground">L{i.row.original.Level}</span> },
     { accessorKey: "Method", header: "Method", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
     { accessorKey: "DistributedAt", header: "Date", size: 140,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.DistributedAt ? String(i.row.original.DistributedAt).slice(0, 16).replace("T", " ") : "—"}</span> },
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.DistributedAt ? fmtIstIso(i.row.original.DistributedAt) : "—"}</span> },
   ];
 
   return (

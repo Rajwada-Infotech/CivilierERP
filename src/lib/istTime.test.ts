@@ -25,3 +25,16 @@ describe("fmtIstDateTime", () => {
     expect(parseServerUtc("")).toBeNull();
   });
 });
+
+import { fmtIstIso } from "./istTime";
+
+describe("fmtIstIso", () => {
+  it("renders a compact IST timestamp", () => {
+    expect(fmtIstIso("2026-10-04T05:17:00.000Z")).toBe("2026-10-04 10:47");
+    expect(fmtIstIso("2026-10-04T05:17:09Z", true)).toBe("2026-10-04 10:47:09");
+    expect(fmtIstIso("2026-10-04T20:00:00")).toBe("2026-10-05 01:30");
+  });
+  it("is blank for nothing", () => {
+    expect(fmtIstIso(null)).toBe("");
+  });
+});

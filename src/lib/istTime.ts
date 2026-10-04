@@ -25,3 +25,13 @@ export function fmtIstDateTime(
   if (!d) return String(value);
   return d.toLocaleString("en-IN", { ...opts, timeZone: IST_ZONE });
 }
+
+/** "2026-10-04 10:47" (or with seconds) — IST, 24-hour, for compact table cells. */
+export function fmtIstIso(value: string | Date | null | undefined, withSeconds = false): string {
+  if (!value) return "";
+  const d = parseServerUtc(value);
+  if (!d) return String(value);
+  // sv-SE renders as "YYYY-MM-DD HH:mm:ss".
+  const s = d.toLocaleString("sv-SE", { timeZone: IST_ZONE, hourCycle: "h23" });
+  return withSeconds ? s : s.slice(0, 16);
+}
