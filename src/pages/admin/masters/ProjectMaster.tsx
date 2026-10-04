@@ -1323,7 +1323,7 @@ export default function ProjectMaster() {
                         }}
                         className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
                       >
-                        <option value="">— Not set (high-rise behaviour) —</option>
+                        <option value="">— Select Project Type —</option>
                         {projectTypeOptions.map((t) => (
                           <option key={t.Id} value={String(t.Id)}>
                             {t.Name}
