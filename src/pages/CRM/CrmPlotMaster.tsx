@@ -50,8 +50,9 @@ async function fetchPlotBlocks(): Promise<PlotBlock[]> {
   if (!response.ok) throw new Error("Failed to load blocks");
   return response.json();
 }
-async function fetchConstructedAssetKinds(): Promise<ConstructedAssetKind[]> {
-  const response = await fetchWithAuth(`${PLOT_API}/constructed-kinds`);
+async function fetchConstructedAssetKinds(projectId?: number | null): Promise<ConstructedAssetKind[]> {
+  // With a project: only the kinds that project's type sells.
+  const response = await fetchWithAuth(`${PLOT_API}/constructed-kinds${projectId ? `?projectId=${projectId}` : ""}`);
   if (!response.ok) throw new Error("Failed to load constructed asset kinds");
   return response.json();
 }
@@ -117,7 +118,6 @@ const CrmPlotMaster: React.FC = () => {
   const { data: facings = [], isError: facingsFailed } = useQuery({ queryKey: ["plot-facings"], queryFn: () => fetchFacings(false), staleTime: 5 * 60_000 });
   const { data: allFacings = [] } = useQuery({ queryKey: ["plot-facings", "all"], queryFn: () => fetchFacings(true), enabled: facingsOpen });
   const { data: layoutTypes = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60_000 });
-  const { data: constructedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds"], queryFn: fetchConstructedAssetKinds, staleTime: 60_000 });
   // Villa types of the project being converted, and of the plot being edited.
   const conversionProjectId = plots.find((plot: Plot) => selectedIds.includes(plot.Id))?.ProjectId ?? null;
   const { data: conversionVillaTypes = [] } = useQuery<VillaType[]>({ queryKey: villaTypesKey(conversionProjectId), queryFn: () => fetchVillaTypes(conversionProjectId!), enabled: convertOpen && conversionProjectId != null });
@@ -191,6 +191,9 @@ const CrmPlotMaster: React.FC = () => {
   // Only plots that are still visible count as selected. Before, a plot ticked and then
   // filtered out was still converted, with nothing on screen to show it.
   const selectedPlots = useMemo(() => filtered.filter((plot) => selectedIds.includes(plot.Id) && canConvert(plot)), [filtered, selectedIds]);
+  // Kinds offered when converting = what the selected plots' project type sells.
+  const kindsProjectId = selectedPlots[0]?.ProjectId ?? null;
+  const { data: constructedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds", kindsProjectId], queryFn: () => fetchConstructedAssetKinds(kindsProjectId), staleTime: 60_000 });
   const selectionIsCompatible = selectedPlots.length > 0 && selectedPlots.every((plot) => plot.ProjectId === selectedPlots[0].ProjectId && plot.BlockId === selectedPlots[0].BlockId);
   const totalArea = selectedPlots.reduce((total, plot) => total + Number(plot.AreaSqFt || 0), 0);
   // Counts follow the project/block filter and always add up: a converted plot with an old

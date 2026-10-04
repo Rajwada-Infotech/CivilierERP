@@ -61,10 +61,14 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         b.UpdatedAt,
         COALESCE(unitLock.LockBookingNo, parkLock.LockBookingNo) AS LockBookingNo,
         COALESCE(unitLock.LockHoldId, parkLock.LockHoldId) AS LockHoldId,
-        planTags.PlanIds AS PaymentPlanIds, planTags.PlanNames AS PaymentPlanNames
+        planTags.PlanIds AS PaymentPlanIds, planTags.PlanNames AS PaymentPlanNames,
+        COALESCE(bt.Name, pt.Name) AS TypeName,
+        CASE WHEN b.ProjectTypeId IS NOT NULL THEN 1 ELSE 0 END AS HasOwnType
       FROM dbo.BlockMaster b
       LEFT JOIN dbo.enterprise e
         ON e.id = b.ProjectId AND e.business_type = 'P'
+      LEFT JOIN dbo.ProjectTypeMaster bt ON bt.Id = b.ProjectTypeId
+      LEFT JOIN dbo.ProjectTypeMaster pt ON pt.Id = e.project_type_id
       OUTER APPLY (
         SELECT STRING_AGG(CAST(bpp.PlanId AS VARCHAR(20)), ',') AS PlanIds,
                STRING_AGG(pp.PlanName, ', ') AS PlanNames

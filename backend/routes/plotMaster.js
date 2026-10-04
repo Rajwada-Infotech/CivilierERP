@@ -74,8 +74,14 @@ async function resolveFacing(pool, facing, currentFacing = null) {
   return { value: found.recordset[0].Code };
 }
 
-router.get("/constructed-kinds", requirePageRight("crm-auto-project-setup", "view"), async (_req, res) => {
+router.get("/constructed-kinds", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
   try {
+    // ?projectId= / ?blockId= narrows to the kinds that project's type sells.
+    const n = (v) => (v === undefined || v === "" ? null : parseInt(v, 10));
+    const projectId = n(req.query.projectId), blockId = n(req.query.blockId);
+    if (projectId != null || blockId != null) {
+      return res.json(await require("../services/unitKind").allowedKinds(getPool(), { projectId, blockId }));
+    }
     const result = await getPool().request().query(`
       SELECT Id, Code, Name, SortOrder, IsLand, IsCommercial
       FROM dbo.CrmConstructedAssetKind
