@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, ChevronDown, ChevronRight, GripVertical, Tag, Undo2, Wand2 } from "lucide-react";
+import { CheckCircle2, GripVertical, Lock, Pencil, Tag, Undo2, Wand2 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // Unit naming for Auto Project Setup. Pick a ready-made style (the ones real
@@ -108,12 +108,14 @@ interface Props {
   canEdit: boolean;
 }
 
-export function NamingPanel({ projectId, shortName, blocks, canEdit }: Props) {
+export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEdit }: Props) {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<string>("project"); // "project" or a block id
   const [b, setB] = useState<Builder>(DEFAULT);
   const [customOpen, setCustomOpen] = useState(false);
-  const [open, setOpen] = useState(false); // folded to one line until "Change"
+  // Open while setting up for the first time; locked (one line + Edit) once
+  // a naming is saved or units already exist.
+  const [open, setOpen] = useState<boolean | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -137,6 +139,9 @@ export function NamingPanel({ projectId, shortName, blocks, canEdit }: Props) {
   }, [naming, target]);
   const saved = useMemo(() => (current && fromTemplate(current.Template, current.SkipLetters, current.GroundLabel)) || DEFAULT, [current]);
   useEffect(() => { setB(saved); }, [saved]);
+  const anyGenerated = useMemo(() => [...floorsByBlock.values()].flat().some((f: any) => f.IsGenerated), [floorsByBlock]);
+  const firstTime = !!naming && !naming.project?.UnitNamingPatternId && !(naming.blocks || []).some((x: any) => x.UnitNamingPatternId) && !anyGenerated;
+  const isOpen = open ?? firstTime;
 
   const short = shortName || "PRJ";
   const blockName = target === "project" ? blocks[0]?.BlockName ?? "A" : blocks.find((x) => String(x.Id) === target)?.BlockName ?? "A";
@@ -186,16 +191,30 @@ export function NamingPanel({ projectId, shortName, blocks, canEdit }: Props) {
   return (
     <div className="rounded-xl border border-border/60 bg-background/50 p-3 sm:p-4 space-y-3">
       {/* Folded: one line saying what new units are called. */}
-      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex flex-wrap items-center gap-2 text-left">
-        {open ? <ChevronDown size={13} className="text-muted-foreground" /> : <ChevronRight size={13} className="text-muted-foreground" />}
-        <Tag size={13} className="text-sky-600" />
-        <span className="text-sm font-semibold">Unit names</span>
-        <span className="font-mono text-xs text-muted-foreground">{example(saved, short, blockName)} …</span>
-        <span className="text-xs text-muted-foreground">· {PRESETS.find((p) => sameAs({ ...p.b, skipIO: saved.skipIO, ground: saved.ground }, saved))?.title ?? "Your own"}</span>
-        {canEdit && <span className="ml-auto text-xs font-medium text-primary">{open ? "Close" : "Change"}</span>}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        {isOpen ? <Tag size={13} className="text-sky-600" /> : <Lock size={12} className="text-muted-foreground" />}
+        <span className="text-sm font-semibold">{isOpen ? "How should units be named?" : "Unit names"}</span>
+        {!isOpen && (
+          <>
+            <span className="font-mono text-xs text-muted-foreground">{example(saved, short, blockName)} …</span>
+            <span className="text-xs text-muted-foreground">· {PRESETS.find((p) => sameAs({ ...p.b, skipIO: saved.skipIO, ground: saved.ground }, saved))?.title ?? "Your own"}</span>
+          </>
+        )}
+        {canEdit && !isOpen && (
+          <button type="button" onClick={() => setOpen(true)}
+            className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border text-primary hover:bg-primary/5">
+            <Pencil size={11} /> Edit
+          </button>
+        )}
+        {isOpen && !firstTime && (
+          <button type="button" onClick={() => { setOpen(false); setB(saved); setCustomOpen(false); }}
+            className="ml-auto px-2.5 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted/50">
+            Cancel
+          </button>
+        )}
+      </div>
 
-      {open && (<>
+      {isOpen && (<>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">Pick the style that looks right.</span>
         {blocks.length > 1 && (
