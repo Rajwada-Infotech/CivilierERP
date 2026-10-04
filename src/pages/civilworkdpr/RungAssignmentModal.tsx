@@ -34,7 +34,7 @@ const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking
 // the Engineers dropdown, the QC dropdown, and each Approval Level's own
 // picker below — same look everywhere a "pick some people" control appears
 // in this modal.
-function UserMultiSelect({
+export function UserMultiSelect({
   users, selected, onChange, placeholder = "Select…", noneLabel = "No one available.",
 }: {
   users: Engineer[]; selected: number[]; onChange: (ids: number[]) => void; placeholder?: string; noneLabel?: string;
@@ -113,7 +113,7 @@ const newLevel = (index: number): ApprovalLevel => ({
 // "one-by-one, then either" chain. Whoever ends up named here (plus
 // super_admin, always) gets the right to approve this activity's finished
 // work — enforced where that approval action itself lives (Work Reporting).
-function ApprovalLevelsEditor({
+export function ApprovalLevelsEditor({
   levels, onChange, users,
 }: {
   levels: ApprovalLevel[]; onChange: (levels: ApprovalLevel[]) => void; users: Engineer[];

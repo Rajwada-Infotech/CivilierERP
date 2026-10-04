@@ -188,6 +188,7 @@ const ALL_ROUTES = [
   { path: "/api/doc-selector", file: "./routes/docSelector" },
   { path: "/api/doc-search", file: "./routes/docSearch" },
   { path: "/api/push-devices", file: "./routes/pushDevices" },
+  { path: "/api/dependency-bulk-assign", file: "./routes/dependencyBulkAssign" },
   { path: "/api/fin-year", file: "./routes/finYear" },
   { path: "/api/general-ledger", file: "./routes/generalLedger" },
   { path: "/api/hsn", file: "./routes/hsn" },

@@ -21,9 +21,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Search, RefreshCw, GitBranch, Boxes, Home, Waypoints } from "lucide-react";
+import { Plus, Search, RefreshCw, GitBranch, Boxes, Home, Waypoints, Users } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { DependencyMasterList } from "./components/DependencyMasterList";
+import { BulkAssignModal } from "./components/BulkAssignModal";
 
 type TypeFilter = "ALL" | WorkType;
 
@@ -62,6 +63,12 @@ export default function DependencyMasterPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const rights = usePageRights("dependency-master");
+  // Bulk assign writes Work Allocation data, so it needs the same right the
+  // single-activity allocation save needs (not Dependency Master's own).
+  const reportingRights = usePageRights("civilworkdpr-activity-reporting");
+  const workDoneRights = usePageRights("civilworkdpr-work-done");
+  const canBulkAssign = reportingRights.canEdit || workDoneRights.canEdit;
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("ALL");
@@ -103,15 +110,26 @@ export default function DependencyMasterPage() {
         subtitle="Room-level activity chains — task scope, alias, and a strictly linear dependency sequence"
         icon={GitBranch}
         action={
-          rights.canCreate && (
-            <button
-              onClick={() => navigate("/masters/dependency/new")}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-engineering transition-all"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              New Dependency
-            </button>
-          )
+          <div className="flex items-center gap-2">
+            {canBulkAssign && rows.length > 0 && (
+              <button
+                onClick={() => setBulkOpen(true)}
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-foreground border border-border bg-background hover:bg-muted text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-all"
+              >
+                <Users className="h-3.5 w-3.5" />
+                Bulk Assign
+              </button>
+            )}
+            {rights.canCreate && (
+              <button
+                onClick={() => navigate("/masters/dependency/new")}
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-engineering transition-all"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New Dependency
+              </button>
+            )}
+          </div>
         }
       >
         {/* Stat strip */}
@@ -192,6 +210,8 @@ export default function DependencyMasterPage() {
           />
         )}
       </CivilWorkDprShell>
+
+      <BulkAssignModal open={bulkOpen} onClose={() => setBulkOpen(false)} rows={rows} />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
