@@ -122,6 +122,9 @@ export const MODULE_SHORTCUTS: ModuleShortcut[] = [
   { code: "KeyA", keyLabel: "A", module: "admin", label: "Admin" },
 ];
 
+/** How long Shift+C waits for an S before it switches to CRM. */
+export const CHORD_GRACE_MS = 150;
+
 const MODULE_SHORTCUT_BY_CODE: Record<string, ModuleShortcut> = Object.fromEntries(
   MODULE_SHORTCUTS.map((s) => [s.code, s]),
 );
@@ -147,7 +150,21 @@ export function useModuleSwitchShortcut(): void {
     const role = currentUser?.role ?? "";
     const isAdminTier = isAdminTierRole(role);
 
+    // Shift+C (CRM) is also the first half of the Shift+C+S cheatsheet chord, so
+    // it waits a beat and is dropped if S joins; S already held means the chord
+    // was started S-first.
+    let sHeld = false;
+    let pendingCrm: ReturnType<typeof setTimeout> | null = null;
+    const cancelPending = () => {
+      if (pendingCrm) clearTimeout(pendingCrm);
+      pendingCrm = null;
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "KeyS") {
+        sHeld = true;
+        cancelPending();
+      }
       if (isEditableTarget(e.target)) return;
       if (!e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
       const shortcut = MODULE_SHORTCUT_BY_CODE[e.code];
@@ -155,18 +172,41 @@ export function useModuleSwitchShortcut(): void {
       if (!userHasModuleAccess(shortcut.module, isAdminTier, (pk) => canAccessPage(pk as never))) return;
 
       e.preventDefault();
-      setCollapsed(false);
-      setModuleSwitching(true);
-      setActiveModule(shortcut.module);
-      const dest =
-        shortcut.module === "admin" && !isAdminTier
-          ? "/admin/approval/inbox"
-          : MODULE_DASHBOARD_ROUTES[shortcut.module];
-      navigate(dest);
-      setTimeout(() => setModuleSwitching(false), 60);
+      const go = () => {
+        pendingCrm = null;
+        setCollapsed(false);
+        setModuleSwitching(true);
+        setActiveModule(shortcut.module);
+        const dest =
+          shortcut.module === "admin" && !isAdminTier
+            ? "/admin/approval/inbox"
+            : MODULE_DASHBOARD_ROUTES[shortcut.module];
+        navigate(dest);
+        setTimeout(() => setModuleSwitching(false), 60);
+      };
+      if (e.code === "KeyC") {
+        if (sHeld || e.repeat) return;
+        cancelPending();
+        pendingCrm = setTimeout(go, CHORD_GRACE_MS);
+        return;
+      }
+      go();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "KeyS") sHeld = false;
+    };
+    const onBlur = () => {
+      sHeld = false;
     };
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      cancelPending();
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", onBlur);
+    };
   }, [currentUser, canAccessPage, setActiveModule, setModuleSwitching, setCollapsed, navigate]);
 }
 
@@ -223,4 +263,55 @@ export function useCalculatorShortcut(onToggle: () => void): void {
 export function isDocFinderShortcut(e: KeyLike): boolean {
   if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return false;
   return e.code === "KeyD";
+}
+
+// ── Shortcut cheatsheet: Shift + C + S ──────────────────────────────────────────
+// Hold Shift, then C and S together (either order). Matched on `code`, so the
+// capital letters Shift produces don't matter. Ignored while typing in a field.
+
+/** S with C held, or C with S held, Shift down, no other modifiers. */
+export function isCheatsheetShortcut(e: KeyLike, held: { c: boolean; s: boolean }): boolean {
+  if (!e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return false;
+  if (e.code === "KeyS") return held.c;
+  if (e.code === "KeyC") return held.s;
+  return false;
+}
+
+/** Toggles the cheatsheet on Shift+C+S — mount once (ShortcutsHost, in AppLayout). */
+export function useCheatsheetShortcut(onToggle: () => void): void {
+  useEffect(() => {
+    const held = { c: false, s: false };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || isEditableTarget(e.target)) return;
+      if (e.repeat) {
+        // A held chord must not retrigger, but still counts as held.
+        return;
+      }
+      if (isCheatsheetShortcut(e, held)) {
+        e.preventDefault();
+        held.c = false;
+        held.s = false;
+        onToggle();
+        return;
+      }
+      if (e.code === "KeyC") held.c = true;
+      if (e.code === "KeyS") held.s = true;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "KeyC") held.c = false;
+      if (e.code === "KeyS") held.s = false;
+    };
+    const onBlur = () => {
+      held.c = false;
+      held.s = false;
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [onToggle]);
 }
