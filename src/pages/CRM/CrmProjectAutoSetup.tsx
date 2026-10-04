@@ -10,6 +10,7 @@ import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { NamingPanel } from "./autoSetup/NamingPanel";
+import { ProjectTypeBar } from "./autoSetup/ProjectTypeBar";
 import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 
 const API = "/api/crm/project-auto-setup";
@@ -698,7 +699,16 @@ const CrmProjectAutoSetup: React.FC = () => {
   // HasFloors flag, resolved server-side in /status — never from its name, so
   // a type added in Project Type master works here with no change. A project
   // with no type set resolves to floors, which is the legacy behaviour.
-  const isPlotted = status?.projectType ? !status.projectType.HasFloors : false;
+  // Each block follows its OWN effective type (block override, else the
+  // project's): tower blocks get floors + units, plot blocks get a plot
+  // layout — so a mixed township sets up both side by side.
+  const towerBlocks = blocks.filter((b: any) => b.HasFloors !== false);
+  const plotBlocks = blocks.filter((b: any) => b.HasFloors === false);
+  const hasTowers = towerBlocks.length > 0;
+  const hasPlots = plotBlocks.length > 0;
+  // Whole-project wording only: plotted when every block is plots, or when
+  // there are no blocks yet and the project's type has no floors.
+  const isPlotted = blocks.length ? !hasTowers : (status?.projectType ? !status.projectType.HasFloors : false);
 
   const step1Done = blocks.length > 0;
   const step2Done = floors.length > 0;
@@ -772,7 +782,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   // backend, so re-sending an unchanged count for an already-set-up block is
   // always a safe no-op.
   const handleSaveFloors = async () => {
-    const payload = blocks
+    const payload = towerBlocks
       .map((b) => ({ BlockId: b.Id, FloorCount: parseInt(floorCounts[b.Id] || "", 10) }))
       .filter((p) => Number.isFinite(p.FloorCount) && p.FloorCount >= 1);
     if (!payload.length) { toast.error("Enter a floor count for at least one block"); return; }
@@ -1199,6 +1209,12 @@ const CrmProjectAutoSetup: React.FC = () => {
             below (Option B synthetic bucket). This note stays as a lightweight
             signpost so staff know what the amber row means without having to
             guess — it disappears automatically once all units are fixed. */}
+        {/* What this project is — type, what it sells, and each block's layout. */}
+        {projectId && status && (
+          <ProjectTypeBar projectId={Number(projectId)} status={status} canEdit={rights.canEdit}
+            onChanged={() => { refetchStatus(); invalidateSyncedMasters(); qc.invalidateQueries({ queryKey: ["auto-setup-kinds", projectId] }); }} />
+        )}
+
         {projectId && status && !isPlotted && status.legacyUnitCount > 0 && (
           <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-2.5 text-sm text-sky-600 flex items-center gap-2">
             <span>
@@ -1592,9 +1608,9 @@ const CrmProjectAutoSetup: React.FC = () => {
                 replaced rather than hidden field-by-field — the backend refuses
                 POST /floors for such a block anyway, and leaving the step
                 visible would invite an action that can only fail. */}
-            {step1Done && isPlotted && (
+            {step1Done && hasPlots && (
               <PlotLayoutStep
-                blocks={blocks}
+                blocks={plotBlocks}
                 projectTypeName={status?.projectType?.Name}
                 canEdit={rights.canEdit}
                 canCreate={rights.canCreate}
@@ -1607,18 +1623,18 @@ const CrmProjectAutoSetup: React.FC = () => {
                 expand a block to browse every plot, check availability status,
                 and delete a plot (with the booking/hold lock guard in place).
                 Detailed editing stays in Unit Master. */}
-            {step1Done && isPlotted && blocks.some((b) => b.PlotTemplate?.IsGenerated) && (
+            {step1Done && hasPlots && plotBlocks.some((b) => b.PlotTemplate?.IsGenerated) && (
               <div className={`${cardCls} border-l-2 border-l-sky-500`}>
                 <SectionHeader
                   icon={MapIcon}
                   colorClass="bg-sky-500/10 text-sky-600"
                   title="Land Inventory"
-                  done={blocks.every((b) => !b.PlotTemplate || b.PlotTemplate.IsGenerated)}
+                  done={plotBlocks.every((b) => !b.PlotTemplate || b.PlotTemplate.IsGenerated)}
                   right={<a href={`/crm/setup/plot-master?projectId=${projectId}`} className="ml-auto inline-flex items-center gap-1 text-[0.6875rem] text-primary hover:underline">Open Plot Master <ExternalLink size={11} /></a>}
                 />
                 <p className="text-[0.6875rem] text-muted-foreground -mt-1">Review live availability below. Use Plot Master for filters, plot history, and conversion to Unit Master after construction.</p>
                 <div className="space-y-1.5">
-                  {blocks.map((b) => {
+                  {plotBlocks.map((b) => {
                     const tpl = b.PlotTemplate;
                     if (!tpl?.IsGenerated) {
                       return (
@@ -1636,7 +1652,7 @@ const CrmProjectAutoSetup: React.FC = () => {
               </div>
             )}
 
-            {step1Done && !isPlotted && (
+            {step1Done && hasTowers && (
               <div className={`${cardCls} border-l-4 border-l-cyan-500`}>
                 <SectionHeader icon={Layers} colorClass="bg-cyan-500/10 text-cyan-600" title="2 · Floor Plan" done={step2Done}
                   hint={step2Done ? "Click a floor to see its units. Use Edit to remove empty floors." : "Enter how many floors each block has."}
@@ -1650,7 +1666,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                 } />
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  {blocks.map((b) => {
+                  {towerBlocks.map((b) => {
                     const blockFloors = floorsByBlock.get(b.Id) || [];
                     const hasFloors = blockFloors.length > 0;
                     // Open by default when there's nothing to summarize yet;
@@ -1782,7 +1798,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     );
                   })}
                 </div>
-                {blocks.some((b) => !(floorsByBlock.get(b.Id) || []).length || floorFormOpenFor[b.Id]) && (
+                {towerBlocks.some((b) => !(floorsByBlock.get(b.Id) || []).length || floorFormOpenFor[b.Id]) && (
                   <div className="flex justify-end pt-1 border-t border-border/60">
                     <button onClick={async () => { await handleSaveFloors(); setFloorFormOpenFor({}); }} disabled={savingFloors}
                       className="w-full sm:w-auto mt-3 px-5 py-2.5 text-sm btn-module text-white rounded-lg font-semibold shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
@@ -1794,17 +1810,17 @@ const CrmProjectAutoSetup: React.FC = () => {
             )}
 
             {/* Unit Types & Generation */}
-            {step2Done && !isPlotted && (
+            {step2Done && hasTowers && (
               <div className={`${cardCls} border-l-4 border-l-sky-500`}>
                 <SectionHeader icon={Ruler} colorClass="bg-sky-500/10 text-sky-600" title="3 · Unit Types & Generation"
                   hint="Define the unit mix per floor for each block, apply it to the floors, then generate the units." />
 
                 {/* How the units will be named — project default, block and
                     floor overrides, with the exact names previewed first. */}
-                <NamingPanel projectId={Number(projectId)} shortName={status?.project?.ShortCode} blocks={blocks} floorsByBlock={floorsByBlock} canEdit={rights.canEdit} />
+                <NamingPanel projectId={Number(projectId)} shortName={status?.project?.ShortCode} blocks={towerBlocks} floorsByBlock={floorsByBlock} canEdit={rights.canEdit} />
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  {blocks.map((b) => {
+                  {towerBlocks.map((b) => {
                     const rows = templates[b.Id] || [];
                     const nonGroundFloors = (floorsByBlock.get(b.Id) || []).filter((f) => f.FloorNo !== 0);
                     const groundFloor = (floorsByBlock.get(b.Id) || []).find((f) => f.FloorNo === 0);
@@ -2136,7 +2152,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     actually eligible to generate anywhere on this project —
                     otherwise it's just an invitation to re-click into the
                     same "No eligible floors" toast with nothing to act on. */}
-                {blocks.some((b) => {
+                {towerBlocks.some((b) => {
                   const bf = floorsByBlock.get(b.Id) || [];
                   const ng = bf.filter((f) => f.FloorNo !== 0);
                   const g = bf.find((f) => f.FloorNo === 0);
