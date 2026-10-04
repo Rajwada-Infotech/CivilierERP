@@ -201,6 +201,22 @@ async function applyUnitKind(db, unitId, rawKind) {
     .query("UPDATE dbo.UnitMaster SET UnitKind = @k WHERE Id = @id");
 }
 
+// Unit kind master — managed here (Flat, Villa, Shop, Office… with Land /
+// Commercial flags). Shared logic in services/unitKind.js.
+const unitKindSvc = require("../services/unitKind");
+router.get("/kinds/manage", requirePageRight("followup-unit-master", "view"), async (_req, res) => {
+  try { res.json(await unitKindSvc.listKinds({ activeOnly: false })); }
+  catch (err) { console.error("[unit-master] GET kinds/manage:", err.message); res.status(500).json({ error: err.message }); }
+});
+router.post("/kinds", requirePageRight("followup-unit-master", "create"), async (req, res) => {
+  try { const r = await unitKindSvc.createKind(req.body, req.user?.userId); res.status(r.status).json(r.body); }
+  catch (err) { console.error("[unit-master] POST kinds:", err.message); res.status(500).json({ error: err.message }); }
+});
+router.put("/kinds/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
+  try { const r = await unitKindSvc.updateKind(Number(req.params.id), req.body, req.user?.userId); res.status(r.status).json(r.body); }
+  catch (err) { console.error("[unit-master] PUT kinds:", err.message); res.status(500).json({ error: err.message }); }
+});
+
 // GET /kinds — the active non-land unit kinds, for the Unit Master form.
 router.get("/kinds", requirePageRight("followup-unit-master", "view"), async (_req, res) => {
   try {

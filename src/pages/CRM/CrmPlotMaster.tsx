@@ -55,11 +55,6 @@ async function fetchConstructedAssetKinds(): Promise<ConstructedAssetKind[]> {
   if (!response.ok) throw new Error("Failed to load constructed asset kinds");
   return response.json();
 }
-async function fetchManagedConstructedAssetKinds(): Promise<ConstructedAssetKind[]> {
-  const response = await fetchWithAuth(`${PLOT_API}/constructed-kinds/manage`);
-  if (!response.ok) throw new Error("Failed to load constructed asset kinds");
-  return response.json();
-}
 
 type StatusKind = "converted" | "booked" | "applied" | "held" | "available";
 function plotStatus(plot: Plot): { kind: StatusKind; label: string; cls: string; tone: string } {
@@ -105,9 +100,6 @@ const CrmPlotMaster: React.FC = () => {
   React.useEffect(() => { setConversionConfirmed(false); }, [selectedIds, unitName, villaTypeId, builtUpArea, superBuiltUpArea]);
   const [converting, setConverting] = useState(false);
   const [layoutState, setLayoutState] = useState<{ blockId: number; mode: "arrange" | "neighbours"; focusId: number | null } | null>(null);
-  const [assetKindsOpen, setAssetKindsOpen] = useState(false);
-  const [assetKindDraft, setAssetKindDraft] = useState({ Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true, IsLand: false, IsCommercial: false });
-  const [savingAssetKind, setSavingAssetKind] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [facingsOpen, setFacingsOpen] = useState(false);
@@ -126,7 +118,6 @@ const CrmPlotMaster: React.FC = () => {
   const { data: allFacings = [] } = useQuery({ queryKey: ["plot-facings", "all"], queryFn: () => fetchFacings(true), enabled: facingsOpen });
   const { data: layoutTypes = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60_000 });
   const { data: constructedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds"], queryFn: fetchConstructedAssetKinds, staleTime: 60_000 });
-  const { data: managedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds", "manage"], queryFn: fetchManagedConstructedAssetKinds, staleTime: 30_000 });
   // Villa types of the project being converted, and of the plot being edited.
   const conversionProjectId = plots.find((plot: Plot) => selectedIds.includes(plot.Id))?.ProjectId ?? null;
   const { data: conversionVillaTypes = [] } = useQuery<VillaType[]>({ queryKey: villaTypesKey(conversionProjectId), queryFn: () => fetchVillaTypes(conversionProjectId!), enabled: convertOpen && conversionProjectId != null });
@@ -241,26 +232,6 @@ const CrmPlotMaster: React.FC = () => {
   const openLayout = (targetBlockId: number, mode: "arrange" | "neighbours" = "arrange", focusId: number | null = null) => setLayoutState({ blockId: targetBlockId, mode, focusId });
   const layoutBlockInfo = layoutState ? blockCatalog.find((block) => block.BlockId === layoutState.blockId) : undefined;
 
-  const editAssetKind = (kind?: ConstructedAssetKind) => setAssetKindDraft(kind
-    ? { Id: kind.Id, Code: kind.Code, Name: kind.Name, SortOrder: String(kind.SortOrder ?? 100), IsActive: kind.IsActive !== false, IsLand: !!kind.IsLand, IsCommercial: !!kind.IsCommercial }
-    : { Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true, IsLand: false, IsCommercial: false });
-  const saveAssetKind = async () => {
-    setSavingAssetKind(true);
-    try {
-      const payload = { Code: assetKindDraft.Code, Name: assetKindDraft.Name, SortOrder: Number(assetKindDraft.SortOrder), IsActive: assetKindDraft.IsActive, IsLand: assetKindDraft.IsLand, IsCommercial: assetKindDraft.IsCommercial };
-      const response = await fetchWithAuth(assetKindDraft.Id ? `${PLOT_API}/constructed-kinds/${assetKindDraft.Id}` : `${PLOT_API}/constructed-kinds`, {
-        method: assetKindDraft.Id ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || "Could not save constructed asset kind");
-      toast.success("Constructed asset kind saved");
-      editAssetKind();
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["constructed-asset-kinds"] }),
-        queryClient.invalidateQueries({ queryKey: ["constructed-asset-kinds", "manage"] }),
-      ]);
-    } catch (e: any) { toast.error(e.message); } finally { setSavingAssetKind(false); }
-  };
 
   const loadPlotDetail = async (plot: Plot) => {
     const response = await fetchWithAuth(`${PLOT_API}/${plot.Id}`);
@@ -457,7 +428,7 @@ const CrmPlotMaster: React.FC = () => {
           <button onClick={() => navigate("/crm/setup/auto-project-setup")} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted"><MapIcon size={14} /> Configure plots</button>
           {rights.canEdit && <button onClick={() => { setFacingDraft({}); setFacingsOpen(true); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Manage plot facings"><Settings2 size={14} /> Facings</button>}
           {rights.canEdit && <button onClick={() => setVillaTypesOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Manage villa types"><Settings2 size={14} /> Villa types</button>}
-          {rights.canEdit && <button onClick={() => { editAssetKind(); setAssetKindsOpen(true); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Flat, villa, shop, office… (land / commercial)"><Settings2 size={14} /> Unit kinds</button>}
+          
           <button onClick={() => refetch()} className="p-2 border border-border rounded-lg hover:bg-muted" title="Refresh"><RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /></button>
         </div>
       }>
@@ -830,37 +801,6 @@ const CrmPlotMaster: React.FC = () => {
         selectedProjectId={selectedPlots[0]?.ProjectId ?? null}
         onPlotsChanged={() => queryClient.invalidateQueries({ queryKey: ["plot-master"] })}
       />
-      <Dialog open={assetKindsOpen} onOpenChange={setAssetKindsOpen}>
-        <DialogContent accent="crm" className="max-w-2xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 size={17} className="text-primary" /> Unit kinds</DialogTitle></DialogHeader>
-          <div className="grid gap-4 md:grid-cols-[1fr_280px]">
-            <div className="max-h-80 overflow-y-auto divide-y divide-border rounded-lg border border-border">
-              {managedAssetKinds.map((kind) => (
-                <button key={kind.Id} onClick={() => editAssetKind(kind)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted/40">
-                  <span className="font-medium">{kind.Name}</span><span className="text-xs text-muted-foreground">{kind.Code}</span>
-                  {kind.IsLand && <span className="rounded bg-emerald-500/10 px-1.5 text-[10px] text-emerald-700 dark:text-emerald-300">Land</span>}
-                  {kind.IsCommercial && <span className="rounded bg-sky-500/10 px-1.5 text-[10px] text-sky-700 dark:text-sky-300">Commercial</span>}
-                  <span className="ml-auto text-xs text-muted-foreground">{kind.IsActive === false ? "Inactive" : "Active"}</span>
-                </button>
-              ))}
-            </div>
-            <div className="space-y-3">
-              <div><label className="mb-1 block text-xs text-muted-foreground">Name</label><input value={assetKindDraft.Name} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, Name: event.target.value }))} className={fieldCls} /></div>
-              <div><label className="mb-1 block text-xs text-muted-foreground">Code</label><input value={assetKindDraft.Code} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, Code: event.target.value.toUpperCase() }))} className={fieldCls} /></div>
-              <div><label className="mb-1 block text-xs text-muted-foreground">Sort order</label><input type="number" min="0" max="9999" value={assetKindDraft.SortOrder} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, SortOrder: event.target.value }))} className={fieldCls} /></div>
-              {/* Usage drives GST: land is outside GST, commercial picks the commercial GST rule. One or the other. */}
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assetKindDraft.IsLand} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, IsLand: event.target.checked, IsCommercial: event.target.checked ? false : draft.IsCommercial }))} /> Land (outside GST)</label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assetKindDraft.IsCommercial} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, IsCommercial: event.target.checked, IsLand: event.target.checked ? false : draft.IsLand }))} /> Commercial (shop / office)</label>
-              {assetKindDraft.Id > 0 && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assetKindDraft.IsActive} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, IsActive: event.target.checked }))} /> Active</label>}
-              <div className="flex justify-end gap-2">
-                <button onClick={() => editAssetKind()} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">New</button>
-                <button onClick={saveAssetKind} disabled={savingAssetKind || !assetKindDraft.Name.trim() || !assetKindDraft.Code.trim()} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">{savingAssetKind ? "Saving..." : "Save"}</button>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent accent="crm" className="max-w-xl">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Eye size={17} className="text-primary" /> {detailPlot?.PlotName || "Plot details"}</DialogTitle></DialogHeader>
