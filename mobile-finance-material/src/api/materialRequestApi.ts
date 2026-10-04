@@ -103,7 +103,7 @@ export const deleteMaterialRequest = (id: number | string) =>
 // ─── Master data ────────────────────────────────────────────────────────────
 
 export const getMRCompanies = () => fetchWithAuth(`${BASE}/companies`).then((r) => handleResponse<{ id: number; name: string }[]>(r));
-export const getMRProjects = () => fetchWithAuth(`${BASE}/projects`).then((r) => handleResponse<{ id: number; name: string; company_id?: number | null }[]>(r));
+export const getMRProjects = () => fetchWithAuth(`${BASE}/projects`).then((r) => handleResponse<{ id: number; name: string; company_id?: number | null; tagged_company_ids?: string | null }[]>(r));
 export const getMRFinYears = () => fetchWithAuth(`${BASE}/fin-years`).then((r) => handleResponse<{ id: number; name: string }[]>(r));
 
 export interface MRItemOption {
