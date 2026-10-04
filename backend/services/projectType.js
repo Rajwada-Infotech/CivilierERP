@@ -77,8 +77,21 @@ function normaliseRow(row) {
  * the first row of ~20 tables at Id 0), so every check here is `!= null` and
  * never a truthiness test — `if (!blockId)` would silently ignore block 0.
  */
+// Migration 526 columns — read only once they exist, so a database that
+// hasn't run it yet keeps working with today's behaviour.
+let usageCols = null;
+async function usageColumnsSql(pool) {
+  if (usageCols === null) {
+    const r = await pool.request().query("SELECT COL_LENGTH('dbo.ProjectTypeMaster', 'SellsCommercial') AS c");
+    usageCols = r.recordset?.[0]?.c != null ? ", pt.SellsResidential, pt.SellsCommercial" : "";
+    if (!usageCols) setTimeout(() => { usageCols = null; }, 60000); // re-check after a migration
+  }
+  return usageCols;
+}
+
 async function getEffectiveType(pool, { projectId = null, blockId = null } = {}) {
   if (blockId == null && projectId == null) return { ...LEGACY_DEFAULT };
+  const extraCols = await usageColumnsSql(pool);
 
   const request = pool.request();
   if (blockId != null) request.input("blockId", sql.Int, blockId);
@@ -88,8 +101,7 @@ async function getEffectiveType(pool, { projectId = null, blockId = null } = {})
   // passed in. COALESCE over the join does the inheritance.
   const result = await request.query(`
     SELECT TOP 1 pt.Id, pt.Code, pt.Name,
-           pt.HasFloors, pt.SellsLand, pt.SellsConstruction, pt.AllowsMultiUnitSale,
-           pt.SellsResidential, pt.SellsCommercial
+           pt.HasFloors, pt.SellsLand, pt.SellsConstruction, pt.AllowsMultiUnitSale${extraCols}
     FROM (
       SELECT COALESCE(
         ${blockId != null ? "(SELECT b.ProjectTypeId FROM dbo.BlockMaster b WHERE b.Id = @blockId)," : ""}
@@ -132,6 +144,8 @@ async function getEffectiveType(pool, { projectId = null, blockId = null } = {})
  * contract as loadLandKinds — a Set of codes, loaded once, passed down.
  */
 async function loadCommercialKinds(pool) {
+  const has = await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c");
+  if (has.recordset?.[0]?.c == null) return new Set(); // pre-526: nothing is commercial
   const r = await pool.request().query(
     "SELECT Code FROM dbo.CrmConstructedAssetKind WHERE IsCommercial = 1",
   );
@@ -144,6 +158,8 @@ async function loadCommercialKinds(pool) {
  * the units' kinds, never the project — a Gloria-style building holds both.
  */
 async function getBookingCommercial(pool, bookingId) {
+  const hasCol = await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c");
+  if (hasCol.recordset?.[0]?.c == null) return null; // pre-526: usage unknown -> usage-agnostic GST rules
   const r = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT ISNULL(k.IsCommercial, 0) AS IsCommercial
     FROM (
@@ -163,6 +179,8 @@ async function getBookingCommercial(pool, bookingId) {
 
 /** Same answer for a single unit (quotes / forms before a booking exists). */
 async function getUnitCommercial(pool, unitId) {
+  const hasCol = await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c");
+  if (hasCol.recordset?.[0]?.c == null) return null; // pre-526: usage unknown -> usage-agnostic GST rules
   if (unitId == null) return null;
   const r = await pool.request().input("uid", sql.Int, unitId).query(`
     SELECT ISNULL(k.IsCommercial, 0) AS IsCommercial

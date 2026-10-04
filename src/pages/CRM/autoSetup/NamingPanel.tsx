@@ -150,6 +150,37 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
   const dirty = !sameAs(effective, saved);
   const names = example(effective, short, blockName);
 
+  // Real check against the database: which of the names this choice would
+  // create already exist (they'd be skipped on generate).
+  const draftTemplate = toTemplate(effective);
+  const { data: preview } = useQuery<{ clashCount: number; floors: { Clashes: string[]; Names: string[] }[] }>({
+    queryKey: ["auto-setup-naming-preview", projectId, target, draftTemplate, effective.skipIO, effective.ground,
+      [...floorsByBlock.values()].flat().map((f: any) => `${f.Id}:${f.UnitCount}:${f.IsGenerated}`).join(",")],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API}/naming-preview`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProjectId: projectId, Draft: { Template: draftTemplate, SkipLetters: effective.skipIO ? "IO" : null, GroundLabel: effective.ground, BlockId: target === "project" ? null : Number(target) } }),
+      });
+      if (!res.ok) throw new Error("Failed to check names");
+      return res.json();
+    },
+    enabled: !!projectId && isOpen,
+  });
+  const pendingCount = preview?.floors.reduce((s, f) => s + f.Names.length, 0) ?? 0;
+  const clashes = preview?.floors.flatMap((f) => f.Clashes) ?? [];
+  const blockHasOwn = target !== "project" && !!naming?.blocks?.find((x: any) => String(x.Id) === target)?.UnitNamingPatternId;
+
+  const useProjectNaming = async () => {
+    const res = await fetchWithAuth(`${API}/naming`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ Level: "block", Id: Number(target), Scope: "UNIT", PatternId: null }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return toast.error(body.error || "Couldn't reset naming");
+    toast.success("This block now follows the project naming");
+    queryClient.invalidateQueries({ queryKey: ["auto-setup-naming", projectId] });
+  };
+
   const drop = (to: number) => {
     if (dragIdx === null || dragIdx === to) return setDragIdx(null);
     setB((s) => { const order = [...s.order]; const [m] = order.splice(dragIdx, 1); order.splice(to, 0, m); return { ...s, order }; });
@@ -328,7 +359,25 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
           )}
         </div>
       </div>
-      <p className="text-[10px] text-muted-foreground">Only units generated from now on use this. Units already created keep their names.</p>
+      {/* Honest consequences, checked against the real data. */}
+      {clashes.length > 0 && (
+        <p className="text-[11px] text-red-600">
+          {clashes.length} of the next {pendingCount} name(s) already exist ({clashes.slice(0, 3).join(", ")}{clashes.length > 3 ? "…" : ""}) — those would be skipped. Pick a different style.
+        </p>
+      )}
+      {anyGenerated && dirty && (
+        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+          Units already created keep their current names; only floors generated from now on use this — a block that is half done would end up with two styles.
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-[10px] text-muted-foreground">Only units generated from now on use this. Units already created keep their names.</p>
+        {blockHasOwn && canEdit && (
+          <button type="button" onClick={useProjectNaming} className="ml-auto text-[11px] text-primary hover:underline">
+            Use the project&apos;s naming for this block instead
+          </button>
+        )}
+      </div>
       </>)}
     </div>
   );

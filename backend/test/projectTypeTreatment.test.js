@@ -212,6 +212,13 @@ describe("bookingTypeViolation — residential vs commercial", () => {
 });
 
 describe("resolveHsnCode — usage qualifier", () => {
+  test("before migration 526 usage isn't considered at all", async () => {
+    const { resolveHsnCode } = require("../services/gstRules");
+    let text = "";
+    const pool = { request() { const r = { input: () => r, query: async (q) => (/COL_LENGTH/.test(q) ? { recordset: [{ c: null }] } : ((text = q), { recordset: [] })) }; return r; } };
+    await resolveHsnCode(pool, "UNIT_PARKING", { value: 1, commercial: true });
+    expect(text).not.toMatch(/ForCommercial/);
+  });
   const { resolveHsnCode } = require("../services/gstRules");
   const capture = () => {
     const seen = { inputs: {}, text: "" };
@@ -219,7 +226,8 @@ describe("resolveHsnCode — usage qualifier", () => {
       request() {
         const r = {
           input: (k, _t, v) => { seen.inputs[k] = v; return r; },
-          query: async (q) => { seen.text = q; return { recordset: [] }; },
+          // Migration 526 present: the column probe answers, the rule query is captured.
+          query: async (q) => (/COL_LENGTH/.test(q) ? { recordset: [{ c: 1 }] } : ((seen.text = q), { recordset: [] })),
         };
         return r;
       },

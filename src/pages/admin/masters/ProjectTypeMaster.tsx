@@ -74,7 +74,7 @@ const columns = [
   { key: "Code", label: "Code" },
   { key: "Behaviour", label: "What it does", sortable: false },
   { key: "UsedBy", label: "Used By" },
-  { key: "IsActive", label: "Status" },
+  { key: "StatusText", label: "Status" },
 ];
 
 const yesNo = (v: unknown) => (v ? "Yes" : "No");
@@ -102,6 +102,7 @@ async function fetchProjectTypes(): Promise<RecordWithId[]> {
         ? [r.ProjectNames, r.BlockCount ? `${r.BlockCount} block(s)` : ""].filter(Boolean).join(" · ")
         : "Not used yet",
     Behaviour: behaviour(r),
+    StatusText: r.IsActive ? "Active" : "Inactive",
     FloorsText: yesNo(r.HasFloors),
     LandText: yesNo(r.SellsLand),
     ConstructionText: yesNo(r.SellsConstruction),

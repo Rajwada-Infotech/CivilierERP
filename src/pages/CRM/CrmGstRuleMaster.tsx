@@ -73,7 +73,7 @@ const columns = [
   { key: "UsageText", label: "Usage" },
   { key: "HsnText", label: "HSN / Rate" },
   { key: "Priority", label: "Priority", hideOnMobile: true },
-  { key: "IsActive", label: "Status" },
+  { key: "StatusText", label: "Status" },
 ];
 
 const inr = (v: unknown) => `₹${Number(v).toLocaleString("en-IN")}`;
@@ -101,6 +101,7 @@ async function fetchRules(): Promise<RecordWithId[]> {
         : [r.MinValue != null ? `above ${inr(r.MinValue)}` : null, r.MaxValue != null ? `up to ${inr(r.MaxValue)}` : null]
             .filter(Boolean)
             .join(", "),
+    StatusText: r.IsActive ? "Active" : "Inactive",
     UsageText: r.ForCommercial === true ? "Commercial" : r.ForCommercial === false ? "Residential" : "Any",
     HsnText: r.HsnCode ? `${r.HsnCode}${r.HsnRate != null ? ` · ${Number(r.HsnRate)}%` : " · not in HSN Master"}` : "—",
   }));

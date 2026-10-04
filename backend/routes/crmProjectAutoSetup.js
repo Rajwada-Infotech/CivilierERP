@@ -1320,6 +1320,9 @@ router.get("/naming", requirePageRight("crm-auto-project-setup", "view"), async 
     const pool = getPool();
     const projectId = parseInt(req.query.ProjectId, 10);
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: "ProjectId is required" });
+    if (!(await require("../services/namingPattern").namingAvailable(pool))) {
+      return res.status(409).json({ error: "Unit naming needs database migration 527 — run the migrations and reload. Units still generate with the default names." });
+    }
     const [patterns, project, blocks, floors] = await Promise.all([
       pool.request().query(`SELECT Id, Name, Scope, Template, GroundLabel, SkipLetters, NumberStart
                             FROM dbo.CrmNamingPattern WHERE IsActive = 1 ORDER BY Scope, SortOrder, Name`),
@@ -1368,9 +1371,11 @@ router.put("/naming", requirePageRight("crm-auto-project-setup", "edit"), async 
   }
 });
 
-// POST /naming-preview { ProjectId } — the exact names the next generate will
-// create for every pending floor (and parking per block), plus any that
-// already exist, so nothing is generated blind.
+// POST /naming-preview { ProjectId, Draft? } — the exact names the next
+// generate will create for every pending floor, plus any that already exist,
+// so nothing is generated blind. Draft = { Template, SkipLetters, GroundLabel,
+// BlockId|null } previews an unsaved choice: BlockId null = the whole project
+// (blocks with their own naming keep it), a BlockId = that block only.
 router.post("/naming-preview", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -1390,10 +1395,18 @@ router.post("/naming-preview", requirePageRight("crm-auto-project-setup", "view"
     const existing = new Set((await pool.request().input("pid", sql.Int, projectId)
       .query("SELECT UnitName FROM dbo.UnitMaster WHERE ProjectId = @pid AND IsActive = 1")).recordset.map((u) => u.UnitName));
 
+    const draft = req.body.Draft && req.body.Draft.Template ? {
+      Template: String(req.body.Draft.Template), SkipLetters: req.body.Draft.SkipLetters || null,
+      GroundLabel: req.body.Draft.GroundLabel || "G", NumberStart: 1,
+      BlockId: req.body.Draft.BlockId == null ? null : parseInt(req.body.Draft.BlockId, 10),
+    } : null;
+    const blockOwn = new Map((await pool.request().input("pid", sql.Int, projectId)
+      .query("SELECT Id, UnitNamingPatternId FROM dbo.BlockMaster WHERE ProjectId = @pid")).recordset.map((b) => [b.Id, b.UnitNamingPatternId]));
     const out = [];
     const seen = new Set();
     for (const f of floors) {
-      const pattern = await resolvePattern(pool, { projectId, blockId: f.BlockId, floorId: f.Id, scope: SCOPE.UNIT });
+      const inDraft = draft && (draft.BlockId == null ? blockOwn.get(f.BlockId) == null : draft.BlockId === f.BlockId);
+      const pattern = inDraft ? draft : await resolvePattern(pool, { projectId, blockId: f.BlockId, floorId: f.Id, scope: SCOPE.UNIT });
       const names = [];
       for (let seq = 1; seq <= f.UnitCount; seq++) {
         names.push(nameFor(pattern, SCOPE.UNIT, { shortCode, blockName: f.BlockName, towerNo: towers.get(f.BlockId), floorNo: f.FloorNo, floorLabel: f.FloorLabel, seq }));

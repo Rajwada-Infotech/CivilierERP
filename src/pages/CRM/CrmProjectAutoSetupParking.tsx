@@ -429,6 +429,11 @@ const CrmProjectAutoSetupParking: React.FC = () => {
                     </table>
                   </div>
 
+                  {!locked && generatedCount > 0 && (
+                    <p className="text-[0.6875rem] text-muted-foreground">
+                      Raising a count adds new slots when you create them. Lowering it doesn&apos;t remove slots already created — delete those under “Slots”.
+                    </p>
+                  )}
                   {!locked && rights.canEdit && (
                     <div className="flex justify-end gap-2">
                       {generatedCount > 0 && (

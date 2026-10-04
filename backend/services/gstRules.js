@@ -57,11 +57,14 @@ async function resolveHsnCode(pool, appliesTo, { value = 0, landOwnedByCustomer 
       : "(r.LandOwnedByCustomer IS NULL OR r.LandOwnedByCustomer = @land)";
   if (landOwnedByCustomer != null) request.input("land", sql.Bit, landOwnedByCustomer ? 1 : 0);
   // Usage (migration 526): identical tri-state contract to land ownership.
-  const usageClause =
-    commercial == null
+  // Before 526 the column doesn't exist, so usage is simply not considered.
+  const usageReady = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmGstRule', 'ForCommercial') AS c")).recordset?.[0]?.c != null;
+  const usageClause = !usageReady
+    ? "1 = 1"
+    : commercial == null
       ? "r.ForCommercial IS NULL"
       : "(r.ForCommercial IS NULL OR r.ForCommercial = @commercial)";
-  if (commercial != null) request.input("commercial", sql.Bit, commercial ? 1 : 0);
+  if (usageReady && commercial != null) request.input("commercial", sql.Bit, commercial ? 1 : 0);
 
   const result = await request.query(`
     SELECT TOP 1 r.Id, r.Name, r.HsnCode
@@ -77,7 +80,7 @@ async function resolveHsnCode(pool, appliesTo, { value = 0, landOwnedByCustomer 
       -- specific than one that ignores it, so it wins regardless of Priority.
       CASE WHEN r.LandOwnedByCustomer IS NULL THEN 1 ELSE 0 END,
       -- Likewise a rule written for this unit's usage beats a generic one.
-      CASE WHEN r.ForCommercial IS NULL THEN 1 ELSE 0 END,
+      ${usageReady ? "CASE WHEN r.ForCommercial IS NULL THEN 1 ELSE 0 END," : ""}
       r.Priority, r.Id
   `);
 

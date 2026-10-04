@@ -457,7 +457,7 @@ const CrmPlotMaster: React.FC = () => {
           <button onClick={() => navigate("/crm/setup/auto-project-setup")} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted"><MapIcon size={14} /> Configure plots</button>
           {rights.canEdit && <button onClick={() => { setFacingDraft({}); setFacingsOpen(true); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Manage plot facings"><Settings2 size={14} /> Facings</button>}
           {rights.canEdit && <button onClick={() => setVillaTypesOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Manage villa types"><Settings2 size={14} /> Villa types</button>}
-          {rights.canEdit && <button onClick={() => { editAssetKind(); setAssetKindsOpen(true); }} className="p-2 border border-border rounded-lg hover:bg-muted" title="Manage constructed asset kinds"><Settings2 size={14} /></button>}
+          {rights.canEdit && <button onClick={() => { editAssetKind(); setAssetKindsOpen(true); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Flat, villa, shop, office… (land / commercial)"><Settings2 size={14} /> Unit kinds</button>}
           <button onClick={() => refetch()} className="p-2 border border-border rounded-lg hover:bg-muted" title="Refresh"><RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /></button>
         </div>
       }>
@@ -832,7 +832,7 @@ const CrmPlotMaster: React.FC = () => {
       />
       <Dialog open={assetKindsOpen} onOpenChange={setAssetKindsOpen}>
         <DialogContent accent="crm" className="max-w-2xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 size={17} className="text-primary" /> Constructed asset kinds</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 size={17} className="text-primary" /> Unit kinds</DialogTitle></DialogHeader>
           <div className="grid gap-4 md:grid-cols-[1fr_280px]">
             <div className="max-h-80 overflow-y-auto divide-y divide-border rounded-lg border border-border">
               {managedAssetKinds.map((kind) => (
