@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2, Lock, RotateCcw, Send } from "lucide-react";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { ApiError, fetchWithAuth } from "@/lib/fetchWithAuth";
 import { connectSocket } from "@/lib/socket";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -23,7 +23,14 @@ type Msg = {
   body: string;
   createdAt: string;
   state?: "sending" | "failed";
+  /** Why a send failed (server message), shown on the failed bubble. */
+  error?: string;
 };
+
+// fetchWithAuth throws (rather than returns) on a 403, so a person who isn't on
+// this activity never reaches a `res.status === 403` check.
+const NOT_PARTICIPANT = "Comments are limited to the engineers allocated to this activity and its approvers.";
+const isForbidden = (err: unknown) => err instanceof ApiError && err.status === 403;
 
 const newClientId = () =>
   (globalThis.crypto?.randomUUID?.() ?? `c${Date.now()}${Math.random().toString(36).slice(2, 10)}`).slice(0, 50);
@@ -78,11 +85,15 @@ export default function ActivityCommentsTab({ rungId }: { rungId: number }) {
 
   const fetchPage = useCallback(
     async (query: string) => {
-      const res = await fetchWithAuth(`${BASE}/${rungId}${query}`);
-      if (res.status === 403) {
-        const body = await res.json().catch(() => ({}));
-        setDenied(body.error || "You don't have access to this thread.");
-        return null;
+      let res: Response;
+      try {
+        res = await fetchWithAuth(`${BASE}/${rungId}${query}`);
+      } catch (err) {
+        if (isForbidden(err)) {
+          setDenied(NOT_PARTICIPANT);
+          return null;
+        }
+        throw err;
       }
       if (!res.ok) throw new Error("Failed to load comments");
       return (await res.json()) as { messages: Msg[]; hasMore: boolean };
@@ -211,11 +222,16 @@ export default function ActivityCommentsTab({ rungId }: { rungId: number }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ body, clientId }),
         });
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Send failed");
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Send failed (${res.status})`);
         const { message } = (await res.json()) as { message: Msg };
         setMessages((cur) => merge(cur, message));
-      } catch {
-        setMessages((cur) => cur.map((m) => (m.clientId === clientId ? { ...m, state: "failed" } : m)));
+      } catch (err) {
+        if (isForbidden(err)) {
+          setDenied(NOT_PARTICIPANT);
+          return;
+        }
+        const reason = err instanceof Error ? err.message : "Send failed";
+        setMessages((cur) => cur.map((m) => (m.clientId === clientId ? { ...m, state: "failed", error: reason } : m)));
       }
     },
     [rungId],
@@ -314,8 +330,8 @@ export default function ActivityCommentsTab({ rungId }: { rungId: number }) {
                       <p className="whitespace-pre-wrap break-words">{m.body}</p>
                       <p className={cn("mt-0.5 text-[0.625rem] flex items-center justify-end gap-1.5", mine ? "text-primary-foreground/70" : "text-muted-foreground")}>
                         {m.state === "failed" ? (
-                          <button type="button" onClick={() => retry(m)} className="inline-flex items-center gap-1 text-red-200 hover:underline">
-                            <AlertCircle size={10} /> Not sent — retry <RotateCcw size={10} />
+                          <button type="button" onClick={() => retry(m)} title={m.error} className="inline-flex items-center gap-1 text-red-200 hover:underline">
+                            <AlertCircle size={10} /> Not sent{m.error ? ` — ${m.error}` : ""} — retry <RotateCcw size={10} />
                           </button>
                         ) : m.state === "sending" ? (
                           "Sending…"
