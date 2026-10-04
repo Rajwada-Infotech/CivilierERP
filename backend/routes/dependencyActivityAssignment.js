@@ -465,6 +465,156 @@ router.get(
   },
 );
 
+// ── Work Transfer ────────────────────────────────────────────────────────────
+// Move activities from one engineer to another. Only work still sitting with
+// the engineer is transferable — once it's Completed/Approved/Cancelled
+// there's nothing left for a new engineer to do.
+const TRANSFERABLE_STATUSES = ["ALLOCATED", "IN_PROGRESS", "HOLD", "REWORK"];
+
+// GET /transfer/candidates?engineerId=&projectId= — current activities the
+// given engineer holds that can still be transferred.
+router.get(
+  "/transfer/candidates",
+  authMiddleware,
+  requirePageRight("civilworkdpr-work-transfer", "view"),
+  async (req, res) => {
+    const engineerId = parseInt(req.query.engineerId, 10);
+    if (!Number.isFinite(engineerId)) return res.status(400).json({ error: "engineerId is required" });
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    try {
+      const pool = await getPool();
+      const request = pool.request().input("engineerId", sql.Int, engineerId);
+      let projectCond = "";
+      if (Number.isFinite(projectId)) {
+        request.input("projectId", sql.Int, projectId);
+        projectCond = " AND dm.ProjectId = @projectId";
+      }
+      const r = await request.query(`
+        SELECT
+          daa.Id AS assignmentId,
+          daa.DependencyMasterActivityId AS rungId,
+          daa.Status AS status,
+          daa.ProgressPercent AS progressPercent,
+          daa.StartDate AS startDate,
+          daa.EndDate AS endDate,
+          am.activity_name AS activityName,
+          dm.ProjectId AS projectId, ep.name AS projectName,
+          CONCAT(
+            ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
+            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+          ) AS scopePath,
+          (
+            SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+            FROM dbo.DependencyActivityEngineer d2
+            JOIN dbo.users u ON u.id = d2.EngineerId
+            WHERE d2.AssignmentId = daa.Id
+          ) AS engineerNames
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyActivityEngineer dae ON dae.AssignmentId = daa.Id AND dae.EngineerId = @engineerId
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+        WHERE daa.IsCurrent = 1
+          AND daa.Status IN (${TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ")})${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        ORDER BY ep.name, scopePath, am.activity_name
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /transfer/candidates error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// POST /transfer — body { fromEngineerId, toEngineerId, assignmentIds: number[], remarks? }.
+// All-or-nothing: if any selected activity is no longer transferable (status
+// moved on, engineer already changed, outside the caller's project scope) the
+// whole batch is refused so a bulk transfer never half-applies. The new
+// engineer starts unconfirmed (Approved = 0), same as a fresh allocation; if
+// they were already on the activity the old engineer is just removed.
+router.post(
+  "/transfer",
+  authMiddleware,
+  requirePageRight("civilworkdpr-work-transfer", "edit"),
+  async (req, res) => {
+    const fromEngineerId = parseInt(req.body?.fromEngineerId, 10);
+    const toEngineerId = parseInt(req.body?.toEngineerId, 10);
+    const assignmentIds = [...new Set((Array.isArray(req.body?.assignmentIds) ? req.body.assignmentIds : [])
+      .map((v) => parseInt(v, 10)).filter(Number.isFinite))];
+    const remarks = req.body?.remarks ? String(req.body.remarks).trim().slice(0, 500) : null;
+    if (!Number.isFinite(fromEngineerId) || !Number.isFinite(toEngineerId)) {
+      return res.status(400).json({ error: "Pick both the engineer to transfer from and to." });
+    }
+    if (fromEngineerId === toEngineerId) {
+      return res.status(400).json({ error: "From and To engineer must be different." });
+    }
+    if (!assignmentIds.length) return res.status(400).json({ error: "Select at least one activity to transfer." });
+    if (assignmentIds.length > 2000) return res.status(400).json({ error: "Too many activities in one transfer (max 2000)." });
+    const actor = req.user?.email || req.user?.name || "system";
+
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    try {
+      const toUser = await pool.request().input("id", sql.Int, toEngineerId)
+        .query("SELECT id FROM dbo.users WHERE id = @id AND ISNULL(discontinue, 0) = 0");
+      if (!toUser.recordset.length) return res.status(400).json({ error: "The engineer to transfer to is not an active user." });
+
+      const idList = assignmentIds.join(",");
+      const rows = (await pool.request().input("fromId", sql.Int, fromEngineerId).query(`
+        SELECT daa.Id AS assignmentId, daa.Status AS status, daa.IsCurrent AS isCurrent, dm.ProjectId AS projectId
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.DependencyActivityEngineer dae ON dae.AssignmentId = daa.Id AND dae.EngineerId = @fromId
+        WHERE daa.Id IN (${idList})
+      `)).recordset;
+      const byId = new Map(rows.map((r) => [Number(r.assignmentId), r]));
+      for (const id of assignmentIds) {
+        const r = byId.get(id);
+        if (!r) return res.status(409).json({ error: "An activity in your selection is no longer assigned to the From engineer. Reload and try again." });
+        if (!r.isCurrent || !TRANSFERABLE_STATUSES.includes(r.status)) {
+          return res.status(409).json({ error: "An activity in your selection has moved on and can't be transferred any more. Reload and try again." });
+        }
+        if (!projectAllowed(req.projectScope, r.projectId)) {
+          return res.status(403).json({ error: "You don't have access to one of the selected activities' projects." });
+        }
+      }
+
+      await tx.begin();
+      for (const id of assignmentIds) {
+        const rq = () => new sql.Request(tx).input("aid", sql.Int, id)
+          .input("fromId", sql.Int, fromEngineerId).input("toId", sql.Int, toEngineerId);
+        const already = await rq().query(
+          "SELECT 1 AS found FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @aid AND EngineerId = @toId",
+        );
+        if (already.recordset.length) {
+          await rq().query("DELETE FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @aid AND EngineerId = @fromId");
+        } else {
+          await rq().query(`
+            UPDATE dbo.DependencyActivityEngineer
+            SET EngineerId = @toId, Approved = 0, ApprovedAt = NULL
+            WHERE AssignmentId = @aid AND EngineerId = @fromId
+          `);
+        }
+        await rq().input("remarks", sql.NVarChar(500), remarks).input("by", sql.NVarChar(200), actor).query(`
+          INSERT INTO dbo.DependencyActivityTransferLog (AssignmentId, FromEngineerId, ToEngineerId, Remarks, TransferredBy)
+          VALUES (@aid, @fromId, @toId, @remarks, @by)
+        `);
+      }
+      await tx.commit();
+      res.json({ success: true, transferred: assignmentIds.length });
+    } catch (err) {
+      try { await tx.rollback(); } catch (_) { /* not begun or already rolled back */ }
+      console.error("[dependency-activity-assignment] POST /transfer error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // ── Quality Check ────────────────────────────────────────────────────────────
 // QC inspects a Completed activity (work dragged to 100% in Reporting),
 // signs off its checklist and either Approves it or sends it back for

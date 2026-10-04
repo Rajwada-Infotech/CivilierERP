@@ -124,6 +124,17 @@ const fields: FieldDef[] = [
         .map((o) => ({ value: o.value, label: o.label })),
   },
   {
+    // Flat / Shop / Office… from the unit kind master (Plot Master › Asset
+    // kinds). A kind marked commercial makes the unit commercial for the
+    // project type check and the GST rule. Empty = leave as it is.
+    name: "unitKind",
+    label: "Unit Kind",
+    type: "select",
+    optionsProvider: (_data, _currentId, form) =>
+      (((form?.__unitKinds as any) ?? []) as { Code: string; Name: string; IsCommercial?: boolean }[])
+        .map((k) => ({ value: k.Code, label: k.IsCommercial ? `${k.Name} (commercial)` : k.Name })),
+  },
+  {
     name: "paymentPlanIds",
     label: "Payment Plans",
     type: "custom",
@@ -374,6 +385,17 @@ const UnitMaster: React.FC = () => {
     staleTime: 60 * 1000,
   });
 
+  const { data: unitKinds = [] } = useQuery<{ Code: string; Name: string; IsCommercial?: boolean }[]>({
+    queryKey: ["unit-master-kinds"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/unit-master/kinds");
+      if (!res.ok) throw new Error("Failed to load unit kinds");
+      const data = await res.json().catch(() => []);
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 60 * 1000,
+  });
+
   // Backend → frontend shape; also inject __blocks so optionsProvider can see them
   const mappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(units)) return [];
@@ -393,6 +415,7 @@ const UnitMaster: React.FC = () => {
       unitName: item.UnitName ?? "",
       floorNo: item.FloorNo != null ? String(item.FloorNo) : "",
       unitType: item.UnitType ?? "",
+      unitKind: item.UnitKind ?? "",
       areaSqFt: item.AreaSqFt != null ? String(item.AreaSqFt) : "",
       // 2-tier: unit's own explicit value → block spec default → empty
       carpetAreaSqFt:       (item.CarpetAreaSqFt       ?? item.SpecCarpetAreaSqFt)       != null ? String(item.CarpetAreaSqFt       ?? item.SpecCarpetAreaSqFt)       : "",
@@ -435,8 +458,9 @@ const UnitMaster: React.FC = () => {
       __companies: companies,
       __projects: projectsList,
       __layoutTypes: layoutTypes,
+      __unitKinds: unitKinds,
     }),
-    [allBlocks, allPaymentPlans, blockPlanTags, companies, projectsList, layoutTypes],
+    [allBlocks, allPaymentPlans, blockPlanTags, companies, projectsList, layoutTypes, unitKinds],
   );
 
   const toPayload = (r: Record<string, any>) => ({
@@ -445,6 +469,7 @@ const UnitMaster: React.FC = () => {
     UnitName: r.unitName?.trim() || null,
     FloorNo: r.floorNo !== "" && r.floorNo != null ? parseInt(r.floorNo) : null,
     UnitType: r.unitType || null,
+    UnitKind: r.unitKind || undefined,
     CarpetAreaSqFt: r.carpetAreaSqFt !== "" && r.carpetAreaSqFt != null ? parseFloat(r.carpetAreaSqFt) : null,
     BuiltUpAreaSqFt: r.builtUpAreaSqFt !== "" && r.builtUpAreaSqFt != null ? parseFloat(r.builtUpAreaSqFt) : null,
     SuperBuiltUpAreaSqFt: r.superBuiltUpAreaSqFt !== "" && r.superBuiltUpAreaSqFt != null ? parseFloat(r.superBuiltUpAreaSqFt) : null,
@@ -531,7 +556,7 @@ const UnitMaster: React.FC = () => {
         }
         // Inject __blocks + reset blockId when project changes
         externalFormPatch={blocksPatch}
-        externalFormPatchKey={`${allBlocks.length}:${allPaymentPlans.length}:${blockPlanTags.length}:${companies.length}:${projectsList.length}:${layoutTypes.map((t) => `${t.id}-${t.roomCount}`).join(",")}`}
+        externalFormPatchKey={`${unitKinds.length}:${allBlocks.length}:${allPaymentPlans.length}:${blockPlanTags.length}:${companies.length}:${projectsList.length}:${layoutTypes.map((t) => `${t.id}-${t.roomCount}`).join(",")}`}
         onFieldChange={(form, fieldName) => {
           if (fieldName === "companyId") {
             return { ...form, projectId: "", blockId: "" };

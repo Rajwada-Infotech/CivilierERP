@@ -319,6 +319,11 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
 
   const effectiveAmount = getEffectiveAmount(item);
   const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
+  // A PO's inbox row carries no supplier/contractor, so "Party" fell back to
+  // the creator's name — a duplicate of "Created By" that read as if the
+  // creator were the counter-party. The real supplier is already in the
+  // Details grid below, so the field is dropped for POs.
+  const hidePartyField = item.Module === "purchase-orders";
   const lineItems = extractLineItems(detail);
   // A Material Request has no Rate/Amount at all yet — pricing only enters
   // the picture once a PO is raised against it — so the generic Item/Qty/
@@ -415,7 +420,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
 
     const overviewFields: { label: string; value?: string | number | boolean | null }[] = [
       { label: usesRungDetail ? "Start Date" : "Date", value: fmtDate(item.RecordDate) },
-      { label: "Party", value: party },
+      ...(hidePartyField ? [] : [{ label: "Party", value: party }]),
       ...(item.ProjectName ? [{ label: "Project", value: item.ProjectName }] : []),
       { label: "Created By", value: item.CreatedBy || "—" },
       usesRungDetail
@@ -639,7 +644,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Overview</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                 <FormField label={usesRungDetail ? "Start Date" : "Date"} value={fmtDate(item.RecordDate)} />
-                <FormField label="Party" value={party} />
+                {!hidePartyField && <FormField label="Party" value={party} />}
                 {item.ProjectName && <FormField label="Project" value={item.ProjectName} />}
                 <FormField label="Created By" value={item.CreatedBy || "—"} />
                 {usesRungDetail ? (

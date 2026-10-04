@@ -379,7 +379,7 @@ const Payment: React.FC = () => {
       })
       .catch(() => toast.error("Failed to load the linked payment"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams.get("view")]);
 
   // Detect On A/C Adjustment context passed from OnAccountAdjustment page
   useEffect(() => {

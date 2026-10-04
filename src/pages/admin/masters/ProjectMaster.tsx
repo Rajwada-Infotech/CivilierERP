@@ -59,6 +59,8 @@ interface ProjectTypeOption {
   SellsLand: boolean;
   SellsConstruction: boolean;
   AllowsMultiUnitSale: boolean;
+  SellsResidential?: boolean;
+  SellsCommercial?: boolean;
 }
 
 interface Project {
@@ -1361,6 +1363,8 @@ export default function ProjectMaster() {
                           selectedProjectType.SellsLand ? "sells land (outside GST)" : null,
                           selectedProjectType.SellsConstruction ? "sells construction (taxable)" : null,
                           selectedProjectType.AllowsMultiUnitSale ? "several units per booking" : null,
+                          selectedProjectType.SellsResidential ? "residential" : null,
+                          selectedProjectType.SellsCommercial ? "commercial" : null,
                         ]
                           .filter(Boolean)
                           .join(" · ")}

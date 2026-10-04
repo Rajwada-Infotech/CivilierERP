@@ -2778,7 +2778,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams.get("view")]);
 
   // ── Import/Export handlers ────────────────────────────────────────────────────
   const handleDownloadTemplate = () => {
@@ -3354,13 +3354,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         {
                           label: "Project / Site",
                           value: viewingPO.ProjectName ?? viewingPO.projectName,
-                        },
-                        {
-                          label: "Cost Center",
-                          value:
-                            viewingPO.CostCenterName ??
-                            viewingPO.costCenterName ??
-                            "—",
                         },
                         {
                           label: "Payment Terms",

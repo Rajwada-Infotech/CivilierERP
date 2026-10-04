@@ -22,6 +22,7 @@ import {
 } from "./layoutContexts";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { CompassProvider } from "@/components/compass/CompassProvider";
+import { DocFinderProvider } from "@/components/docfinder/DocFinderProvider";
 import { CalculatorHost } from "@/components/calculator/CalculatorHost";
 import { useSidebarToggleShortcut, useModuleSwitchShortcut } from "@/hooks/useGlobalShortcuts";
 
@@ -170,6 +171,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <CompassProvider>
+    <DocFinderProvider>
     <SidebarContext.Provider value={sidebarValue}>
       <NavbarCollapseContext.Provider value={navbarValue}>
         <NavPanelAutoExpand isHome={isHome} homeNavOpen={homeNavOpen} setHomeNavOpen={setHomeNavOpen}>
@@ -320,6 +322,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
       </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>
     <CalculatorHost />
+    </DocFinderProvider>
     </CompassProvider>
   );
 };

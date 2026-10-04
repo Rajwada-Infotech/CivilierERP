@@ -862,8 +862,12 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // The project / block type decides what may be sold and whether several
   // units can share one booking (Project Type Master flags).
   {
-    const { bookingTypeViolation, loadLandKinds } = require("./projectType");
-    const why = await bookingTypeViolation(pool, unitRows, { isPlotBooking, landKinds: await loadLandKinds(pool) });
+    const { bookingTypeViolation, loadLandKinds, loadCommercialKinds } = require("./projectType");
+    const why = await bookingTypeViolation(pool, unitRows, {
+      isPlotBooking,
+      landKinds: await loadLandKinds(pool),
+      commercialKinds: await loadCommercialKinds(pool),
+    });
     if (why) throw new CrmCreationError(why);
   }
 

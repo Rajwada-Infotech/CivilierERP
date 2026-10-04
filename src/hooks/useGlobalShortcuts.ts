@@ -29,7 +29,7 @@ type KeyLike = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "alt
 // of triggering a shortcut — an <input>/<textarea>/<select> or a
 // contentEditable region. Shift+digit in particular types "!"/"@"/etc. in a
 // normal text field, so any shortcut built on it must back off there.
-function isEditableTarget(target: EventTarget | null): boolean {
+export function isEditableTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
   const tag = el.tagName;
@@ -212,4 +212,15 @@ export function useCalculatorShortcut(onToggle: () => void): void {
       window.removeEventListener("blur", onBlur);
     };
   }, [onToggle]);
+}
+
+// ── Find a document: Alt+Shift+D ────────────────────────────────────────────────
+// Chosen over Shift+D (a capital "D" typed in any field) and Ctrl+Shift+D
+// (Chrome/Firefox "bookmark all tabs"). `code` rather than `key`: with Alt held,
+// macOS reports Option+D as "∂" and Shift flips the case elsewhere.
+
+/** Alt+Shift+D, no Ctrl/Meta. */
+export function isDocFinderShortcut(e: KeyLike): boolean {
+  if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return false;
+  return e.code === "KeyD";
 }
