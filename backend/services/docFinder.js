@@ -144,7 +144,9 @@ async function allowedTables(user) {
 }
 
 function previewSelect(entry) {
-  const docNoExpr = `COALESCE(${entry.docNoCols.map((c) => `NULLIF(t.${c}, '')`).join(", ")})`;
+  // COALESCE needs two or more arguments in T-SQL, so a single column is a bare NULLIF.
+  const parts = entry.docNoCols.map((c) => `NULLIF(t.${c}, '')`);
+  const docNoExpr = parts.length > 1 ? `COALESCE(${parts.join(", ")})` : parts[0];
   return `
     t.${entry.idCol} AS Id,
     ${docNoExpr} AS DocNo,

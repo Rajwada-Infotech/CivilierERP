@@ -64,6 +64,22 @@ describe("DOC_FINDER_REGISTRY", () => {
 describe("findDocuments", () => {
   beforeEach(() => jest.clearAllMocks());
 
+  it("emits SQL T-SQL accepts: no one-argument COALESCE, balanced parentheses", async () => {
+    const { pool, queries } = fakePool(() => []);
+    await findDocuments(pool, { q: "SU-2026-00011", user: admin, scope: null });
+    const previews = queries.filter((q) => !q.text.includes("DocNumberSequence"));
+    expect(previews).toHaveLength(Object.keys(DOC_FINDER_REGISTRY).length);
+    for (const { text } of previews) {
+      for (const m of text.matchAll(/COALESCE\(((?:[^()]|\([^()]*\))*)\)/g)) {
+        // top-level commas = argument count
+        let depth = 0, args = 1;
+        for (const ch of m[1]) { if (ch === "(") depth++; else if (ch === ")") depth--; else if (ch === "," && depth === 0) args++; }
+        expect(args).toBeGreaterThanOrEqual(2);
+      }
+      expect((text.match(/\(/g) || []).length).toBe((text.match(/\)/g) || []).length);
+    }
+  });
+
   it("returns tooShort without touching the DB for a 1-2 char query", async () => {
     const { pool, queries } = fakePool(() => []);
     const out = await findDocuments(pool, { q: "su", user: admin, scope: null });
