@@ -820,6 +820,18 @@ const CrmProjectAutoSetup: React.FC = () => {
   // Each block allows what its OWN effective type sells (block override, else project).
   const kindsFor = (blockId: number): KindRow[] => kindsData?.blocks?.[blockId] ?? kindsData?.project ?? [];
 
+  // Per-floor kind, only where the block's type sells commercial: the floor's
+  // default kind (from the database) means "follow the unit mix".
+  const floorKindPicker = (blockId: number, f: any) =>
+    kindsFor(blockId).some((k) => k.IsCommercial) ? (
+      <select value={f.UnitKind || kindsData?.defaultKind || ""} disabled={!rights.canEdit || f.IsGenerated}
+        onChange={(e) => handleFloorFieldSave(f, { UnitKind: e.target.value === kindsData?.defaultKind ? "" : e.target.value })}
+        title="What this floor's units are" className="bg-transparent text-xs outline-none text-muted-foreground">
+        {!kindsFor(blockId).some((k) => k.Code === kindsData?.defaultKind) && <option value="">As unit mix</option>}
+        {kindsFor(blockId).map((k) => <option key={k.Code} value={k.Code}>{k.Name}</option>)}
+      </select>
+    ) : null;
+
   const handleFloorFieldSave = async (floor: any, patch: { UnitCount?: number; HasUnits?: boolean; UnitKind?: string }) => {
     try {
       const res = await fetchWithAuth(`${API}/floors/${floor.Id}`, {
@@ -2046,30 +2058,6 @@ const CrmProjectAutoSetup: React.FC = () => {
                           )}
                         </div>
 
-                        {/* Floor use — only for project types that sell commercial
-                            units: which floors are shops / offices instead of flats.
-                            Commercial floors take no BHK from the unit mix. */}
-                        {kindsFor(b.Id).some((k) => k.IsCommercial) && (
-                          <div className="pt-3 border-t border-border/60 space-y-2">
-                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Whole floor as one kind <span className="normal-case tracking-normal">(optional — e.g. a shops-only ground floor)</span></div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {[groundFloor, ...nonGroundFloors].filter((f: any) => f && f.HasUnits && !f.IsGenerated).map((f: any) => (
-                                <label key={f.Id} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border/50 bg-muted/40 text-xs">
-                                  <span className="text-muted-foreground">{f.FloorNo === 0 ? "G" : f.FloorLabel}</span>
-                                  <select value={f.UnitKind || kindsData?.defaultKind || ""} disabled={!rights.canEdit}
-                                    // The default kind = "no override": the floor follows the unit mix.
-                                    onChange={(e) => handleFloorFieldSave(f, { UnitKind: e.target.value === kindsData?.defaultKind ? "" : e.target.value })}
-                                    className="bg-transparent outline-none">
-                                    {!kindsFor(b.Id).some((k) => k.Code === kindsData?.defaultKind) && <option value="">As the unit mix</option>}
-                                    {kindsFor(b.Id).map((k) => <option key={k.Code} value={k.Code}>{k.Name}{k.IsCommercial ? " · commercial" : ""}</option>)}
-                                  </select>
-                                </label>
-                              ))}
-                            </div>
-                            <p className="text-[0.625rem] text-muted-foreground">A floor set here is created entirely as that kind (no BHK, no rooms); other floors follow the unit mix above, which can itself mix flats and shops.</p>
-                          </div>
-                        )}
-
                         {/* Ground floor stays its own explicit row — never
                             covered by the block template above. */}
                         {groundFloor && (
@@ -2091,6 +2079,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                     onChange={(e) => handleFloorFieldSave(groundFloor, { UnitCount: parseInt(e.target.value, 10) || 0, HasUnits: true })}
                                     className={`${inputCls} !w-20 !py-1`} />
                                 )}
+                                {groundFloor.HasUnits && floorKindPicker(b.Id, groundFloor)}
                               </label>
                             )}
                             {expandedFloorId === groundFloor.Id && (
@@ -2137,11 +2126,13 @@ const CrmProjectAutoSetup: React.FC = () => {
                                       className="w-14 bg-transparent border-b border-primary outline-none" />
                                   </span>
                                 ) : (
-                                  <button onClick={() => setEditingFloorId(f.Id)}
-                                    className="group inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:bg-muted/70" title="Edit unit count for this floor">
-                                    <span>{f.FloorLabel}: {f.UnitCount}</span>
-                                    <Pencil size={10} className="opacity-40 group-hover:opacity-80" />
-                                  </button>
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border/50 bg-muted/40">
+                                    <button onClick={() => setEditingFloorId(f.Id)} className="group inline-flex items-center gap-1 hover:text-foreground" title="Edit unit count for this floor">
+                                      <span>{f.FloorLabel}: {f.UnitCount}</span>
+                                      <Pencil size={10} className="opacity-40 group-hover:opacity-80" />
+                                    </button>
+                                    {floorKindPicker(b.Id, f)}
+                                  </span>
                                 )}
                                 {expandedFloorId === f.Id && (
                                   <FloorUnitList
