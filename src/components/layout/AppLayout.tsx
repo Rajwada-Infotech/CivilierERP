@@ -23,6 +23,7 @@ import {
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { CompassProvider } from "@/components/compass/CompassProvider";
 import { DocFinderProvider } from "@/components/docfinder/DocFinderProvider";
+import { ShortcutsHost } from "@/components/shortcuts/ShortcutsHost";
 import { CalculatorHost } from "@/components/calculator/CalculatorHost";
 import { useSidebarToggleShortcut, useModuleSwitchShortcut } from "@/hooks/useGlobalShortcuts";
 
@@ -322,6 +323,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
       </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>
     <CalculatorHost />
+    <ShortcutsHost />
     </DocFinderProvider>
     </CompassProvider>
   );
