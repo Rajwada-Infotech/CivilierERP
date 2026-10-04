@@ -1519,6 +1519,8 @@ router.put("/project-type", requirePageRight("crm-auto-project-setup", "edit"), 
     }
     await pool.request().input("p", sql.Int, projectId).input("t", sql.Int, typeId)
       .query("UPDATE dbo.enterprise SET project_type_id = @t WHERE id = @p");
+    // Same caches Project Master clears on save, so its list shows the new type at once.
+    await Promise.all(["enterprises", "project-master", "block-master"].map((k) => bumpCacheVersion(k))).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     console.error("[auto-setup] PUT project-type:", err.message);
@@ -1545,6 +1547,7 @@ router.put("/blocks/:id/type", requirePageRight("crm-auto-project-setup", "edit"
     }
     await pool.request().input("b", sql.Int, blockId).input("t", sql.Int, typeId)
       .query("UPDATE dbo.BlockMaster SET ProjectTypeId = @t WHERE Id = @b");
+    await Promise.all(["block-master", "project-master"].map((k) => bumpCacheVersion(k))).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     console.error("[auto-setup] PUT block type:", err.message);
