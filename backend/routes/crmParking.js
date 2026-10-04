@@ -671,7 +671,7 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
     let unitParkingRate = 0;
     if (holdLineAmounts.length) {
       const appRow = await pool.request().input("aid", sql.Int, applicationId).query(`
-        SELECT a.RatePerSqFt, um.AreaSqFt
+        SELECT a.RatePerSqFt, um.AreaSqFt, a.PreferredUnitId
         FROM dbo.CrmApplication a
         LEFT JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId
         WHERE a.Id = @aid AND a.IsActive = 1
@@ -685,7 +685,9 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
       // used to compare against UNIT_PARKING_THRESHOLD directly, which meant
       // moving the threshold in the master repriced the booking but not this
       // quote.
-      const hsnCode = (await resolveUnitParkingHsn(pool, combinedBase)).hsnCode;
+      const { getUnitCommercial } = require("../services/projectType");
+      const commercial = await getUnitCommercial(pool, appR?.PreferredUnitId ?? null);
+      const hsnCode = (await resolveUnitParkingHsn(pool, combinedBase, { commercial })).hsnCode;
       unitParkingRate = await getHsnRate(pool, hsnCode);
     }
 

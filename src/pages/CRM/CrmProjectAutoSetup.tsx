@@ -9,6 +9,7 @@ import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil
 import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { NamingPanel } from "./autoSetup/NamingPanel";
 import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 
 const API = "/api/crm/project-auto-setup";
@@ -167,6 +168,14 @@ const SetupProgress: React.FC<{ steps: { label: string; detail: string; done: bo
 // is identical. Real layouts have plots of differing sizes, each with its own
 // area, dimensions, facing and survey number, edited per plot afterwards.
 // Generating uniform plots and refining them beats hand-creating sixty rows.
+// Common plot-number styles (as used on site plans): P-1, Plot 1, PLOT NO 1, plain 1.
+const PLOT_PREFIXES = [
+  { label: "dash", value: "P-" },
+  { label: "plot", value: "Plot " },
+  { label: "plotno", value: "PLOT NO " },
+  { label: "plain", value: "" },
+];
+
 const PlotLayoutStep: React.FC<{
   blocks: any[];
   projectTypeName?: string;
@@ -289,8 +298,28 @@ const PlotLayoutStep: React.FC<{
 
               <div className="grid grid-cols-3 gap-2">
                 {f("Plots", "PlotCount")}
-                {f("Prefix", "NumberPrefix", "text", "P-")}
                 {f("Start No.", "StartNumber")}
+                {f("Own prefix", "NumberPrefix", "text", "P-")}
+                {/* Plot names — pick a common style or type your own prefix above. */}
+                <div className="col-span-3 space-y-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground mr-1">Plot names</span>
+                    {PLOT_PREFIXES.map((pre) => (
+                      <button key={pre.label} type="button" disabled={generated || !canEdit || working}
+                        onClick={() => patch(b.Id, { NumberPrefix: pre.value })}
+                        className={`px-2 py-0.5 text-xs rounded-md border font-mono transition-colors disabled:opacity-50 ${(d.NumberPrefix ?? "") === pre.value ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/50"}`}>
+                        {pre.value}{d.StartNumber || 1}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-[0.6875rem] text-muted-foreground">
+                    {generated ? "Created as " : "Will be named "}
+                    <span className="font-mono text-emerald-700 dark:text-emerald-400">
+                      {[0, 1].map((i) => `${d.NumberPrefix ?? ""}${Number(d.StartNumber || 1) + i}`).join(", ")}
+                      {Number(d.PlotCount) > 2 ? ` … ${d.NumberPrefix ?? ""}${Number(d.StartNumber || 1) + Number(d.PlotCount) - 1}` : ""}
+                    </span>
+                  </div>
+                </div>
                 {f("Area (sq ft)", "DefaultAreaSqFt")}
                 {f("Rate / sq ft", "DefaultRatePerSqFt")}
                 {f("Road (ft)", "DefaultRoadWidthFt")}
@@ -1729,6 +1758,10 @@ const CrmProjectAutoSetup: React.FC = () => {
               <div className={`${cardCls} border-l-4 border-l-sky-500`}>
                 <SectionHeader icon={Ruler} colorClass="bg-sky-500/10 text-sky-600" title="3 · Unit Types & Generation"
                   hint="Define the unit mix per floor for each block, apply it to the floors, then generate the units." />
+
+                {/* How the units will be named — project default, block and
+                    floor overrides, with the exact names previewed first. */}
+                <NamingPanel projectId={Number(projectId)} shortName={status?.project?.ShortCode} blocks={blocks} floorsByBlock={floorsByBlock} canEdit={rights.canEdit} />
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {blocks.map((b) => {

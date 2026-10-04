@@ -77,7 +77,7 @@ async function resolveFacing(pool, facing, currentFacing = null) {
 router.get("/constructed-kinds", requirePageRight("crm-auto-project-setup", "view"), async (_req, res) => {
   try {
     const result = await getPool().request().query(`
-      SELECT Id, Code, Name, SortOrder
+      SELECT Id, Code, Name, SortOrder, IsLand, IsCommercial
       FROM dbo.CrmConstructedAssetKind
       WHERE IsActive = 1
       ORDER BY SortOrder, Name
@@ -92,7 +92,7 @@ router.get("/constructed-kinds", requirePageRight("crm-auto-project-setup", "vie
 router.get("/constructed-kinds/manage", requirePageRight("crm-auto-project-setup", "view"), async (_req, res) => {
   try {
     const result = await getPool().request().query(`
-      SELECT Id, Code, Name, SortOrder, IsActive
+      SELECT Id, Code, Name, SortOrder, IsActive, IsLand, IsCommercial
       FROM dbo.CrmConstructedAssetKind
       ORDER BY IsActive DESC, SortOrder, Name
     `);
@@ -112,7 +112,12 @@ function parseConstructedKind(body) {
   }
   if (!name || name.length > 100) return { error: "Name is required and must be 100 characters or fewer" };
   if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) return { error: "Sort order must be a whole number from 0 to 9999" };
-  return { code, name, sortOrder };
+  // Usage flags drive GST (land is outside GST; commercial picks the
+  // commercial GST rule), so a kind can be one or the other, never both.
+  const isLand = body?.IsLand === true;
+  const isCommercial = body?.IsCommercial === true;
+  if (isLand && isCommercial) return { error: "A kind can be land or commercial, not both" };
+  return { code, name, sortOrder, isLand, isCommercial };
 }
 
 router.post("/constructed-kinds", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
@@ -122,9 +127,10 @@ router.post("/constructed-kinds", requirePageRight("crm-auto-project-setup", "cr
     const result = await getPool().request()
       .input("code", sql.NVarChar(20), value.code).input("name", sql.NVarChar(100), value.name)
       .input("sortOrder", sql.Int, value.sortOrder).input("by", sql.Int, req.user?.userId || null)
-      .query(`INSERT INTO dbo.CrmConstructedAssetKind (Code, Name, SortOrder, IsActive, CreatedBy, CreatedAt)
-              OUTPUT INSERTED.Id, INSERTED.Code, INSERTED.Name, INSERTED.SortOrder, INSERTED.IsActive
-              VALUES (@code, @name, @sortOrder, 1, @by, SYSDATETIME())`);
+      .input("isLand", sql.Bit, value.isLand).input("isCommercial", sql.Bit, value.isCommercial)
+      .query(`INSERT INTO dbo.CrmConstructedAssetKind (Code, Name, SortOrder, IsLand, IsCommercial, IsActive, CreatedBy, CreatedAt)
+              OUTPUT INSERTED.Id, INSERTED.Code, INSERTED.Name, INSERTED.SortOrder, INSERTED.IsActive, INSERTED.IsLand, INSERTED.IsCommercial
+              VALUES (@code, @name, @sortOrder, @isLand, @isCommercial, 1, @by, SYSDATETIME())`);
     res.status(201).json(result.recordset[0]);
   } catch (error) {
     if (error.number === 2627 || error.number === 2601) return res.status(409).json({ error: "An asset kind with this code already exists" });
@@ -143,9 +149,11 @@ router.put("/constructed-kinds/:id", requirePageRight("crm-auto-project-setup", 
     const result = await getPool().request()
       .input("id", sql.Int, id).input("code", sql.NVarChar(20), value.code).input("name", sql.NVarChar(100), value.name)
       .input("sortOrder", sql.Int, value.sortOrder).input("isActive", sql.Bit, isActive).input("by", sql.Int, req.user?.userId || null)
+      .input("isLand", sql.Bit, value.isLand).input("isCommercial", sql.Bit, value.isCommercial)
       .query(`UPDATE dbo.CrmConstructedAssetKind
-              SET Code = @code, Name = @name, SortOrder = @sortOrder, IsActive = @isActive, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-              OUTPUT INSERTED.Id, INSERTED.Code, INSERTED.Name, INSERTED.SortOrder, INSERTED.IsActive
+              SET Code = @code, Name = @name, SortOrder = @sortOrder, IsLand = @isLand, IsCommercial = @isCommercial,
+                  IsActive = @isActive, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+              OUTPUT INSERTED.Id, INSERTED.Code, INSERTED.Name, INSERTED.SortOrder, INSERTED.IsActive, INSERTED.IsLand, INSERTED.IsCommercial
               WHERE Id = @id`);
     if (!result.recordset.length) return res.status(404).json({ error: "Constructed asset kind not found" });
     res.json(result.recordset[0]);

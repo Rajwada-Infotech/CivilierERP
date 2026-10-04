@@ -53,6 +53,18 @@ const fields: FieldDef[] = [
     type: "toggle",
     defaultValue: false,
   },
+  {
+    name: "SellsResidential",
+    label: "Sells residential — flats / villas whose kind is not commercial",
+    type: "toggle",
+    defaultValue: true,
+  },
+  {
+    name: "SellsCommercial",
+    label: "Sells commercial — shops / offices (kinds marked commercial)",
+    type: "toggle",
+    defaultValue: false,
+  },
   { name: "SortOrder", label: "Sort Order", type: "number", defaultValue: "100" },
   { name: "IsActive", label: "Status", type: "toggle", defaultValue: true },
 ];
@@ -72,6 +84,7 @@ const behaviour = (r: any) =>
   [
     r.HasFloors ? "Tower (floors)" : "Site map (plots)",
     [r.SellsLand && "land (no GST)", r.SellsConstruction && "construction (GST)"].filter(Boolean).join(" + ") || "sells nothing",
+    [r.SellsResidential && "residential", r.SellsCommercial && "commercial"].filter(Boolean).join(" + ") || "no usage",
     r.AllowsMultiUnitSale ? "many units / booking" : "1 unit / booking",
   ].join(" · ");
 
@@ -93,6 +106,8 @@ async function fetchProjectTypes(): Promise<RecordWithId[]> {
     LandText: yesNo(r.SellsLand),
     ConstructionText: yesNo(r.SellsConstruction),
     MultiText: yesNo(r.AllowsMultiUnitSale),
+    ResidentialText: yesNo(r.SellsResidential),
+    CommercialText: yesNo(r.SellsCommercial),
   }));
 }
 
@@ -164,6 +179,8 @@ const ProjectTypeMaster: React.FC = () => {
             { key: "LandText", label: "Sells land (no GST)" },
             { key: "ConstructionText", label: "Sells construction (GST)" },
             { key: "MultiText", label: "Several units per booking" },
+            { key: "ResidentialText", label: "Sells residential" },
+            { key: "CommercialText", label: "Sells commercial" },
             { key: "UsedBy", label: "Used by" },
             { key: "IsActive", label: "Status" },
           ],
