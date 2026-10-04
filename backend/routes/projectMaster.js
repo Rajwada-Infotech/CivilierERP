@@ -553,6 +553,17 @@ router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
   try {
     const pool = getPool();
+    // A new project type must not strand floors / plots or make unsold units
+    // unsellable — same rule as Auto Project Setup (services/typeGuard.js).
+    {
+      const newTypeId = f.projectTypeId != null && f.projectTypeId !== "" ? parseInt(f.projectTypeId, 10) : null;
+      const cur = (await pool.request().input("id", sql.Int, parseInt(req.params.id, 10))
+        .query("SELECT project_type_id AS t FROM dbo.enterprise WHERE id = @id")).recordset[0];
+      if (cur && newTypeId != null && cur.t !== newTypeId) {
+        const problem = await require("../services/typeGuard").projectTypeChangeProblem(pool, parseInt(req.params.id, 10), newTypeId);
+        if (problem) return res.status(400).json({ error: problem });
+      }
+    }
     await pool
       .request()
       .input("id", sql.Int, parseInt(req.params.id))

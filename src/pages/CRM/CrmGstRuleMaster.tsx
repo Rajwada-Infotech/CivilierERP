@@ -111,6 +111,14 @@ const CrmGstRuleMaster: React.FC = () => {
   const rights = usePageRights("crm-gst-rule-master");
   const queryClient = useQueryClient();
   const { data: rows = [], isLoading } = useQuery({ queryKey: ["crm-gst-rules"], queryFn: fetchRules, staleTime: 60 * 1000 });
+  const { data: coverage } = useQuery<{ commercialUnits: number; commercialRules: number } | null>({
+    queryKey: ["crm-gst-rules", "coverage"],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/options`);
+      return r.ok ? (await r.json()).coverage ?? null : null;
+    },
+    staleTime: 60 * 1000,
+  });
 
   const send = async (url: string, method: string, record?: Record<string, unknown>) => {
     const res = await fetchWithAuth(url, {
@@ -136,6 +144,12 @@ const CrmGstRuleMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["CRM", "Setup", "GST Rules"]} />
+      {coverage && coverage.commercialUnits > 0 && coverage.commercialRules === 0 && (
+        <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          {coverage.commercialUnits} commercial unit(s) (shops / offices) exist but no rule is set for <b>Commercial units only</b> — they are
+          being taxed with the residential rules. Add a rule with Unit usage = Commercial units only.
+        </div>
+      )}
       <MasterPage
         title="GST Rule"
         canCreate={rights.canCreate}

@@ -191,7 +191,20 @@ router.get("/applicable-payment-plans", async (req, res) => {
 // a fixed list. Land kinds belong to Plot Master, so they're refused here.
 // Undefined / "" means "leave the unit's kind as it is".
 async function applyUnitKind(db, unitId, rawKind) {
-  if (rawKind === undefined || rawKind === null || String(rawKind).trim() === "") return;
+  if (rawKind === undefined || rawKind === null || String(rawKind).trim() === "") {
+    // No kind chosen: the unit keeps its current one (or the default) — still
+    // has to be something this project's type sells.
+    const u = (await db.request().input("id", sql.Int, unitId).query("SELECT ProjectId, BlockId, UnitKind FROM dbo.UnitMaster WHERE Id = @id")).recordset[0];
+    const isLand = u && u.UnitKind && (await db.request().input("c", sql.NVarChar(20), u.UnitKind)
+      .query("SELECT IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @c")).recordset[0]?.IsLand;
+    if (u && u.UnitKind && !isLand) { // legacy land rows are Plot Master's business
+      const ok = await unitKindSvc.allowedKinds(db, { projectId: u.ProjectId, blockId: u.BlockId });
+      if (ok.length && !ok.some((x) => x.Code === String(u.UnitKind).toUpperCase())) {
+        throw new LayoutValidationError(`This project's type doesn't sell "${u.UnitKind}" units — pick a Unit Kind it does sell.`);
+      }
+    }
+    return;
+  }
   const code = String(rawKind).trim().toUpperCase();
   const k = (await db.request().input("c", sql.NVarChar(20), code)
     .query("SELECT TOP 1 Code, IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @c AND IsActive = 1")).recordset[0];
