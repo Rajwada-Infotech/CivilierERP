@@ -11,6 +11,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, ChevronDown, ChevronRight, Play, ToggleLeft, ToggleRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/distribution-rules";
 
@@ -282,11 +283,11 @@ const SaDistributionRules: React.FC = () => {
               {form.ScopeType === "TeamLead" && (
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1.5">Team Lead</label>
-                  <select value={form.ScopeId} onChange={(e) => setForm((f) => ({ ...f, ScopeId: e.target.value }))}
+                  <SearchableNativeSelect value={form.ScopeId} onChange={(e) => setForm((f) => ({ ...f, ScopeId: e.target.value }))}
                     className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
                     <option value="">Select team lead...</option>
                     {(userOptions as any[]).filter((u: any) => u.label.includes("team lead")).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                  </select>
+                  </SearchableNativeSelect>
                 </div>
               )}
             </div>
@@ -302,11 +303,11 @@ const SaDistributionRules: React.FC = () => {
               <div className="space-y-2">
                 {members.map((m, i) => (
                   <div key={i} className="flex gap-2 items-center">
-                    <select value={m.UserId} onChange={(e) => handleMemberChange(i, "UserId", e.target.value)}
+                    <SearchableNativeSelect value={m.UserId} onChange={(e) => handleMemberChange(i, "UserId", e.target.value)}
                       className="flex-1 text-sm border border-border rounded-lg px-2 py-1.5 bg-background">
                       <option value="">Select user...</option>
                       {(userOptions as any[]).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                    </select>
+                    </SearchableNativeSelect>
                     <input type="number" value={m.Weight} onChange={(e) => handleMemberChange(i, "Weight", e.target.value)}
                       className="w-16 text-sm border border-border rounded-lg px-2 py-1.5 bg-background text-center" placeholder="Wt" min="0.1" step="0.1" title="Weight" />
                     {members.length > 1 && (

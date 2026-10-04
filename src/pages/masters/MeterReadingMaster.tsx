@@ -15,6 +15,7 @@ import {
   type MeterRow,
 } from "@/api/electricityMaintenanceApi";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const PAGE_KEY = "meter-reading-master";
 const STATUS_OPTIONS = ["Active", "Inactive", "Transferred", "Disconnected"] as const;
@@ -182,12 +183,12 @@ function MeterFormDialog({ meter, onClose, onSaved }: { meter: MeterRow | null; 
           {!isEdit ? (
             <div>
               <label className={labelCls}>Customer / Booking</label>
-              <select value={bookingId} onChange={(e) => setBookingId(e.target.value)} className={fieldCls}>
+              <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)} className={fieldCls}>
                 <option value="">Select customer…</option>
                 {directoryRows.map((c) => (
                   <option key={c.Id} value={c.Id}>{c.CustomerName} — {[c.BlockName, c.UnitNo].filter(Boolean).join(" / ")} ({c.BookingNo})</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-3 text-xs">

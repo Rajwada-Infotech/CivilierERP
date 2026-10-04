@@ -12,6 +12,7 @@ import { Plus, CheckCircle2, Circle, ExternalLink, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/legal-milestones";
 
@@ -868,7 +869,7 @@ const CrmLegalMilestones: React.FC = () => {
             <DialogHeader><DialogTitle className="font-heading">Start Legal Workflow</DialogTitle></DialogHeader>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select
+              <SearchableNativeSelect
                 value={bookingId}
                 onChange={(e) => setBookingId(e.target.value)}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
@@ -877,7 +878,7 @@ const CrmLegalMilestones: React.FC = () => {
                 {startableBookings.map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
               {startableBookings.length === 0 && (
                 <p className="text-xs text-muted-foreground mt-1">
                   No booking is eligible right now — a booking needs to be fully Approved, active, unfrozen, have an Agreement on file, and not already have a legal workflow tracker.

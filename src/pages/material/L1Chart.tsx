@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const selectCls =
   "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
@@ -208,7 +209,7 @@ export default function L1Chart() {
               Add Supplier
             </span>
             <div className="relative flex-1 min-w-0">
-              <select
+              <SearchableNativeSelect
                 value={addSupplierId}
                 onChange={(e) => setAddSupplierId(e.target.value)}
                 className="text-sm rounded-lg border border-border px-3 py-2.5 pr-7 bg-background appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-full"
@@ -221,7 +222,7 @@ export default function L1Chart() {
                       {s.LHeadName ?? s.label ?? s.name}
                     </option>
                   ))}
-              </select>
+              </SearchableNativeSelect>
               <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             </div>
             <Button
@@ -423,7 +424,7 @@ export default function L1Chart() {
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1">
-                      <select
+                      <SearchableNativeSelect
                         value={winningSupplierId || String(cheapestSupplierId || "")}
                         onChange={(e) => setWinningSupplierId(e.target.value)}
                         className={selectCls}
@@ -436,7 +437,7 @@ export default function L1Chart() {
                             {s.SupplierLHeadId === cheapestSupplierId ? " · Lowest" : ""}
                           </option>
                         ))}
-                      </select>
+                      </SearchableNativeSelect>
                       <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     </div>
                     {effectiveWinner && (

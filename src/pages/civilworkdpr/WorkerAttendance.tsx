@@ -47,6 +47,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 export const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
@@ -235,7 +236,7 @@ export function AddWorkerDialog({
               placeholder="Worker name"
               className={inputCls}
             />
-            <select
+            <SearchableNativeSelect
               value={newContractorId}
               onChange={(e) => setNewContractorId(e.target.value ? Number(e.target.value) : "")}
               className={inputCls}
@@ -244,7 +245,7 @@ export function AddWorkerDialog({
               {contractors.map((c: ContractorOption) => (
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
-            </select>
+            </SearchableNativeSelect>
             <div>
               <input
                 value={newAadhaar}

@@ -24,6 +24,7 @@ import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProject
 import { CrmDataTable, CrmRowMenu, type CrmColumn, type RowMenuItem } from "@/components/crm/CrmDataTable";
 import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
 import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/possession-notice";
 const DELIVERY_MODES = ["Email", "Post", "Courier", "InPerson"];
@@ -163,7 +164,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
                 </div>
               </div>
             ) : (
-              <select value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
                 <option value="">Select booking…</option>
                 {(eligible as any[]).map((b: any) => (
@@ -171,7 +172,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
                     {b.BookingNo} — {b.ApplicantName} ({b.UnitNo})
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             )}
           </div>
 

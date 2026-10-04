@@ -52,6 +52,7 @@ import {
   type AlternateUomRow,
 } from "./ItemUomAlternatesEditor";
 import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface HsnCode {
@@ -1417,7 +1418,7 @@ const ItemMaster: React.FC = () => {
             </Field>
             {/* Default Supplier */}
             <Field label="Default Supplier">
-              <select
+              <SearchableNativeSelect
                 value={form.defaultSupplierId}
                 onChange={(e) => set("defaultSupplierId", e.target.value)}
                 className={inputCls()}
@@ -1428,7 +1429,7 @@ const ItemMaster: React.FC = () => {
                     {s.label}
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </Field>
             {/* GL Account tag — the account this item's spend is booked under */}
             <Field label="GL Account">

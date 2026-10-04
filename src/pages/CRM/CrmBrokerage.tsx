@@ -16,6 +16,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTds } from "@/contexts/TdsContext";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
@@ -354,17 +355,17 @@ const CrmBrokerage: React.FC = () => {
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={form.BookingId} disabled={editingId != null} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <SearchableNativeSelect value={form.BookingId} disabled={editingId != null} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(bookings as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} (₹{Number(b.TotalValue || 0).toLocaleString("en-IN")})</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Broker * (from Broker Master)</label>
-              <select value={form.BrokerId} disabled={editingId != null} onChange={(e) => {
+              <SearchableNativeSelect value={form.BrokerId} disabled={editingId != null} onChange={(e) => {
                   const brokerId = e.target.value;
                   const broker = (brokers as any[]).find((b: any) => String(b.LHeadId) === brokerId);
                   setForm((f) => ({
@@ -379,7 +380,7 @@ const CrmBrokerage: React.FC = () => {
                 {(brokers as any[]).map((b: any) => (
                   <option key={b.LHeadId} value={String(b.LHeadId)}>{b.LHeadName}{b.LHeadPhone ? ` — ${b.LHeadPhone}` : ""}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
               {!brokers.length && (
                 <p className="text-xs text-muted-foreground mt-1">No brokers found — add one in Broker Master first.</p>
               )}

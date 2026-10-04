@@ -3,6 +3,7 @@ import { CalendarDays, Building2, FolderKanban, Hash, Truck, Filter, ChevronDown
 import { CardTitle } from "@/components/ui/card";
 import { ALL_STATUSES } from "./constants";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 interface OptionLike {
   id: number | string;
@@ -230,7 +231,7 @@ export function BookingListToolbar({
               <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 <Truck size={10} /> Vendor
               </label>
-              <select
+              <SearchableNativeSelect
                 value={vendorFilter}
                 onChange={(e) => onVendorFilterChange(e.target.value)}
                 className="h-8 min-w-[160px] rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
@@ -241,7 +242,7 @@ export function BookingListToolbar({
                     {v.label}
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
           </div>
         </>

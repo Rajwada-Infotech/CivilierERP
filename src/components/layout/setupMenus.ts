@@ -460,6 +460,13 @@ export const crmSetupItems: SetupItem[] = [
     pageKey: "crm-auto-project-setup",
   },
   {
+    icon: LayoutGrid,
+    label: "Project Type",
+    path: "/masters/project-type-master",
+    color: "text-violet-500",
+    pageKey: "project-type-master",
+  },
+  {
     icon: Ruler,
     label: "Unit Master",
     path: "/crm/setup/unit-master",

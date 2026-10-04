@@ -29,6 +29,7 @@ import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const REPORT_API = "/api/task-performance-report";
 const ACCENT = "#0d9488";
@@ -565,21 +566,21 @@ const TaskPerformanceReport: React.FC = () => {
             </FilterField>
 
             <FilterField icon={User} label="Created By">
-              <select className={selectCls} value={filters.createdBy} onChange={(e) => updateFilter({ createdBy: e.target.value })}>
+              <SearchableNativeSelect className={selectCls} value={filters.createdBy} onChange={(e) => updateFilter({ createdBy: e.target.value })}>
                 <option value="">All Users</option>
                 {users.map((u) => (
                   <option key={u.id} value={String(u.id)}>{u.name}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </FilterField>
 
             <FilterField icon={Users} label="Follower / User">
-              <select className={selectCls} value={filters.followerId} onChange={(e) => updateFilter({ followerId: e.target.value })}>
+              <SearchableNativeSelect className={selectCls} value={filters.followerId} onChange={(e) => updateFilter({ followerId: e.target.value })}>
                 <option value="">All Users</option>
                 {users.map((u) => (
                   <option key={u.id} value={String(u.id)}>{u.name}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </FilterField>
 
             <FilterField icon={Gauge} label="Task Status">
