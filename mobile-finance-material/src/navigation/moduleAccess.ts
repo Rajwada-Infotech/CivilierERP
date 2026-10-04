@@ -35,6 +35,7 @@ export const MODULE_PAGES: Record<string, string[]> = {
     "civilworkdpr-activity-reporting",
     "civilworkdpr-room-master",
     "civilworkdpr-amendment",
+    "civilworkdpr-work-transfer",
     "civilworkdpr-daily-labour",
   ],
 };

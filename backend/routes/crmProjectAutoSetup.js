@@ -1307,12 +1307,121 @@ async function getBlockParkingSequence(pool, blockId) {
 // POST /generate-units — the final commit. For every eligible floor
 // (non-generated, HasUnits=1, UnitCount>0 — all three re-checked here as a
 // backstop, not just trusted from the UI), bulk-creates real UnitMaster rows
-// named `${ProjectShortCode}/${BlockName}/${unitCode}`, where unitCode is the
-// floor's label ('G' or the floor number) + a 2-digit sequence reset per
-// floor (G01, G02, ..., 1001, 1002, ...). UnitType/AreaSqFt come from the
+// named by the floor's naming pattern (services/namingPattern.js: floor ->
+// block -> project), or with none assigned the legacy short/block/floor01. UnitType/AreaSqFt come from the
 // Block's own Unit Type template (see getBlockUnitSequence above) if one has
 // been set up; otherwise left NULL exactly like before this feature
 // existed, filled in afterward via the existing Unit Master edit page.
+// ── Naming patterns (migration 527) ──────────────────────────────────────────
+// GET /naming?ProjectId= — active patterns + what's assigned at project, block
+// and floor level, so the wizard can show and change it at every stage.
+router.get("/naming", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const projectId = parseInt(req.query.ProjectId, 10);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: "ProjectId is required" });
+    if (!(await require("../services/namingPattern").namingAvailable(pool))) {
+      return res.status(409).json({ error: "Unit naming needs database migration 527 — run the migrations and reload. Units still generate with the default names." });
+    }
+    const [patterns, project, blocks, floors] = await Promise.all([
+      pool.request().query(`SELECT Id, Name, Scope, Template, GroundLabel, SkipLetters, NumberStart
+                            FROM dbo.CrmNamingPattern WHERE IsActive = 1 ORDER BY Scope, SortOrder, Name`),
+      pool.request().input("pid", sql.Int, projectId)
+        .query("SELECT UnitNamingPatternId, ParkingNamingPatternId FROM dbo.enterprise WHERE id = @pid"),
+      pool.request().input("pid", sql.Int, projectId)
+        .query("SELECT Id, UnitNamingPatternId, ParkingNamingPatternId FROM dbo.BlockMaster WHERE ProjectId = @pid AND IsActive = 1"),
+      pool.request().input("pid", sql.Int, projectId)
+        .query("SELECT Id, UnitNamingPatternId FROM dbo.CrmProjectAutoSetupFloor WHERE ProjectId = @pid AND IsActive = 1"),
+    ]);
+    res.json({ patterns: patterns.recordset, project: project.recordset[0] || {}, blocks: blocks.recordset, floors: floors.recordset });
+  } catch (err) {
+    console.error("[auto-setup] GET naming:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /naming { Level: project|block|floor, Id, Scope: UNIT|PARKING, PatternId|null }
+router.put("/naming", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const level = String(req.body.Level || "");
+    const scope = req.body.Scope === "PARKING" ? "PARKING" : "UNIT";
+    const id = parseInt(req.body.Id, 10);
+    const patternId = req.body.PatternId === null || req.body.PatternId === "" ? null : parseInt(req.body.PatternId, 10);
+    const target = {
+      project: { table: "dbo.enterprise", key: "id" },
+      block: { table: "dbo.BlockMaster", key: "Id" },
+      floor: { table: "dbo.CrmProjectAutoSetupFloor", key: "Id" },
+    }[level];
+    if (!target || !Number.isFinite(id)) return res.status(400).json({ error: "Level (project/block/floor) and Id are required" });
+    if (level === "floor" && scope === "PARKING") return res.status(400).json({ error: "Parking is named per block, not per floor" });
+    if (patternId != null) {
+      const p = await pool.request().input("id", sql.Int, patternId).input("s", sql.NVarChar(10), scope)
+        .query("SELECT Id FROM dbo.CrmNamingPattern WHERE Id = @id AND IsActive = 1 AND Scope = @s");
+      if (!p.recordset.length) return res.status(400).json({ error: "That naming pattern doesn't exist, is inactive, or is for a different scope" });
+    }
+    const col = scope === "PARKING" ? "ParkingNamingPatternId" : "UnitNamingPatternId";
+    const r = await pool.request().input("id", sql.Int, id).input("pat", sql.Int, patternId)
+      .query(`UPDATE ${target.table} SET ${col} = @pat WHERE ${target.key} = @id`);
+    if (!r.rowsAffected[0]) return res.status(404).json({ error: `${level} not found` });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[auto-setup] PUT naming:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /naming-preview { ProjectId, Draft? } — the exact names the next
+// generate will create for every pending floor, plus any that already exist,
+// so nothing is generated blind. Draft = { Template, SkipLetters, GroundLabel,
+// BlockId|null } previews an unsaved choice: BlockId null = the whole project
+// (blocks with their own naming keep it), a BlockId = that block only.
+router.post("/naming-preview", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const projectId = parseInt(req.body.ProjectId, 10);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: "ProjectId is required" });
+    const project = await getProject(pool, projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const shortCode = resolveShortCode(project) || "(short name)";
+    const { SCOPE, towerNumbers, resolvePattern, nameFor } = require("../services/namingPattern");
+    const towers = await towerNumbers(pool, projectId);
+
+    const floors = (await pool.request().input("pid", sql.Int, projectId).query(`
+      SELECT f.Id, f.BlockId, f.FloorNo, f.FloorLabel, f.UnitCount, b.BlockName
+      FROM dbo.CrmProjectAutoSetupFloor f JOIN dbo.BlockMaster b ON b.Id = f.BlockId
+      WHERE f.ProjectId = @pid AND f.IsActive = 1 AND f.IsGenerated = 0 AND f.HasUnits = 1 AND f.UnitCount > 0
+      ORDER BY f.BlockId, f.FloorNo`)).recordset;
+    const existing = new Set((await pool.request().input("pid", sql.Int, projectId)
+      .query("SELECT UnitName FROM dbo.UnitMaster WHERE ProjectId = @pid AND IsActive = 1")).recordset.map((u) => u.UnitName));
+
+    const draft = req.body.Draft && req.body.Draft.Template ? {
+      Template: String(req.body.Draft.Template), SkipLetters: req.body.Draft.SkipLetters || null,
+      GroundLabel: req.body.Draft.GroundLabel || "G", NumberStart: 1,
+      BlockId: req.body.Draft.BlockId == null ? null : parseInt(req.body.Draft.BlockId, 10),
+    } : null;
+    const blockOwn = new Map((await pool.request().input("pid", sql.Int, projectId)
+      .query("SELECT Id, UnitNamingPatternId FROM dbo.BlockMaster WHERE ProjectId = @pid")).recordset.map((b) => [b.Id, b.UnitNamingPatternId]));
+    const out = [];
+    const seen = new Set();
+    for (const f of floors) {
+      const inDraft = draft && (draft.BlockId == null ? blockOwn.get(f.BlockId) == null : draft.BlockId === f.BlockId);
+      const pattern = inDraft ? draft : await resolvePattern(pool, { projectId, blockId: f.BlockId, floorId: f.Id, scope: SCOPE.UNIT });
+      const names = [];
+      for (let seq = 1; seq <= f.UnitCount; seq++) {
+        names.push(nameFor(pattern, SCOPE.UNIT, { shortCode, blockName: f.BlockName, towerNo: towers.get(f.BlockId), floorNo: f.FloorNo, floorLabel: f.FloorLabel, seq }));
+      }
+      const clashes = names.filter((n) => existing.has(n) || seen.has(n));
+      names.forEach((n) => seen.add(n));
+      out.push({ FloorId: f.Id, BlockId: f.BlockId, FloorLabel: f.FloorLabel, Pattern: pattern ? pattern.Name : null, Names: names, Clashes: clashes });
+    }
+    res.json({ floors: out, clashCount: out.reduce((s, f) => s + f.Clashes.length, 0) });
+  } catch (err) {
+    console.error("[auto-setup] POST naming-preview:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post("/generate-units", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
   const pool = getPool();
   const createdBy = req.user?.userId || null;
@@ -1354,6 +1463,9 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
     };
     const sample = [];
     const sequenceByBlock = new Map();
+    // Naming pattern per floor (floor → block → project; none = legacy names).
+    const { SCOPE, towerNumbers, resolvePattern, nameFor } = require("../services/namingPattern");
+    const towers = await towerNumbers(pool, projectId);
     // Pre-fetch payment plan tags per block — forward-fill to each generated unit.
     const plansByBlock = new Map();
     for (const floor of floors.recordset) {
@@ -1368,10 +1480,12 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
         sequenceByBlock.set(floor.BlockId, await getBlockUnitSequence(pool, floor.BlockId));
       }
       const sequence = sequenceByBlock.get(floor.BlockId);
+      const pattern = await resolvePattern(pool, { projectId, blockId: floor.BlockId, floorId: floor.Id, scope: SCOPE.UNIT });
 
       for (let seq = 1; seq <= floor.UnitCount; seq++) {
-        const unitCode = `${floor.FloorLabel}${String(seq).padStart(2, "0")}`;
-        const unitName = `${shortCode}/${floor.BlockName}/${unitCode}`;
+        const unitName = nameFor(pattern, SCOPE.UNIT, {
+          shortCode, blockName: floor.BlockName, towerNo: towers.get(floor.BlockId), floorNo: floor.FloorNo, floorLabel: floor.FloorLabel, seq,
+        });
         const typeSlot = sequence.length ? sequence[(seq - 1) % sequence.length] : null;
         const blockPlanIds = plansByBlock.get(floor.BlockId) || [];
 
@@ -1541,11 +1655,14 @@ router.post("/generate-parking-slots", requirePageRight("crm-auto-project-setup"
 
     let totalCreated = 0;
     const sample = [];
+    const { SCOPE, towerNumbers, resolvePattern, nameFor } = require("../services/namingPattern");
+    const towers = await towerNumbers(pool, projectId);
     for (const block of blocks.recordset) {
       const sequence = await getBlockParkingSequence(pool, block.BlockId);
+      const pattern = await resolvePattern(pool, { projectId, blockId: block.BlockId, scope: SCOPE.PARKING });
 
       for (let seq = 1; seq <= sequence.length; seq++) {
-        const slotNo = `${shortCode}/${block.BlockName}/P${String(seq).padStart(2, "0")}`;
+        const slotNo = nameFor(pattern, SCOPE.PARKING, { shortCode, blockName: block.BlockName, towerNo: towers.get(block.BlockId), seq });
         const parkingType = sequence[seq - 1];
 
         // Wrap the check+INSERT in a transaction with UPDLOCK so that two
@@ -1657,7 +1774,7 @@ router.put("/blocks/:id/plot-template", requirePageRight("crm-auto-project-setup
       .input("bid", sql.Int, blockId)
       .input("pid", sql.Int, block.ProjectId)
       .input("count", sql.Int, plotCount)
-      .input("prefix", sql.NVarChar(20), b.NumberPrefix || null)
+      .input("prefix", sql.NVarChar(20), b.NumberPrefix ?? null)
       .input("start", sql.Int, startNumber)
       .input("area", sql.Decimal(18, 2), num(b.DefaultAreaSqFt))
       .input("rate", sql.Decimal(18, 2), num(b.DefaultRatePerSqFt))
@@ -1717,7 +1834,8 @@ router.post("/generate-plots", requirePageRight("crm-auto-project-setup", "creat
     if (effType.HasFloors)
       return res.status(400).json({ error: `This block is part of a ${effType.Name} project, which uses floors.` });
 
-    const prefix = tpl.NumberPrefix || "P";
+    // "" is a real choice (plain 1, 2, 3); only an unset prefix falls back to "P".
+    const prefix = tpl.NumberPrefix ?? "P";
     let created = 0;
     const skipped = [];
 

@@ -173,3 +173,78 @@ describe("bookingTypeViolation", () => {
     expect(await bookingTypeViolation(poolWith(plotted), [flat(1)])).toMatch(/does not sell construction/);
   });
 });
+
+describe("bookingTypeViolation — residential vs commercial", () => {
+  const { bookingTypeViolation } = require("../services/projectType");
+  const poolWith = (row) => ({
+    request() {
+      const r = { input: () => r, query: async () => ({ recordset: row ? [row] : [] }) };
+      return r;
+    },
+  });
+  // Kinds marked commercial come from the kind master; here a test register.
+  const commercialKinds = new Set(["SHOP"]);
+  const base = { Id: 7, Code: "X", Name: "Test Type", HasFloors: true, SellsLand: false, SellsConstruction: true, AllowsMultiUnitSale: true };
+  const mixedUse = { ...base, SellsResidential: true, SellsCommercial: true };
+  const residentialOnly = { ...base, SellsResidential: true, SellsCommercial: false };
+  const commercialOnly = { ...base, SellsResidential: false, SellsCommercial: true };
+  const shop = (id) => ({ Id: id, UnitName: `GF-${id}`, ProjectId: 1, BlockId: 1, UnitKind: "SHOP" });
+  const flat = (id) => ({ Id: id, UnitName: `${id}A`, ProjectId: 1, BlockId: 1, UnitKind: "FLAT" });
+
+  test("a shop in a commercial + residential building is fine", async () => {
+    expect(await bookingTypeViolation(poolWith(mixedUse), [shop(1)], { commercialKinds })).toBeNull();
+  });
+  test("a flat in a commercial + residential building is fine", async () => {
+    expect(await bookingTypeViolation(poolWith(mixedUse), [flat(2)], { commercialKinds })).toBeNull();
+  });
+  test("a shop is refused where the type sells no commercial", async () => {
+    expect(await bookingTypeViolation(poolWith(residentialOnly), [shop(1)], { commercialKinds })).toMatch(/does not sell commercial/);
+  });
+  test("a flat is refused in a purely commercial building", async () => {
+    expect(await bookingTypeViolation(poolWith(commercialOnly), [flat(2)], { commercialKinds })).toMatch(/does not sell residential/);
+  });
+  test("a shop and a flat can't share one booking", async () => {
+    expect(await bookingTypeViolation(poolWith(mixedUse), [shop(1), flat(2)], { commercialKinds })).toMatch(/can't be on one booking/);
+  });
+  test("with no commercial register every unit is residential (today's behaviour)", async () => {
+    expect(await bookingTypeViolation(poolWith(residentialOnly), [shop(1)])).toBeNull();
+  });
+});
+
+describe("resolveHsnCode — usage qualifier", () => {
+  test("before migration 526 usage isn't considered at all", async () => {
+    const { resolveHsnCode } = require("../services/gstRules");
+    let text = "";
+    const pool = { request() { const r = { input: () => r, query: async (q) => (/COL_LENGTH/.test(q) ? { recordset: [{ c: null }] } : ((text = q), { recordset: [] })) }; return r; } };
+    await resolveHsnCode(pool, "UNIT_PARKING", { value: 1, commercial: true });
+    expect(text).not.toMatch(/ForCommercial/);
+  });
+  const { resolveHsnCode } = require("../services/gstRules");
+  const capture = () => {
+    const seen = { inputs: {}, text: "" };
+    const pool = {
+      request() {
+        const r = {
+          input: (k, _t, v) => { seen.inputs[k] = v; return r; },
+          // Migration 526 present: the column probe answers, the rule query is captured.
+          query: async (q) => (/COL_LENGTH/.test(q) ? { recordset: [{ c: 1 }] } : ((seen.text = q), { recordset: [] })),
+        };
+        return r;
+      },
+    };
+    return { pool, seen };
+  };
+  test("unknown usage matches only usage-agnostic rules", async () => {
+    const { pool, seen } = capture();
+    await resolveHsnCode(pool, "UNIT_PARKING", { value: 1 });
+    expect(seen.text).toMatch(/r\.ForCommercial IS NULL/);
+    expect(seen.inputs.commercial).toBeUndefined();
+  });
+  test("commercial usage also matches commercial-only rules, specific first", async () => {
+    const { pool, seen } = capture();
+    await resolveHsnCode(pool, "UNIT_PARKING", { value: 1, commercial: true });
+    expect(seen.text).toMatch(/r\.ForCommercial = @commercial/);
+    expect(seen.text).toMatch(/CASE WHEN r\.ForCommercial IS NULL THEN 1 ELSE 0 END/);
+    expect(seen.inputs.commercial).toBe(1);
+  });
+});

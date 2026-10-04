@@ -1,4 +1,4 @@
-import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText, ShieldTick, Edit2 } from "iconsax-react";
+import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText, ShieldTick, Edit2, Repeat } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Room Composition, Room Categories and Room Master are reachable from the
@@ -25,6 +25,12 @@ export const buildCivilWorkDprNavItems = (_pendingApprovalCount: number): NavIte
     icon: TaskSquare,
     path: "/civilworkdpr/work-allocation",
     pageKey: "civilworkdpr-work-done",
+  },
+  {
+    label: "Work Transfer",
+    icon: Repeat,
+    path: "/civilworkdpr/work-transfer",
+    pageKey: "civilworkdpr-work-transfer",
   },
   {
     label: "Reporting",

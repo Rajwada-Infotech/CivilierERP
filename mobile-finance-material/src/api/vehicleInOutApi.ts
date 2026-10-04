@@ -4,6 +4,7 @@
 // than its name suggests: one record per vehicle "lot" carrying both an
 // entry and (optional) exit timestamp, no weighbridge/weight capture, no
 // separate gate-in/gate-out actions — see VehicleInOutFormModal.tsx.
+import { File } from "expo-file-system";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
 const BASE = "/api/vehicle-in-out";
@@ -183,10 +184,12 @@ export async function uploadVehicleAttachments(
 ): Promise<{ success: boolean; attachments: VehicleAttachment[]; ids: number[] }> {
   const form = new FormData();
   for (const file of files) {
-    // RN's FormData accepts this {uri,name,type} shape in place of a Blob/File.
-    form.append("file", file as unknown as Blob);
+    // expo-file-system's File is a real Blob, so it goes through expo/fetch's
+    // multipart encoder. The old {uri,name,type} object sent via RN's fetch
+    // failed on-device with "Network error" before reaching the server.
+    form.append("file", new File(file.uri) as unknown as Blob);
   }
-  const res = await fetchWithAuth(`${BASE}/upload`, { method: "POST", body: form });
+  const res = await fetchWithAuth(`${BASE}/upload`, { method: "POST", body: form, useExpoFetch: true });
   if (!res.ok) throw new Error(await parseError(res, "Upload failed"));
   return res.json().catch(() => ({}));
 }

@@ -37,7 +37,9 @@ const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 // "…/1A" or "…/1/A" -> "A";  "…/101" / "…/306" -> 2-digit seq -> "A" / "F".
 function letterOf(unitName, floorNo) {
   const tail = String(unitName).split("/").pop();
-  let m = tail.match(/([A-Z])$/);
+  // Only a floor-letter tail ("1A") or a bare letter ("A") is a position;
+  // named units like "GF-11 A" are matched by their full name instead.
+  let m = tail.match(/^\d*([A-Z])$/);
   if (m) return m[1];
   m = tail.match(/^(\d+)$/);
   if (m && floorNo != null) {

@@ -184,7 +184,9 @@ async function fetchApplicationFormData(pool, applicationId) {
     const upTotal = unitValue + parkingBase;
     // Same resolver the booking itself uses, so the printed form can never
     // quote a different bracket from the one that will be charged.
-    const hsnCode = (await resolveUnitParkingHsn(pool, upTotal)).hsnCode;
+    const { getUnitCommercial } = require("./projectType");
+    const commercial = await getUnitCommercial(pool, d.PreferredUnitId ?? null);
+    const hsnCode = (await resolveUnitParkingHsn(pool, upTotal, { commercial })).hsnCode;
     const gstRate = upTotal > 0 ? await getHsnRate(pool, hsnCode) : 0;
     // Resolved once here, in async context, and carried on d.pricing: the row
     // builder below renders synchronously, and this code is PRINTED on the

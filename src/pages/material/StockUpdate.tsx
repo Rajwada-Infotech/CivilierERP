@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { PackagePlus, Plus, Trash2, Eye, Pencil, Loader2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -272,6 +273,19 @@ export default function StockUpdate() {
   const [viewId, setViewId] = useState<number | null>(null);
   const [editId, setEditId] = useState<number | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+
+  // Deep-link support — Find a document (Alt+Shift+D) opens /material/stock-update?view=<id>.
+  // The param is cleared immediately so a refresh or back-navigation can't reopen it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const raw = searchParams.get("view");
+    if (!raw) return;
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    const id = Number(raw);
+    if (Number.isInteger(id) && id > 0) setViewId(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get("view")]);
 
   const { data: companies = [] } = useQuery({ queryKey: ["su-companies"], queryFn: getCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["su-projects"], queryFn: getProjects, staleTime: 5 * 60_000 });
