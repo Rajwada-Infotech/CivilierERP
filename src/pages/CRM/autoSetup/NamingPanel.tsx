@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, GripVertical, Tag, Undo2, Wand2 } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, GripVertical, Tag, Undo2, Wand2 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // Unit naming for Auto Project Setup. Pick a ready-made style (the ones real
@@ -113,6 +113,7 @@ export function NamingPanel({ projectId, shortName, blocks, canEdit }: Props) {
   const [target, setTarget] = useState<string>("project"); // "project" or a block id
   const [b, setB] = useState<Builder>(DEFAULT);
   const [customOpen, setCustomOpen] = useState(false);
+  const [open, setOpen] = useState(false); // folded to one line until "Change"
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -173,6 +174,7 @@ export function NamingPanel({ projectId, shortName, blocks, canEdit }: Props) {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Couldn't save naming");
       toast.success("Naming saved — new units will use it");
+      setOpen(false);
       queryClient.invalidateQueries({ queryKey: ["auto-setup-naming", projectId] });
     } catch (e: any) {
       toast.error(e.message);
@@ -183,10 +185,19 @@ export function NamingPanel({ projectId, shortName, blocks, canEdit }: Props) {
 
   return (
     <div className="rounded-xl border border-border/60 bg-background/50 p-3 sm:p-4 space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Folded: one line saying what new units are called. */}
+      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex flex-wrap items-center gap-2 text-left">
+        {open ? <ChevronDown size={13} className="text-muted-foreground" /> : <ChevronRight size={13} className="text-muted-foreground" />}
         <Tag size={13} className="text-sky-600" />
-        <span className="text-sm font-semibold">How should units be named?</span>
-        <span className="hidden sm:inline text-xs text-muted-foreground">Click the one that looks right.</span>
+        <span className="text-sm font-semibold">Unit names</span>
+        <span className="font-mono text-xs text-muted-foreground">{example(saved, short, blockName)} …</span>
+        <span className="text-xs text-muted-foreground">· {PRESETS.find((p) => sameAs({ ...p.b, skipIO: saved.skipIO, ground: saved.ground }, saved))?.title ?? "Your own"}</span>
+        {canEdit && <span className="ml-auto text-xs font-medium text-primary">{open ? "Close" : "Change"}</span>}
+      </button>
+
+      {open && (<>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">Pick the style that looks right.</span>
         {blocks.length > 1 && (
           <label className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
             Apply to
@@ -299,6 +310,7 @@ export function NamingPanel({ projectId, shortName, blocks, canEdit }: Props) {
         </div>
       </div>
       <p className="text-[10px] text-muted-foreground">Only units generated from now on use this. Units already created keep their names.</p>
+      </>)}
     </div>
   );
 }
