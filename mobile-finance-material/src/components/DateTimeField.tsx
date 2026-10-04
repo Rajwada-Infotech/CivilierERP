@@ -5,12 +5,13 @@ import { Calendar, ChevronLeft, ChevronRight, Clock, Minus, Plus, X } from "luci
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import {
-  MONTH_NAMES, WEEKDAYS, clampDay, formatDisplay, from12h, fromDate, monthGrid,
-  parseLocal, shiftMonth, to12h, toLocalString, type LocalDateTime,
+  MONTH_NAMES, WEEKDAYS, clampDay, formatDateDisplay, formatDisplay, from12h, fromDate, monthGrid,
+  parseLocal, shiftMonth, to12h, toDateString, toLocalString, type LocalDateTime,
 } from "@/utils/dateTimeValue";
 
 // Pure-JS date + time picker (no native module, so it ships over the air).
-// `value` / `onChange` use the local wall-clock string "YYYY-MM-DDTHH:mm".
+// `value` / `onChange` use the local wall-clock string "YYYY-MM-DDTHH:mm", or
+// "YYYY-MM-DD" in `mode="date"` (no time section).
 
 const CELL = 40;
 
@@ -44,9 +45,9 @@ function Stepper({
 }
 
 function PickerSheet({
-  title, initial, clearable, onApply, onClear, onClose,
+  title, initial, clearable, dateOnly, onApply, onClear, onClose,
 }: {
-  title: string; initial: string; clearable?: boolean;
+  title: string; initial: string; clearable?: boolean; dateOnly?: boolean;
   onApply: (v: string) => void; onClear: () => void; onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -130,29 +131,34 @@ function PickerSheet({
             </View>
           ))}
 
-          {/* Time */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 14, marginBottom: 8 }}>
-            <Clock size={13} color={colors.mutedForeground} />
-            <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6 }}>Time</Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" }}>
-            <Stepper
-              label="Hour" display={String(hour12).padStart(2, "0")} max={12}
-              onMinus={() => setHour12(hour12 - 1)} onPlus={() => setHour12(hour12 + 1)} onType={(n) => setHour12(n === 0 ? 12 : n)}
-            />
-            <Stepper
-              label="Minute" display={String(draft.min).padStart(2, "0")} max={59}
-              onMinus={() => setMinute(draft.min - 1)} onPlus={() => setMinute(draft.min + 1)} onType={setMinute}
-            />
-            <View style={{ gap: 6 }}>
-              <Pressable onPress={() => setDraft((d) => ({ ...d, h: from12h(to12h(d.h).hour12, false) }))} style={chip(!pm)}>
-                <Text style={{ color: !pm ? colors.primary : colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>AM</Text>
-              </Pressable>
-              <Pressable onPress={() => setDraft((d) => ({ ...d, h: from12h(to12h(d.h).hour12, true) }))} style={chip(pm)}>
-                <Text style={{ color: pm ? colors.primary : colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>PM</Text>
-              </Pressable>
+          {!dateOnly && (
+            <>
+            {/* Time */}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 14, marginBottom: 8 }}>
+              <Clock size={13} color={colors.mutedForeground} />
+              <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6 }}>Time</Text>
             </View>
-          </View>
+            <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" }}>
+              <Stepper
+                label="Hour" display={String(hour12).padStart(2, "0")} max={12}
+                onMinus={() => setHour12(hour12 - 1)} onPlus={() => setHour12(hour12 + 1)} onType={(n) => setHour12(n === 0 ? 12 : n)}
+              />
+              <Stepper
+                label="Minute" display={String(draft.min).padStart(2, "0")} max={59}
+                onMinus={() => setMinute(draft.min - 1)} onPlus={() => setMinute(draft.min + 1)} onType={setMinute}
+              />
+              <View style={{ gap: 6 }}>
+                <Pressable onPress={() => setDraft((d) => ({ ...d, h: from12h(to12h(d.h).hour12, false) }))} style={chip(!pm)}>
+                  <Text style={{ color: !pm ? colors.primary : colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>AM</Text>
+                </Pressable>
+                <Pressable onPress={() => setDraft((d) => ({ ...d, h: from12h(to12h(d.h).hour12, true) }))} style={chip(pm)}>
+                  <Text style={{ color: pm ? colors.primary : colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>PM</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            </>
+          )}
 
           <Pressable
             onPress={() => {
@@ -162,7 +168,7 @@ function PickerSheet({
             }}
             style={{ alignSelf: "flex-start", marginTop: 12, paddingHorizontal: 12, height: 32, borderRadius: 10, borderWidth: 1, borderColor: colors.border, justifyContent: "center" }}
           >
-            <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.medium }}>Set to now</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.medium }}>{dateOnly ? "Today" : "Set to now"}</Text>
           </Pressable>
         </ScrollView>
 
@@ -175,7 +181,7 @@ function PickerSheet({
           <Pressable onPress={onClose} style={{ paddingHorizontal: 18, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}>
             <Text style={{ color: colors.mutedForeground, fontSize: 12.5, fontFamily: fonts.heading.medium }}>Cancel</Text>
           </Pressable>
-          <Pressable onPress={() => onApply(toLocalString(draft))} style={{ flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}>
+          <Pressable onPress={() => onApply(dateOnly ? toDateString(draft) : toLocalString(draft))} style={{ flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}>
             <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>Set</Text>
           </Pressable>
         </View>
@@ -186,17 +192,22 @@ function PickerSheet({
 
 /** A tappable field that opens the date + time picker. Same look as the form's text fields. */
 export function DateTimeField({
-  value, onChange, placeholder = "Select date & time", title = "Select date & time", clearable, disabled,
+  value, onChange, mode = "datetime", placeholder, title, clearable, disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
+  /** "date" picks a day only and saves "YYYY-MM-DD". */
+  mode?: "datetime" | "date";
   placeholder?: string;
   title?: string;
   clearable?: boolean;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const shown = formatDisplay(value);
+  const dateOnly = mode === "date";
+  const shown = dateOnly ? formatDateDisplay(value) : formatDisplay(value);
+  placeholder ??= dateOnly ? "Select date" : "Select date & time";
+  title ??= dateOnly ? "Select date" : "Select date & time";
   return (
     <>
       <Pressable
@@ -223,6 +234,7 @@ export function DateTimeField({
             title={title}
             initial={value}
             clearable={clearable && !!value}
+            dateOnly={dateOnly}
             onApply={(v) => { onChange(v); setOpen(false); }}
             onClear={() => { onChange(""); setOpen(false); }}
             onClose={() => setOpen(false)}

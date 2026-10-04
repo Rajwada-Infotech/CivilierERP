@@ -56,6 +56,17 @@ export function from12h(hour12: number, pm: boolean): number {
   return (hour12 % 12) + (pm ? 12 : 0);
 }
 
+/** "YYYY-MM-DD" for a date-only field. */
+export function toDateString(v: LocalDateTime): string {
+  return `${v.y}-${pad(v.m)}-${pad(v.d)}`;
+}
+
+/** "04 Oct 2026" — empty string for an empty/invalid value. */
+export function formatDateDisplay(value: string | null | undefined): string {
+  const v = parseLocal(value);
+  return v ? `${pad(v.d)} ${MONTH_SHORT[v.m - 1]} ${v.y}` : "";
+}
+
 /** "04 Oct 2026, 05:10 PM" — empty string for an empty/invalid value. */
 export function formatDisplay(value: string | null | undefined): string {
   const v = parseLocal(value);
