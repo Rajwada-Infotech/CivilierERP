@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, Lock, Plus, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Lock, Pencil, Plus, X } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { unitTypeOptions, type LayoutType } from "@/api/unitBhkConfigApi";
 
@@ -124,6 +124,8 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
   });
   const [typical, setTypical] = useState<MixRow[]>([]);
   const [editingFloor, setEditingFloor] = useState<number | null>(null);
+  const [openFloor, setOpenFloor] = useState<number | null>(null); // expanded (read-only) floor
+  const [typicalOpen, setTypicalOpen] = useState<boolean | null>(null); // null = auto: open until first saved
   const [floorDraft, setFloorDraft] = useState<MixRow[]>([]);
   const [busy, setBusy] = useState(false);
   const firstType = unitTypeOptions(layoutTypes)[0]?.value ?? "";
@@ -154,6 +156,8 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
   const toggleUnits = (f: FloorRow, on: boolean) => call(`${API}/floors/${f.Id}`, "PUT", { HasUnits: on }, on ? `Floor ${f.FloorLabel} has units` : `Floor ${f.FloorLabel}: no units`);
 
   if (!data) return <div className="text-xs text-muted-foreground p-2">Loading floors…</div>;
+  // Locked once saved; open the first time (nothing saved yet) or after Edit.
+  const typicalEditing = typicalOpen ?? data.typical.length === 0;
   // Shown live from what's being typed, saved or not.
   const typTotal = total(typical);
   const pending = data.floors.filter((f) => !f.IsGenerated && f.HasUnits).reduce((s, f) => s + (f.ownMix ? total(f.ownMix) : typTotal), 0);
@@ -163,15 +167,25 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
       {/* Typical floor — defined once, used by every floor that isn't "own mix". */}
       <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
+          {!typicalEditing && <Lock size={11} className="text-muted-foreground" />}
           <span className="text-xs font-semibold">Typical floor</span>
           <span className="text-[0.6875rem] text-muted-foreground">applies to every floor unless a floor has its own mix</span>
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">{total(typical)} per floor</span>
+          {canEdit && !typicalEditing && (
+            <button type="button" onClick={() => setTypicalOpen(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border text-primary hover:bg-primary/5">
+              <Pencil size={11} /> Edit
+            </button>
+          )}
         </div>
-        <MixEditor rows={typical} onChange={setTypical} kinds={kinds} layoutTypes={layoutTypes} canEdit={canEdit} />
-        {canEdit && typicalDirty && (
+        <MixEditor rows={typical} onChange={setTypical} kinds={kinds} layoutTypes={layoutTypes} canEdit={canEdit && typicalEditing} />
+        {canEdit && typicalEditing && (
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setTypical(data.typical.length ? data.typical.map((r) => ({ ...r })) : [{ UnitType: firstType, Count: 1 }])} className="px-3 py-1.5 text-xs rounded-lg border border-border">Undo</button>
-            <button type="button" onClick={saveTypical} disabled={busy} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">Save typical floor</button>
+            {data.typical.length > 0 && (
+              <button type="button" onClick={() => { setTypical(data.typical.map((r) => ({ ...r }))); setTypicalOpen(false); }} className="px-3 py-1.5 text-xs rounded-lg border border-border">Cancel</button>
+            )}
+            <button type="button" onClick={async () => { if (await saveTypical()) setTypicalOpen(false); }} disabled={busy || !typicalDirty}
+              className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">Save typical floor</button>
           </div>
         )}
       </div>
@@ -183,56 +197,100 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
             <tr><th className="text-left px-3 py-2 w-16">Floor</th><th className="text-left px-3 py-2">Units on this floor</th><th className="text-right px-3 py-2 w-16">Total</th></tr>
           </thead>
           <tbody className="divide-y divide-border/60">
-            {data.floors.map((f) => (
-              <tr key={f.Id} className={f.IsGenerated ? "bg-emerald-500/5" : ""}>
-                <td className="px-3 py-2 font-medium align-top">{f.FloorNo === 0 ? "G" : f.FloorLabel}</td>
-                <td className="px-3 py-2">
-                  {f.IsGenerated ? (
-                    <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400"><Lock size={11} /> {f.GeneratedUnitCount} unit(s) created — edit them in Unit Master</span>
-                  ) : editingFloor === f.Id ? (
-                    <div className="space-y-2">
-                      <MixEditor rows={floorDraft} onChange={setFloorDraft} kinds={kinds} layoutTypes={layoutTypes} canEdit={canEdit} />
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => saveFloorMix(f)} disabled={busy} className="px-3 py-1 text-xs font-semibold text-white rounded-lg bg-primary disabled:opacity-40">Save floor</button>
-                        <button type="button" onClick={() => setEditingFloor(null)} className="px-3 py-1 text-xs rounded-lg border border-border">Cancel</button>
+            {data.floors.map((f) => {
+              const isOpen = openFloor === f.Id;
+              const isEditing = editingFloor === f.Id;
+              const rows = f.ownMix || typical;
+              const label = f.FloorNo === 0 ? "G" : f.FloorLabel;
+              return (
+                <React.Fragment key={f.Id}>
+                  {/* Summary row — click to see this floor's configuration (read-only until Edit). */}
+                  <tr onClick={() => { if (!isEditing) setOpenFloor(isOpen ? null : f.Id); }}
+                    className={`cursor-pointer transition-colors ${f.IsGenerated ? "bg-emerald-500/5" : isOpen ? "bg-primary/5" : "hover:bg-muted/40"}`}>
+                    <td className="px-3 py-2 font-medium">
+                      <span className="inline-flex items-center gap-1.5">
+                        {isOpen ? <ChevronDown size={12} className="text-muted-foreground" /> : <ChevronRight size={12} className="text-muted-foreground" />}
+                        {label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {f.FloorNo === 0 && !f.IsGenerated && (
+                          <span className="inline-flex items-center gap-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                            <button type="button" role="switch" aria-checked={!!f.HasUnits} aria-label="Sellable units on the ground floor"
+                              disabled={!canEdit || busy} onClick={() => toggleUnits(f, !f.HasUnits)}
+                              className={`relative h-4 w-7 rounded-full transition-colors ${f.HasUnits ? "bg-primary" : "bg-muted-foreground/30"}`}>
+                              <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${f.HasUnits ? "left-3.5" : "left-0.5"}`} />
+                            </button>
+                            {!f.HasUnits && "No sellable units"}
+                          </span>
+                        )}
+                        {f.IsGenerated ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400"><Lock size={11} /> {f.GeneratedUnitCount} unit(s) created</span>
+                        ) : f.HasUnits && (f.ownMix ? (
+                          <>
+                            <span className="rounded bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300">Own mix</span>
+                            <span>{describe(f.ownMix)}</span>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">Same as typical · {describe(typical)}</span>
+                        ))}
                       </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-2">
-                      {f.FloorNo === 0 && (
-                        <span className="inline-flex items-center gap-2 text-muted-foreground">
-                          <button type="button" role="switch" aria-checked={!!f.HasUnits} aria-label="Sellable units on the ground floor"
-                            disabled={!canEdit || busy} onClick={() => toggleUnits(f, !f.HasUnits)}
-                            className={`relative h-4 w-7 rounded-full transition-colors ${f.HasUnits ? "bg-primary" : "bg-muted-foreground/30"}`}>
-                            <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${f.HasUnits ? "left-3.5" : "left-0.5"}`} />
-                          </button>
-                          {!f.HasUnits && "No sellable units"}
-                        </span>
-                      )}
-                      {f.HasUnits && (f.ownMix ? (
-                        <>
-                          <span className="rounded bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300">Own mix</span>
-                          <span>{describe(f.ownMix)}</span>
-                        </>
-                      ) : (
-                        <span className="text-muted-foreground">Same as typical · {describe(typical)}</span>
-                      ))}
-                      {canEdit && f.HasUnits && data.mixReady && editingFloor !== f.Id && (
-                        <span className="ml-auto flex gap-2">
-                          <button type="button" onClick={() => { setFloorDraft((f.ownMix || data.typical).map((r) => ({ ...r }))); setEditingFloor(f.Id); }} className="text-primary hover:underline">
-                            {f.ownMix ? "Edit own mix" : "Set own mix"}
-                          </button>
-                          {f.ownMix && <button type="button" onClick={() => useTypical(f)} className="text-muted-foreground hover:text-foreground">Use typical</button>}
-                        </span>
-                      )}
-                    </div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {f.IsGenerated ? f.GeneratedUnitCount : f.HasUnits ? total(rows) : "—"}
+                    </td>
+                  </tr>
+
+                  {/* Detail — locked view first, Edit to change. */}
+                  {isOpen && (
+                    <tr className="bg-muted/10">
+                      <td />
+                      <td colSpan={2} className="px-3 pb-3 pt-1">
+                        {f.IsGenerated ? (
+                          <p className="text-xs text-muted-foreground">Units on this floor are created — change them in Unit Master.</p>
+                        ) : !f.HasUnits ? (
+                          <p className="text-xs text-muted-foreground">No sellable units on this floor. Turn the switch on to add some.</p>
+                        ) : isEditing ? (
+                          <div className="space-y-2">
+                            <MixEditor rows={floorDraft} onChange={setFloorDraft} kinds={kinds} layoutTypes={layoutTypes} canEdit={canEdit} />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button type="button" onClick={() => saveFloorMix(f)} disabled={busy} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary disabled:opacity-40">Save floor {label}</button>
+                              <button type="button" onClick={() => setEditingFloor(null)} className="px-3 py-1.5 text-xs rounded-lg border border-border">Cancel</button>
+                              <span className="text-[0.6875rem] text-muted-foreground">Saving gives this floor its own mix; other floors keep the typical floor.</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <MixEditor rows={rows} onChange={() => {}} kinds={kinds} layoutTypes={layoutTypes} canEdit={false} />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
+                                <Lock size={11} /> {f.ownMix ? "This floor's own mix" : "Follows the typical floor"}
+                              </span>
+                              {canEdit && (
+                                <span className="ml-auto flex gap-2">
+                                  {f.ownMix && (
+                                    <button type="button" onClick={() => useTypical(f)} disabled={busy} className="px-3 py-1.5 text-xs rounded-lg border border-border">Use typical floor</button>
+                                  )}
+                                  <button type="button"
+                                    onClick={() => {
+                                      if (!data.mixReady) { toast.error("Editing one floor needs database migration 530 — run the migrations and reload."); return; }
+                                      setFloorDraft(rows.map((r) => ({ ...r }))); setEditingFloor(f.Id);
+                                    }}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-border text-primary hover:bg-primary/5">
+                                    <Pencil size={11} /> Edit floor {label}
+                                  </button>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
                   )}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums align-top">
-                  {f.IsGenerated ? f.GeneratedUnitCount : f.HasUnits ? (f.ownMix ? total(f.ownMix) : typTotal) : "—"}
-                </td>
-              </tr>
-            ))}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
