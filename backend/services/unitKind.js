@@ -18,14 +18,27 @@ function parseKind(body) {
   const isLand = body?.IsLand === true;
   const isCommercial = body?.IsCommercial === true;
   if (isLand && isCommercial) return { error: "A kind can be land or commercial, not both" };
-  return { code, name, sortOrder, isLand, isCommercial };
+  const builtOn = body?.BuiltOn == null || body.BuiltOn === "" ? null : String(body.BuiltOn).trim().toUpperCase();
+  if (builtOn != null && builtOn !== "FLOORS" && builtOn !== "PLOTS") return { error: "Built on must be Floors, Plots or both" };
+  return { code, name, sortOrder, isLand, isCommercial, builtOn };
 }
 
-const COLS = "Id, Code, Name, SortOrder, IsActive, IsLand, IsCommercial";
+const BASE_COLS = "Id, Code, Name, SortOrder, IsActive, IsLand, IsCommercial";
+// BuiltOn (migration 531) is optional so an older database keeps working.
+// Only "present" is remembered: the migration can run while the server is up.
+let hasBuiltOn = false;
+async function builtOnReady() {
+  if (!hasBuiltOn) {
+    const r = await getPool().request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'BuiltOn') AS n");
+    hasBuiltOn = r.recordset[0].n != null;
+  }
+  return hasBuiltOn;
+}
+const cols = async () => `${BASE_COLS}${(await builtOnReady()) ? ", BuiltOn" : ""}`;
 
 async function listKinds({ activeOnly = true } = {}) {
   const r = await getPool().request().query(
-    `SELECT ${COLS} FROM dbo.CrmConstructedAssetKind ${activeOnly ? "WHERE IsActive = 1" : ""} ORDER BY IsActive DESC, SortOrder, Name`);
+    `SELECT ${await cols()} FROM dbo.CrmConstructedAssetKind ${activeOnly ? "WHERE IsActive = 1" : ""} ORDER BY IsActive DESC, SortOrder, Name`);
   return r.recordset;
 }
 
@@ -33,14 +46,16 @@ async function listKinds({ activeOnly = true } = {}) {
 async function createKind(body, userId) {
   const v = parseKind(body);
   if (v.error) return { status: 400, body: { error: v.error } };
+  const bo = await builtOnReady();
+  const COLS = await cols();
   try {
     const r = await getPool().request()
       .input("code", sql.NVarChar(20), v.code).input("name", sql.NVarChar(100), v.name)
       .input("sortOrder", sql.Int, v.sortOrder).input("by", sql.Int, userId || null)
-      .input("isLand", sql.Bit, v.isLand).input("isCommercial", sql.Bit, v.isCommercial)
-      .query(`INSERT INTO dbo.CrmConstructedAssetKind (Code, Name, SortOrder, IsLand, IsCommercial, IsActive, CreatedBy, CreatedAt)
+      .input("isLand", sql.Bit, v.isLand).input("isCommercial", sql.Bit, v.isCommercial).input("builtOn", sql.NVarChar(10), v.builtOn)
+      .query(`INSERT INTO dbo.CrmConstructedAssetKind (Code, Name, SortOrder, IsLand, IsCommercial, IsActive, CreatedBy, CreatedAt${bo ? ", BuiltOn" : ""})
               OUTPUT ${COLS.split(", ").map((c) => `INSERTED.${c}`).join(", ")}
-              VALUES (@code, @name, @sortOrder, @isLand, @isCommercial, 1, @by, SYSDATETIME())`);
+              VALUES (@code, @name, @sortOrder, @isLand, @isCommercial, 1, @by, SYSDATETIME()${bo ? ", @builtOn" : ""})`);
     return { status: 201, body: r.recordset[0] };
   } catch (e) {
     if (e.number === 2627 || e.number === 2601) return { status: 409, body: { error: "A unit kind with this code already exists" } };
@@ -63,14 +78,16 @@ async function updateKind(id, body, userId) {
     if (v.code !== cur.Code) return { status: 409, body: { error: `${cur.Units} unit(s) use the code ${cur.Code} — it can't be changed while they do.` } };
     if (!!cur.IsLand !== v.isLand || !!cur.IsCommercial !== v.isCommercial) return { status: 409, body: { error: `${cur.Units} unit(s) are ${cur.Code} — changing land / commercial would change their GST. Create a new kind instead.` } };
   }
+  const bo = await builtOnReady();
+  const COLS = await cols();
   try {
     const r = await getPool().request()
       .input("id", sql.Int, id).input("code", sql.NVarChar(20), v.code).input("name", sql.NVarChar(100), v.name)
       .input("sortOrder", sql.Int, v.sortOrder).input("isActive", sql.Bit, body?.IsActive !== false).input("by", sql.Int, userId || null)
-      .input("isLand", sql.Bit, v.isLand).input("isCommercial", sql.Bit, v.isCommercial)
+      .input("isLand", sql.Bit, v.isLand).input("isCommercial", sql.Bit, v.isCommercial).input("builtOn", sql.NVarChar(10), v.builtOn)
       .query(`UPDATE dbo.CrmConstructedAssetKind
               SET Code = @code, Name = @name, SortOrder = @sortOrder, IsLand = @isLand, IsCommercial = @isCommercial,
-                  IsActive = @isActive, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+                  IsActive = @isActive, UpdatedBy = @by, UpdatedAt = SYSDATETIME()${bo ? ", BuiltOn = @builtOn" : ""}
               OUTPUT ${COLS.split(", ").map((c) => `INSERTED.${c}`).join(", ")}
               WHERE Id = @id`);
     if (!r.recordset.length) return { status: 404, body: { error: "Unit kind not found" } };
@@ -84,8 +101,9 @@ async function updateKind(id, body, userId) {
 /**
  * The unit kinds a project (or block) may use, from its effective project
  * type's flags: commercial kinds need "Sells commercial", the rest need
- * "Sells residential"; land kinds belong to plots, never units. A project
- * with no type set keeps today's freedom (every non-land kind).
+ * "Sells residential"; land kinds belong to plots, never units; a kind built
+ * on floors needs a type with floors, one built on plots a type without. A
+ * project with no type set keeps today's freedom (every non-land kind).
  */
 async function allowedKinds(pool, { projectId = null, blockId = null } = {}) {
   const { getEffectiveType } = require("./projectType");
@@ -93,7 +111,9 @@ async function allowedKinds(pool, { projectId = null, blockId = null } = {}) {
   if (projectId == null && blockId == null) return kinds;
   const t = await getEffectiveType(pool, { projectId, blockId });
   if (t.Id == null) return kinds;
-  return kinds.filter((k) => (k.IsCommercial ? t.SellsCommercial : t.SellsResidential));
+  const layout = t.HasFloors === false ? "PLOTS" : t.HasFloors ? "FLOORS" : null;
+  return kinds.filter((k) => (k.IsCommercial ? t.SellsCommercial : t.SellsResidential)
+    && (!k.BuiltOn || !layout || k.BuiltOn === layout));
 }
 
 /** The kind a unit gets when none is chosen — read from the UnitMaster.UnitKind

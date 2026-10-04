@@ -10,8 +10,9 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 // (residential); never both. Kinds are data: nothing here lists them.
 
 const API = "/api/unit-master/kinds";
-type Kind = { Id: number; Code: string; Name: string; SortOrder?: number; IsActive?: boolean; IsLand?: boolean; IsCommercial?: boolean };
-const empty = { Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true, IsLand: false, IsCommercial: false };
+type Kind = { Id: number; Code: string; Name: string; SortOrder?: number; IsActive?: boolean; IsLand?: boolean; IsCommercial?: boolean; BuiltOn?: string | null };
+const empty = { Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true, IsLand: false, IsCommercial: false, BuiltOn: "" };
+const BUILT_ON: Record<string, string> = { FLOORS: "Floors", PLOTS: "Plots" };
 const fieldCls = "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm";
 
 export function UnitKindsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
@@ -29,7 +30,7 @@ export function UnitKindsDialog({ open, onOpenChange }: { open: boolean; onOpenC
   });
 
   const edit = (k?: Kind) => setDraft(k
-    ? { Id: k.Id, Code: k.Code, Name: k.Name, SortOrder: String(k.SortOrder ?? 100), IsActive: k.IsActive !== false, IsLand: !!k.IsLand, IsCommercial: !!k.IsCommercial }
+    ? { Id: k.Id, Code: k.Code, Name: k.Name, SortOrder: String(k.SortOrder ?? 100), IsActive: k.IsActive !== false, IsLand: !!k.IsLand, IsCommercial: !!k.IsCommercial, BuiltOn: k.BuiltOn || "" }
     : empty);
 
   const save = async () => {
@@ -37,7 +38,7 @@ export function UnitKindsDialog({ open, onOpenChange }: { open: boolean; onOpenC
     try {
       const r = await fetchWithAuth(draft.Id ? `${API}/${draft.Id}` : API, {
         method: draft.Id ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...draft, SortOrder: Number(draft.SortOrder) }),
+        body: JSON.stringify({ ...draft, SortOrder: Number(draft.SortOrder), BuiltOn: draft.BuiltOn || null }),
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || "Could not save the unit kind");
@@ -62,6 +63,7 @@ export function UnitKindsDialog({ open, onOpenChange }: { open: boolean; onOpenC
                 <span className="font-medium">{k.Name}</span><span className="text-xs text-muted-foreground">{k.Code}</span>
                 {k.IsLand && <span className="rounded bg-emerald-500/10 px-1.5 text-[10px] text-emerald-700 dark:text-emerald-300">Land</span>}
                 {k.IsCommercial && <span className="rounded bg-sky-500/10 px-1.5 text-[10px] text-sky-700 dark:text-sky-300">Commercial</span>}
+                {k.BuiltOn && <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{BUILT_ON[k.BuiltOn] ?? k.BuiltOn}</span>}
                 <span className="ml-auto text-xs text-muted-foreground">{k.IsActive === false ? "Inactive" : "Active"}</span>
               </button>
             ))}
@@ -71,6 +73,12 @@ export function UnitKindsDialog({ open, onOpenChange }: { open: boolean; onOpenC
             <div><label className="mb-1 block text-xs text-muted-foreground">Code</label><input value={draft.Code} onChange={(e) => setDraft((d) => ({ ...d, Code: e.target.value.toUpperCase() }))} className={fieldCls} /></div>
             <div><label className="mb-1 block text-xs text-muted-foreground">Sort order</label><input type="number" min="0" max="9999" value={draft.SortOrder} onChange={(e) => setDraft((d) => ({ ...d, SortOrder: e.target.value }))} className={fieldCls} /></div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.IsCommercial} onChange={(e) => setDraft((d) => ({ ...d, IsCommercial: e.target.checked, IsLand: e.target.checked ? false : d.IsLand }))} /> Commercial (shop / office)</label>
+            <div><label className="mb-1 block text-xs text-muted-foreground">Built on</label>
+              <select value={draft.BuiltOn} disabled={draft.IsLand} onChange={(e) => setDraft((d) => ({ ...d, BuiltOn: e.target.value }))} className={fieldCls}>
+                <option value="">Floors or plots</option>
+                <option value="FLOORS">Floors (towers)</option>
+                <option value="PLOTS">Plots (villas, bungalows)</option>
+              </select></div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.IsLand} onChange={(e) => setDraft((d) => ({ ...d, IsLand: e.target.checked, IsCommercial: e.target.checked ? false : d.IsCommercial }))} /> Land (outside GST)</label>
             {draft.Id > 0 && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.IsActive} onChange={(e) => setDraft((d) => ({ ...d, IsActive: e.target.checked }))} /> Active</label>}
             <div className="flex justify-end gap-2">

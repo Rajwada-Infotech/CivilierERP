@@ -98,6 +98,28 @@ async function main() {
       }
     }
   }
+  // REPORT only: units whose kind their block's type doesn't sell / build
+  // (e.g. a villa on a tower block). Fix by changing the type or the unit's kind.
+  const { allowedKinds } = require("../services/unitKind");
+  const blocks = (await pool.request().query(`
+    SELECT b.Id, b.ProjectId, b.BlockName, e.name AS ProjectName
+    FROM dbo.BlockMaster b JOIN dbo.enterprise e ON e.id = b.ProjectId WHERE b.IsActive = 1`)).recordset;
+  let misfit = 0;
+  for (const b of blocks) {
+    const ok = (await allowedKinds(pool, { projectId: b.ProjectId, blockId: b.Id })).map((k) => k.Code);
+    const rows = (await pool.request().input("b", sql.Int, b.Id).query(`
+      SELECT u.UnitKind, COUNT(*) AS n FROM dbo.UnitMaster u
+      LEFT JOIN dbo.CrmConstructedAssetKind k ON k.Code = u.UnitKind
+      WHERE u.BlockId = @b AND u.IsActive = 1 AND u.UnitKind IS NOT NULL AND ISNULL(k.IsLand, 0) = 0
+      GROUP BY u.UnitKind`)).recordset;
+    for (const r of rows) {
+      if (ok.includes(String(r.UnitKind).toUpperCase())) continue;
+      misfit += r.n;
+      console.log(`  KIND/TYPE MISMATCH ${b.ProjectName} / ${b.BlockName}: ${r.n} × ${r.UnitKind} — this block's type allows ${ok.join(", ") || "none"}`);
+    }
+  }
+  console.log(misfit ? `${misfit} unit(s) have a kind their block's type doesn't allow (reported only).` : "Every unit's kind fits its block's type.");
+
   console.log(`\n${APPLY ? "APPLIED" : "WOULD APPLY"}: ${JSON.stringify(totals)}`);
   if (!APPLY) console.log("Dry run — nothing was written.");
   if (APPLY && totals.fixed) console.log("Units given a BHK here: open Room Master › Generate Rooms (or checkDprSync) to build their rooms.");

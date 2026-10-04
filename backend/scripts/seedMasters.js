@@ -23,8 +23,23 @@ async function main() {
 
   for (const k of spec.unitKinds || []) {
     const code = String(k.Code).trim().toUpperCase();
-    const have = await pool.request().input("c", sql.NVarChar(20), code).query("SELECT Id, Name, IsActive, IsCommercial FROM dbo.CrmConstructedAssetKind WHERE Code = @c");
-    if (have.recordset.length) { console.log(`   = unit kind ${code} already exists (${JSON.stringify(have.recordset[0])}) — left as is`); totals.alreadyThere++; continue; }
+    const builtOnCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'BuiltOn') AS n")).recordset[0].n != null;
+    const have = await pool.request().input("c", sql.NVarChar(20), code).query(`SELECT Id, Name, IsActive, IsCommercial${builtOnCol ? ", BuiltOn" : ""} FROM dbo.CrmConstructedAssetKind WHERE Code = @c`);
+    if (have.recordset.length) {
+      const row = have.recordset[0];
+      // Only fills an empty "built on" — never overwrites what someone set in the master.
+      if (builtOnCol && k.BuiltOn && !row.BuiltOn) {
+        if (APPLY) await pool.request().input("id", sql.Int, row.Id).input("b", sql.NVarChar(10), String(k.BuiltOn).toUpperCase())
+          .query("UPDATE dbo.CrmConstructedAssetKind SET BuiltOn = @b, UpdatedAt = SYSDATETIME() WHERE Id = @id AND BuiltOn IS NULL");
+        console.log(`   ~ unit kind ${code}: built on ${String(k.BuiltOn).toUpperCase()}`);
+        totals.builtOnSet = (totals.builtOnSet || 0) + 1;
+      } else {
+        console.log(`   = unit kind ${code} already exists (${JSON.stringify(row)}) — left as is`);
+        totals.alreadyThere++;
+      }
+      continue;
+    }
+    if (!k.Name) { console.log(`   ! unit kind ${code} not in the master and has no Name in the spec — skipped`); continue; }
     if (k.IsLand && k.IsCommercial) throw new Error(`${code}: a kind can't be land and commercial`);
     if (APPLY) {
       await pool.request().input("c", sql.NVarChar(20), code).input("n", sql.NVarChar(100), k.Name)
