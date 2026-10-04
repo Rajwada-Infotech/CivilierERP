@@ -3,14 +3,17 @@
 // messaging, out of scope), the stacked PO-preview sub-modal (shown here as
 // a plain PO-number field instead), the per-line quality debit-note flow,
 // and Print.
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { View, Text, Modal, Pressable, ScrollView, Image, ActivityIndicator } from "react-native";
+import { View, Text, Modal, Pressable, ScrollView, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { X, Truck, FileText } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { getVehicleInOut, type VehicleInOutRecord } from "@/api/vehicleInOutApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { AuthImage } from "@/components/AuthImage";
+import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return "—";
@@ -35,6 +38,7 @@ function Field({ label, value }: { label: string; value: string }) {
 
 export function VehicleInOutDetailModal({ recordId, onClose }: { recordId: number | null; onClose: () => void }) {
   const insets = useSafeAreaInsets();
+  const [previewAtt, setPreviewAtt] = useState<{ url: string; filename?: string } | null>(null);
 
   const { data: rec, isLoading } = useQuery<VehicleInOutRecord>({
     queryKey: ["vehicle-in-out-detail", recordId],
@@ -110,9 +114,11 @@ export function VehicleInOutDetailModal({ recordId, onClose }: { recordId: numbe
                 </Text>
                 <View className="flex-row flex-wrap gap-2">
                   {rec.Attachments.map((a) => (
-                    <View key={a.id} className="rounded-lg overflow-hidden" style={{ width: 72, height: 72, borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.muted}40` }}>
+                    <View key={a.id} className="rounded-lg overflow-hidden" style={{ width: 84, height: 84, borderWidth: 1, borderColor: colors.border, backgroundColor: `${colors.muted}40` }}>
                       {a.mimeType?.startsWith("image/") ? (
-                        <Image source={{ uri: a.url }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                        <Pressable onPress={() => setPreviewAtt(a)} style={{ width: "100%", height: "100%" }}>
+                          <AuthImage url={a.url} style={{ width: "100%", height: "100%" }} />
+                        </Pressable>
                       ) : (
                         <View className="flex-1 items-center justify-center">
                           <FileText size={20} color={colors.mutedForeground} />
@@ -135,6 +141,7 @@ export function VehicleInOutDetailModal({ recordId, onClose }: { recordId: numbe
           </ScrollView>
         )}
       </View>
+      <ImagePreviewModal visible={!!previewAtt} url={previewAtt?.url} title={previewAtt?.filename} onClose={() => setPreviewAtt(null)} />
     </Modal>
   );
 }
