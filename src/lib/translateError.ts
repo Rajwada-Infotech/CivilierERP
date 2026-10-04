@@ -104,11 +104,11 @@ const ERROR_MAP: [RegExp, string][] = [
   [/timeout|ETIMEDOUT|request.*timed out/i,
     "The request took too long. Please try again. If the problem persists, contact support."],
   [/500|internal server error/i,
-    "Something went wrong on the server. Please try again. If this keeps happening, contact your IT support."],
+    "Something went wrong on the server. Please try again."],
   [/too many requests|rate limit|429/i,
     "Too many requests. Please wait a moment and try again."],
   [/database.*error|sql.*error|DB error/i,
-    "A database error occurred. Please try again or contact IT support."],
+    "A database error occurred. Please try again."],
 
 
   // ── Generic validation ────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ export function translateError(raw: string | undefined | null): string {
   const sanitized = raw
     .split("\n")[0]                          // first line only
     .replace(/at\s+\w+\s*\(.*?\)/g, "")     // remove stack trace refs
-    .replace(/SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN/gi, "") // remove SQL
+    .replace(/\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN)\b/g, "") // remove SQL keywords (whole uppercase words only — never "selected", "from", "where" in a sentence)
     .replace(/\s{2,}/g, " ")
     .trim();
 

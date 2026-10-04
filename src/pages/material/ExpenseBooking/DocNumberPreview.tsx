@@ -297,7 +297,7 @@ export function DocNumberPreview({
                       {dt.Description}
                     </span>
                     {dt.EntryType && (
-                      <span className="text-[10px] opacity-40 ml-auto pl-3 shrink-0">
+                      <span className="text-[0.625rem] opacity-40 ml-auto pl-3 shrink-0">
                         {dt.EntryType}
                       </span>
                     )}

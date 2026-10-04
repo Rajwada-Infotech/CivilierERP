@@ -46,6 +46,7 @@ const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
+const { postVoucher, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
 
 function userEmail(req) {
   return req.user?.email || req.user?.userEmail || "system";
@@ -306,34 +307,43 @@ router.post("/", requirePageRight("vehicle-in-out", "edit"), async (req, res) =>
     const debitNoteId = insertRes.recordset[0].DebitNoteId;
     await backPatchRecordId(pool, sql, docNo, "QualityRejectionDebitNote", debitNoteId);
 
-    // Post the financial effect: a debit against the supplier's ledger
-    // (reduces what the company owes them), single-leg per
-    // GeneralLedgerEntry's documented shape (one row per debit/credit leg).
+    // Post the financial effect: Dr the supplier's ledger (reduces what the
+    // company owes them) / Cr Purchase A/c (reverses the purchase value
+    // recognized for the rejected quantity when the GRN was posted) — a
+    // real double-entry pair through postVoucher(), which was missing here
+    // before. The prior version inserted a single raw GeneralLedgerEntry
+    // row (Debit only, Credit hardcoded to 0) with no offsetting leg
+    // anywhere in this function, permanently unbalancing the ledger by
+    // every debit note's own amount — confirmed live: it was the entire
+    // source of a ₹3,530 global Debit≠Credit gap on dev (4 QDN rows,
+    // Sept 2026 balance-sheet investigation).
     let glEntryId = null;
     if (amount > 0) {
-      const glRes = await pool
-        .request()
-        .input("VoucherNo", sql.NVarChar(100), docNo)
-        .input("LHeadId", sql.Int, line.SupplierID)
-        .input("DebitAmount", sql.Decimal(18, 2), amount)
-        .input("Narration", sql.NVarChar(500), `Quality rejection — ${line.ItemName || "item"}: ${qtyBad} ${line.UomName || ""} (${percentBad}% of ${receivedQty}) on ${docNo}`)
-        .input("SourceType", sql.NVarChar(30), "QualityRejectionDebitNote")
-        .input("SourceId", sql.Int, debitNoteId)
-        .input("CompanyId", sql.Int, line.CompanyID)
-        .input("ProjectId", sql.Int, line.ProjectID)
-        .input("CreatedBy", sql.NVarChar(150), email).query(`
-          INSERT INTO dbo.GeneralLedgerEntry
-            (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
-             SourceType, SourceId, CompanyId, ProjectId, CreatedBy)
-          OUTPUT INSERTED.EntryId
-          VALUES
-            (@VoucherNo, CAST(GETDATE() AS DATE), @LHeadId, @DebitAmount, 0, @Narration,
-             @SourceType, @SourceId, @CompanyId, @ProjectId, @CreatedBy)
-        `);
-      glEntryId = glRes.recordset[0].EntryId;
-      await pool.request().input("Id", sql.Int, debitNoteId).input("GLEntryId", sql.Int, glEntryId).query(`
-        UPDATE dbo.QualityRejectionDebitNote SET GLEntryId = @GLEntryId WHERE DebitNoteId = @Id
+      const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
+      const narrationSuffix = `${line.ItemName || "item"}: ${qtyBad} ${line.UomName || ""} (${percentBad}% of ${receivedQty}) on ${docNo}`;
+      await postVoucher(pool, {
+        voucherNo: docNo,
+        voucherDate: new Date(),
+        sourceType: "QualityRejectionDebitNote",
+        sourceId: debitNoteId,
+        companyId: line.CompanyID,
+        projectId: line.ProjectID,
+        createdBy: email,
+        legs: [
+          { lHeadId: line.SupplierID, debit: amount, narration: `Quality rejection — ${narrationSuffix}` },
+          { lHeadId: purchaseHeadId, credit: amount, narration: `Quality rejection reversal — ${narrationSuffix}` },
+        ],
+      });
+      const glRes = await pool.request().input("SrcId", sql.Int, debitNoteId).input("PartyId", sql.Int, line.SupplierID).query(`
+        SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry
+        WHERE SourceType = 'QualityRejectionDebitNote' AND SourceId = @SrcId AND LHeadId = @PartyId AND IsReversed = 0
       `);
+      glEntryId = glRes.recordset[0]?.EntryId ?? null;
+      if (glEntryId) {
+        await pool.request().input("Id", sql.Int, debitNoteId).input("GLEntryId", sql.Int, glEntryId).query(`
+          UPDATE dbo.QualityRejectionDebitNote SET GLEntryId = @GLEntryId WHERE DebitNoteId = @Id
+        `);
+      }
     }
 
     res.status(201).json({

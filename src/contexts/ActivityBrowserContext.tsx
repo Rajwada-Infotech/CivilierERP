@@ -30,7 +30,7 @@ const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"] as const;
 
 function isPrivilegedUser(): boolean {
   try {
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const user = JSON.parse(sessionStorage.getItem("user") || "{}");
     return PRIVILEGED_ROLES.includes(user?.role);
   } catch {
     return false;
@@ -149,7 +149,7 @@ export const useActivityBrowser = (): ActivityBrowserContextType => {
 
 export function getStoredUser() {
   try {
-    return JSON.parse(localStorage.getItem("user") || "{}");
+    return JSON.parse(sessionStorage.getItem("user") || "{}");
   } catch {
     return {};
   }
@@ -212,7 +212,7 @@ export const ActivityBrowserProvider: React.FC<{
 
   const fetchActivityCore = useCallback(
     async (page: number, filters: ActivityFilters, df: DateFilters) => {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       if (!token || !isPrivilegedUser()) {
         setRawSessions([]);
         setIsLoading(false);
@@ -322,7 +322,7 @@ export const ActivityBrowserProvider: React.FC<{
     };
 
     const trySubscribe = () => {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       if (!token || !isPrivilegedUser()) return;
       if (unsubscribe) return; // already subscribed
 
@@ -376,10 +376,10 @@ export const ActivityBrowserProvider: React.FC<{
       const sessionId = generateUUID();
       const loginTime = Date.now();
 
-      localStorage.setItem("currentSessionId", sessionId);
+      sessionStorage.setItem("currentSessionId", sessionId);
       // Persist login timestamp so recordLogout can compute sessionDuration
       // precisely even across page refreshes.
-      localStorage.setItem("sessionLoginTime", String(loginTime));
+      sessionStorage.setItem("sessionLoginTime", String(loginTime));
 
       // Reset per-session page dedup for the new session
       sessionPagesSeen.current.clear();
@@ -409,7 +409,7 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogout = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
-      const sessionId = localStorage.getItem("currentSessionId");
+      const sessionId = sessionStorage.getItem("currentSessionId");
       if (!sessionId) return;
 
       const deviceInfo = getDeviceInfo();
@@ -418,7 +418,7 @@ export const ActivityBrowserProvider: React.FC<{
       // Falls back to null if sessionLoginTime is missing (e.g. pre-existing
       // sessions that logged in before this fix was deployed) — the row is
       // still written, just without a duration value.
-      const loginTimeRaw = localStorage.getItem("sessionLoginTime");
+      const loginTimeRaw = sessionStorage.getItem("sessionLoginTime");
       const sessionDurationSeconds = loginTimeRaw
         ? Math.round((Date.now() - parseInt(loginTimeRaw, 10)) / 1000)
         : null;
@@ -443,8 +443,8 @@ export const ActivityBrowserProvider: React.FC<{
       } catch (err) {
         console.error("Logout log failed:", err);
       } finally {
-        localStorage.removeItem("currentSessionId");
-        localStorage.removeItem("sessionLoginTime");
+        sessionStorage.removeItem("currentSessionId");
+        sessionStorage.removeItem("sessionLoginTime");
       }
     },
     [],
@@ -459,7 +459,7 @@ export const ActivityBrowserProvider: React.FC<{
       details?: string;
     }) => {
       const user = getStoredUser();
-      let sessionId = localStorage.getItem("currentSessionId");
+      let sessionId = sessionStorage.getItem("currentSessionId");
 
       // Sessions that started before recordLogin ran (e.g. a user already
       // logged in when this tracking was deployed, or localStorage was
@@ -469,8 +469,8 @@ export const ActivityBrowserProvider: React.FC<{
       // authenticated, instead of just warning on every action.
       if (!sessionId && user.id) {
         sessionId = generateUUID();
-        localStorage.setItem("currentSessionId", sessionId);
-        localStorage.setItem("sessionLoginTime", String(Date.now()));
+        sessionStorage.setItem("currentSessionId", sessionId);
+        sessionStorage.setItem("sessionLoginTime", String(Date.now()));
       }
 
       if (!sessionId) {

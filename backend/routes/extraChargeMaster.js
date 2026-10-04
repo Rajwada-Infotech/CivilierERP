@@ -36,7 +36,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .request()
       .input("Name",      sql.NVarChar(200), ChargeName.trim())
       .input("Default",   sql.Decimal(18, 2), DefaultAmount != null && DefaultAmount !== "" ? parseFloat(DefaultAmount) : null)
-      .input("Gst",       sql.Decimal(5, 2), GstRate != null ? parseFloat(GstRate) : 18)
+      .input("Gst",       sql.Decimal(5, 2), GstRate != null && GstRate !== "" ? parseFloat(GstRate) : 18)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .query(`
@@ -64,7 +64,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("Id",       sql.Int, parseInt(id))
       .input("Name",     sql.NVarChar(200), ChargeName.trim())
       .input("Default",  sql.Decimal(18, 2), DefaultAmount != null && DefaultAmount !== "" ? parseFloat(DefaultAmount) : null)
-      .input("Gst",      sql.Decimal(5, 2), GstRate != null ? parseFloat(GstRate) : 18)
+      .input("Gst",      sql.Decimal(5, 2), GstRate != null && GstRate !== "" ? parseFloat(GstRate) : 18)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy",sql.Int, updatedBy)
       .query(`

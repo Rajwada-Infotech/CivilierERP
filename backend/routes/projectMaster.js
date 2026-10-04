@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -8,6 +9,7 @@ const { bumpCacheVersion } = require("../redis");
 const { cache } = require("../middleware/cache");
 const { deleteProjectCascade } = require("../services/projectCascadeDelete");
 const { getProjectLockReason } = require("../services/crmHierarchyLocks");
+const { recordAmendment } = require("../services/amendmentLog");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
@@ -39,7 +41,7 @@ async function acctHeadHasLGSTType(pool) {
 // the compliance fields genuinely haven't been filled in yet. Idempotent:
 // does nothing if the PRJ-{id}-CUST/SUPP heads already exist.
 async function ensureProjectLedgerHeads(pool, projectId, projectName, address, createdBy) {
-  if (!projectId) return;
+  if (projectId === null) return;
 
   const projectRow = await pool
     .request()
@@ -132,6 +134,122 @@ async function ensureProjectLedgerHeads(pool, projectId, projectName, address, c
   await bumpCacheVersion("account-head-master");
 }
 
+// A tagged company can't be untagged once it actually has transactions
+// against this project — removing the row would just make those historical
+// documents' project/company pairing inexplicable in every dropdown that
+// now checks ProjectCompanies. Existing transactions are never touched by a
+// re-tag either way (see the Invoice/Payment/JV visibility checks, which
+// only gate *new* documents).
+async function companyHasTransactionsAgainstProject(pool, projectId, companyId) {
+  const r = await pool
+    .request()
+    .input("pid", sql.Int, projectId)
+    .input("cid", sql.Int, companyId)
+    .query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.ExpenseBooking WHERE ECompanyId = @cid AND TRY_CAST(EProjectName AS INT) = @pid) +
+        (SELECT COUNT(*) FROM dbo.NewPayment WHERE TRY_CAST(PCompany AS INT) = @cid AND TRY_CAST(PProject AS INT) = @pid) +
+        (SELECT COUNT(*) FROM dbo.JournalVoucher WHERE CompanyId = @cid AND ProjectId = @pid) AS cnt
+    `);
+  return (r.recordset[0]?.cnt || 0) > 0;
+}
+
+// Company tagging changes which projects every Company -> Project dropdown
+// offers. The early bump in each save path runs BEFORE the tag sync, so any
+// list fetched in that window re-cached the pre-tag data for its full TTL
+// (which is why a freshly tagged project "sometimes" didn't show up under
+// its new company). Call this AFTER the tag sync so the very next read
+// rebuilds from the final state.
+async function bumpProjectListCaches() {
+  await Promise.all([
+    bumpCacheVersion("enterprises"),
+    bumpCacheVersion("project-master"),
+    bumpCacheVersion("godowns"),
+  ]).catch(() => {});
+}
+
+// ── Sync a project's tagged additional companies ───────────────────────────────
+// The primary company_id stays untouched — this only replaces the
+// ProjectCompanies rows and the multi_company_enabled flag. Disabling the
+// toggle clears any previously tagged companies rather than just hiding
+// them, so a re-enable starts from a clean slate — except for a tag that
+// already has real transactions against it, which is silently kept either
+// way (see companyHasTransactionsAgainstProject) and reported back as
+// `keptTags` for the caller to surface as a warning.
+async function syncProjectCompanies(pool, projectId, enabled, companyIds, changedBy) {
+  const beforeResult = await pool
+    .request()
+    .input("pid", sql.Int, projectId)
+    .query("SELECT CompanyId FROM dbo.ProjectCompanies WHERE ProjectId=@pid ORDER BY CompanyId");
+  const beforeIds = beforeResult.recordset.map((r) => r.CompanyId);
+
+  await pool
+    .request()
+    .input("id", sql.Int, projectId)
+    .input("enabled", sql.Bit, enabled ? 1 : 0)
+    .query("UPDATE dbo.enterprise SET multi_company_enabled=@enabled WHERE id=@id");
+
+  const requestedIds = enabled && Array.isArray(companyIds)
+    ? [...new Set(
+        companyIds
+          .map((raw) => parseInt(raw, 10))
+          .filter((cid) => Number.isInteger(cid) && cid !== projectId),
+      )]
+    : [];
+
+  const finalIds = new Set(requestedIds);
+  const keptTags = [];
+  for (const cid of beforeIds) {
+    if (finalIds.has(cid)) continue;
+    if (await companyHasTransactionsAgainstProject(pool, projectId, cid)) {
+      finalIds.add(cid);
+      const nameResult = await pool
+        .request()
+        .input("cid", sql.Int, cid)
+        .query("SELECT name FROM dbo.enterprise WHERE id=@cid");
+      keptTags.push({ companyId: cid, companyName: nameResult.recordset[0]?.name || `Company #${cid}` });
+    }
+  }
+
+  const finalIdList = [...finalIds];
+  await pool
+    .request()
+    .input("pid", sql.Int, projectId)
+    .query(
+      `DELETE FROM dbo.ProjectCompanies WHERE ProjectId=@pid AND CompanyId NOT IN (${finalIdList.length ? finalIdList.join(",") : "-1"})`,
+    );
+
+  for (const cid of finalIdList) {
+    if (beforeIds.includes(cid)) continue;
+    await pool
+      .request()
+      .input("pid", sql.Int, projectId)
+      .input("cid", sql.Int, cid)
+      .query(
+        "INSERT INTO dbo.ProjectCompanies (ProjectId, CompanyId) VALUES (@pid, @cid)",
+      );
+  }
+
+  const beforeCsv = beforeIds.slice().sort((a, b) => a - b).join(",");
+  const afterCsv = finalIdList.slice().sort((a, b) => a - b).join(",");
+  if (beforeCsv !== afterCsv) {
+    try {
+      await recordAmendment({
+        refDocType: "project-master",
+        refDocId: projectId,
+        changedBy,
+        before: { TaggedCompanyIds: beforeCsv },
+        after: { TaggedCompanyIds: afterCsv },
+        fieldLabels: { TaggedCompanyIds: "Tagged Companies" },
+      });
+    } catch (amendErr) {
+      console.warn("[projectMaster] Tag change audit log failed:", amendErr.message);
+    }
+  }
+
+  return { keptTags };
+}
+
 // ── GET all projects ──────────────────────────────────────────────────────────
 router.get("/", cache("project-master", 60, { shared: true }), async (req, res) => {
   try {
@@ -161,6 +279,9 @@ router.get("/", cache("project-master", 60, { shared: true }), async (req, res) 
         p.logo                  AS ProjectImage,
         p.enterprise_id         AS EnterpriseId,
         e.name                  AS EnterpriseName,
+        p.project_type_id       AS ProjectTypeId,
+        pt.Name                 AS ProjectTypeName,
+        pt.Code                 AS ProjectTypeCode,
         p.company_id            AS CompanyId,
         c.name                  AS CompanyName,
         c.gst_no                AS CompanyGST,
@@ -170,10 +291,14 @@ router.get("/", cache("project-master", 60, { shared: true }), async (req, res) 
         c.trade_license         AS CompanyTradeLicenseNo,
         ISNULL(p.jv_enabled, 0) AS JvEnabled,
         p.jv_company_name       AS JvCompanyName,
+        ISNULL(p.multi_company_enabled, 0) AS MultiCompanyEnabled,
+        (SELECT STRING_AGG(CAST(pc.CompanyId AS NVARCHAR(20)), ',')
+           FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = p.id) AS MultiCompanyIds,
         p.date_of_entry         AS CreatedAt
       FROM dbo.enterprise p WITH (NOLOCK)
       LEFT JOIN dbo.enterprise e WITH (NOLOCK) ON e.id = p.enterprise_id
       LEFT JOIN dbo.enterprise c WITH (NOLOCK) ON c.id = p.company_id
+      LEFT JOIN dbo.ProjectTypeMaster pt WITH (NOLOCK) ON pt.Id = p.project_type_id
       WHERE p.business_type = 'P'
       ORDER BY p.name
     `);
@@ -184,6 +309,32 @@ router.get("/", cache("project-master", 60, { shared: true }), async (req, res) 
 });
 
 // ── GET /company/:id — fetch compliance fields from linked Company ─────────────
+// The Project Type options the create/edit form offers (migration 502).
+//
+// Returns the BEHAVIOUR FLAGS alongside the name, not just id/label, so the
+// form can react to the choice without a second round trip or a hardcoded list
+// of which codes mean what — e.g. hiding floor-related setup for a type whose
+// HasFloors is false. Callers must branch on the flags, never on Code/Name.
+//
+// Authenticated but not admin-gated: picking a type is part of ordinary project
+// creation, and the write itself is still behind adminOnly below.
+router.get("/types", async (_req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT Id, Code, Name, Description,
+             HasFloors, SellsLand, SellsConstruction, AllowsMultiUnitSale
+      FROM dbo.ProjectTypeMaster
+      WHERE IsActive = 1
+      ORDER BY SortOrder, Name
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[projectMaster] GET /types:", err.message);
+    res.status(500).json({ error: "Failed to load project types" });
+  }
+});
+
 router.get("/company/:id", async (req, res) => {
   try {
     const pool = getPool();
@@ -221,6 +372,7 @@ router.post("/", adminOnly, async (req, res) => {
       .input("business_identity", sql.NVarChar(100), f.code || null)
       .input("business_type", sql.NVarChar(10), "P")
       .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("project_type_id", sql.Int, f.projectTypeId != null && f.projectTypeId !== "" ? parseInt(f.projectTypeId, 10) : null)
       .input("description", sql.NVarChar(sql.MAX), f.description || null)
       .input("address", sql.NVarChar(sql.MAX), f.addressLine1 || null)
       .input("address_line2", sql.NVarChar(500), f.addressLine2 || null)
@@ -264,13 +416,13 @@ router.post("/", adminOnly, async (req, res) => {
           address, address_line2, address_line3, pincode, latitude, longitude,
           currency, status, rera_no, start_date, end_date, team_size, remarks,
           logo, enterprise_id, company_id,
-          jv_enabled, jv_company_name, discontinue, date_of_entry
+          jv_enabled, jv_company_name, discontinue, date_of_entry, project_type_id
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @address, @address_line2, @address_line3, @pincode, @latitude, @longitude,
           @currency, @status, @rera_no, @start_date, @end_date, @team_size, @remarks,
           @logo, @enterprise_id, @company_id,
-          @jv_enabled, @jv_company_name, @discontinue, @date_of_entry
+          @jv_enabled, @jv_company_name, @discontinue, @date_of_entry, @project_type_id
         )
       `);
     await bumpCacheVersion("enterprises");
@@ -351,6 +503,27 @@ router.post("/", adminOnly, async (req, res) => {
       );
     }
 
+    // Tag additional companies, if the form enabled it
+    try {
+      const projectRow = await pool
+        .request()
+        .input("name", sql.NVarChar(255), f.name || null)
+        .input("btype", sql.NVarChar(10), "P")
+        .query(
+          "SELECT TOP 1 id FROM dbo.enterprise WHERE name=@name AND business_type=@btype ORDER BY id DESC",
+        );
+      const newProjectId = projectRow.recordset[0]?.id;
+      if (newProjectId) {
+        await syncProjectCompanies(pool, newProjectId, !!f.multiCompanyEnabled, f.multiCompanyIds);
+      }
+    } catch (multiCompanyErr) {
+      console.warn(
+        "[projectMaster] Multi-company tagging failed:",
+        multiCompanyErr.message,
+      );
+    }
+    await bumpProjectListCaches();
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -369,6 +542,7 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("short_name", sql.NVarChar(100), f.shortName || null)
       .input("business_identity", sql.NVarChar(100), f.code || null)
       .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("project_type_id", sql.Int, f.projectTypeId != null && f.projectTypeId !== "" ? parseInt(f.projectTypeId, 10) : null)
       .input("description", sql.NVarChar(sql.MAX), f.description || null)
       .input("address", sql.NVarChar(sql.MAX), f.addressLine1 || null)
       .input("address_line2", sql.NVarChar(500), f.addressLine2 || null)
@@ -408,7 +582,7 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, business_identity=@business_identity,
-          entity_type=@entity_type, description=@description,
+          entity_type=@entity_type, project_type_id=@project_type_id, description=@description,
           address=@address, address_line2=@address_line2, address_line3=@address_line3,
           pincode=@pincode, latitude=@latitude, longitude=@longitude,
           currency=@currency, status=@status, rera_no=@rera_no,
@@ -425,7 +599,8 @@ router.put("/:id", adminOnly, async (req, res) => {
     // otherwise the godown silently drops out of company/project filters
     // (same root cause as migration 105-fix-godown-enterprise-id).
     try {
-      const projectId = parseInt(req.params.id);
+      const projectId = parseId(req.params.id);
+      if (projectId === null) return res.status(400).json({ error: "Invalid id" });
       const resolvedCompanyId = f.companyId ? parseInt(f.companyId) : null;
       await pool
         .request()
@@ -448,7 +623,8 @@ router.put("/:id", adminOnly, async (req, res) => {
     // this route is the documented way to backfill), and projects whose
     // company didn't have GST on file at creation time but does now.
     try {
-      const projectId = parseInt(req.params.id, 10);
+      const projectId = parseId(req.params.id);
+      if (projectId === null) return res.status(400).json({ error: "Invalid id" });
       const createdBy = req.user?.name || req.user?.email || "system";
       await ensureProjectLedgerHeads(pool, projectId, f.name, f.addressLine1, createdBy);
     } catch (ledgerErr) {
@@ -458,7 +634,34 @@ router.put("/:id", adminOnly, async (req, res) => {
       );
     }
 
-    res.json({ success: true });
+    // Tag additional companies, if the form enabled it
+    let keptTags = [];
+    try {
+      const changedBy = req.user?.name || req.user?.email || "system";
+      const syncResult = await syncProjectCompanies(
+        pool,
+        parseInt(req.params.id, 10),
+        !!f.multiCompanyEnabled,
+        f.multiCompanyIds,
+        changedBy,
+      );
+      keptTags = syncResult?.keptTags || [];
+    } catch (multiCompanyErr) {
+      console.warn(
+        "[projectMaster] Multi-company tagging failed:",
+        multiCompanyErr.message,
+      );
+    }
+    await bumpProjectListCaches();
+
+    res.json({
+      success: true,
+      ...(keptTags.length
+        ? {
+            warning: `${keptTags.map((t) => `"${t.companyName}"`).join(", ")} ${keptTags.length === 1 ? "wasn't" : "weren't"} untagged — transactions already exist against this project for that company.`,
+          }
+        : {}),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -536,7 +739,16 @@ router.delete("/:id", adminOnly, async (req, res) => {
       });
     }
 
-    // 4. Safe to delete
+    // 4. Safe to delete — clear any multi-company tag rows referencing this
+    // project (either direction: as the tagged project, or as one of the
+    // additional companies tagged on some other project) before the FK'd
+    // enterprise row itself goes.
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "DELETE FROM dbo.ProjectCompanies WHERE ProjectId=@id OR CompanyId=@id",
+      );
     await pool
       .request()
       .input("id", sql.Int, id)
@@ -606,6 +818,12 @@ router.delete("/:id/cascade", async (req, res) => {
     // The project's own AccountHeadMaster ledger heads and TypeOfDoc rows
     // are intentionally left in place (see projectCascadeDelete.js) — only
     // the enterprise row itself is removed here, after everything under it.
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "DELETE FROM dbo.ProjectCompanies WHERE ProjectId=@id OR CompanyId=@id",
+      );
     await pool
       .request()
       .input("id", sql.Int, id)

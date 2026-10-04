@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 // Generic, color-parameterized version of FinanceShell/MaterialShell —
 // those two are pixel-identical aside from hardcoded color constants, so
@@ -29,7 +29,7 @@ export const GlassShell: React.FC<GlassShellProps> = ({
   secondaryColor,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const secondary = secondaryColor || accentColor;
 
   const glassCard = isDark
@@ -143,6 +143,9 @@ export const GlassCard: React.FC<{
   onClick?: () => void;
   trend?: "up" | "down" | "neutral";
   children?: React.ReactNode;
+  // Toggled/selected state — for a GlassCard used as a filter tile (e.g. a
+  // status filter row), not part of the original stat-card design.
+  active?: boolean;
 }> = ({
   label,
   value,
@@ -152,9 +155,10 @@ export const GlassCard: React.FC<{
   onClick,
   trend,
   children,
+  active,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div
@@ -164,12 +168,14 @@ export const GlassCard: React.FC<{
       className={`relative rounded-xl overflow-hidden ${onClick ? "cursor-pointer" : ""}`}
       style={{
         background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.75)",
-        border: `1px solid ${accentColor}28`,
+        border: active ? `1.5px solid ${accentColor}` : `1px solid ${accentColor}28`,
         backdropFilter: "blur(16px) saturate(150%)",
         WebkitBackdropFilter: "blur(16px) saturate(150%)",
-        boxShadow: isDark
-          ? "0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-          : "0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+        boxShadow: active
+          ? `0 4px 20px ${accentColor}40, inset 0 1px 0 rgba(255,255,255,0.05)`
+          : isDark
+            ? "0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
+            : "0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
       }}
     >
       <div
@@ -192,7 +198,7 @@ export const GlassCard: React.FC<{
       <div className="relative z-10 p-4">
         <div className="flex items-start justify-between gap-2 mb-3">
           <p
-            className="text-[10px] font-heading font-semibold uppercase tracking-widest"
+            className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest"
             style={{ color: accentColor, opacity: 0.85 }}
           >
             {label}

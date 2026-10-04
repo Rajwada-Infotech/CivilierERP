@@ -196,16 +196,24 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   }
 
 
-  await pool.request().input("bid", sql.Int, bookingId)
-    .query(`
-      UPDATE dbo.CrmBooking SET
-        WorkflowStage = 'MarketingHeadApproval',
-        ReadyForApprovalAt = SYSDATETIME(),
-        StageRemarks = NULL, RejectedFromStage = NULL, RejectedBy = NULL, RejectedAt = NULL,
-        UpdatedAt = SYSDATETIME()
-      WHERE Id = @bid
-    `);
-  await logStageAction(pool, bookingId, STAGE_MARKETING, "SubmittedForApproval", null, userId);
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    await tx.request().input("bid", sql.Int, bookingId)
+      .query(`
+        UPDATE dbo.CrmBooking SET
+          WorkflowStage = 'MarketingHeadApproval',
+          ReadyForApprovalAt = SYSDATETIME(),
+          StageRemarks = NULL, RejectedFromStage = NULL, RejectedBy = NULL, RejectedAt = NULL,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @bid
+      `);
+    await logStageAction(tx, bookingId, STAGE_MARKETING, "SubmittedForApproval", null, userId);
+    await tx.commit();
+  } catch (txErr) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    throw txErr;
+  }
 
   return {
     ok: true,
@@ -229,38 +237,79 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
   // Approved — which is exactly our "Confirmed".
   const result = await approvalTransition("crm-bookings", bookingId, "Approved", userEmail, userRole, null, userId);
 
-  const nextStage = stage === STAGE_MARKETING ? STAGE_DIRECTOR : STAGE_CONFIRMED;
   // Require at least 2 approval levels (Marketing Head + Director) before confirming.
   // A misconfigured 1-level workflow must never bypass Director approval.
   const MIN_APPROVAL_LEVELS = 2;
-  const confirmedNow = nextStage === STAGE_CONFIRMED && result.level >= result.totalLevels && result.totalLevels >= MIN_APPROVAL_LEVELS;
+  const confirmedNow = result.level >= result.totalLevels && result.totalLevels >= MIN_APPROVAL_LEVELS;
+  // nextStage is derived from the level approvalTransition ACTUALLY just
+  // recorded (result.level), never from the `stage` parameter this request
+  // started with. Those can disagree: approvalTransition holds its own
+  // UPDLOCK/HOLDLOCK on this booking's ApprovalAuditLog rows, so two
+  // concurrent approve calls (a double-click, a network retry, or — since
+  // admin/super_admin are valid approvers at BOTH levels — the same admin
+  // genuinely clicking Approve twice in quick succession) are correctly
+  // serialized THERE. But `stage` was read before this function's own
+  // requireActiveStage call, with no lock — the second call's `stage` can
+  // still say 'MarketingHeadApproval' even though the first call already
+  // advanced WorkflowStage to 'DirectorApproval' and this second call's
+  // approvalTransition just recorded level 2 (Director). Computing
+  // nextStage from `stage` in that case would advance WorkflowStage
+  // backward to 'DirectorApproval' while Status is already 'Approved' — a
+  // contradictory record that also skips the confirmedNow side effects
+  // (portal provisioning, pending-MR sweep) below. Keying off result.level
+  // instead makes this call correctly recognize itself as the confirming
+  // action whenever it actually was one, regardless of what `stage` says.
+  const nextStage = confirmedNow ? STAGE_CONFIRMED : STAGE_DIRECTOR;
 
-  await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .input("stg", sql.NVarChar(40), nextStage)
-    .input("mhAt", sql.DateTime2, stage === STAGE_MARKETING ? new Date() : null)
-    .input("mhBy", sql.Int, stage === STAGE_MARKETING ? userId : null)
-    .input("drAt", sql.DateTime2, stage === STAGE_DIRECTOR ? new Date() : null)
-    .input("drBy", sql.Int, stage === STAGE_DIRECTOR ? userId : null)
-    .input("cfAt", sql.DateTime2, confirmedNow ? new Date() : null)
-    .input("cfBy", sql.Int, confirmedNow ? userId : null)
-    .query(`
-      UPDATE dbo.CrmBooking SET
-        WorkflowStage = @stg,
-        ReadyForApprovalAt = CASE WHEN @stg = 'DirectorApproval' THEN SYSDATETIME() ELSE NULL END,
-        StageRemarks = NULL, RejectedFromStage = NULL, RejectedBy = NULL, RejectedAt = NULL,
-        MarketingHeadApprovedAt = ISNULL(MarketingHeadApprovedAt, @mhAt),
-        MarketingHeadApprovedBy = ISNULL(MarketingHeadApprovedBy, @mhBy),
-        DirectorApprovedAt = ISNULL(DirectorApprovedAt, @drAt),
-        DirectorApprovedBy = ISNULL(DirectorApprovedBy, @drBy),
-        ConfirmedAt = ISNULL(ConfirmedAt, @cfAt),
-        ConfirmedBy = ISNULL(ConfirmedBy, @cfBy),
-        UpdatedAt = SYSDATETIME()
-      WHERE Id = @bid
-    `);
-
+  // approvalTransition (above) owns its own internal transaction/locking and
+  // must run on the plain pool first — same established rule as every other
+  // approve/reject route in this codebase. The stage-advance UPDATE and its
+  // CrmBookingStageLog entry are wrapped together so a failure between them
+  // can't leave a booking's WorkflowStage advanced (or Confirmed) with no
+  // trace of it in the stage log.
   const actionWord = confirmedNow ? "Confirmed" : "StageApproved";
-  await logStageAction(pool, bookingId, nextStage, actionWord, null, userId);
+  // Same reasoning as nextStage above — which level was just recorded
+  // (result.level), not which stage this request started at (`stage`),
+  // decides which approval timestamp/actor this call stamps. The ISNULL
+  // guards in the UPDATE already make this idempotent against a genuine
+  // re-run, but keying off the wrong level here would mis-attribute a
+  // Director approval as a repeat Marketing Head stamp (or vice versa) in
+  // exactly the race this whole function is now hardened against.
+  const isMarketingLevel = result.level === 1;
+  const isDirectorLevel = result.level >= MIN_APPROVAL_LEVELS;
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    await tx.request()
+      .input("bid", sql.Int, bookingId)
+      .input("stg", sql.NVarChar(40), nextStage)
+      .input("mhAt", sql.DateTime2, isMarketingLevel ? new Date() : null)
+      .input("mhBy", sql.Int, isMarketingLevel ? userId : null)
+      .input("drAt", sql.DateTime2, isDirectorLevel ? new Date() : null)
+      .input("drBy", sql.Int, isDirectorLevel ? userId : null)
+      .input("cfAt", sql.DateTime2, confirmedNow ? new Date() : null)
+      .input("cfBy", sql.Int, confirmedNow ? userId : null)
+      .query(`
+        UPDATE dbo.CrmBooking SET
+          WorkflowStage = @stg,
+          ReadyForApprovalAt = CASE WHEN @stg = 'DirectorApproval' THEN SYSDATETIME() ELSE NULL END,
+          StageRemarks = NULL, RejectedFromStage = NULL, RejectedBy = NULL, RejectedAt = NULL,
+          MarketingHeadApprovedAt = ISNULL(MarketingHeadApprovedAt, @mhAt),
+          MarketingHeadApprovedBy = ISNULL(MarketingHeadApprovedBy, @mhBy),
+          DirectorApprovedAt = ISNULL(DirectorApprovedAt, @drAt),
+          DirectorApprovedBy = ISNULL(DirectorApprovedBy, @drBy),
+          ConfirmedAt = ISNULL(ConfirmedAt, @cfAt),
+          ConfirmedBy = ISNULL(ConfirmedBy, @cfBy),
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @bid
+      `);
+
+    await logStageAction(tx, bookingId, nextStage, actionWord, null, userId);
+    await tx.commit();
+  } catch (txErr) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    throw txErr;
+  }
 
   // Portal provisioning fires the instant booking is confirmed — the customer
   // gets access to track their application, upload documents, and view
@@ -347,69 +396,108 @@ async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, u
 
   const prevStage = stage === STAGE_MARKETING ? STAGE_REVIEW : STAGE_MARKETING;
 
-  await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .input("stg", sql.NVarChar(40), prevStage)
-    .input("rem", sql.NVarChar(sql.MAX), String(remark).trim())
-    .input("rejFrom", sql.NVarChar(40), stage)
-    .input("rejBy", sql.Int, userId)
-    .input("rejAt", sql.DateTime2, new Date())
-    .query(`
-      UPDATE dbo.CrmBooking SET
-        WorkflowStage = @stg,
-        StageRemarks = @rem,
-        RejectedFromStage = @rejFrom,
-        RejectedBy = @rejBy,
-        RejectedAt = @rejAt,
-        -- Bouncing to Review means staff must re-submit via ready-for-approval
-        -- (which re-stamps this) — clear it so it drops out of the Approval
-        -- Inbox until then. Bouncing to MarketingHeadApproval means the
-        -- booking is ALREADY sitting at an approval stage awaiting Marketing
-        -- Head again — re-stamp now, don't null it, or it silently vanishes
-        -- from their Approval Inbox query (which requires IS NOT NULL).
-        ReadyForApprovalAt = CASE WHEN @stg = 'Review' THEN NULL ELSE SYSDATETIME() END,
-        -- Always clear the Marketing Head stamp on any reject: resetFromLevel
-        -- above always deletes the level-1 (Marketing) ApprovalAuditLog row
-        -- regardless of which stage we're bouncing to, so a re-approval is
-        -- always required and this stamp must be free to be re-set fresh
-        -- (approveStageRequest uses ISNULL(...), so a stale non-null value
-        -- here would otherwise survive the next real approval untouched).
-        MarketingHeadApprovedAt = NULL,
-        MarketingHeadApprovedBy = NULL,
-        UpdatedAt = SYSDATETIME()
-      WHERE Id = @bid
-    `);
-  await logStageAction(pool, bookingId, prevStage, "BouncedBackForCorrection", String(remark).trim(), userId);
-
-  // A bounce is not a terminal rejection. Clear any approved levels at/after
-  // the bounced-to point so the loop restarts cleanly when the preparer
-  // resubmits. This is especially important for Director -> Marketing Head:
-  // the old level-1 ApprovalAuditLog row must not make the next Marketing
-  // click count as Director approval.
+  // The stage bounce-back, its stage-log entry, and the approval-level reset
+  // (clear stale Approved rows + record the BouncedBack action) are one
+  // event — wrapped so a failure partway through can never leave a stale
+  // Approved ApprovalAuditLog row standing after a bounce, which would let a
+  // later re-approval silently skip a level it should have required again.
   const resetFromLevel = prevStage === STAGE_MARKETING ? 1 : 0;
-  await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .input("lvl", sql.Int, resetFromLevel)
-    .query(`
-      DELETE FROM dbo.ApprovalAuditLog
-      WHERE TableName = 'CrmBooking'
-        AND RecordId = @bid
-        AND ActionStatus = 'Approved'
-        AND Level >= @lvl
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    // Re-verify WorkflowStage under lock, inside this same transaction,
+    // immediately before acting — the requireActiveStage call above read it
+    // with no lock at all, so a concurrent approve on this same booking
+    // (which DOES take a real UPDLOCK/HOLDLOCK via approvalTransition) could
+    // have already advanced WorkflowStage in the gap between that read and
+    // this transaction starting. Without this re-check, a reject acting on
+    // stale stage info would bounce WorkflowStage backward over a genuinely
+    // newer approval and DELETE the ApprovalAuditLog row that approval just
+    // wrote — silently erasing a committed approval instead of rejecting
+    // the state the rejecter actually saw.
+    const lockRow = await tx.request().input("bid", sql.Int, bookingId).query(`
+      SELECT WorkflowStage, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
     `);
+    const current = lockRow.recordset[0];
+    if (!current) throw Object.assign(new Error("Booking not found"), { status: 404 });
+    if (current.Status === "Cancelled" || current.Status === "Rejected" || current.IsActive === false) {
+      throw Object.assign(new Error(`This booking has been ${current.Status} — no further workflow actions are allowed`), { status: 400 });
+    }
+    if (current.WorkflowStage !== stage) {
+      throw Object.assign(
+        new Error(`Booking has already moved to '${stageLabel(current.WorkflowStage)}' — refresh and try again`),
+        { status: 409 },
+      );
+    }
 
-  await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .input("lvl", sql.Int, resetFromLevel)
-    .input("role", sql.NVarChar(100), userRole || null)
-    .input("email", sql.NVarChar(200), userEmail || null)
-    .input("note", sql.NVarChar(500), String(remark).trim())
-    .query(`
-      INSERT INTO dbo.ApprovalAuditLog
-        (TableName, RecordId, Level, Role, ApproverEmail, ActionStatus, Note, ActionAt)
-      VALUES
-        ('CrmBooking', @bid, @lvl, @role, @email, 'BouncedBack', @note, SYSDATETIME())
-    `);
+    await tx.request()
+      .input("bid", sql.Int, bookingId)
+      .input("stg", sql.NVarChar(40), prevStage)
+      .input("rem", sql.NVarChar(sql.MAX), String(remark).trim())
+      .input("rejFrom", sql.NVarChar(40), stage)
+      .input("rejBy", sql.Int, userId)
+      .input("rejAt", sql.DateTime2, new Date())
+      .query(`
+        UPDATE dbo.CrmBooking SET
+          WorkflowStage = @stg,
+          StageRemarks = @rem,
+          RejectedFromStage = @rejFrom,
+          RejectedBy = @rejBy,
+          RejectedAt = @rejAt,
+          -- Bouncing to Review means staff must re-submit via ready-for-approval
+          -- (which re-stamps this) — clear it so it drops out of the Approval
+          -- Inbox until then. Bouncing to MarketingHeadApproval means the
+          -- booking is ALREADY sitting at an approval stage awaiting Marketing
+          -- Head again — re-stamp now, don't null it, or it silently vanishes
+          -- from their Approval Inbox query (which requires IS NOT NULL).
+          ReadyForApprovalAt = CASE WHEN @stg = 'Review' THEN NULL ELSE SYSDATETIME() END,
+          -- Always clear the Marketing Head stamp on any reject: resetFromLevel
+          -- above always deletes the level-1 (Marketing) ApprovalAuditLog row
+          -- regardless of which stage we're bouncing to, so a re-approval is
+          -- always required and this stamp must be free to be re-set fresh
+          -- (approveStageRequest uses ISNULL(...), so a stale non-null value
+          -- here would otherwise survive the next real approval untouched).
+          MarketingHeadApprovedAt = NULL,
+          MarketingHeadApprovedBy = NULL,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @bid
+      `);
+    await logStageAction(tx, bookingId, prevStage, "BouncedBackForCorrection", String(remark).trim(), userId);
+
+    // A bounce is not a terminal rejection. Clear any approved levels at/after
+    // the bounced-to point so the loop restarts cleanly when the preparer
+    // resubmits. This is especially important for Director -> Marketing Head:
+    // the old level-1 ApprovalAuditLog row must not make the next Marketing
+    // click count as Director approval.
+    await tx.request()
+      .input("bid", sql.Int, bookingId)
+      .input("lvl", sql.Int, resetFromLevel)
+      .query(`
+        DELETE FROM dbo.ApprovalAuditLog
+        WHERE TableName = 'CrmBooking'
+          AND RecordId = @bid
+          AND ActionStatus = 'Approved'
+          AND Level >= @lvl
+      `);
+
+    await tx.request()
+      .input("bid", sql.Int, bookingId)
+      .input("lvl", sql.Int, resetFromLevel)
+      .input("role", sql.NVarChar(100), userRole || null)
+      .input("email", sql.NVarChar(200), userEmail || null)
+      .input("note", sql.NVarChar(500), String(remark).trim())
+      .query(`
+        INSERT INTO dbo.ApprovalAuditLog
+          (TableName, RecordId, Level, Role, ApproverEmail, ActionStatus, Note, ActionAt)
+        VALUES
+          ('CrmBooking', @bid, @lvl, @role, @email, 'BouncedBack', @note, SYSDATETIME())
+      `);
+
+    await tx.commit();
+  } catch (txErr) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    throw txErr;
+  }
 
   return {
     ok: true,

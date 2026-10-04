@@ -92,7 +92,7 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
 
   // ── Fetch tasks ──────────────────────────────────────────────────────────
   const refetch = useCallback(async () => {
-    if (!localStorage.getItem("token")) {
+    if (!sessionStorage.getItem("token")) {
       setLoading(false);
       return;
     }
@@ -115,7 +115,7 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     if (token) {
       refetch();
     }

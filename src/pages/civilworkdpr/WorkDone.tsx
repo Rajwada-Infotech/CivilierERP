@@ -1,15 +1,18 @@
 import React, { useMemo, useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
-import { getRoomInstancesForUnit } from "@/api/unitBhkConfigApi";
+import { getRoomsForUnit } from "@/api/roomMasterApi";
+import { floorLabel, floorDisplay } from "@/lib/floorLabel";
 import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
-import { getReportedAssignments } from "@/api/dependencyActivityAssignmentApi";
+import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
+import { ScopeLocationTree } from "@/components/civilworkdpr/ScopeLocationTree";
 import {
   Hammer,
   Layers,
@@ -24,8 +27,6 @@ import {
   UserRound,
   CalendarDays,
   ListChecks,
-  ChevronDown,
-  ChevronRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -41,7 +42,7 @@ const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking
 // collapse into once picked.
 const leanInputCls =
   "w-full px-2.5 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
-const leanLabelCls = "text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5";
+const leanLabelCls = "text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5";
 
 // unit-master already carries Project/Block/Floor for every unit — reusing
 // that one flat list (same source CrmApplication.tsx's own Project -> Block
@@ -106,13 +107,108 @@ interface WorkDoneLocationForm {
   BlockId: string;
   FloorNo: string;
   UnitId: string;
-  // Value is the synthetic "<categoryId>-<index>" key from
-  // getRoomInstancesForUnit — there's no per-room table yet, just a
-  // category+quantity count, so this key only ever exists for the
-  // lifetime of this form (nothing persists it).
+  // A real dbo.RoomMaster row id (Flat Master), scoped to the selected
+  // Unit — no synthetic/generated room list anymore.
   RoomId: string;
 }
 const EMPTY_FORM: WorkDoneLocationForm = { ProjectId: "", BlockId: "", FloorNo: "", UnitId: "", RoomId: "" };
+
+// One room's worth of chain cards for the Dependency Chains browser.
+// ScopeLocationTree only calls renderLeaf for an expanded room node, and
+// every chain grouped into one leaf shares that same room, so this fetches
+// just that room's assignment rows (for the Pending/Done/QC chips) instead
+// of the page's old single getReportedAssignments() with no filter at all
+// — which loaded every IsCurrent row in the system regardless of whether
+// any room was ever expanded.
+function DependencyChainCards({
+  chains,
+  onAssign,
+}: {
+  chains: DependencyMasterListRow[];
+  onAssign: (rung: LadderActivity, chain: DependencyMasterListRow) => void;
+}) {
+  const roomId = chains[0]?.roomId ?? null;
+  const { data: assignments = [] } = useQuery({
+    queryKey: ["civilworkdpr-work-done-saved-flow", "room", roomId],
+    queryFn: () => getReportedAssignments({ roomId }),
+    enabled: roomId != null,
+  });
+  const assignmentByRungId = useMemo(() => {
+    const map = new Map<number, (typeof assignments)[number]>();
+    assignments.forEach((a) => map.set(a.rungId, a));
+    return map;
+  }, [assignments]);
+
+  return (
+    <div className="space-y-2.5">
+      {chains.map((chain) => {
+        const rungs = chain.activities ?? [];
+        return (
+          <div key={chain.id} className="rounded-lg border border-border/60 px-3.5 py-3 space-y-2.5">
+            <div>
+              <span className="text-sm font-semibold text-foreground">{chain.alias}</span>
+              <span
+                className={`ml-2 text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                  chain.workType === "INTERNAL"
+                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
+                    : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                }`}
+              >
+                {chain.workType}
+              </span>
+            </div>
+            {/* Mobile: one full-width block per rung, name on its own line
+                above the badges — the old single-line rounded-full pill
+                (name + status + QC + attempt all inline) just overflowed or
+                squished on a narrow screen once the activity name was more
+                than a couple words. Desktop keeps the original compact
+                wrapping pill row. */}
+            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-1.5">
+              {rungs.length === 0 ? (
+                <span className="text-xs text-muted-foreground italic">Loading activities…</span>
+              ) : (
+                rungs.map((rung) => {
+                  const assignment = rung.rungId != null ? assignmentByRungId.get(rung.rungId) : undefined;
+                  const done = assignment?.status === "COMPLETED";
+                  // Every rung gets a real stub assignment row (Status='PENDING') the
+                  // moment it's created (see dependencyMaster.js) — a never-allocated
+                  // rung genuinely IS pending, matching Reporting's own Pending count.
+                  // The "PENDING" fallback below only covers a rung from before that
+                  // stub-row backfill (migration 487) that somehow still has none.
+                  const meta = ASSIGNMENT_STATUS_META[assignment?.status ?? "PENDING"];
+                  return (
+                    <button
+                      key={rung.rungId ?? rung.activityId}
+                      type="button"
+                      onClick={() => onAssign(rung, chain)}
+                      className={`w-full sm:w-auto flex flex-wrap items-center gap-1.5 rounded-xl sm:rounded-full border px-2.5 sm:pl-2 sm:pr-2.5 py-1.5 sm:py-1 text-xs text-left transition-colors ${
+                        done
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                          : "border-border bg-muted/40 text-foreground hover:bg-muted"
+                      }`}
+                      title="Assign engineer & material"
+                    >
+                      <span className="font-medium flex-1 min-w-0 basis-full sm:basis-auto">
+                        {rung.sequenceNo}. {rung.activityName}
+                      </span>
+                      <span
+                        className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 ${meta.className}`}
+                      >
+                        {meta.label}
+                      </span>
+                      <QcBadge qcStatus={assignment?.qcStatus} />
+                      <AttemptBadge attemptNo={assignment?.attemptNo} />
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function WorkDone() {
   const rights = usePageRights("civilworkdpr-work-done");
@@ -127,49 +223,16 @@ export default function WorkDone() {
   // chain, shows the room each chain is already scoped to, and collapses
   // status to a single Pending/Done read so it's a fast glance, not a
   // management table.
+  // getDependencyMasters now returns each chain's full activity ladder
+  // inline (see dependencyMaster.js's GET /) — this used to also fire one
+  // GET /:id per chain via useQueries, which at production scale (1000+
+  // chains) blew through the route's rate limit and left this page unable
+  // to load at all.
   const { data: allChains = [] } = useQuery({
     queryKey: ["civilworkdpr-work-done-all-chains"],
     queryFn: getDependencyMasters,
     enabled: rights.canView,
   });
-  const chainDetailQueries = useQueries({
-    queries: (allChains as DependencyMasterListRow[]).map((c) => ({
-      queryKey: ["civilworkdpr-work-done-dependency-detail", String(c.id)],
-      queryFn: () => getDependencyMaster(c.id),
-      enabled: rights.canView,
-    })),
-  });
-  const { data: allAssignments = [] } = useQuery({
-    queryKey: ["civilworkdpr-work-done-saved-flow"],
-    queryFn: () => getReportedAssignments(),
-    enabled: rights.canView,
-  });
-  const allAssignmentByRungId = useMemo(() => {
-    const map = new Map<number, (typeof allAssignments)[number]>();
-    allAssignments.forEach((a) => map.set(a.rungId, a));
-    return map;
-  }, [allAssignments]);
-
-  // Group chains by the room they're allocated to — a room with several
-  // chains (e.g. Bedroom 1 having both a Flooring Sequence and a Snag
-  // Rectification chain) now shows as one collapsible cluster instead of
-  // scattered rows, same grouping convention as GRN's PO grouping.
-  const chainGroupsByRoom = useMemo(() => {
-    const groups = new Map<
-      string,
-      { key: string; scopePath: string; projectName: string | null; chains: { chain: DependencyMasterListRow; index: number }[] }
-    >();
-    (allChains as DependencyMasterListRow[]).forEach((chain, index) => {
-      const key = chain.scopePath;
-      if (!groups.has(key)) groups.set(key, { key, scopePath: key, projectName: chain.projectName, chains: [] });
-      groups.get(key)!.chains.push({ chain, index });
-    });
-    return Array.from(groups.values());
-  }, [allChains]);
-  const [collapsedChainGroups, setCollapsedChainGroups] = useState<Record<string, boolean>>({});
-  const toggleChainGroup = (key: string) =>
-    setCollapsedChainGroups((prev) => ({ ...prev, [key]: !prev[key] }));
-
   const { data: projects = [], isLoading: loadingProjects } = useQuery({
     queryKey: ["civilworkdpr-work-done-projects"],
     queryFn: fetchProjects,
@@ -217,15 +280,9 @@ export default function WorkDone() {
     return unitsForTower.filter((u: any) => String(u.FloorNo) === form.FloorNo);
   }, [unitsForTower, form.FloorNo]);
 
-  // Dependency link — appears once a Room is selected. Work Allocation's
-  // "Room" is a synthetic per-category instance (RoomCompositionBuilder's
-  // category+quantity model, no real dbo.RoomMaster row behind it — see
-  // RoomInstance's {key,label} shape), while a Dependency Master's own scope
-  // is tied to a real RoomMaster row. The two "Room" concepts can't be
-  // cross-referenced, so matching is scoped to Project/Tower/Floor/Unit —
-  // the levels both sides genuinely share — and the user picks the specific
-  // chain themselves rather than the page guessing a Room match that isn't
-  // really there.
+  // Dependency link — appears once a Room is selected. Both sides are now
+  // real dbo.RoomMaster rows (Flat Master), so matching narrows all the way
+  // down to the exact Room, not just Project/Tower/Floor/Unit.
   const [linkedDependencyId, setLinkedDependencyId] = useState<string>("");
   const { data: allDependencies = [], isLoading: loadingDependencies } = useQuery({
     queryKey: ["civilworkdpr-work-done-dependencies"],
@@ -239,8 +296,11 @@ export default function WorkDone() {
       (d) =>
         String(d.projectId) === form.ProjectId &&
         String(d.towerId) === form.BlockId &&
-        String(d.floor) === form.FloorNo &&
-        String(d.flatId) === form.UnitId,
+        // Dependency Master stores the floor as a label ("G", "1", "2", …);
+        // the form holds UnitMaster.FloorNo ("0" for Ground) — compare labels.
+        String(d.floor) === floorLabel(form.FloorNo) &&
+        String(d.flatId) === form.UnitId &&
+        String(d.roomId) === form.RoomId,
     );
   }, [allDependencies, form.ProjectId, form.BlockId, form.FloorNo, form.UnitId, form.RoomId]);
   const linkedDependency = useMemo(
@@ -253,19 +313,37 @@ export default function WorkDone() {
     enabled: !!linkedDependencyId,
   });
 
+  // Saved Flow below is already scoped to one Room (form.RoomId) by the
+  // time it can render, so this fetches just that room's assignment rows
+  // instead of the old getReportedAssignments() with no filter at all —
+  // which pulled every IsCurrent row in the system (342,000+ at production
+  // scale) just to look up a handful of rungs by id. See
+  // DependencyChainCards below for the Dependency Chains browser's own
+  // equivalent, room-scoped-per-expanded-node fix.
+  const roomIdNum = form.RoomId ? parseInt(form.RoomId, 10) : null;
+  const { data: roomAssignments = [] } = useQuery({
+    queryKey: ["civilworkdpr-work-done-saved-flow", "room", roomIdNum],
+    queryFn: () => getReportedAssignments({ roomId: roomIdNum }),
+    enabled: roomIdNum != null,
+  });
+  const roomAssignmentByRungId = useMemo(() => {
+    const map = new Map<number, (typeof roomAssignments)[number]>();
+    roomAssignments.forEach((a) => map.set(a.rungId, a));
+    return map;
+  }, [roomAssignments]);
+
   const selectedUnit = useMemo(
     () => (units as any[]).find((u: any) => String(u.Id) === form.UnitId) || null,
     [units, form.UnitId],
   );
 
-  // Room instances (Bathroom 1, Bathroom 2, ...) generated live from the
-  // selected Unit's saved room composition — current Alias at render time,
-  // so a renamed category shows up immediately without touching any stored
-  // data (see RoomCompositionBuilder.tsx / RoomCategoryMaster.tsx).
+  // Real rooms tagged to the selected Unit in Flat Master (dbo.RoomMaster)
+  // — no more synthetic/generated room list; if a unit has no rooms tagged
+  // yet, that's fixed in Flat Master, not by regenerating one here.
   const selectedUnitId = form.UnitId ? parseInt(form.UnitId, 10) : null;
   const { data: roomInstances = [], isLoading: loadingRooms } = useQuery({
-    queryKey: ["work-done-room-instances", selectedUnitId],
-    queryFn: () => getRoomInstancesForUnit(selectedUnitId as number),
+    queryKey: ["work-done-rooms-for-unit", selectedUnitId],
+    queryFn: () => getRoomsForUnit(selectedUnitId as number),
     enabled: !!selectedUnitId,
   });
   const selectedProject = useMemo(
@@ -329,7 +407,7 @@ export default function WorkDone() {
               </span>
             </div>
 
-            <div className="p-5">
+            <div className="p-3.5 sm:p-5">
               {/* Each level collapses into a chip once picked (see
                   LocationChip) and only the next level's dropdown is ever
                   rendered — nothing downstream shows until its parent is
@@ -390,7 +468,7 @@ export default function WorkDone() {
                 {/* 3. Floor — depends on Tower */}
                 {form.BlockId &&
                   (form.FloorNo ? (
-                    <LocationChip icon={LayoutGrid} label="Floor" value={form.FloorNo} onClear={() => handleFloorChange("")} />
+                    <LocationChip icon={LayoutGrid} label="Floor" value={floorDisplay(form.FloorNo)} onClear={() => handleFloorChange("")} />
                   ) : (
                     <div className="w-full sm:w-36">
                       <label className={leanLabelCls}>
@@ -400,7 +478,7 @@ export default function WorkDone() {
                         <option value="">Select floor…</option>
                         {floorsForTower.map((fl) => (
                           <option key={fl} value={fl}>
-                            Floor {fl}
+                            {floorDisplay(fl)}
                           </option>
                         ))}
                       </select>
@@ -427,15 +505,14 @@ export default function WorkDone() {
                     </div>
                   ))}
 
-                {/* 5. Room — generated from the selected Unit's saved room
-                    composition (Room Category Master x quantity, via
-                    RoomCompositionBuilder.tsx). */}
+                {/* 5. Room — real dbo.RoomMaster rows tagged to the selected
+                    Unit in Flat Master. */}
                 {form.UnitId &&
                   (form.RoomId ? (
                     <LocationChip
                       icon={DoorOpen}
                       label="Room"
-                      value={roomInstances.find((r) => r.key === form.RoomId)?.label || form.RoomId}
+                      value={roomInstances.find((r) => String(r.Id) === form.RoomId)?.RoomName || form.RoomId}
                       onClear={() => handleRoomChange("")}
                     />
                   ) : (
@@ -453,12 +530,12 @@ export default function WorkDone() {
                           {loadingRooms
                             ? "Loading rooms…"
                             : roomInstances.length === 0
-                              ? "No rooms configured for this unit"
+                              ? "No rooms created for this unit — add them in Flat Master"
                               : "Select room…"}
                         </option>
                         {roomInstances.map((r) => (
-                          <option key={r.key} value={r.key}>
-                            {r.label}
+                          <option key={r.Id} value={String(r.Id)}>
+                            {r.RoomName}
                           </option>
                         ))}
                       </select>
@@ -481,95 +558,17 @@ export default function WorkDone() {
                 <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
                 <span className="text-sm font-heading font-semibold text-foreground">Dependency Chains</span>
               </div>
-              <div className="divide-y divide-border">
-                {chainGroupsByRoom.map((group) => {
-                  const collapsed = !!collapsedChainGroups[group.key];
-                  return (
-                    <div key={group.key}>
-                      {/* Group header — every chain allocated to this room */}
-                      <button
-                        type="button"
-                        onClick={() => toggleChainGroup(group.key)}
-                        className="w-full flex items-center gap-2.5 px-5 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
-                      >
-                        {collapsed ? (
-                          <ChevronRight size={14} className="text-muted-foreground shrink-0" />
-                        ) : (
-                          <ChevronDown size={14} className="text-muted-foreground shrink-0" />
-                        )}
-                        <MapPin size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
-                        <span className="text-sm font-heading font-semibold text-foreground truncate">
-                          {group.projectName ? `${group.projectName} > ` : ""}
-                          {group.scopePath}
-                        </span>
-                        <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
-                          {group.chains.length} chain{group.chains.length !== 1 ? "s" : ""}
-                        </span>
-                      </button>
-
-                      {!collapsed && (
-                        <div className="divide-y divide-border">
-                          {group.chains.map(({ chain, index }) => {
-                            const detail = chainDetailQueries[index]?.data;
-                            const rungs = detail?.activities ?? [];
-                            return (
-                              <div key={chain.id} className="px-5 py-4 space-y-2.5">
-                                <div>
-                                  <span className="text-sm font-semibold text-foreground">{chain.alias}</span>
-                                  <span
-                                    className={`ml-2 text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                                      chain.workType === "INTERNAL"
-                                        ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                                        : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                                    }`}
-                                  >
-                                    {chain.workType}
-                                  </span>
-                                </div>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {rungs.length === 0 ? (
-                                    <span className="text-xs text-muted-foreground italic">Loading activities…</span>
-                                  ) : (
-                                    rungs.map((rung) => {
-                                      const assignment = rung.rungId != null ? allAssignmentByRungId.get(rung.rungId) : undefined;
-                                      const done = assignment?.status === "COMPLETED";
-                                      return (
-                                        <button
-                                          key={rung.rungId ?? rung.activityId}
-                                          type="button"
-                                          onClick={() => setActiveAssignment({ rung, chain })}
-                                          className={`flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-1 text-xs transition-colors ${
-                                            done
-                                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                              : "border-border bg-muted/40 text-foreground hover:bg-muted"
-                                          }`}
-                                          title="Assign engineer & material"
-                                        >
-                                          <span className="font-medium">
-                                            {rung.sequenceNo}. {rung.activityName}
-                                          </span>
-                                          <span
-                                            className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                                              done
-                                                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-                                                : "bg-slate-500/15 text-slate-600 dark:text-slate-400"
-                                            }`}
-                                          >
-                                            {done ? "Done" : "Pending"}
-                                          </span>
-                                        </button>
-                                      );
-                                    })
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+              <div className="p-2 sm:p-4">
+                <ScopeLocationTree
+                  rows={allChains as DependencyMasterListRow[]}
+                  countLabel="chain"
+                  renderLeaf={(chains) => (
+                    <DependencyChainCards
+                      chains={chains}
+                      onAssign={(rung, chain) => setActiveAssignment({ rung, chain })}
+                    />
+                  )}
+                />
               </div>
             </div>
           )}
@@ -589,7 +588,7 @@ export default function WorkDone() {
               </span>
             </div>
 
-            <div className="p-5 space-y-4">
+            <div className="p-3.5 sm:p-5 space-y-4">
               {loadingDependencies ? (
                 <div className="w-full h-10 rounded-lg border border-border bg-muted/30 animate-pulse" />
               ) : matchingDependencies.length === 0 ? (
@@ -625,7 +624,7 @@ export default function WorkDone() {
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-semibold text-foreground">{linkedDependency.alias}</span>
                         <span
-                          className={`text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                          className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
                             linkedDependency.workType === "INTERNAL"
                               ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
                               : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
@@ -661,78 +660,141 @@ export default function WorkDone() {
                       <label className={labelCls}>
                         <ListChecks size={11} /> Saved Flow
                       </label>
-                      <div className="rounded-lg border border-border overflow-hidden overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
-                              <th className="px-3.5 py-2.5">Activity</th>
-                              <th className="px-3 py-2.5">Engineer</th>
-                              <th className="px-3 py-2.5">Start Date</th>
-                              <th className="px-3 py-2.5">Material</th>
-                              <th className="px-3.5 py-2.5">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(linkedDependencyDetail?.activities ?? []).map((rung) => {
-                              const assignment = rung.rungId != null ? allAssignmentByRungId.get(rung.rungId) : undefined;
-                              return (
-                                <tr
-                                  key={`${rung.rungId ?? rung.activityId}-${rung.sequenceNo}`}
-                                  className="border-b border-border last:border-0 hover:bg-muted/20"
-                                >
-                                  <td className="px-3.5 py-3">
-                                    <span className="text-xs font-medium text-foreground">
-                                      {rung.sequenceNo}. {rung.activityName}
-                                    </span>
-                                  </td>
-                                  {assignment ? (
-                                    <>
-                                      <td className="px-3 py-3">
-                                        <span className="flex items-center gap-1.5 text-xs text-foreground">
-                                          <UserRound size={11} className="text-muted-foreground shrink-0" />
-                                          {assignment.engineerNames || (
-                                            <span className="text-muted-foreground italic">Unassigned</span>
-                                          )}
-                                        </span>
-                                      </td>
-                                      <td className="px-3 py-3">
-                                        <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
-                                          <CalendarDays size={11} className="text-muted-foreground shrink-0" />
-                                          {assignment.startDate ? new Date(assignment.startDate).toLocaleDateString() : "—"}
-                                        </span>
-                                      </td>
-                                      <td className="px-3 py-3">
-                                        {assignment.materials.length === 0 ? (
-                                          <span className="text-xs text-muted-foreground italic">—</span>
-                                        ) : (
-                                          <div className="flex flex-col gap-0.5">
-                                            {assignment.materials.map((m, i) => (
-                                              <span key={i} className="text-xs text-foreground whitespace-nowrap">
-                                                {m.name}
-                                                <span className="text-muted-foreground">
-                                                  {" "}
-                                                  · {m.quantity}
-                                                  {m.uom ? ` ${m.uom}` : ""}
-                                                </span>
-                                              </span>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </td>
-                                      <td className="px-3.5 py-3">
-                                        <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
-                                      </td>
-                                    </>
-                                  ) : (
-                                    <td colSpan={4} className="px-3 py-3">
-                                      <span className="text-xs text-muted-foreground italic">Not assigned yet</span>
-                                    </td>
+                      <div className="rounded-lg border border-border overflow-hidden">
+                        {/* Mobile: one stacked card per rung — the 5-column
+                            table below is the same cramped-on-a-phone shape
+                            Reporting's own activity table had before its own
+                            mobile rework; this mirrors that fix. */}
+                        <div className="sm:hidden divide-y divide-border">
+                          {(linkedDependencyDetail?.activities ?? []).map((rung) => {
+                            const assignment = rung.rungId != null ? roomAssignmentByRungId.get(rung.rungId) : undefined;
+                            return (
+                              <div key={`${rung.rungId ?? rung.activityId}-${rung.sequenceNo}`} className="p-3 space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="text-xs font-medium text-foreground leading-snug min-w-0">
+                                    {rung.sequenceNo}. {rung.activityName}
+                                  </span>
+                                  {assignment && (
+                                    <div className="shrink-0">
+                                      <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
+                                    </div>
                                   )}
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <QcBadge qcStatus={assignment?.qcStatus} />
+                                  <AttemptBadge attemptNo={assignment?.attemptNo} />
+                                </div>
+                                {assignment ? (
+                                  <>
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                                      <span className="flex items-center gap-1.5">
+                                        <UserRound size={11} className="shrink-0" />
+                                        {assignment.engineerNames || <span className="italic">Unassigned</span>}
+                                      </span>
+                                      <span className="flex items-center gap-1.5">
+                                        <CalendarDays size={11} className="shrink-0" />
+                                        {assignment.startDate ? new Date(assignment.startDate).toLocaleDateString() : "—"}
+                                      </span>
+                                    </div>
+                                    {assignment.materials.length > 0 && (
+                                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                        {assignment.materials.map((m, i) => (
+                                          <span key={i} className="text-xs text-foreground">
+                                            {m.name}
+                                            <span className="text-muted-foreground">
+                                              {" "}
+                                              · {m.quantity}
+                                              {m.uom ? ` ${m.uom}` : ""}
+                                            </span>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground italic">Not assigned yet</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Tablet/desktop: the original dense table. */}
+                        <div className="hidden sm:block overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                                <th className="px-3.5 py-2.5">Activity</th>
+                                <th className="px-3 py-2.5">Engineer</th>
+                                <th className="px-3 py-2.5">Start Date</th>
+                                <th className="px-3 py-2.5">Material</th>
+                                <th className="px-3.5 py-2.5">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(linkedDependencyDetail?.activities ?? []).map((rung) => {
+                                const assignment = rung.rungId != null ? roomAssignmentByRungId.get(rung.rungId) : undefined;
+                                return (
+                                  <tr
+                                    key={`${rung.rungId ?? rung.activityId}-${rung.sequenceNo}`}
+                                    className="border-b border-border last:border-0 hover:bg-muted/20"
+                                  >
+                                    <td className="px-3.5 py-3">
+                                      <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                                        {rung.sequenceNo}. {rung.activityName}
+                                        <QcBadge qcStatus={assignment?.qcStatus} />
+                                        <AttemptBadge attemptNo={assignment?.attemptNo} />
+                                      </span>
+                                    </td>
+                                    {assignment ? (
+                                      <>
+                                        <td className="px-3 py-3">
+                                          <span className="flex items-center gap-1.5 text-xs text-foreground">
+                                            <UserRound size={11} className="text-muted-foreground shrink-0" />
+                                            {assignment.engineerNames || (
+                                              <span className="text-muted-foreground italic">Unassigned</span>
+                                            )}
+                                          </span>
+                                        </td>
+                                        <td className="px-3 py-3">
+                                          <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
+                                            <CalendarDays size={11} className="text-muted-foreground shrink-0" />
+                                            {assignment.startDate ? new Date(assignment.startDate).toLocaleDateString() : "—"}
+                                          </span>
+                                        </td>
+                                        <td className="px-3 py-3">
+                                          {assignment.materials.length === 0 ? (
+                                            <span className="text-xs text-muted-foreground italic">—</span>
+                                          ) : (
+                                            <div className="flex flex-col gap-0.5">
+                                              {assignment.materials.map((m, i) => (
+                                                <span key={i} className="text-xs text-foreground whitespace-nowrap">
+                                                  {m.name}
+                                                  <span className="text-muted-foreground">
+                                                    {" "}
+                                                    · {m.quantity}
+                                                    {m.uom ? ` ${m.uom}` : ""}
+                                                  </span>
+                                                </span>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </td>
+                                        <td className="px-3.5 py-3">
+                                          <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
+                                        </td>
+                                      </>
+                                    ) : (
+                                      <td colSpan={4} className="px-3 py-3">
+                                        <span className="text-xs text-muted-foreground italic">Not assigned yet</span>
+                                      </td>
+                                    )}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     </div>
                   )}

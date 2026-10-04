@@ -1,5 +1,6 @@
 import React from "react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { AutoInput } from "@/components/ui/date-input";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Link2, X } from "lucide-react";
 import { MODE_STYLE } from "../constants";
 
@@ -21,7 +22,7 @@ export function Field({
         {required && <span className="text-destructive">*</span>}
       </label>
       {children}
-      {hint && <p className="text-[11px] text-muted-foreground/70">{hint}</p>}
+      {hint && <p className="text-[0.6875rem] text-muted-foreground/70">{hint}</p>}
     </div>
   );
 }
@@ -36,7 +37,7 @@ export function SectionHeader({
   badge?: React.ReactNode;
 }) {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   return (
     <div
       className="flex items-center gap-2.5 px-3 py-2 rounded-lg"
@@ -57,7 +58,7 @@ export function SectionHeader({
         <Icon size={11} style={{ color: "#818cf8" }} />
       </div>
       <p
-        className="text-[10px] font-heading uppercase tracking-widest flex-1"
+        className="text-[0.625rem] font-heading uppercase tracking-widest flex-1"
         style={{ color: isDark ? "#94a3b8" : "#6366f1" }}
       >
         {label}
@@ -122,7 +123,7 @@ export function ModeBadge({ mode }: { mode: string }) {
   };
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold ring-1 ${s.ring} ${s.text}`}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.6875rem] font-heading font-semibold ring-1 ${s.ring} ${s.text}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {mode || "—"}
@@ -160,7 +161,7 @@ export function InputField({
           {prefix}
         </span>
       )}
-      <input
+      <AutoInput
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}

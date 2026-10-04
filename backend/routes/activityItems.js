@@ -41,34 +41,54 @@ router.get("/", authMiddleware, async (req, res) => {
 });
 
 // ─── POST / — link an item to an activity ────────────────────────────────────
+// Accepts either the original single `itemId`, or `itemIds: string[]` to
+// link several items in one request — same shape as
+// activity-checkpoint.js's POST /template/:activityId multi-add.
 router.post("/", authMiddleware, requirePageRight("activity-master", "edit"), async (req, res) => {
-  const { activityId, itemId } = req.body;
+  const { activityId } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
+  const rawIds = Array.isArray(req.body?.itemIds)
+    ? req.body.itemIds
+    : req.body?.itemId
+      ? [req.body.itemId]
+      : [];
+  const itemIds = [...new Set(rawIds.filter(Boolean))];
+
   if (!activityId) return res.status(400).json({ error: "activityId is required" });
-  if (!itemId) return res.status(400).json({ error: "itemId is required" });
+  if (itemIds.length === 0) return res.status(400).json({ error: "itemId or itemIds is required" });
 
   try {
     const pool = getPool();
 
     const dup = await pool.request()
       .input("activityId", sql.Int, activityId)
-      .input("itemId", sql.UniqueIdentifier, itemId)
-      .query(`SELECT ActivityItemId FROM dbo.ActivityItems WHERE ActivityId = @activityId AND ItemId = @itemId`);
-    if (dup.recordset.length > 0) {
+      .query(`SELECT ItemId FROM dbo.ActivityItems WHERE ActivityId = @activityId`);
+    const already = new Set(dup.recordset.map((r) => r.ItemId));
+    if (itemIds.some((id) => already.has(id))) {
       return res.status(409).json({ error: "This item is already linked to this activity" });
     }
 
-    const result = await pool.request()
-      .input("activityId", sql.Int, activityId)
-      .input("itemId", sql.UniqueIdentifier, itemId)
-      .input("createdBy", sql.NVarChar(100), actor)
-      .query(`
-        INSERT INTO dbo.ActivityItems (ActivityId, ItemId, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.ActivityItemId AS id
-        VALUES (@activityId, @itemId, @createdBy, GETDATE())
-      `);
-    res.status(201).json({ success: true, id: result.recordset[0].id });
+    const ids = [];
+    for (const itemId of itemIds) {
+      const result = await pool.request()
+        .input("activityId", sql.Int, activityId)
+        .input("itemId", sql.UniqueIdentifier, itemId)
+        .input("createdBy", sql.NVarChar(100), actor)
+        .query(`
+          INSERT INTO dbo.ActivityItems (ActivityId, ItemId, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.ActivityItemId AS id
+          VALUES (@activityId, @itemId, @createdBy, GETDATE())
+        `);
+      ids.push(result.recordset[0].id);
+    }
+
+    // Single-id requests keep the original `{ id }` shape so any other
+    // caller of this route isn't broken by this change.
+    if (rawIds.length === 1 && req.body?.itemId !== undefined) {
+      return res.status(201).json({ success: true, id: ids[0] });
+    }
+    res.status(201).json({ success: true, ids });
   } catch (err) {
     console.error("ActivityItems POST error:", err);
     res.status(500).json({ error: "Failed to link item to activity" });

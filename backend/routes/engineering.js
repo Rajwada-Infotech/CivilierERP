@@ -1,6 +1,7 @@
 "use strict";
 
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -20,7 +21,13 @@ const {
 const WORK_DONE_TABLE = "WorkDone";
 const WORK_DONE_CACHE = "engineering-work-done";
 
-router.use(checkPermissionForMethod("Engineering", "WorkDone"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Engineering", "WorkDone")(req, res, next);
+});
 
 const tableExists = {
   [WORK_DONE_TABLE]: null,
@@ -727,7 +734,11 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
       .input("GrossAmount", sql.Decimal(18, 2), gross)
       .input("Deductions", sql.Decimal(18, 2), deductions)
       .input("CertifiedAmount", sql.Decimal(18, 2), certified)
-      .input("Status", sql.NVarChar(50), body.Status || "Draft")
+      // Editing an already-Approved Work Done must go back through approval
+      // — ignore whatever status the client sends. Mirrors
+      // journalVoucher.js's wasApproved handling; Work Done doesn't post to
+      // GL directly, so no reversal needed.
+      .input("Status", sql.NVarChar(50), wasApproved ? "Pending" : body.Status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), body.Remarks || null)
       .input("UpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.WorkDone SET
@@ -762,7 +773,12 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
 
-    // Re-submit to Pending if still in Draft/Rejected
+    // Re-submit to Pending if still in Draft/Rejected. For a genuinely
+    // Rejected record, transition()'s Pending branch writes a fresh Level=0
+    // marker, which restarts approval at level 1 regardless of what was
+    // approved before the rejection (see approvalService.js's
+    // currentCycleCutoffSql).
+    let resubmitted = false;
     try {
       const pool = getPool();
       const r = await pool
@@ -779,6 +795,7 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
           req.user?.role,
         );
         await bumpCacheVersion(WORK_DONE_CACHE);
+        resubmitted = true;
       }
     } catch (e) {
       console.warn("[Work Done auto-submit on update]", e.message);
@@ -802,7 +819,15 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
       }
     }
 
-    res.json({ message: "Work Done entry updated" });
+    res.json({
+      message: wasApproved
+        ? "Work Done entry updated — sent back for approval"
+        : resubmitted
+          ? "Work Done entry updated and re-submitted for approval"
+          : "Work Done entry updated",
+      reopenedForApproval: wasApproved,
+      resubmitted,
+    });
   } catch (err) {
     console.error("[PUT /engineering/work-done/:id]", err);
     res.status(500).json({ error: "Failed to update work done entry." });
@@ -851,7 +876,8 @@ router.delete("/work-done/:id", requirePageRight("engineering-work-order", "dele
 });
 
 router.put("/work-done/:id/submit", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -871,7 +897,8 @@ router.put("/work-done/:id/submit", requirePageRight("engineering-work-order", "
 });
 
 router.put("/work-done/:id/approve", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -881,6 +908,8 @@ router.put("/work-done/:id/approve", async (req, res) => {
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
@@ -893,7 +922,8 @@ router.put("/work-done/:id/approve", async (req, res) => {
 });
 
 router.put("/work-done/:id/reject", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -904,6 +934,7 @@ router.put("/work-done/:id/reject", async (req, res) => {
       userEmail,
       req.user?.role,
       req.body?.note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");

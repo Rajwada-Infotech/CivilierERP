@@ -22,6 +22,9 @@ export type WorkType = "INTERNAL" | "EXTERNAL";
 export interface ScopeOption {
   id: number | string;
   label: string;
+  /** Room level only — set when this room already has a Dependency Chain
+   *  (a room can only have one), so the picker can show/disable it. */
+  linkedAlias?: string | null;
 }
 
 export interface DependencyScope {
@@ -73,6 +76,10 @@ export interface DependencyMasterListRow {
   activityCount: number;
   /** Server-built "Tower > Floor N > Flat > Room" trail — ready to render. */
   scopePath: string;
+  /** Full activity ladder for this chain — included inline so callers that
+   *  need every chain's rungs (e.g. Work Done's chain browser) don't have
+   *  to fire one GET /:id per row. */
+  activities: LadderActivity[];
 }
 
 export interface DependencyMasterDetail extends DependencyMasterListRow {
@@ -98,10 +105,16 @@ export const getFlatOptions = async (towerId: number, floor: string): Promise<Sc
   return handleResponse<ScopeOption[]>(res);
 };
 
-export const getRoomOptions = async (flatId: number, floor: string): Promise<ScopeOption[]> => {
-  const res = await fetchWithAuth(
-    `${BASE}/scope-options?level=room&flatId=${flatId}&floor=${encodeURIComponent(floor)}`,
-  );
+export const getRoomOptions = async (
+  flatId: number,
+  floor: string,
+  // When editing an existing chain, its own current room shouldn't be
+  // flagged as "already linked" to itself.
+  excludeId?: number | null,
+): Promise<ScopeOption[]> => {
+  const params = new URLSearchParams({ level: "room", flatId: String(flatId), floor });
+  if (excludeId) params.set("excludeId", String(excludeId));
+  const res = await fetchWithAuth(`${BASE}/scope-options?${params.toString()}`);
   return handleResponse<ScopeOption[]>(res);
 };
 

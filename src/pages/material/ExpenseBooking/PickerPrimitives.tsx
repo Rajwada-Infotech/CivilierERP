@@ -12,9 +12,10 @@ import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { fmt } from "./helpers";
 import { SECTION_ICONS, inputCls } from "./constants";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Smooth date picker (popover calendar) ───────────────────────────────────
-// Replaces native <input type="date"> — avoids the inconsistent, unstyled
+// Replaces native <DateInput> — avoids the inconsistent, unstyled
 // browser date-segment UI (e.g. "dd-----yyyy" placeholders) across browsers.
 export function DateField({
   value,
@@ -78,7 +79,7 @@ export function SectionHeader({ label }: { label: string }) {
           <Icon size={12} className="text-emerald-500" />
         </div>
       )}
-      <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+      <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
         {label}
       </p>
     </div>
@@ -97,8 +98,8 @@ export function InfoPill({
   return (
     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/40 border border-border/50">
       <Icon size={11} className="text-muted-foreground shrink-0" />
-      <span className="text-[10px] text-muted-foreground">{label}:</span>
-      <span className="text-[10px] font-semibold text-foreground truncate">
+      <span className="text-[0.625rem] text-muted-foreground">{label}:</span>
+      <span className="text-[0.625rem] font-semibold text-foreground truncate">
         {value}
       </span>
     </div>
@@ -149,13 +150,13 @@ export function PickerRow({
             {primary}
           </span>
           {badge && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+            <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
               {badge}
             </span>
           )}
         </div>
         {secondary && (
-          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+          <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">
             {secondary}
           </p>
         )}
@@ -191,7 +192,7 @@ export function StatCard({
         <Icon size={15} />
       </div>
       <div className="min-w-0">
-        <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider truncate">
+        <p className="text-[0.625rem] text-muted-foreground font-heading uppercase tracking-wider truncate">
           {label}
         </p>
         <p className="text-base font-bold font-mono text-foreground mt-0.5">
@@ -254,7 +255,7 @@ export function GRNChainBadge({
       {grns.map((g) => (
         <span
           key={g.GRNNo}
-          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 font-mono whitespace-nowrap"
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 font-mono whitespace-nowrap"
         >
           <Truck size={9} className="shrink-0" />
           {g.GRNNo}
@@ -297,7 +298,7 @@ export function LinkedDocBadge({
     return (
       <div className="flex flex-col gap-1">
         {linkedPODocNo && (
-          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-mono whitespace-nowrap">
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-mono whitespace-nowrap">
             <FileText size={9} className="shrink-0" />
             {linkedPODocNo}
           </span>
@@ -306,7 +307,7 @@ export function LinkedDocBadge({
           {grnNos.length > 0 ? grnNos.map((g) => (
             <span
               key={g}
-              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 font-mono whitespace-nowrap"
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 font-mono whitespace-nowrap"
             >
               <Truck size={9} className="shrink-0" />
               {g}
@@ -319,7 +320,7 @@ export function LinkedDocBadge({
 
   if (eSourceType === "PO" || eSourceType === "WO_PO") {
     return sourceDocNo ? (
-      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-mono whitespace-nowrap">
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-mono whitespace-nowrap">
         <FileText size={9} className="shrink-0" />
         {sourceDocNo}
       </span>
@@ -328,7 +329,7 @@ export function LinkedDocBadge({
 
   if (eSourceType === "WORK_DONE") {
     return sourceDocNo ? (
-      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 font-mono whitespace-nowrap">
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 font-mono whitespace-nowrap">
         <Wrench size={9} className="shrink-0" />
         {sourceDocNo}
       </span>

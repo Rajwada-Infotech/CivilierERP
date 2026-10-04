@@ -7,22 +7,23 @@ import {
   Bank,
   Box,
   Cpu,
-  Notepad,
+  Grid1,
   Message2,
   ShoppingCart,
-  Building3,
   Chart21,
   Archive,
   VideoPlay,
   Shield,
   MoneyRecive,
+  Profile2User,
 } from "iconsax-react";
-import { HardHat } from "lucide-react";
+import { HardHat, Wrench } from "lucide-react";
+import { TimelineIcon } from "@/components/icons/TimelineIcon";
 import { useModule } from "@/contexts/ModuleContext";
-import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
+import { MODULE_DASHBOARD_ROUTES, Module, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 // ── Module definitions ────────────────────────────────────────────────────────
 // ringRgb: raw "r,g,b" used to build valid RGBA strings at runtime
@@ -36,6 +37,11 @@ const HardHatIcon: React.FC<{ size?: number; variant?: string; className?: strin
   variant,
   ...rest
 }) => <HardHat {...rest} />;
+
+const WrenchIcon: React.FC<{ size?: number; variant?: string; className?: string; style?: React.CSSProperties }> = ({
+  variant,
+  ...rest
+}) => <Wrench {...rest} />;
 
 const MODULES = [
   {
@@ -85,7 +91,7 @@ const MODULES = [
   },
   {
     id: "civilworkdpr" as Module,
-    icon: Building3,
+    icon: TimelineIcon,
     label: "Civil Work DPR",
     desc: "Internal operations workspace",
     color: "#0891b2",
@@ -94,7 +100,7 @@ const MODULES = [
   },
   {
     id: "followup" as Module,
-    icon: Notepad,
+    icon: Grid1,
     label: "Follow-Up",
     desc: "Sales, agreements & CRM",
     color: "#0d9488",
@@ -137,6 +143,24 @@ const MODULES = [
     bg: "rgba(14,165,233,0.22)",
     ringRgb: "14,165,233",
   },
+  {
+    id: "maintenance" as Module,
+    icon: WrenchIcon,
+    label: "Maintenance",
+    desc: "Upkeep, repairs & servicing",
+    color: "#65a30d",
+    bg: "rgba(101,163,13,0.22)",
+    ringRgb: "101,163,13",
+  },
+  {
+    id: "hr-payroll" as Module,
+    icon: Profile2User,
+    label: "HR and Payroll",
+    desc: "Employees, attendance & payroll",
+    color: "#eab308",
+    bg: "rgba(234,179,8,0.22)",
+    ringRgb: "234,179,8",
+  },
   // Records is always last — new modules get inserted above this entry
   {
     id: "records" as Module,
@@ -176,9 +200,9 @@ export const ModuleStrip: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const role = currentUser?.role ?? "";
-  const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
+  const isAdminTier = isAdminTierRole(role);
 
   const activeModuleItem =
     [...MODULES, ADMIN_MODULE].find((m) => m.id === activeModule) ?? MODULES[0];
@@ -202,25 +226,11 @@ export const ModuleStrip: React.FC = () => {
     setCanScrollDown(hasOverflow && !atBottom);
   }, []);
 
-  // Map each module to a representative page key that signals access.
-  // A user with ANY view right in a module's page definitions will see that module.
-  const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
-    finance:     ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions", "expense-booking"],
-    material:    ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
-    "fixed-asset": ["fixed-asset-dashboard", "fixed-asset-record", "fixed-asset-tagging", "asset-transfer", "depreciation-setup", "id-template-master"],
-    followup:    ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
-    engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
-    ticket:      ["ticket-dashboard", "tickets"],
-    sales:       ["sale-order", "sale-invoice", "sales-payment"],
-    civilworkdpr: ["civilworkdpr-dashboard"],
-    "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
-  };
-
-  const userHasModuleAccess = (moduleId: string): boolean => {
-    if (isAdminTier) return true;
-    const pages = MODULE_SAMPLE_PAGES[moduleId] ?? [];
-    return pages.some((pk) => canAccessPage(pk as any));
-  };
+  // MODULE_SAMPLE_PAGES/userHasModuleAccess now live in module.utils.ts —
+  // shared with useGlobalShortcuts.ts's Shift+key module switcher so both
+  // agree on exactly who can reach which module.
+  const userHasModuleAccess = (moduleId: string): boolean =>
+    sharedUserHasModuleAccess(moduleId, isAdminTier, (pk) => canAccessPage(pk as any));
 
   // Filter regular modules; admin for admin-tier OR users with approval-inbox access
   const canAccessApprovalInbox = canAccessPage("approval-inbox" as any);
@@ -567,10 +577,10 @@ export const ModuleStrip: React.FC = () => {
                       : "0 8px 28px rgba(15,17,26,0.18)",
                   }}
                 >
-                  <p className="text-[12px] font-semibold leading-snug" style={{ color: isDark ? "#f4f5f9" : "#14161f" }}>
+                  <p className="text-[0.75rem] font-semibold leading-snug" style={{ color: isDark ? "#f4f5f9" : "#14161f" }}>
                     {tooltip.label}
                   </p>
-                  <p className="text-[10px] mt-0.5 leading-snug" style={{ color: isDark ? "rgba(244,245,249,0.62)" : "rgba(20,22,31,0.62)" }}>
+                  <p className="text-[0.625rem] mt-0.5 leading-snug" style={{ color: isDark ? "rgba(244,245,249,0.62)" : "rgba(20,22,31,0.62)" }}>
                     {tooltip.desc}
                   </p>
                   <span

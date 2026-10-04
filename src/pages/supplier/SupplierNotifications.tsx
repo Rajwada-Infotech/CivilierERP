@@ -3,11 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import * as spApi from "@/api/supplierPortalApi";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   AlertTriangle, Clock, CheckCircle2, Bell, ChevronRight,
   RefreshCw, FileText, Zap, Package,
 } from "lucide-react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const fade = (delay = 0) => ({
   initial: { opacity: 0, y: 12 },
@@ -41,7 +42,7 @@ type Alert = {
 export default function SupplierNotifications() {
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const { data: quotations = [], isLoading: loadingQ, refetch: refetchQ, isFetching: fetchingQ } = useQuery({
     queryKey: ["supplier-quotations"],
@@ -137,10 +138,10 @@ export default function SupplierNotifications() {
     due_soon: {
       icon: Clock,
       color: "text-amber-500",
-      bg: "bg-amber-50 dark:bg-amber-500/10",
+      bg: "bg-amber-50 dark:bg-[#ffe2021a]",
       border: "border-amber-200 dark:border-amber-500/20",
       label: "Due Soon",
-      labelColor: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20",
+      labelColor: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-[#ffe2021a] border border-amber-200 dark:border-amber-500/20",
     },
     new: {
       icon: Zap,
@@ -161,22 +162,22 @@ export default function SupplierNotifications() {
     goods_pending: {
       icon: Package,
       color: "text-amber-500",
-      bg: "bg-amber-50 dark:bg-amber-500/10",
+      bg: "bg-amber-50 dark:bg-[#ffe2021a]",
       border: "border-amber-200 dark:border-amber-500/20",
       label: "Pending Delivery",
-      labelColor: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20",
+      labelColor: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-[#ffe2021a] border border-amber-200 dark:border-amber-500/20",
     },
   };
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-background">
-      <div className="fixed inset-0 pointer-events-none z-0">
+      <BodyPortal><div className="fixed inset-0 pointer-events-none z-0">
         <div style={{
           position: "absolute", top: "-5%", left: "50%", transform: "translateX(-50%)",
           width: "60vw", height: "30vh",
           background: `radial-gradient(ellipse at 50% 0%, rgba(16,185,129,${isDark ? "0.06" : "0.03"}) 0%, transparent 70%)`,
         }} />
-      </div>
+      </div></BodyPortal>
 
       <div className="relative z-10 max-w-2xl mx-auto px-4 py-8 space-y-5">
 
@@ -236,7 +237,7 @@ export default function SupplierNotifications() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold text-foreground truncate">{alert.title}</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${m.labelColor}`}>
+                      <span className={`text-[0.625rem] font-bold px-1.5 py-0.5 rounded-full ${m.labelColor}`}>
                         {m.label}
                       </span>
                     </div>
@@ -244,7 +245,7 @@ export default function SupplierNotifications() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {alert.time && (
-                      <span className="text-[10px] text-muted-foreground/60 hidden sm:block">
+                      <span className="text-[0.625rem] text-muted-foreground/60 hidden sm:block">
                         {fmtRelative(alert.time)}
                       </span>
                     )}
@@ -260,7 +261,7 @@ export default function SupplierNotifications() {
         {!isLoading && alerts.length > 0 && (
           <motion.div {...fade(0.2)} className="flex items-center justify-center gap-1.5 py-2">
             <FileText size={11} className="text-muted-foreground/40" />
-            <span className="text-[11px] text-muted-foreground/50">
+            <span className="text-[0.6875rem] text-muted-foreground/50">
               Alerts are generated from your active RFQ list
             </span>
           </motion.div>

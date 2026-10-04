@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const verifyToken = require("../middleware/auth");
@@ -80,7 +81,8 @@ router.get("/roles", verifyToken, guard, async (req, res) => {
 // ── GET /api/sa/role-master/user/:id/permissions ──────────────────────────────
 router.get("/user/:id/permissions", verifyToken, guard, async (req, res) => {
   try {
-    const userId = parseInt(req.params.id, 10);
+    const userId = parseId(req.params.id);
+    if (!userId) return res.status(400).json({ error: "Invalid id" });
     const pool = getPool();
 
     const ur = await pool.request().input("id", sql.Int, userId)

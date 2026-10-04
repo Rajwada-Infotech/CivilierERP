@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { fmtIstIso } from "@/lib/istTime";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -9,6 +10,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Phone, MapPin, Clock, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DateInput } from "@/components/ui/date-input";
 
 const ACTIVITIES_API = "/api/sa/lead-activities";
 const LEADS_API = "/api/sa/leads";
@@ -249,7 +251,7 @@ const SaFollowups: React.FC = () => {
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Next Reminder Date</label>
-                    <input type="date" value={logForm.NextFollowupDate} onChange={(e) => setLogForm((f) => ({ ...f, NextFollowupDate: e.target.value }))}
+                    <DateInput value={logForm.NextFollowupDate} onChange={(e) => setLogForm((f) => ({ ...f, NextFollowupDate: e.target.value }))}
                       className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                   </div>
                   <div className="col-span-2">
@@ -259,7 +261,7 @@ const SaFollowups: React.FC = () => {
                   </div>
                 </div>
                 <button onClick={handleLogFollowup} disabled={saving}
-                  className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg disabled:opacity-40 hover:bg-primary/90 transition-colors">
+                  className="px-4 py-2 btn-module text-white text-sm font-medium rounded-lg disabled:opacity-40 transition-colors">
                   {saving ? "Logging..." : "Log Follow-Up"}
                 </button>
               </div>
@@ -274,7 +276,7 @@ const SaFollowups: React.FC = () => {
                   <div key={h.Id} className="px-4 py-3 border-b border-border last:border-0">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-foreground">{h.ActivityType}</span>
-                      <span className="text-xs text-muted-foreground">{h.CreatedAt ? String(h.CreatedAt).slice(0, 16).replace("T", " ") : "—"}</span>
+                      <span className="text-xs text-muted-foreground">{h.CreatedAt ? fmtIstIso(h.CreatedAt) : "—"}</span>
                     </div>
                     {h.Summary && <p className="text-xs text-muted-foreground mt-1">{h.Summary}</p>}
                     {h.NextFollowupDate && <p className="text-xs text-amber-600 mt-0.5">Next reminder: {String(h.NextFollowupDate).slice(0, 10)}</p>}
@@ -297,7 +299,7 @@ const SaFollowups: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Preferred Date</label>
-              <input type="date" value={visitForm.PreferredDate} onChange={(e) => setVisitForm((f) => ({ ...f, PreferredDate: e.target.value }))}
+              <DateInput value={visitForm.PreferredDate} onChange={(e) => setVisitForm((f) => ({ ...f, PreferredDate: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
             <div>
@@ -315,7 +317,7 @@ const SaFollowups: React.FC = () => {
             <button onClick={() => { setVisitDialogOpen(false); setVisitForm({ ...EMPTY_VISIT_FORM }); }}
               className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
             <button onClick={handleScheduleVisit} disabled={schedulingVisit}
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold btn-module text-white disabled:opacity-40 transition-colors">
               {schedulingVisit ? "Scheduling..." : "Schedule Visit"}
             </button>
           </div>

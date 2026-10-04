@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { AutoInput } from "@/components/ui/date-input";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -10,10 +11,15 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, Search, ChevronRight, IdCard, IndianRupee, Lock, Pencil, BookUser,
-  User, MapPin, Briefcase, FileText, UserPlus, AlertTriangle,
+  User, MapPin, Briefcase, FileText, UserPlus, AlertTriangle, Trash2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableSelect } from "@/components/SearchableSelect";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -25,16 +31,29 @@ const EMPTY_FORM = {
   IsCurrentSameAsPermanent: true,
   CurrentAddress: "", CurrentCity: "", CurrentState: "", CurrentPincode: "",
   CoApplicantName: "", CoApplicantMobile: "", CoApplicantPanNo: "", CoApplicantRelation: "",
+  InvoiceMode: "NonInvoice" as "Invoice" | "NonInvoice",
   Notes: "",
 };
 
-async function fetchCustomers(search: string): Promise<any[]> {
+const PAGE_SIZE = 20;
+interface CustomerListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchCustomersList(filters: CustomerListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
   try {
-    const url = search ? `${API}?search=${encodeURIComponent(search)}` : API;
-    const res = await fetchWithAuth(url);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
+    const res = await fetchWithAuth(`${API}?${params}`);
+    if (!res.ok) return { rows: [], total: 0 };
+    const data = await res.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 // Only converted leads are offered here — this dropdown IS the real "only a
 // converted lead may enter the CRM module" gate now (Leads -> Customer ->
@@ -64,12 +83,12 @@ function AddressFields({
   return (
     <>
       <div>
-        <label className="text-xs text-muted-foreground block mb-1">Permanent Address *</label>
+        <label className="text-xs text-muted-foreground block mb-1">Permanent Address</label>
         <textarea value={form.PermanentAddress} readOnly={readOnly}
           onChange={(e) => setForm((f: any) => ({ ...f, PermanentAddress: e.target.value }))}
           rows={2} className={`${inputCls} resize-none`} />
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {([
           { key: "PermanentCity", label: "City" },
           { key: "PermanentState", label: "State" },
@@ -102,7 +121,7 @@ function AddressFields({
               onChange={(e) => setForm((f: any) => ({ ...f, CurrentAddress: e.target.value }))}
               rows={2} className={`${inputCls} resize-none`} />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {([
               { key: "CurrentCity", label: "City" },
               { key: "CurrentState", label: "State" },
@@ -122,7 +141,7 @@ function AddressFields({
   );
 }
 
-function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onClose: () => void; onSaved: () => void }) {
+function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onDeleted }: { customer: any; canDelete?: boolean; onClose: () => void; onSaved: () => void; onDeleted?: () => void }) {
   const [form, setForm] = useState({
     CustomerName: customer.CustomerName || "", Mobile: customer.Mobile || "",
     AltMobile: customer.AltMobile || "", Email: customer.Email || "",
@@ -136,6 +155,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
     DateOfBirth: customer.DateOfBirth ? String(customer.DateOfBirth).slice(0, 10) : "",
     CoApplicantName: customer.CoApplicantName || "", CoApplicantMobile: customer.CoApplicantMobile || "",
     CoApplicantPanNo: customer.CoApplicantPanNo || "", CoApplicantRelation: customer.CoApplicantRelation || "",
+    InvoiceMode: (customer.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice") as "Invoice" | "NonInvoice",
     Notes: customer.Notes || "",
   });
   const [saving, setSaving] = useState(false);
@@ -147,7 +167,35 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
   const [locked, setLocked] = useState(true);
   const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Client-side mirror of the server guard: a customer can be deleted only when
+  // none of their bookings are still live (Approved / Pending / in-approval).
+  // Backend re-checks and is the real authority — this just gates the button.
+  const blockingBookings = (customer.applications || []).filter(
+    (a: any) => a.BookingStatus && !["Cancelled", "Rejected", "Expired"].includes(a.BookingStatus),
+  );
+  const deleteBlocked = blockingBookings.length > 0;
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${customer.Id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to delete customer");
+      toast.success(`${customer.CustomerNo} deleted`);
+      onDeleted?.();
+      onClose();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleSave = async () => {
+    if (!form.CustomerName?.trim()) { toast.error("Customer Name is required"); return; }
     if (form.Mobile?.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
       toast.error("Mobile must be exactly 10 digits"); return;
     }
@@ -185,11 +233,11 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
+      <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
         <DialogHeader className="space-y-0.5">
           <DialogTitle className="font-heading text-base font-bold flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
-              <IdCard size={16} className="text-amber-500" /> {customer.CustomerNo} — Edit Customer
+              <IdCard size={16} className="text-sky-500" /> {customer.CustomerNo} — Edit Customer
             </span>
             {locked ? (
               <button onClick={() => setLocked(false)}
@@ -197,7 +245,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
                 <Pencil size={12} /> Edit
               </button>
             ) : (
-              <span className="flex items-center gap-1 text-xs font-medium text-amber-600 shrink-0">
+              <span className="flex items-center gap-1 text-xs font-medium text-sky-600 shrink-0">
                 <Pencil size={12} /> Editing
               </span>
             )}
@@ -217,23 +265,23 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <div className="rounded-xl border border-border p-3 space-y-2">
             <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-              <User size={13} className="text-amber-500" /> Personal &amp; Financial Details
+              <User size={13} className="text-sky-500" /> Personal &amp; Financial Details
             </h3>
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {[
-                { key: "CustomerName", label: "Customer Name *", type: "text" },
-                { key: "Mobile", label: "Mobile *", type: "text" },
+                { key: "CustomerName", label: "Customer Name", type: "text", required: true },
+                { key: "Mobile", label: "Mobile", type: "text" },
                 { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                 { key: "Email", label: "Email", type: "email" },
-                { key: "PanNo", label: "PAN Number *", type: "text" },
+                { key: "PanNo", label: "PAN Number", type: "text" },
                 { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                 { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                 { key: "Occupation", label: "Occupation", type: "text" },
                 { key: "AnnualIncome", label: "Annual Income", type: "number" },
-              ].map(({ key, label, type }) => (
+              ].map(({ key, label, type, required }) => (
                 <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-0.5">{label}</label>
-                  <input type={type} value={(form as any)[key]} readOnly={locked}
+                  <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
+                  <AutoInput type={type} value={(form as any)[key]} readOnly={locked}
                     onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                     className={inputCls} />
                 </div>
@@ -244,7 +292,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
           <div className="space-y-3">
             <div className="rounded-xl border border-border p-3 space-y-2">
               <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <MapPin size={13} className="text-amber-500" /> Address
+                <MapPin size={13} className="text-sky-500" /> Address
               </h3>
               <AddressFields form={form} setForm={setForm} readOnly={locked} inputCls={inputCls} />
             </div>
@@ -255,7 +303,23 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
 
             <div className="rounded-xl border border-border p-3 space-y-2">
               <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <FileText size={13} className="text-amber-500" /> Notes
+                <FileText size={13} className="text-sky-500" /> Billing
+              </h3>
+              <p className="text-[0.6875rem] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
+              <div className="flex items-center gap-4">
+                {(["NonInvoice", "Invoice"] as const).map((mode) => (
+                  <label key={mode} className={`flex items-center gap-1.5 text-sm ${locked ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}`}>
+                    <input type="radio" name="invoiceMode" disabled={locked} checked={form.InvoiceMode === mode}
+                      onChange={() => setForm((f) => ({ ...f, InvoiceMode: mode }))} />
+                    {mode === "NonInvoice" ? "Non-Invoice" : "Invoice"}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border p-3 space-y-2">
+              <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+                <FileText size={13} className="text-sky-500" /> Notes
               </h3>
               <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
                 rows={2} className={`${inputCls} resize-none`} />
@@ -271,23 +335,23 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
         {(customer.outstanding && Number(customer.outstanding.TotalDue) > 0) || customer.applications?.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {customer.outstanding && Number(customer.outstanding.TotalDue) > 0 ? (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
-                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-amber-700 dark:text-amber-400"><IndianRupee size={13} /> Outstanding</h3>
-                <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-2">
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-sky-700 dark:text-sky-400"><IndianRupee size={13} /> Outstanding</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                   <div><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">₹{Number(customer.outstanding.TotalDue).toLocaleString("en-IN")}</span></div>
                   <div><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-green-700">₹{Number(customer.outstanding.TotalPaid).toLocaleString("en-IN")}</span></div>
-                  <div><span className="text-muted-foreground block">Outstanding</span><span className="font-semibold text-amber-700">₹{Number(customer.outstanding.TotalOutstanding).toLocaleString("en-IN")}</span></div>
+                  <div><span className="text-muted-foreground block">Outstanding</span><span className="font-semibold text-sky-700">₹{Number(customer.outstanding.TotalOutstanding).toLocaleString("en-IN")}</span></div>
                 </div>
               </div>
             ) : <div />}
 
             {customer.applications?.length > 0 && (
               <div className="rounded-xl border border-border p-3 space-y-2">
-                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground"><IdCard size={13} className="text-amber-500" /> Applications ({customer.applications.length})</h3>
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground"><IdCard size={13} className="text-sky-500" /> Applications ({customer.applications.length})</h3>
                 <div className="space-y-1.5 max-h-20 overflow-y-auto thin-scroll">
                   {customer.applications.map((a: any) => (
                     <div key={a.Id} className="flex items-center justify-between text-xs">
-                      <span className="font-mono text-amber-600 dark:text-amber-400">{a.ApplicationNo}</span>
+                      <span className="font-mono text-sky-600 dark:text-sky-400">{a.ApplicationNo}</span>
                       <span className="text-muted-foreground">{a.Status}</span>
                       {a.BookingNo && <span className="text-green-600">→ {a.BookingNo}</span>}
                     </div>
@@ -298,7 +362,32 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
           </div>
         ) : null}
 
-        <div className="flex justify-end gap-2 pt-2.5 border-t border-border">
+        <div className="flex justify-between items-center gap-2 pt-2.5 border-t border-border">
+          <div>
+            {locked && canDelete && (
+              confirmDelete ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Delete this customer?</span>
+                  <button onClick={() => setConfirmDelete(false)} disabled={deleting}
+                    className="px-2.5 py-1 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                  <button onClick={handleDelete} disabled={deleting}
+                    className="px-2.5 py-1 text-xs rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40">
+                    {deleting ? "Deleting…" : "Confirm Delete"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  disabled={deleteBlocked}
+                  title={deleteBlocked
+                    ? `Cannot delete — active/approved booking(s): ${blockingBookings.map((a: any) => `${a.BookingNo} (${a.BookingStatus})`).join(", ")}. Cancel them first.`
+                    : "Delete this customer"}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                  <Trash2 size={12} /> Delete Customer
+                </button>
+              )
+            )}
+          </div>
           {locked ? (
             <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           ) : (
@@ -306,7 +395,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
               <button onClick={() => { setLocked(true); onClose(); }}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleSave} disabled={saving}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {saving ? "Saving..." : "Save Changes"}
               </button>
             </>
@@ -321,7 +410,10 @@ const CrmCustomers: React.FC = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -369,17 +461,14 @@ const CrmCustomers: React.FC = () => {
   }, []);
 
   const handleCreate = async () => {
-    if (!form.CustomerName.trim() || !form.Mobile.trim() || !form.PanNo.trim() || !form.PermanentAddress.trim()) {
-      toast.error("Customer Name, Mobile, PAN and Permanent Address are required");
-      return;
-    }
-    if (!/^\d{10}$/.test(form.Mobile.trim())) {
+    if (!form.CustomerName.trim()) { toast.error("Customer Name is required"); return; }
+    if (form.Mobile.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
       toast.error("Mobile must be exactly 10 digits"); return;
     }
     if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
       toast.error("Alternate mobile must be exactly 10 digits"); return;
     }
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
+    if (form.PanNo.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
       toast.error("PAN must be in format ABCDE1234F"); return;
     }
     if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
@@ -426,11 +515,20 @@ const CrmCustomers: React.FC = () => {
     }
   };
 
-  const { data: customers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-customers", search],
-    queryFn: () => fetchCustomers(search),
+  const listFilters: CustomerListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-customers", listFilters, page],
+    queryFn: () => fetchCustomersList(listFilters, page),
     staleTime: 30_000,
   });
+  const customers = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
 
   // Deep-link from CrmLeads.tsx's "Create Customer" action
@@ -456,8 +554,14 @@ const CrmCustomers: React.FC = () => {
     if (custDeepLinkOpened) return;
     const customerId = searchParams.get("customerId");
     if (!customerId) return;
-    setCustDeepLinkOpened(true);
-    setEditingId(parseInt(customerId));
+    const id = parseInt(customerId, 10);
+    if (id > 0) {
+      setCustDeepLinkOpened(true);
+      setEditingId(id);
+    } else {
+      // Invalid param (0 or NaN) — clear it so the URL doesn't stay dirty
+      setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
+    }
   }, [searchParams, custDeepLinkOpened]);
 
   // Converted leads not yet linked to another (active) customer — the
@@ -474,7 +578,7 @@ const CrmCustomers: React.FC = () => {
       const r = await fetchWithAuth(`${API}/${editingId}`);
       return r.ok ? r.json() : null;
     },
-    enabled: !!editingId,
+    enabled: editingId != null,
   });
 
   const handleLeadChange = (leadId: string) => {
@@ -560,7 +664,23 @@ const CrmCustomers: React.FC = () => {
       ) },
   ];
 
-  usePageRights("crm-customers");
+  const { canDelete } = usePageRights("crm-customers");
+
+  const exportColumns: ExportColumn[] = [
+    { header: "Customer No", accessor: "CustomerNo" },
+    { header: "Name", accessor: "CustomerName" },
+    { header: "Mobile", accessor: "Mobile" },
+    { header: "PAN", accessor: "PanNo" },
+    { header: "Address", accessor: (r) => [r.PermanentCity, r.PermanentState].filter(Boolean).join(", ") },
+    { header: "Co-Applicant", accessor: "CoApplicantName" },
+    { header: "Applications", accessor: "ApplicationCount" },
+    { header: "Registered", accessor: (r) => (r.CreatedAt ? String(r.CreatedAt).slice(0, 10) : "") },
+  ];
+
+  const fetchAllCustomersForExport = async () => {
+    const { rows } = await fetchCustomersList(listFilters, 1, Math.max(total, PAGE_SIZE));
+    return rows as Record<string, unknown>[];
+  };
 
   return (
     <>
@@ -570,6 +690,13 @@ const CrmCustomers: React.FC = () => {
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
         <div className="flex items-center gap-2">
+          <ExportMenu
+            data={filtered as unknown as Record<string, unknown>[]}
+            fetchData={fetchAllCustomersForExport}
+            columns={exportColumns}
+            title="CRM Customers"
+            filename="crm-customers"
+          />
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => navigate("/masters/customers")}
             title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
@@ -577,17 +704,21 @@ const CrmCustomers: React.FC = () => {
             <BookUser size={14} /> Customer Ledger (Master)
           </button>
           <button onClick={() => setDialogOpen(true)}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
             <Plus size={14} /> New Customer
           </button>
         </div>
       }
     >
-      <div className="relative max-w-md">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name, mobile, PAN, customer no..."
-          className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+      <div className="flex gap-3 flex-wrap items-center">
+        <div className="relative flex-1 min-w-48 max-w-md">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search name, mobile, PAN, customer no... (Enter to search)"
+            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+        </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
       <DataTable
@@ -598,26 +729,31 @@ const CrmCustomers: React.FC = () => {
         emptyMessage="No customers found"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* New Customer Dialog — wide two-column layout, compact enough to
           fit the whole field set on one screen without an inner scroller. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setDupSuggestions([]); } }}>
-        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
+        <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
-              <UserPlus size={16} className="text-amber-500" /> New Customer
+              <UserPlus size={16} className="text-sky-500" /> New Customer
             </DialogTitle>
           </DialogHeader>
 
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Link to Existing Lead (optional)</label>
-            <select value={form.LeadId} onChange={(e) => handleLeadChange(e.target.value)}
-              className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40">
-              <option value="">— Walk-in / New Customer —</option>
-              {availableLeads.map((l: any) => (
-                <option key={l.Id} value={String(l.Id)}>{l.CustomerName} · {l.Mobile} · {l.LeadUid}</option>
-              ))}
-            </select>
+            {/* Searchable: type a lead's name, mobile or lead id. */}
+            <SearchableSelect
+              value={form.LeadId}
+              onChange={(v) => handleLeadChange(v)}
+              placeholder="— Walk-in / New Customer —"
+              searchPlaceholder="Search name, mobile or lead id..."
+              options={[
+                { value: "", label: "— Walk-in / New Customer —" },
+                ...availableLeads.map((l: any) => ({ value: String(l.Id), label: [l.CustomerName, l.Mobile, l.LeadUid].filter(Boolean).join(" · ") })),
+              ]}
+            />
             {form.LeadId && <p className="text-xs text-green-600 mt-1">Name, mobile and email prefilled from lead — only converted leads are listed</p>}
           </div>
 
@@ -627,23 +763,23 @@ const CrmCustomers: React.FC = () => {
                 2-column layout's 4+1 rows across two separate cards. */}
             <div className="rounded-xl border border-border p-3 space-y-2">
               <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <User size={13} className="text-amber-500" /> Personal &amp; Financial Details
+                <User size={13} className="text-sky-500" /> Personal &amp; Financial Details
               </h3>
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                 {[
-                  { key: "CustomerName", label: "Customer Name *", type: "text" },
-                  { key: "Mobile", label: "Mobile *", type: "text" },
+                  { key: "CustomerName", label: "Customer Name", type: "text", required: true },
+                  { key: "Mobile", label: "Mobile", type: "text" },
                   { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                   { key: "Email", label: "Email", type: "email" },
-                  { key: "PanNo", label: "PAN Number *", type: "text" },
+                  { key: "PanNo", label: "PAN Number", type: "text" },
                   { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                   { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                   { key: "Occupation", label: "Occupation", type: "text" },
                   { key: "AnnualIncome", label: "Annual Income", type: "number" },
-                ].map(({ key, label, type }) => (
+                ].map(({ key, label, type, required }) => (
                   <div key={key}>
-                    <label className="text-xs text-muted-foreground block mb-0.5">{label}</label>
-                    <input type={type} value={(form as any)[key]}
+                    <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
+                    <AutoInput type={type} value={(form as any)[key]}
                       onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                       onBlur={() => {
                         // Trigger duplicate check when Mobile or PAN loses focus —
@@ -652,7 +788,7 @@ const CrmCustomers: React.FC = () => {
                           checkDuplicates(form.Mobile, form.PanNo, form.CustomerName);
                         }
                       }}
-                      className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+                      className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
                   </div>
                 ))}
 
@@ -663,13 +799,13 @@ const CrmCustomers: React.FC = () => {
             <div className="space-y-3">
               <div className="rounded-xl border border-border p-3 space-y-2">
                 <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                  <MapPin size={13} className="text-amber-500" /> Address
+                  <MapPin size={13} className="text-sky-500" /> Address
                 </h3>
                 <AddressFields
                   form={form}
                   setForm={setForm}
                   readOnly={false}
-                  inputCls="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                  inputCls="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40"
                 />
               </div>
 
@@ -677,30 +813,42 @@ const CrmCustomers: React.FC = () => {
 
               <div className="rounded-xl border border-border p-3 space-y-2">
                 <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                  <FileText size={13} className="text-amber-500" /> Notes
+                  <FileText size={13} className="text-sky-500" /> Billing
+                </h3>
+                <p className="text-[0.6875rem] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
+                <div className="flex items-center gap-4">
+                  {(["NonInvoice", "Invoice"] as const).map((mode) => (
+                    <label key={mode} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                      <input type="radio" name="newCustomerInvoiceMode" checked={form.InvoiceMode === mode}
+                        onChange={() => setForm((f) => ({ ...f, InvoiceMode: mode }))} />
+                      {mode === "NonInvoice" ? "Non-Invoice" : "Invoice"}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border p-3 space-y-2">
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+                  <FileText size={13} className="text-sky-500" /> Notes
                 </h3>
                 <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                  rows={2} className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+                  rows={2} className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
               </div>
             </div>
           </div>
-
-          <p className="text-xs text-muted-foreground">
-            Name, Mobile, PAN and Permanent Address are required — every Application will auto-fetch its details from this record.
-          </p>
 
           {/* Duplicate warning banner — shown when the /suggest endpoint finds
               existing customers that match the entered Mobile, PAN, or Name.
               Each candidate is shown as a compact card; staff can dismiss
               individual cards or open the existing record directly. */}
           {(dupChecking || dupSuggestions.length > 0) && (
-            <div className="rounded-xl border border-amber-400/40 bg-amber-50/60 dark:bg-amber-900/10 p-3 space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+            <div className="rounded-xl border border-sky-400/40 bg-sky-50/60 dark:bg-sky-900/10 p-3 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-700 dark:text-sky-400">
                 <AlertTriangle size={13} />
                 {dupChecking ? "Checking for duplicates…" : `${dupSuggestions.length} possible duplicate${dupSuggestions.length > 1 ? "s" : ""} found — verify before registering`}
               </div>
               {dupSuggestions.map((d: any) => (
-                <div key={d.Id} className="flex items-start justify-between gap-2 rounded-lg border border-amber-300/50 bg-white dark:bg-card px-3 py-2 text-xs">
+                <div key={d.Id} className="flex items-start justify-between gap-2 rounded-lg border border-sky-300/50 bg-white dark:bg-card px-3 py-2 text-xs">
                   <div className="space-y-0.5 min-w-0">
                     {d._fromError ? (
                       <p className="font-medium text-red-600">{d._errorMsg}</p>
@@ -715,7 +863,7 @@ const CrmCustomers: React.FC = () => {
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       onClick={() => { setDialogOpen(false); setDupSuggestions([]); setForm({ ...EMPTY_FORM }); openCustomer(d.Id); }}
-                      className="px-2 py-1 rounded-md text-xs font-medium border border-amber-400/60 text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors"
+                      className="px-2 py-1 rounded-md text-xs font-medium border border-sky-400/60 text-sky-700 hover:bg-sky-100 dark:hover:bg-sky-900/20 transition-colors"
                     >
                       View Customer
                     </button>
@@ -736,7 +884,7 @@ const CrmCustomers: React.FC = () => {
               Cancel
             </button>
             <button onClick={handleCreate} disabled={saving}
-              className="px-4 py-1.5 text-sm text-white rounded-lg font-medium shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
+              className="px-4 py-1.5 text-sm text-white rounded-lg font-medium shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
               {saving ? "Registering..." : "Register Customer"}
             </button>
           </div>
@@ -744,11 +892,13 @@ const CrmCustomers: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {editingId && editingCustomer && (
+      {editingId != null && editingCustomer && (
         <EditCustomerDialog
           customer={editingCustomer}
+          canDelete={canDelete}
           onClose={closeCustomer}
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-customers"] })}
+          onDeleted={() => { qc.invalidateQueries({ queryKey: ["crm-customers"] }); closeCustomer(); }}
         />
       )}
     </CrmShell>

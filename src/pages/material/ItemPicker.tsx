@@ -28,7 +28,13 @@ export function ItemPicker({
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [tab, setTab] = React.useState<"Goods" | "Service" | "FixedAsset">("Goods");
-  const [pos, setPos] = React.useState({ top: 0, left: 0, width: 0 });
+  const [pos, setPos] = React.useState({
+    top: 0,
+    bottom: null as number | null,
+    left: 0,
+    width: 0,
+    maxHeight: 420,
+  });
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
 
@@ -39,13 +45,39 @@ export function ItemPicker({
   // Position is re-read every animation frame (not just on scroll/resize
   // events) so it stays glued to the trigger with zero lag, including on
   // nested-scroll-container scrolls that don't bubble a window "scroll".
+  //
+  // It also flips above the trigger when there isn't enough room below —
+  // previously this always opened downward regardless of where the row
+  // sat on screen, so a picker near the bottom of the viewport (or inside
+  // a short modal) opened off-screen with no way to see or scroll to the
+  // item list. When flipped, the panel is anchored by `bottom` (not a
+  // computed `top`) so it grows upward from the trigger regardless of the
+  // list's actual rendered height, and `maxHeight` is clamped to whichever
+  // side (above/below) has more room so the item list stays scrollable
+  // and never spills past the viewport edge.
+  const MARGIN = 8;
+  const MIN_PANEL_HEIGHT = 220;
+  const PREFERRED_PANEL_HEIGHT = 420;
+
   const updatePosition = React.useCallback(() => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const width = Math.max(rect.width, 420);
     let left = rect.left;
-    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
-    setPos({ top: rect.bottom + 4, left, width });
+    if (left + width > window.innerWidth - MARGIN) left = window.innerWidth - width - MARGIN;
+    if (left < MARGIN) left = MARGIN;
+
+    const spaceBelow = window.innerHeight - rect.bottom - MARGIN;
+    const spaceAbove = rect.top - MARGIN;
+    const openUpward = spaceBelow < MIN_PANEL_HEIGHT && spaceAbove > spaceBelow;
+    const available = openUpward ? spaceAbove : spaceBelow;
+    const maxHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(PREFERRED_PANEL_HEIGHT, available));
+
+    setPos(
+      openUpward
+        ? { top: 0, bottom: window.innerHeight - rect.top + 4, left, width, maxHeight }
+        : { top: rect.bottom + 4, bottom: null, left, width, maxHeight },
+    );
   }, []);
 
   React.useEffect(() => {
@@ -118,10 +150,16 @@ export function ItemPicker({
         createPortal(
           <div
             ref={panelRef}
-            style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
-            className="z-[100] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
+            style={{
+              position: "fixed",
+              ...(pos.bottom != null ? { bottom: pos.bottom } : { top: pos.top }),
+              left: pos.left,
+              width: pos.width,
+              maxHeight: pos.maxHeight,
+            }}
+            className="z-[100] flex flex-col bg-card border border-border rounded-xl shadow-xl overflow-hidden"
           >
-            <div className="flex border-b border-border">
+            <div className="flex border-b border-border shrink-0">
               {(["Goods", "Service", "FixedAsset"] as const).map((t) => (
                 <button
                   key={t}
@@ -138,7 +176,7 @@ export function ItemPicker({
               ))}
             </div>
 
-            <div className="p-2 border-b border-border">
+            <div className="p-2 border-b border-border shrink-0">
               <div className="relative">
                 <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
@@ -152,7 +190,7 @@ export function ItemPicker({
               </div>
             </div>
 
-            <div className="max-h-96 overflow-y-auto divide-y divide-border/50 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/50 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {filtered.length === 0 ? (
                 <div className="px-4 py-6 text-center text-xs text-muted-foreground">No items found</div>
               ) : (

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -30,30 +31,68 @@ router.get("/", requirePageRight("crm-project-banks", "view"), async (req, res) 
 });
 
 // GET /for-project/:projectId — the one lookup every payment surface calls
-// to scope its deposit-bank dropdown. This is the full rule, resolved
-// server-side so no caller can get it wrong:
+// to scope its deposit-bank dropdown. Deliberately NOT gated behind
+// requirePageRight("crm-project-banks", ...) like its siblings in this file —
+// staff recording a CRM payment/refund/cancellation need this dropdown even
+// if their role has no rights on the Project-Bank tagging screen itself.
+// Explicit decision, not an oversight (audited 2026-09; see crmRefunds.js /
+// crmPayments.js / crmCancellations.js callers) — keep this route
+// authenticated-only, do not add a page-right guard here.
+//
+// Still deliberately never returns the full account number — that stays a
+// Bank Master-only detail. BBranch + a masked last-4 (BAccountLast4) were
+// added after a real production mix-up: multiple company bank accounts can
+// share the exact same brand name ("Axis Bank" tagged twice for two
+// different branches/accounts), and the name-only dropdown made them
+// genuinely indistinguishable. Branch name and a masked last-4 are enough
+// to tell accounts apart without exposing the sensitive full number.
+// This is the full rule, resolved server-side so no caller can get it wrong:
 //   1. Any bank(s) tagged to this Project -> return exactly those, nothing
 //      else (a tagged bank is exclusive to its tagged Project(s) and must
 //      never appear for a different one).
-//   2. Nothing tagged to this Project -> return every bank that has NO tag
-//      to ANY project at all. A bank tagged elsewhere must stay invisible
-//      here even though this Project itself has no tags of its own —
-//      "untagged" is the fallback pool, not "everything".
+//   2. Nothing tagged to this Project -> return every active bank account,
+//      full stop. An untagged project is meant to behave as if it were
+//      tagged to everything — a bank being tagged to some OTHER project
+//      doesn't remove it from this one's fallback list.
 router.get("/for-project/:projectId", async (req, res) => {
   try {
     const pool = getPool();
-    const projectId = parseInt(req.params.projectId);
+    const projectId = parseId(req.params.projectId);
+    if (projectId === null) return res.status(400).json({ error: "Invalid projectId" });
+    // Some callers (a refund/payout disbursed as a bank transfer to the
+    // customer's own account) must never offer "Cash in Hand" — migration
+    // 418 deliberately made it selectable under LHeadType='B' for OTHER
+    // flows (e.g. a cash payment mode on NewPayment), but there's no such
+    // thing as an NEFT/RTGS transfer sourced from cash. A real production
+    // mix-up (Cash in Hand picked as a refund's disbursing bank) is what
+    // surfaced this — see crmRefunds.js's finance-approve route. Deposit
+    // pickers (money coming IN, which can legitimately be received as
+    // cash) do NOT pass this flag and keep seeing Cash in Hand.
+    //
+    // Matched by NAME, not by the 'CASH-IN-HAND' LHeadCode sentinel alone —
+    // a live check found 6 distinct Cash-in-Hand heads in this database,
+    // and only one actually uses that canonical code; the other five
+    // ("Cash in Hand - Delta 1", "- Rajwada", "- RAJWADA GROUP", etc.) were
+    // created ad hoc with codes like 'CASH-C-82' that an exact-code filter
+    // silently missed, leaving cash options in the "excluded" list. No real
+    // bank in this data is named starting with "Cash" or "Cash-in-Hand", so
+    // this is a safe, broad match.
+    const excludeCash = req.query.excludeCash === "1" || req.query.excludeCash === "true";
+    const isCashHead = (name) => /^cash([\s-]?in[\s-]?hand)?/i.test(String(name || "").trim());
     // Fetch ALL of this project's tag rows first (not filtered on the
-    // tagged bank's own LHeadStatus). Whether we're in branch (1) or (2)
-    // above must be decided from "does this project have any tag row at
-    // all" — NOT "does this project have any tag row pointing to a
-    // currently-active bank". Filtering on LHeadStatus before checking
-    // that would mean a project whose only tagged bank(s) are temporarily
-    // deactivated (e.g. a bank head disabled for correction) silently
-    // fell through to branch (2) and leaked every untagged bank in the
-    // system into a project meant to be exclusive to specific banks.
+    // tagged bank's own LHeadStatus, and not on excludeCash either — see
+    // below). Whether we're in branch (1) or (2) above must be decided
+    // from "does this project have any tag row at all" — NOT "does this
+    // project have any tag row pointing to a currently-active, non-cash
+    // bank". Filtering that out before checking tag existence would mean
+    // a project tagged exclusively to Cash in Hand (or to a temporarily
+    // deactivated bank) silently fell through to branch (2) and leaked
+    // every untagged bank into a project meant to be exclusive.
     const rows = await pool.request().input("pid", sql.Int, projectId).query(`
-      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName, ah.LHeadStatus AS BStatus
+      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName, ah.LHeadStatus AS BStatus,
+             ah.LBranchName AS BBranch, ah.LIFSCCode AS BIfscCode,
+             CASE WHEN LEN(ISNULL(ah.LAccountNo, '')) >= 4
+                  THEN RIGHT(ah.LAccountNo, 4) ELSE NULL END AS BAccountLast4
       FROM dbo.CrmProjectBank pb
       JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = pb.BankLHeadId
       WHERE pb.ProjectId = @pid AND pb.IsActive = 1
@@ -61,20 +100,37 @@ router.get("/for-project/:projectId", async (req, res) => {
     `);
     if (rows.recordset.length) {
       // Project has tag(s) -> stays in the exclusive branch even if every
-      // tagged bank happens to be currently inactive. An empty array here
-      // (all tagged banks temporarily deactivated) is the correct result,
-      // not a signal to fall through to the untagged pool below.
-      return res.json(rows.recordset.filter((r) => r.BStatus === 1).map(({ BId, BName }) => ({ BId, BName })));
+      // tagged bank happens to be currently inactive (or, with
+      // excludeCash, if the only tagged bank is Cash in Hand). An empty
+      // array here is the correct result, not a signal to fall through to
+      // the untagged pool below.
+      //
+      // BUG FIX: LHeadStatus is a `bit` column — mssql deserializes it as a
+      // JS boolean (true/false), not the number 1/0. The old `=== 1` strict
+      // check could never match a boolean, so this branch silently returned
+      // an empty list for every project that actually had tagged banks —
+      // exactly the "tagging is broken" symptom reported live (tag a bank
+      // to a project, its dropdown still shows nothing). Use a truthy check
+      // instead so it works regardless of whether the driver hands back a
+      // boolean or a 1/0.
+      return res.json(
+        rows.recordset
+          .filter((r) => !!r.BStatus && (!excludeCash || !isCashHead(r.BName)))
+          .map(({ BId, BName, BBranch, BIfscCode, BAccountLast4 }) => ({ BId, BName, BBranch, BIfscCode, BAccountLast4 })),
+      );
     }
 
     // No banks are tagged to this project — show ALL active company banks
     const allBanks = await pool.request().query(`
-      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName
+      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName,
+             ah.LBranchName AS BBranch, ah.LIFSCCode AS BIfscCode,
+             CASE WHEN LEN(ISNULL(ah.LAccountNo, '')) >= 4
+                  THEN RIGHT(ah.LAccountNo, 4) ELSE NULL END AS BAccountLast4
       FROM dbo.AccountHeadMaster ah
       WHERE ah.LHeadType = 'B' AND ah.LHeadStatus = 1
       ORDER BY ah.LHeadName
     `);
-    res.json(allBanks.recordset);
+    res.json(excludeCash ? allBanks.recordset.filter((b) => !isCashHead(b.BName)) : allBanks.recordset);
   } catch (e) {
     console.error("[crm-project-banks] GET /for-project error:", e.message);
     res.status(500).json({ error: e.message });
@@ -86,7 +142,8 @@ router.get("/for-project/:projectId", async (req, res) => {
 router.get("/for-bank/:bankLHeadId", requirePageRight("crm-project-banks", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bankLHeadId = parseInt(req.params.bankLHeadId);
+    const bankLHeadId = parseId(req.params.bankLHeadId);
+    if (bankLHeadId === null) return res.status(400).json({ error: "Invalid bankLHeadId" });
     const result = await pool.request().input("bid", sql.Int, bankLHeadId).query(`
       SELECT pb.ProjectId, proj.name AS ProjectName
       FROM dbo.CrmProjectBank pb
@@ -163,7 +220,8 @@ router.post("/", requirePageRight("crm-project-banks", "create"), async (req, re
 router.delete("/:id", requirePageRight("crm-project-banks", "delete"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     await pool.request().input("id", sql.Int, id)
       .query("UPDATE dbo.CrmProjectBank SET IsActive = 0 WHERE Id = @id");
     res.json({ success: true });

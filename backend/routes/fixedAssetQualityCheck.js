@@ -370,7 +370,7 @@ router.patch("/:id/follow-up-status", requirePageRight(PAGE, "edit"), async (req
   }
 });
 
-// ── DELETE /:id — soft delete ─────────────────────────────────────────────
+// ── DELETE /:id — permanently removes the quality check record ──────────────
 router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   const email = requireUser(req, res);
   if (!email) return;
@@ -378,11 +378,21 @@ router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
-    const r = await pool.request()
-      .input("Id", sql.Int, id).input("By", sql.NVarChar(200), email)
-      .query(`UPDATE dbo.FixedAssetQualityCheck SET Status = 'Deleted', UpdatedBy = @By, UpdatedAt = SYSDATETIME()
-              WHERE QualityCheckId = @Id AND Status <> 'Deleted'`);
-    if (!r.rowsAffected[0]) return res.status(404).json({ error: "Not found" });
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      // FixedAssetFollowUpReminderLog.QualityCheckId is a foreign key into
+      // this table -- any reminder already logged against this record must
+      // go first.
+      await tx.request()
+        .input("Id", sql.Int, id)
+        .query(`DELETE FROM dbo.FixedAssetFollowUpReminderLog WHERE QualityCheckId = @Id`);
+      const r = await tx.request()
+        .input("Id", sql.Int, id)
+        .query(`DELETE FROM dbo.FixedAssetQualityCheck WHERE QualityCheckId = @Id`);
+      if (!r.rowsAffected[0]) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+      await tx.commit();
+    } catch (e) { await tx.rollback(); throw e; }
     await bumpCacheVersion("fixed-asset-quality-check");
     res.json({ ok: true });
   } catch (err) {

@@ -4,8 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { formatCompactINR } from "@/utils/formatCurrency";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import {
   GlassShell,
   GlassCard,
@@ -58,7 +59,7 @@ const statusColors: Record<string, string> = {
   Closed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   Completed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   "Fully Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-  Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+  Pending: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
   "In Progress": "bg-blue-500/10 text-blue-600 border-blue-400/20",
   Draft: "bg-muted text-muted-foreground border-border",
   Open: "bg-blue-500/10 text-blue-600 border-blue-400/20",
@@ -72,7 +73,7 @@ function StatusBadge({ status }: { status: string }) {
     statusColors[status] ?? "bg-muted text-muted-foreground border-border";
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cls}`}
     >
       {status || "Draft"}
     </span>
@@ -121,7 +122,7 @@ function StatusBreakdown({
         const pct = total > 0 ? Math.round((Number(row.Count) / total) * 100) : 0;
         return (
           <div key={row.Status}>
-            <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
+            <div className="flex justify-between text-[0.625rem] text-muted-foreground mb-0.5">
               <span>{row.Status || "Draft"}</span>
               <span className="font-medium text-foreground">{row.Count}</span>
             </div>
@@ -154,6 +155,7 @@ const DonutCard: React.FC<{
   glassStyle: React.CSSProperties;
   formatValue?: (n: number) => string;
 }> = ({ title, icon: Icon, accentColor, data, isDark, glassStyle, formatValue = fmt }) => {
+  const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <div className="rounded-xl overflow-hidden" style={glassStyle}>
@@ -192,7 +194,7 @@ const DonutCard: React.FC<{
                   strokeWidth={0}
                 >
                   {data.map((d, i) => (
-                    <Cell key={i} fill={d.color} />
+                    <Cell key={i} fill={bwChartColor(theme, i, d.color)} />
                   ))}
                 </Pie>
                 <Tooltip
@@ -214,11 +216,11 @@ const DonutCard: React.FC<{
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d) => (
+              {data.map((d, i) => (
                 <div key={d.name} className="flex items-center gap-2">
                   <div
                     className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ background: d.color }}
+                    style={{ background: bwChartColor(theme, i, d.color) }}
                   />
                   <span className="text-xs text-foreground whitespace-nowrap">
                     {d.name}
@@ -252,6 +254,7 @@ const TrendCard: React.FC<{
   isDark: boolean;
   glassStyle: React.CSSProperties;
 }> = ({ title, icon: Icon, accentColor, data, series, isDark, glassStyle }) => {
+  const { theme } = useTheme();
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
     <div className="rounded-xl overflow-hidden" style={glassStyle}>
@@ -295,7 +298,7 @@ const TrendCard: React.FC<{
                 axisLine={false}
                 tickLine={false}
                 width={40}
-                tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
+                tickFormatter={formatCompactINR}
               />
               <Tooltip
                 labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
@@ -308,13 +311,13 @@ const TrendCard: React.FC<{
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              {series.map((s) => (
+              {series.map((s, i) => (
                 <Line
                   key={s.key}
                   type="monotone"
                   dataKey={s.key}
                   name={s.name}
-                  stroke={s.color}
+                  stroke={bwChartColor(theme, i, s.color)}
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 4 }}
@@ -335,7 +338,7 @@ const WO_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">
+      <span className="font-mono text-[0.6875rem] text-primary">
         {(getValue() as string) || "—"}
       </span>
     ),
@@ -372,7 +375,7 @@ const BOQ_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">
+      <span className="font-mono text-[0.6875rem] text-primary">
         {(getValue() as string) || "—"}
       </span>
     ),
@@ -409,7 +412,7 @@ const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
     accessorKey: "DocNo",
     header: "Doc No",
     cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">
+      <span className="font-mono text-[0.6875rem] text-primary">
         {(getValue() as string) || "—"}
       </span>
     ),
@@ -445,7 +448,7 @@ export default function EngineeringDashboard() {
   const rights = usePageRights("engineering-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["engineering-dashboard"],
@@ -661,7 +664,7 @@ export default function EngineeringDashboard() {
                 </div>
                 <button
                   onClick={() => navigate("/engineering/work-order")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: ACCENT }}
                 >
                   View all →
@@ -700,7 +703,7 @@ export default function EngineeringDashboard() {
                 </div>
                 <button
                   onClick={() => navigate("/engineering/boq")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#3b82f6" }}
                 >
                   View all →
@@ -744,7 +747,7 @@ export default function EngineeringDashboard() {
                 </div>
                 <button
                   onClick={() => navigate("/engineering/work-done")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#10b981" }}
                 >
                   View all →

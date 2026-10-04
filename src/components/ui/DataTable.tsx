@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -106,15 +106,56 @@ export function DataTable<TData extends RowData>({
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
+  // Horizontal-scroll edge fades: shown only while there's more table to
+  // scroll to on that side.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  const updateEdges = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 2;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    setEdges((e) => (e.left === left && e.right === right ? e : { left, right }));
+  }, []);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    updateEdges();
+    const ro = new ResizeObserver(updateEdges);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, [updateEdges]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: defaultPageSize,
   });
 
+  // Status sits immediately left of the row-actions column (or last when
+  // there's none), so it can be pinned right beside Actions while the other
+  // columns scroll (see .sticky-status in index.css). Display order only —
+  // data, sorting and export are unaffected.
+  const orderedColumns = React.useMemo(() => {
+    const hdr = (c: ColumnDef<TData, unknown>) => (typeof c.header === "string" ? c.header.trim() : "");
+    const key = (c: ColumnDef<TData, unknown>) =>
+      String((c as { id?: string }).id ?? (c as { accessorKey?: string }).accessorKey ?? "").toLowerCase();
+    const statusIdx = columns.findIndex((c) => /^status$/i.test(hdr(c)) || key(c) === "status");
+    if (statusIdx < 0) return columns;
+    const lastIdx = columns.length - 1;
+    const last = columns[lastIdx];
+    const hasActions = lastIdx !== statusIdx && (key(last) === "actions" || /^actions?$/i.test(hdr(last)) || (!hdr(last) && typeof last.header !== "function"));
+    const target = hasActions ? lastIdx - 1 : lastIdx;
+    if (statusIdx === target) return columns;
+    const next = columns.slice();
+    const [status] = next.splice(statusIdx, 1);
+    next.splice(target, 0, status);
+    return next;
+  }, [columns]);
+
   const table = useReactTable({
     data,
-    columns,
+    columns: orderedColumns,
     state: {
       sorting,
       globalFilter,
@@ -166,10 +207,14 @@ export function DataTable<TData extends RowData>({
 
   return (
     <div className={className}>
-      {/* ── Search bar ── */}
-      {searchable && (
+      {/* ── Search bar / export toolbar ──
+          Shown whenever either the built-in search or an export button is
+          wanted — searchable=false pages (which run their own page-level
+          search) still need this row rendered so exportConfig's ExportMenu
+          isn't silently dropped. */}
+      {(searchable || exportConfig) && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
-          <p className="text-[11px] font-body text-muted-foreground">
+          <p className="text-[0.6875rem] font-body text-muted-foreground">
             {loading
               ? "Loading..."
               : `${totalFiltered} record${totalFiltered !== 1 ? "s" : ""}`}
@@ -187,25 +232,31 @@ export function DataTable<TData extends RowData>({
                 disabled={loading || data.length === 0}
               />
             )}
-            <div className="relative flex-1 sm:flex-none">
-              <Search
-                size={13}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-              <input
-                type="text"
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                placeholder={searchPlaceholder}
-                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-full sm:w-44"
-              />
-            </div>
+            {searchable && (
+              <div className="relative flex-1 sm:flex-none">
+                <Search
+                  size={13}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={globalFilter}
+                  onChange={(e) => setGlobalFilter(e.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-full sm:w-44"
+                />
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ── Table (large screens only) ── */}
-      <div className="hidden lg:block overflow-x-auto thin-scroll">
+      {/* ── Table (tablet & desktop) — scrolls sideways inside its card, the
+          actions column stays pinned on the right (see index.css). ── */}
+      <div className="relative hidden md:block">
+      {edges.left && <div className="pointer-events-none absolute inset-y-0 left-0 w-6 z-[4] bg-gradient-to-r from-card to-transparent" />}
+      {edges.right && <div className="pointer-events-none absolute inset-y-0 right-0 w-4 z-[1] bg-gradient-to-l from-black/[0.04] to-transparent" />}
+      <div ref={scrollRef} onScroll={updateEdges} className="overflow-x-auto overscroll-x-contain thin-scroll scroll-smooth">
         {(() => {
           const allCols = table.getAllLeafColumns();
           // Percentage widths always squeezed every column into exactly the
@@ -217,11 +268,15 @@ export function DataTable<TData extends RowData>({
           // actually kick in; min-width:100% keeps narrow tables filling
           // the container exactly as before.
           const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 150), 0);
-          const widthOf = (size: number | undefined) => size ?? 150;
+          // Column sizes are authored in px but applied in rem (size / 16) so
+          // they scale together with the rem-based text (e.g. the laptop
+          // 110% root size) instead of the text outgrowing its column and
+          // breaking IDs, dates and badges onto several lines.
+          const widthOf = (size: number | undefined) => `${(size ?? 150) / 16}rem`;
           return (
-        <table className="text-sm font-body" style={{ tableLayout: "fixed", width: totalSize, minWidth: "100%" }}>
+        <table className="text-sm font-body" style={{ tableLayout: "auto", width: "100%", minWidth: `${totalSize / 16}rem` }}>
           <thead>
-            <tr className="border-b border-border bg-muted/30">
+            <tr className="border-b border-border bg-muted">
               {table.getHeaderGroups().map((hg) =>
                 hg.headers.map((header) => {
                   const canSort = header.column.getCanSort();
@@ -231,7 +286,7 @@ export function DataTable<TData extends RowData>({
                       key={header.id}
                       colSpan={header.colSpan}
                       style={{ width: widthOf(header.column.columnDef.size) }}
-                      className={`px-5 py-3.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none text-left ${
+                      className={`px-4 py-3 text-[0.625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap select-none text-left ${
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
                           : ""
@@ -273,7 +328,7 @@ export function DataTable<TData extends RowData>({
               Array.from({ length: skeletonRows }).map((_, i) => (
                 <tr key={i} className="border-b border-border">
                   {columns.map((_, j) => (
-                    <td key={j} className="px-5 py-4">
+                    <td key={j} className="px-4 py-3.5">
                       <div className="h-4 bg-muted rounded animate-pulse" />
                     </td>
                   ))}
@@ -295,14 +350,14 @@ export function DataTable<TData extends RowData>({
                 <tr
                   key={row.id ? `row-${row.id}` : `row-${row.index}`}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  className={`hover:bg-muted/20 transition-colors ${onRowClick ? "cursor-pointer" : ""} ${
+                  className={`even:bg-muted/[0.18] hover:bg-primary/[0.04] transition-colors ${onRowClick ? "cursor-pointer" : ""} ${
                     rowClassName ? rowClassName(row) : ""
                   }`}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className={`px-5 py-4 text-foreground text-sm align-middle overflow-hidden ${(cell.column.columnDef.meta as any)?.className ?? ""}`}
+                      className={`px-4 py-3 text-foreground text-[0.8125rem] leading-snug align-middle break-words ${(cell.column.columnDef.meta as any)?.className ?? ""}`}
                     >
                       {flexRender(
                         cell.column.columnDef.cell,
@@ -318,9 +373,10 @@ export function DataTable<TData extends RowData>({
           );
         })()}
       </div>
+      </div>
 
-      {/* ── Cards (mobile + tablet, below lg) ── */}
-      <div className="lg:hidden font-body">
+      {/* ── Cards (phones) ── */}
+      <div className="md:hidden font-body">
         {loading ? (
           <div className="divide-y divide-border">
             {Array.from({ length: skeletonRows }).map((_, i) => (
@@ -336,42 +392,53 @@ export function DataTable<TData extends RowData>({
             {emptyMessage}
           </div>
         ) : (
-          <div className="divide-y divide-border">
+          <div className="p-3 space-y-2.5">
             {rows.map((row) => {
               const headers = table.getFlatHeaders();
               const cells = row.getVisibleCells();
+              const labelOf = (i: number) => {
+                const h = headers[i];
+                return h && !h.isPlaceholder ? flexRender(h.column.columnDef.header, h.getContext()) : null;
+              };
+              // The actions column (id "actions", or an empty header) goes in
+              // the card footer; the first column is the card's title.
+              const isActionCol = (i: number) => {
+                const h = headers[i];
+                const hdr = h?.column.columnDef.header;
+                return h?.column.id === "actions" || (typeof hdr === "string" && /^actions?$/i.test(hdr.trim())) || hdr === "" || hdr == null;
+              };
+              const titleCell = cells[0];
+              const actionIdx = cells.findIndex((_, i) => i > 0 && isActionCol(i));
+              const detailIdx = cells.map((_, i) => i).filter((i) => i > 0 && i !== actionIdx);
               return (
                 <div
+                  data-row
                   key={row.id ? `card-${row.id}` : `card-${row.index}`}
-                  className={`p-4 space-y-2.5 ${rowClassName ? rowClassName(row) : ""}`}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  className={`rounded-xl border border-border bg-card shadow-sm overflow-hidden ${onRowClick ? "cursor-pointer active:bg-muted/40" : ""} ${rowClassName ? rowClassName(row) : ""}`}
                 >
-                  {cells.map((cell, i) => {
-                    const header = headers[i];
-                    const label = header
-                      ? flexRender(
-                          header.column.columnDef.header,
-                          header.getContext(),
-                        )
-                      : null;
-                    return (
-                      <div
-                        key={cell.id}
-                        className="flex items-start justify-between gap-4"
-                      >
-                        {label && (
-                          <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground shrink-0 pt-0.5">
-                            {label}
-                          </span>
-                        )}
-                        <span className="text-sm text-foreground text-right min-w-0">
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext(),
-                          )}
-                        </span>
-                      </div>
-                    );
-                  })}
+                  {titleCell && (
+                    <div className="px-3.5 pt-3 pb-2 text-sm font-semibold text-foreground break-words">
+                      {flexRender(titleCell.column.columnDef.cell, titleCell.getContext())}
+                    </div>
+                  )}
+                  {detailIdx.length > 0 && (
+                    <dl className="grid grid-cols-2 gap-x-3 gap-y-2 px-3.5 pb-3">
+                      {detailIdx.map((i) => (
+                        <div key={cells[i].id} className="min-w-0">
+                          <dt className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">{labelOf(i)}</dt>
+                          <dd className="text-[0.8125rem] text-foreground break-words mt-0.5">
+                            {flexRender(cells[i].column.columnDef.cell, cells[i].getContext())}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  {actionIdx > 0 && (
+                    <div className="flex justify-end px-3 py-2 border-t border-border/70 bg-muted/20">
+                      {flexRender(cells[actionIdx].column.columnDef.cell, cells[actionIdx].getContext())}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -406,8 +473,12 @@ export function DataTable<TData extends RowData>({
 
           {/* Page info */}
           <span className="text-xs text-muted-foreground shrink-0">
-            Page {table.getState().pagination.pageIndex + 1} of{" "}
-            {table.getPageCount()} &middot; {totalFiltered} total
+            {(() => {
+              const { pageIndex, pageSize } = table.getState().pagination;
+              const from = pageIndex * pageSize + 1;
+              const to = Math.min(totalFiltered, (pageIndex + 1) * pageSize);
+              return <>Showing <span className="font-medium text-foreground">{from}–{to}</span> of <span className="font-medium text-foreground">{totalFiltered}</span></>;
+            })()}
           </span>
 
           {/* Nav buttons — pushed to right */}
@@ -437,16 +508,34 @@ export function DataTable<TData extends RowData>({
                 disabled: !table.getCanNextPage(),
                 label: "Last",
               },
-            ].map(({ icon: Icon, fn, disabled, label }) => (
-              <button
-                key={label}
-                onClick={fn}
-                disabled={disabled}
-                title={label}
-                className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <Icon size={14} />
-              </button>
+            ].map(({ icon: Icon, fn, disabled, label }, idx) => (
+              <React.Fragment key={label}>
+                {/* Page numbers (current ±1) between Prev and Next — hidden on phones. */}
+                {idx === 2 && (() => {
+                  const cur = table.getState().pagination.pageIndex;
+                  const count = table.getPageCount();
+                  const pages = [cur - 1, cur, cur + 1].filter((p) => p >= 0 && p < count);
+                  return pages.map((p) => (
+                    <button
+                      key={`p${p}`}
+                      onClick={() => table.setPageIndex(p)}
+                      className={`hidden sm:inline-flex min-w-[1.75rem] h-7 items-center justify-center rounded-md text-xs font-medium transition-colors ${
+                        p === cur ? "bg-primary/10 text-primary border border-primary/30" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      {p + 1}
+                    </button>
+                  ));
+                })()}
+                <button
+                  onClick={fn}
+                  disabled={disabled}
+                  title={label}
+                  className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <Icon size={14} />
+                </button>
+              </React.Fragment>
             ))}
           </div>
         </div>

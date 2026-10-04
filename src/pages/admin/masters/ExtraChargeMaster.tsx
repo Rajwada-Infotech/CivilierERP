@@ -94,34 +94,30 @@ const ExtraChargeMaster: React.FC = () => {
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to add charge type");
-        toast.success("Extra charge type added!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to update charge type");
-        toast.success("Extra charge type updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to delete charge type");
-        toast.success("Extra charge type deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["extra-charge-master"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to add charge type");
+      toast.success("Extra charge type added!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to update charge type");
+      toast.success("Extra charge type updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to delete charge type");
+      toast.success("Extra charge type deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["extra-charge-master"] });
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading extra charge types...</div>;
@@ -160,12 +156,12 @@ const ExtraChargeMaster: React.FC = () => {
             win.document.write(safeHtml`
               <html><head><title>Extra Charge — ${row.chargeName}</title>
               <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-              </head><body><h2>Extra Charge Type</h2><table>
+              </head><body><h2>Extra Charge Type</h2><div className="overflow-x-auto thin-scroll"><table>
                 <tr><td>Charge Name</td><td>${row.chargeName || "—"}</td></tr>
                 <tr><td>Default Amount</td><td>₹${row.defaultAmount || "0"}</td></tr>
                 <tr><td>GST %</td><td>${row.gstRate || "0"}%</td></tr>
                 <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
-              </table></body></html>
+              </table></div></body></html>
             `);
             win.document.close();
             win.print();

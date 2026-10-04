@@ -113,6 +113,8 @@ export interface PurchaseOrder {
   DocNo?: string | null;
   SourceMRId?: number | null;
   SourceMRDocNo?: string | null;
+  /** MR the PO came from — its own SourceMRDocNo, or its Quotation's MR (list endpoint). */
+  EffectiveMRDocNo?: string | null;
   SourceWODocNo?: string | null;
   SourceWDDocNo?: string | null;
   SourceQTId?: number | null;
@@ -181,7 +183,7 @@ export const deletePurchaseOrder = (id: number | string) =>
 export interface NameOption { id: string; name: string }
 
 export const getSuppliers = async (): Promise<NameOption[]> => {
-  const raw = await fetchWithAuth("/api/account-head?type=S").then((r) => handleResponse<any>(r));
+  const raw = await fetchWithAuth("/api/account-head?type=S,V&excludeCategory=Landlord").then((r) => handleResponse<any>(r));
   return ensureArray<any>(raw).map((s) => ({ id: String(s.LHeadId), name: s.LHeadName ?? "" }));
 };
 

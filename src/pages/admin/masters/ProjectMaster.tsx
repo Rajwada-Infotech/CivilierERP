@@ -2,6 +2,7 @@
 import React, { useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateProjectCompanyQueries } from "@/lib/invalidateProjectQueries";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import {
@@ -23,9 +24,15 @@ import {
   CalendarDays,
   ChevronDown,
   ShieldAlert,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   getProjects,
   createProject,
@@ -39,6 +46,20 @@ import { useLookup } from "@/hooks/useLookup";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useAuth } from "@/contexts/AuthContext";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
+import { AutoInput, DateInput } from "@/components/ui/date-input";
+
+/** A row of dbo.ProjectTypeMaster (migration 502). The flags are what code
+ *  should branch on — never Code or Name. */
+interface ProjectTypeOption {
+  Id: number;
+  Code: string;
+  Name: string;
+  Description?: string | null;
+  HasFloors: boolean;
+  SellsLand: boolean;
+  SellsConstruction: boolean;
+  AllowsMultiUnitSale: boolean;
+}
 
 interface Project {
   Id?: number;
@@ -46,6 +67,12 @@ interface Project {
   name: string;
   shortName: string;
   type: string;
+  /** dbo.ProjectTypeMaster.Id — decides floors vs plots, land vs
+   *  construction, single vs multi-unit sale. Empty means unset, which
+   *  keeps the project on the legacy high-rise behaviour. */
+  projectTypeId: string;
+  projectTypeName: string; // display-only, from the GET join
+  projectTypeCode: string; // display-only
   enterpriseId: string; // id stored, name resolved via JOIN for display
   enterpriseName: string; // display-only, from GET join
   companyId: string;
@@ -66,6 +93,9 @@ interface Project {
   // jv
   jvEnabled: boolean;
   jvCompanyName: string;
+  // additional companies tagged to this project, beyond the primary one
+  multiCompanyEnabled: boolean;
+  multiCompanyIds: string[];
   // rest
   teamSize: string;
   startDate: string;
@@ -107,11 +137,123 @@ function ProjectAvatar({
   );
 }
 
+// A fixed palette cycled by id, so companies sitting side by side in the
+// stack read as distinct at a glance instead of a wall of same-colored dots.
+const TAG_AVATAR_COLORS = [
+  "bg-violet-500/15 text-violet-600",
+  "bg-blue-500/15 text-blue-600",
+  "bg-emerald-500/15 text-emerald-600",
+  "bg-amber-500/15 text-amber-600",
+  "bg-rose-500/15 text-rose-600",
+  "bg-cyan-500/15 text-cyan-600",
+];
+function tagAvatarColor(id: string) {
+  const n = parseInt(id, 10) || 0;
+  return TAG_AVATAR_COLORS[n % TAG_AVATAR_COLORS.length];
+}
+
+// Assignee-stack style picker: collapses to overlapping avatar circles (or
+// a bare "Add companies" affordance when empty) and expands into a
+// searchable list on click — the same interaction Linear/Notion use for
+// assigning multiple people, applied here to companies instead of a wall
+// of toggle chips.
+function CompanyTagPicker({
+  companies,
+  excludeId,
+  selectedIds,
+  onChange,
+}: {
+  companies: any[];
+  excludeId: string;
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const options = (companies as any[]).filter((c) => String(c.Id ?? c.id) !== excludeId);
+  const selected = options.filter((c) => selectedIds.includes(String(c.Id ?? c.id)));
+  const MAX_SHOWN = 5;
+  const shownAvatars = selected.slice(0, MAX_SHOWN);
+  const extra = selected.length - shownAvatars.length;
+
+  const toggle = (id: string) => {
+    onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className="group flex items-center gap-2.5 py-1">
+          {selected.length === 0 ? (
+            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-dashed border-border text-xs text-muted-foreground group-hover:border-primary/40 group-hover:text-primary transition-colors">
+              <Plus size={12} /> Add companies
+            </span>
+          ) : (
+            <>
+              <div className="flex items-center -space-x-2.5">
+                {shownAvatars.map((c) => {
+                  const id = String(c.Id ?? c.id);
+                  const name = c.Name ?? c.name ?? "";
+                  return (
+                    <Avatar key={id} className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
+                      <AvatarFallback className={`text-[0.6875rem] font-heading font-bold ${tagAvatarColor(id)}`}>
+                        {name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  );
+                })}
+                {extra > 0 && (
+                  <Avatar className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
+                    <AvatarFallback className="text-[0.625rem] font-heading font-bold bg-muted text-muted-foreground">
+                      +{extra}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground group-hover:text-primary transition-colors">
+                {selected.length} tagged
+              </span>
+            </>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search companies…" />
+          <CommandList>
+            <CommandEmpty>No companies found.</CommandEmpty>
+            <CommandGroup>
+              {options.map((c) => {
+                const id = String(c.Id ?? c.id);
+                const name = c.Name ?? c.name ?? "";
+                const checked = selectedIds.includes(id);
+                return (
+                  <CommandItem key={id} value={name} onSelect={() => toggle(id)} className="gap-2">
+                    <Avatar className="h-6 w-6">
+                      <AvatarFallback className={`text-[0.625rem] font-heading font-bold ${tagAvatarColor(id)}`}>
+                        {name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="flex-1 truncate">{name}</span>
+                    <Check size={14} className={checked ? "opacity-100 text-primary" : "opacity-0"} />
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 const emptyProject: Project = {
   code: "",
   name: "",
   shortName: "",
   type: "Construction",
+  projectTypeId: "",
+  projectTypeName: "",
+  projectTypeCode: "",
   enterpriseId: "",
   enterpriseName: "",
   companyId: "",
@@ -129,6 +271,8 @@ const emptyProject: Project = {
   tradeLicenseNo: "",
   jvEnabled: false,
   jvCompanyName: "",
+  multiCompanyEnabled: false,
+  multiCompanyIds: [],
   teamSize: "",
   startDate: "",
   endDate: "",
@@ -148,6 +292,9 @@ function rowToForm(row: any): Project {
     name: row.Name ?? "",
     shortName: row.ShortName ?? "",
     type: row.Type ?? "Construction",
+    projectTypeId: row.ProjectTypeId != null ? String(row.ProjectTypeId) : "",
+    projectTypeName: row.ProjectTypeName ?? "",
+    projectTypeCode: row.ProjectTypeCode ?? "",
     enterpriseId: row.EnterpriseId != null ? String(row.EnterpriseId) : "",
     enterpriseName: row.EnterpriseName ?? "",
     companyId: row.CompanyId != null ? String(row.CompanyId) : "",
@@ -166,6 +313,10 @@ function rowToForm(row: any): Project {
     tradeLicenseNo: row.CompanyTradeLicenseNo ?? "",
     jvEnabled: !!row.JvEnabled,
     jvCompanyName: row.JvCompanyName ?? "",
+    multiCompanyEnabled: !!row.MultiCompanyEnabled,
+    multiCompanyIds: row.MultiCompanyIds
+      ? String(row.MultiCompanyIds).split(",").filter(Boolean)
+      : [],
     teamSize: row.TeamSize != null ? String(row.TeamSize) : "",
     startDate: row.StartDate ? row.StartDate.slice(0, 10) : "",
     endDate: row.EndDate ? row.EndDate.slice(0, 10) : "",
@@ -190,14 +341,14 @@ function ProjectViewModal({
   const STATUS_COLORS: Record<string, string> = {
     Active: "bg-emerald-500/10 text-emerald-600",
     Planning: "bg-blue-500/10 text-blue-600",
-    "On Hold": "bg-amber-500/10 text-amber-600",
+    "On Hold": "bg-[#ffe2021a] text-amber-600",
     Completed: "bg-purple-500/10 text-purple-600",
     Cancelled: "bg-muted text-muted-foreground",
   };
 
   const Row = ({ label, value }: { label: string; value?: string | null }) => (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       <span className="text-sm text-foreground break-words">
@@ -360,6 +511,10 @@ function ProjectViewModal({
             <Section title="General" />
             <Row label="Short Name" value={project.shortName} />
             <Row label="Type" value={project.type} />
+            <Row
+              label="Project Type"
+              value={project.projectTypeName || "Not set (high-rise)"}
+            />
             <Row label="Enterprise" value={project.enterpriseName} />
             <Row label="Company" value={project.companyName} />
             <Row label="Description" value={project.description} />
@@ -464,6 +619,15 @@ function buildProjectColumns(
       },
     },
     {
+      id: "project_type",
+      header: "Project Type",
+      cell: ({ row }) => (
+        <span className="text-xs text-muted-foreground">
+          {row.original.ProjectTypeName || "—"}
+        </span>
+      ),
+    },
+    {
       accessorKey: "Type",
       header: "Type",
       cell: ({ getValue }) => (
@@ -516,7 +680,7 @@ function buildProjectColumns(
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-1">
-          <button
+          <button data-row-view
             onClick={() => openView(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
             title="View details"
@@ -568,7 +732,7 @@ export default function ProjectMaster() {
   const [viewTarget, setViewTarget] = useState<Project | null>(null);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<
-    "general" | "location" | "compliance" | "timeline" | "financial"
+    "general" | "location" | "compliance" | "timeline"
   >("general");
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [cascadeTarget, setCascadeTarget] = useState<{ Id: number; Name: string } | null>(null);
@@ -622,6 +786,20 @@ export default function ProjectMaster() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Project types come from dbo.ProjectTypeMaster with their behaviour flags
+  // attached, so the form can describe a choice without a hardcoded map of
+  // which code means what — a type added to the master explains itself.
+  const { data: projectTypeOptions = [] } = useQuery<ProjectTypeOption[]>({
+    queryKey: ["project-type-master"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/project-master/types");
+      if (!res.ok) throw new Error("Failed to load project types");
+      const data = await res.json().catch(() => []);
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: companies = [] } = useQuery({
     queryKey: ["companies-list"],
     queryFn: async () => {
@@ -633,6 +811,26 @@ export default function ProjectMaster() {
         : [];
     },
     staleTime: 5 * 60 * 1000,
+  });
+
+  const selectedProjectType = projectTypeOptions.find(
+    (t) => String(t.Id) === form.projectTypeId,
+  );
+
+  // What this type would make unbookable for an existing project — unsold
+  // units / plots whose kind the type doesn't sell (same rule the booking
+  // check enforces), so a wrong type is caught here, not at a sale.
+  const { data: typeImpact } = useQuery<{ blocked: { reason: string; units: number }[]; total: number }>({
+    queryKey: ["project-type-impact", editId, form.projectTypeId],
+    enabled: editId != null && !!form.projectTypeId,
+    queryFn: async () => {
+      const res = await fetchWithAuth(
+        `/api/project-type-master/impact?projectId=${editId}&typeId=${form.projectTypeId}`,
+      );
+      if (!res.ok) throw new Error("Failed to check project type");
+      return res.json();
+    },
+    staleTime: 30 * 1000,
   });
 
   // Companies filtered to those belonging to the selected enterprise
@@ -692,6 +890,7 @@ export default function ProjectMaster() {
         name: form.name,
         shortName: form.shortName,
         type: form.type,
+        projectTypeId: form.projectTypeId !== "" ? parseInt(form.projectTypeId, 10) : null,
         enterpriseId: form.enterpriseId ? parseInt(form.enterpriseId) : null,
         companyId: form.companyId ? parseInt(form.companyId) : null,
         // address
@@ -704,6 +903,11 @@ export default function ProjectMaster() {
         // jv
         jvEnabled: form.jvEnabled,
         jvCompanyName: form.jvEnabled ? form.jvCompanyName || null : null,
+        // additional tagged companies
+        multiCompanyEnabled: form.multiCompanyEnabled,
+        multiCompanyIds: form.multiCompanyEnabled
+          ? form.multiCompanyIds.map((id) => parseInt(id, 10))
+          : [],
         // rest
         teamSize: form.teamSize,
         startDate: form.startDate || null,
@@ -727,16 +931,16 @@ export default function ProjectMaster() {
         payload.projectImage = form.projectImage;
       }
 
-      return editId ? updateProject(editId, payload) : createProject(payload);
+      return editId != null ? updateProject(editId, payload) : createProject(payload);
     },
-    onSuccess: () => {
+    onSuccess: (result: any) => {
       toast.success(
         editId
           ? "Project updated successfully"
           : "Project created successfully",
       );
-      qc.invalidateQueries({ queryKey: ["project-master"] });
-      qc.invalidateQueries({ queryKey: ["enterprises"] });
+      if (result?.warning) toast.warning(result.warning);
+      invalidateProjectCompanyQueries(qc);
       resetForm();
     },
     onError: (e: any) =>
@@ -749,8 +953,7 @@ export default function ProjectMaster() {
     mutationFn: deleteProject,
     onSuccess: () => {
       toast.success("Project deleted successfully");
-      qc.invalidateQueries({ queryKey: ["project-master"] });
-      qc.invalidateQueries({ queryKey: ["enterprises"] });
+      invalidateProjectCompanyQueries(qc);
       setDeleteConfirm(null);
     },
     onError: (e: any) =>
@@ -768,8 +971,7 @@ export default function ProjectMaster() {
           ? `Project and its transactions deleted (${tableCount} table${tableCount > 1 ? "s" : ""} affected).`
           : "Project deleted — it had no linked transactions.",
       );
-      qc.invalidateQueries({ queryKey: ["project-master"] });
-      qc.invalidateQueries({ queryKey: ["enterprises"] });
+      invalidateProjectCompanyQueries(qc);
       setCascadeTarget(null);
       setCascadeConfirmText("");
     },
@@ -812,6 +1014,20 @@ export default function ProjectMaster() {
     (p: any) =>
       (p.Name ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (p.Code ?? "").toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const exportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Code", accessor: "Code" },
+      { header: "Project Name", accessor: "Name" },
+      { header: "Enterprise", accessor: "EnterpriseName" },
+      { header: "Company", accessor: "CompanyName" },
+      { header: "Type", accessor: "Type" },
+      { header: "Status", accessor: "Status" },
+      { header: "JV Enabled", accessor: (r: any) => (r.JvEnabled ? "Yes" : "No") },
+      { header: "Active", accessor: (r: any) => (r.IsActive ? "Active" : "Inactive") },
+    ],
+    [],
   );
 
   const openNew = () => {
@@ -866,8 +1082,7 @@ export default function ProjectMaster() {
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
           />
-          <input
-            type="date"
+          <DateInput
             value={(form[key] as string) || ""}
             onChange={(e) =>
               !readOnly && setForm((p) => ({ ...p, [key]: e.target.value }))
@@ -877,7 +1092,7 @@ export default function ProjectMaster() {
           />
         </div>
       ) : (
-        <input
+        <AutoInput
           type={type}
           value={(form[key] as string) || ""}
           onChange={(e) =>
@@ -917,13 +1132,7 @@ export default function ProjectMaster() {
     </div>
   );
 
-  const TABS = [
-    "general",
-    "location",
-    "compliance",
-    "timeline",
-    "financial",
-  ] as const;
+  const TABS = ["general", "location", "compliance", "timeline"] as const;
 
   return (
     <>
@@ -938,7 +1147,7 @@ export default function ProjectMaster() {
           rights.canCreate && (
             <button
               onClick={openNew}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
             >
               <Plus size={13} /> Add Project
             </button>
@@ -964,6 +1173,13 @@ export default function ProjectMaster() {
               <span className="text-xs text-muted-foreground">
                 {filtered.length} project{filtered.length !== 1 ? "s" : ""}
               </span>
+              <ExportMenu
+                data={filtered as unknown as Record<string, unknown>[]}
+                columns={exportColumns}
+                title="Project Master"
+                filename="project-master"
+                disabled={!rights.canExport || filtered.length === 0}
+              />
             </div>
             {isLoading ? (
               <div className="flex justify-center py-16">
@@ -999,7 +1215,7 @@ export default function ProjectMaster() {
                   size="md"
                 />
                 <h2 className="font-heading font-semibold text-foreground">
-                  {editId ? `Edit — ${form.name || "Project"}` : "New Project"}
+                  {editId != null ? `Edit — ${form.name || "Project"}` : "New Project"}
                 </h2>
               </div>
               <button
@@ -1018,7 +1234,7 @@ export default function ProjectMaster() {
                   onClick={() => setActiveTab(tab)}
                   className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize whitespace-nowrap transition-colors ${
                     activeTab === tab
-                      ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-sm"
+                      ? "btn-module text-white shadow-sm"
                       : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
@@ -1096,6 +1312,69 @@ export default function ProjectMaster() {
                   {fi("Project Name", "name", "text", "", false, true)}
                   {fi("Short Name", "shortName")}
                   {se("Type", "type", projectTypes)}
+
+                  {/* Project Type — what the project SELLS, which is a different
+                      question from "Type" above (Construction / Renovation …).
+                      It decides whether units stack on floors or sit on a site
+                      map, whether land is sold (outside GST) or construction is
+                      (taxable), and whether several units can go on one booking.
+                      Leaving it unset keeps the existing high-rise behaviour. */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Project Type
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={form.projectTypeId}
+                        onChange={(e) => {
+                          const sel = projectTypeOptions.find(
+                            (t) => String(t.Id) === e.target.value,
+                          );
+                          setForm((p) => ({
+                            ...p,
+                            projectTypeId: e.target.value,
+                            projectTypeName: sel?.Name ?? "",
+                            projectTypeCode: sel?.Code ?? "",
+                          }));
+                        }}
+                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                      >
+                        <option value="">— Not set (high-rise behaviour) —</option>
+                        {projectTypeOptions.map((t) => (
+                          <option key={t.Id} value={String(t.Id)}>
+                            {t.Name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        size={13}
+                        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                    </div>
+                    {/* Describe the choice from the master's own flags rather
+                        than a hardcoded lookup, so a type added later explains
+                        itself without a code change. */}
+                    {selectedProjectType && (
+                      <p className="mt-1 text-[0.6875rem] text-muted-foreground">
+                        {[
+                          selectedProjectType.HasFloors ? "Floors" : "Site layout (no floors)",
+                          selectedProjectType.SellsLand ? "sells land (outside GST)" : null,
+                          selectedProjectType.SellsConstruction ? "sells construction (taxable)" : null,
+                          selectedProjectType.AllowsMultiUnitSale ? "several units per booking" : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    )}
+                    {typeImpact && typeImpact.total > 0 && (
+                      <p className="mt-1 text-[0.6875rem] text-amber-600 dark:text-amber-400">
+                        ⚠ With this type, {typeImpact.total} unsold unit(s) could not be booked:{" "}
+                        {typeImpact.blocked.map((b) => `${b.units} ${b.reason}`).join(", ")}.
+                        Pick a type that sells them, or fix the units' kind.
+                      </p>
+                    )}
+                  </div>
+                  {se("Currency", "currency", currencies)}
 
                   {/* Enterprise Dropdown */}
                   <div>
@@ -1189,13 +1468,13 @@ export default function ProjectMaster() {
                       />
                     </div>
                     {complianceLoading && (
-                      <p className="text-[10px] text-primary mt-1 flex items-center gap-1">
+                      <p className="text-[0.625rem] text-primary mt-1 flex items-center gap-1">
                         <Loader2 size={10} className="animate-spin" />
                         Fetching compliance data…
                       </p>
                     )}
                     {form.companyId && !complianceLoading && form.gst && (
-                      <p className="text-[10px] text-emerald-600 mt-1">
+                      <p className="text-[0.625rem] text-emerald-600 mt-1">
                         ✓ Compliance data loaded from Company Master
                       </p>
                     )}
@@ -1283,6 +1562,53 @@ export default function ProjectMaster() {
                           }
                           placeholder="Enter JV partner or company name"
                           className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Multi-Company tagging toggle */}
+                  <div className="col-span-full border border-border rounded-lg p-4 bg-muted/10 space-y-3">
+                    <button
+                      onClick={() =>
+                        setForm((p) => ({
+                          ...p,
+                          multiCompanyEnabled: !p.multiCompanyEnabled,
+                          multiCompanyIds: !p.multiCompanyEnabled
+                            ? p.multiCompanyIds
+                            : [],
+                        }))
+                      }
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      {form.multiCompanyEnabled ? (
+                        <ToggleRight size={24} className="text-blue-500" />
+                      ) : (
+                        <ToggleLeft size={24} className="text-muted-foreground" />
+                      )}
+                      <span
+                        className={
+                          form.multiCompanyEnabled
+                            ? "text-blue-600 font-medium"
+                            : "text-muted-foreground"
+                        }
+                      >
+                        Tag Additional Companies
+                      </span>
+                    </button>
+
+                    {form.multiCompanyEnabled && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-2">
+                          Companies (besides the primary Company above)
+                        </label>
+                        <CompanyTagPicker
+                          companies={companies}
+                          excludeId={form.companyId}
+                          selectedIds={form.multiCompanyIds}
+                          onChange={(ids) =>
+                            setForm((p) => ({ ...p, multiCompanyIds: ids }))
+                          }
                         />
                       </div>
                     )}
@@ -1392,13 +1718,6 @@ export default function ProjectMaster() {
                   {fi("Team Size", "teamSize", "number")}
                 </div>
               )}
-
-              {/* ── Financial ── */}
-              {activeTab === "financial" && (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {se("Currency", "currency", currencies)}
-                </div>
-              )}
             </div>
 
             {/* Save / Cancel */}
@@ -1412,12 +1731,12 @@ export default function ProjectMaster() {
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg btn-module shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />
                 )}
-                {editId ? "Update Project" : "Create Project"}
+                {editId != null ? "Update Project" : "Create Project"}
               </button>
             </div>
           </div>

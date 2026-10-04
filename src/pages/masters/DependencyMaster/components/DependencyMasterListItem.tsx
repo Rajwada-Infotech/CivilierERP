@@ -66,13 +66,13 @@ export function DependencyMasterListItem({
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-heading font-semibold text-foreground truncate">{row.alias}</span>
             <span
-              className="text-[9px] font-heading uppercase tracking-widest shrink-0"
+              className="text-[0.5625rem] font-heading uppercase tracking-widest shrink-0"
               style={{ color: accent }}
             >
               {isInternal ? "Internal" : "External"}
             </span>
           </div>
-          <p className="text-[11px] font-mono text-muted-foreground truncate mt-0.5 flex items-center gap-1">
+          <p className="text-[0.6875rem] font-mono text-muted-foreground truncate mt-0.5 flex items-center gap-1">
             <Link2 size={9} className="shrink-0 opacity-60" />
             {row.scopePath}
           </p>
@@ -88,10 +88,10 @@ export function DependencyMasterListItem({
             />
           ))}
           {row.activityCount > 6 && (
-            <span className="text-[9px] text-muted-foreground ml-0.5">+{row.activityCount - 6}</span>
+            <span className="text-[0.5625rem] text-muted-foreground ml-0.5">+{row.activityCount - 6}</span>
           )}
         </div>
-        <span className="text-[10px] font-mono text-muted-foreground shrink-0 w-20 text-right">
+        <span className="text-[0.625rem] font-mono text-muted-foreground shrink-0 w-20 text-right">
           {row.activityCount} {row.activityCount === 1 ? "step" : "steps"}
         </span>
 
@@ -126,7 +126,7 @@ export function DependencyMasterListItem({
             </div>
           ) : cached ? (
             <>
-              <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-2 flex items-center gap-1">
+              <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-2 flex items-center gap-1">
                 <GitBranch size={9} /> Activity Chain
               </p>
               <ActivityChainPreview rungs={cached.activities} onRungClick={setActiveRung} />

@@ -4,6 +4,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectRawAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a receipt whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT RPProjectId AS ProjectId FROM dbo.ReceivedPayment WHERE RPPaymentID = @id"));
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -12,15 +16,32 @@ const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
-const { recordGLPosting } = require("../services/approvalService");
+const { recordGLPosting, hasApprovalInboxEditRight } = require("../services/approvalService");
+const { areEarlierMilestonesCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
-const allowRoles = require("../middleware/role");
 
 // Only these roles may approve/reject — mirrors APPROVER_ROLES in the shared
 // approval engine (services/approvalService.js). Without this, any user with
 // ReceivedPayments "edit" permission could approve a receipt and post it to
 // the ledger, because checkPermissionForMethod only checks CanEdit for a PUT.
-const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
+// "director" added — the Director role is already treated as approver-tier
+// elsewhere (crm-bookings' MODULE_APPROVER_ROLE_OVERRIDES in
+// approvalService.js, and the named-director comment in approvalInbox.js),
+// it was just never added to this module's own hardcoded list.
+const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head", "director"];
+
+// Approve/Reject gate — kept DYNAMIC, same rule as the shared approval engine
+// (approvalService.transition) and the ApprovalActions buttons: the default
+// approver roles above, OR anyone granted "edit" on the "approval-inbox" page
+// through Menu Rights (role-level or per-user). Rights assigned in Menu Rights
+// therefore take effect here with no code change.
+async function allowApprover(req, res, next) {
+  const role = String(req.user?.role || "").trim().toLowerCase();
+  if (APPROVER_ROLES.includes(role)) return next();
+  const userId = Number(req.user?.userId ?? req.user?.id) || null;
+  if (await hasApprovalInboxEditRight(userId)) return next();
+  return res.status(403).json({ error: "You don't have approval rights for Received Payments" });
+}
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
@@ -95,7 +116,7 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
           RPRejectedBy, RPRejectedAt, RPRejectionNote,
           RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
           RPCustomerName, RPDepositBankId, RPDepositBankName,
-          SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo, CrmBookingId,
           COUNT(*) OVER() AS _total,
           SUM(RPAmount) OVER() AS _totalAmount,
           SUM(CASE WHEN RPStatus = 'Approved' THEN 1 ELSE 0 END) OVER() AS _approvedCount,
@@ -103,7 +124,7 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
           SUM(CASE WHEN RPStatus = 'Pending' THEN 1 ELSE 0 END) OVER() AS _pendingCount,
           SUM(CASE WHEN RPStatus = 'Rejected' THEN 1 ELSE 0 END) OVER() AS _rejectedCount
         FROM dbo.ReceivedPayment
-        WHERE (@companyId IS NULL OR RPCompanyId = @companyId)
+        WHERE (@companyId IS NULL OR RPCompanyId = @companyId)${projectPredicate(req.projectScope, "RPProjectId")}
           AND (@status IS NULL OR RPStatus = @status)
         ORDER BY RPCreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -150,8 +171,10 @@ router.get("/:id", async (req, res) => {
           RPRejectedBy, RPRejectedAt, RPRejectionNote,
           RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
           RPCustomerName, RPDepositBankId, RPDepositBankName,
-          SourceSaleInvoiceId, SourceSaleInvoiceDocNo
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo, CrmBookingId,
+          COALESCE(cu.name, RPCreatedBy) AS CreatedByName
         FROM dbo.ReceivedPayment
+        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(RPCreatedBy)
         WHERE RPPaymentID = @id
       `);
     if (!result.recordset.length) return res.status(404).json({ error: "Received payment not found" });
@@ -218,7 +241,7 @@ router.get("/:id/posting", async (req, res) => {
     // row's own id (see crmLedger.js). Checking only 'ReceivedPayment' left
     // every CRM-linked receipt showing "Not yet posted" even once approved
     // and actually posted — same join trialBalance.js already uses.
-    const postedRes = (rp.CrmMilestoneId || rp.CrmBookingId)
+    const postedRes = (rp.CrmMilestoneId != null || rp.CrmBookingId != null)
       ? await pool.request().input("SrcId", sql.Int, rpId).query(`
           SELECT TOP 1 gle.VoucherNo
           FROM dbo.GeneralLedgerEntry gle
@@ -484,7 +507,7 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       .input(
         "SourceSaleInvoiceId",
         sql.Int,
-        SourceSaleInvoiceId ? parseInt(SourceSaleInvoiceId, 10) : null,
+        SourceSaleInvoiceId !== undefined && SourceSaleInvoiceId !== null && SourceSaleInvoiceId !== "" ? parseInt(SourceSaleInvoiceId, 10) : null,
       )
       .input(
         "SourceSaleInvoiceDocNo",
@@ -492,9 +515,9 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
         SourceSaleInvoiceDocNo || null,
       )
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
-      .input("CrmMilestoneId", sql.Int, CrmMilestoneId ? parseInt(CrmMilestoneId, 10) : null)
-      .input("CrmBookingId", sql.Int, CrmBookingId ? parseInt(CrmBookingId, 10) : null)
-      .input("CrmApplicationId", sql.Int, CrmApplicationId ? parseInt(CrmApplicationId, 10) : null);
+      .input("CrmMilestoneId", sql.Int, CrmMilestoneId != null && CrmMilestoneId !== "" ? parseInt(CrmMilestoneId, 10) : null)
+      .input("CrmBookingId", sql.Int, CrmBookingId != null && CrmBookingId !== "" ? parseInt(CrmBookingId, 10) : null)
+      .input("CrmApplicationId", sql.Int, CrmApplicationId != null && CrmApplicationId !== "" ? parseInt(CrmApplicationId, 10) : null);
 
     const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId, RPChequeDate, RPIsPostDated, CrmMilestoneId, CrmBookingId, CrmApplicationId`;
     const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId, @RPChequeDate, @RPIsPostDated, @CrmMilestoneId, @CrmBookingId, @CrmApplicationId`;
@@ -564,6 +587,7 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
   try {
     const createdBy = req.user?.name || req.user?.email || null;
     const pool = getPool();
+    if (!(await assertProjectRawAllowed(req, res, req.body?.RPProjectId))) return;
     const row = await createReceivedPaymentInternal(pool, req.body, createdBy);
     await invalidateReceivedPaymentWorkflowCaches();
     res.status(201).json(row);
@@ -577,6 +601,7 @@ router.post("/", requirePageRight("received-payment", "create"), async (req, res
 router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res) => {
   try {
     const { id } = req.params;
+    if (!(await assertProjectRawAllowed(req, res, req.body?.RPProjectId))) return;
     const {
       RPCompanyName,
       RPCompanyId,
@@ -608,6 +633,20 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
     const pool = getPool();
     const beforeSnapshot = await snapshotRow(pool, "dbo.ReceivedPayment", "RPPaymentID", id);
     const wasApproved = beforeSnapshot?.RPStatus === "Approved";
+
+    // Editing an already-Approved payment must go back through approval —
+    // this UPDATE never touched RPStatus before, so an edited-Approved
+    // receipt silently stayed Approved with no re-approval and no GL
+    // reversal. Mirrors journalVoucher.js's wasApproved handling. Only
+    // reverses the standard (non-CRM) posting path — a CRM-linked receipt's
+    // actual GL legs live under CrmPaymentReceipt/CrmOnAccountPayment, keyed
+    // by their own id, not this one; editing still gets re-queued for
+    // approval, but re-approving a CRM-linked edit won't repost its GL
+    // (hasPosting() will still see the old, unreversed entries).
+    if (wasApproved) {
+      const { reversePostingBySource } = require("../services/generalLedger");
+      await reversePostingBySource(pool, "ReceivedPayment", id);
+    }
 
     const extraSet = `, RPCompanyId=@RPCompanyId, RPProjectId=@RPProjectId,
       RPCustomerName=@RPCustomerName, RPFinYear=@RPFinYear,
@@ -653,6 +692,7 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
       .input("RPDepositBankName", sql.NVarChar(255), RPDepositBankName || null)
       .input("RPFinYear", sql.NVarChar(20), RPFinYear || null).query(`
         UPDATE dbo.ReceivedPayment SET
+          ${wasApproved ? "RPStatus        = 'Pending'," : ""}
           RPCompanyName   = @RPCompanyName,
           RPReceivedFrom  = @RPReceivedFrom,
           RPProjectName   = @RPProjectName,
@@ -741,6 +781,15 @@ router.delete("/:id", requirePageRight("received-payment", "delete"), async (req
 
     const linkedSIId = existing.recordset[0].SourceSaleInvoiceId;
 
+    // Reverse whatever GL this payment posted at approval (SourceType
+    // 'ReceivedPayment', SourceId = RPPaymentID — see generalLedger.js's
+    // postReceivedPaymentApproval) before hard-deleting it. Previously
+    // skipped, so a deleted receipt's GeneralLedgerEntry rows survived with
+    // IsReversed=0 forever, inflating every ledger/report reading off that
+    // table. Same fix already applied to loanSanction.js's DELETE.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(tx, "ReceivedPayment", id);
+
     await new sql.Request(tx).input("id", sql.Int, id).query(`
       DELETE FROM dbo.BankReconciliation
       WHERE SourceType = 'RECEIVED' AND SourceID = @id
@@ -818,8 +867,59 @@ router.patch("/:id/submit", requirePageRight("received-payment", "edit"), async 
   }
 });
 
+// ── PATCH /:id/deposit-bank (Accounts) ───────────────────────────────────────
+// CRM payments are entered in CRM WITHOUT a deposit bank (the CRM user
+// receives the cheque but doesn't decide where it is banked). Accounts sets
+// the bank here, on the Pending Received Payment, before it can be approved
+// (PUT /:id/approve refuses a CRM payment with no bank). Deliberately a
+// narrow action: it changes ONLY the deposit bank — amount, mode and cheque
+// details came from CRM and stay as entered.
+router.patch("/:id/deposit-bank", requirePageRight("received-payment", "edit"), async (req, res) => {
+  const pid = parseInt(req.params.id, 10);
+  const bankId = parseInt(req.body?.RPDepositBankId, 10);
+  if (!Number.isInteger(pid) || pid <= 0) return res.status(400).json({ error: "Invalid id" });
+  if (!Number.isInteger(bankId) || bankId <= 0) return res.status(400).json({ error: "Select a deposit bank" });
+  const by = req.user?.name || req.user?.email || null;
+  try {
+    const pool = getPool();
+    const bank = await pool.request().input("b", sql.Int, bankId).query(`
+      SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster
+      WHERE LHeadId = @b AND LHeadType = 'B' AND ISNULL(LHeadStatus, 1) = 1
+    `);
+    if (!bank.recordset.length) return res.status(400).json({ error: "That account is not an active bank account" });
+
+    const r = await pool.request()
+      .input("id", sql.Int, pid)
+      .input("bid", sql.Int, bankId)
+      .input("bname", sql.NVarChar(255), bank.recordset[0].LHeadName)
+      .input("by", sql.NVarChar(150), by)
+      .query(`
+        UPDATE dbo.ReceivedPayment
+        SET RPDepositBankId = @bid, RPDepositBankName = @bname, RPUpdatedBy = @by, RPUpdatedAt = GETDATE()
+        OUTPUT INSERTED.RPPaymentID, INSERTED.RPDocNo, INSERTED.RPDepositBankId, INSERTED.RPDepositBankName
+        WHERE RPPaymentID = @id AND RPStatus = 'Pending' AND CrmBookingId IS NOT NULL
+      `);
+    if (!r.recordset.length) {
+      const cur = await pool.request().input("id", sql.Int, pid)
+        .query("SELECT RPStatus, CrmBookingId FROM dbo.ReceivedPayment WHERE RPPaymentID = @id");
+      if (!cur.recordset.length) return res.status(404).json({ error: "Received payment not found" });
+      if (cur.recordset[0].CrmBookingId == null) return res.status(400).json({ error: "Only CRM payments get their deposit bank set here" });
+      return res.status(400).json({ error: `The deposit bank can only be set while the payment is Pending (it is ${cur.recordset[0].RPStatus})` });
+    }
+    try {
+      const { logAudit } = require("../utils/auditLog");
+      await logAudit({ module: "ReceivedPayment", recordId: pid, recordNo: r.recordset[0].RPDocNo, action: `Deposit bank set: ${bank.recordset[0].LHeadName}`, changedBy: req.user?.userId ?? null });
+    } catch (auditErr) { console.error("[received-payment] deposit-bank audit log failed:", auditErr.message); }
+    await invalidateReceivedPaymentWorkflowCaches();
+    res.json({ success: true, ...r.recordset[0] });
+  } catch (err) {
+    console.error("PATCH /received-payment/:id/deposit-bank error:", err);
+    res.status(500).json({ error: "Failed to set the deposit bank" });
+  }
+});
+
 // ── PUT /:id/approve (approver roles only — called from Approval Inbox) ──────
-router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
+router.put("/:id/approve", allowApprover, async (req, res) => {
   const pid = parseInt(req.params.id, 10);
   if (!Number.isFinite(pid))
     return res.status(400).json({ error: "Invalid id" });
@@ -857,19 +957,45 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
         .json({ error: `Cannot approve from status "${status}"` });
     }
 
-    if (cur.recordset[0].CrmMilestoneId) {
-      const predecessor = await tx.request()
-        .input("mid", sql.Int, cur.recordset[0].CrmMilestoneId).query(`
-          SELECT TOP 1 p.MilestoneName
-          FROM dbo.CrmPaymentMilestone m
-          JOIN dbo.CrmPaymentMilestone p ON p.BookingId = m.BookingId AND p.MilestoneNo < m.MilestoneNo
-          WHERE m.Id = @mid AND p.Status NOT IN ('Paid', 'Waived')
-          ORDER BY p.MilestoneNo
-        `);
-      if (predecessor.recordset.length) {
+    if (cur.recordset[0].CrmMilestoneId != null) {
+      const target = await tx.request().input("mid", sql.Int, cur.recordset[0].CrmMilestoneId)
+        .query("SELECT BookingId, MilestoneNo FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
+      const targetRow = target.recordset[0];
+      // Same virtual-coverage predecessor check as crmPayments.js
+      // (createReceiptForMilestone / applyCrmMilestonePaymentApproval) — real
+      // Status can't gate this, since Milestone 1 itself only becomes Paid
+      // once the WHOLE booking (money for every later milestone included) is
+      // already on-account. Checking real Status here would make it
+      // impossible to ever approve a payment past Milestone 1.
+      if (targetRow && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo))) {
+        const predecessor = await tx.request()
+          .input("mid", sql.Int, cur.recordset[0].CrmMilestoneId).query(`
+            SELECT TOP 1 p.MilestoneName
+            FROM dbo.CrmPaymentMilestone m
+            JOIN dbo.CrmPaymentMilestone p ON p.BookingId = m.BookingId AND p.MilestoneNo < m.MilestoneNo
+            WHERE m.Id = @mid AND p.Status NOT IN ('Paid', 'Waived')
+            ORDER BY p.MilestoneNo
+          `);
         await tx.rollback();
-        return res.status(400).json({ error: `Cannot approve — "${predecessor.recordset[0].MilestoneName}" is still due first` });
+        return res.status(400).json({ error: `Cannot approve — "${predecessor.recordset[0]?.MilestoneName || "an earlier milestone"}" is still due first` });
       }
+    }
+
+    // CRM-linked rows (milestone payment or on-account deposit) post to GL
+    // the moment this approval commits (applyCrmMilestonePaymentApproval /
+    // applyCrmOnAccountPaymentApproval below), debiting whatever bank is on
+    // this row right now — with no bank, that posting either fails outright
+    // or (older code) silently fell back to a proxy clearing account
+    // ("CRM Collections A/c"), producing a real-looking asset balance that
+    // doesn't correspond to any actual bank. Reject the approval itself
+    // instead of letting it commit and only discovering the gap later —
+    // same rollback-with-clear-reason pattern as the predecessor-milestone
+    // check above.
+    if (cur.recordset[0].CrmBookingId != null && !cur.recordset[0].RPDepositBankId) {
+      await tx.rollback();
+      return res.status(400).json({
+        error: "This payment has no Deposit Bank set — add one before approving so it posts to the correct GL account.",
+      });
     }
 
     await tx
@@ -899,7 +1025,7 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
   // createReceiptForMilestone posted directly before this approval detour
   // existed. Never allowed to fail the approval itself; outcome logged the
   // same way GL posting failures already are everywhere else.
-  if (crmRow?.CrmMilestoneId) {
+  if (crmRow?.CrmMilestoneId != null) {
     let brokerWarning = null, crmWarning = null;
     try {
       const { applyCrmMilestonePaymentApproval } = require("./crmPayments");
@@ -922,7 +1048,7 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
   // a specific milestone. Same detour as the branch above: the real
   // CrmOnAccountPayment insert/GL/auto-sweep only happens here, once
   // approved, instead of when it was originally submitted.
-  if (crmRow?.CrmBookingId) {
+  if (crmRow?.CrmBookingId != null) {
     let crmWarning = null;
     try {
       const { applyCrmOnAccountPaymentApproval } = require("./crmPayments");
@@ -957,7 +1083,7 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
 });
 
 // ── PUT /:id/reject (approver roles only — called from Approval Inbox) ───────
-router.put("/:id/reject", allowRoles(...APPROVER_ROLES), async (req, res) => {
+router.put("/:id/reject", allowApprover, async (req, res) => {
   const pid = parseInt(req.params.id, 10);
   if (!Number.isFinite(pid))
     return res.status(400).json({ error: "Invalid id" });

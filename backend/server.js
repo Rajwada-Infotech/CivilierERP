@@ -12,6 +12,7 @@ const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
 const authMiddleware = require("./middleware/auth");
+const { attachProjectScope } = require("./services/projectScope");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
 
@@ -147,13 +148,18 @@ function isLocalRequest(req) {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 const ALL_ROUTES = [
   { path: "/api/amendments", file: "./routes/amendmentLog" },
+  { path: "/api/audit-trail", file: "./routes/auditTrail" },
   { path: "/api/roles", file: "./routes/roles" },
   { path: "/api/user-rights", file: "./routes/userRights" },
   { path: "/api/user-widget-rights", file: "./routes/userWidgetRights" },
+  { path: "/api/user-project-access", file: "./routes/userProjectAccess" },
+  { path: "/api/activity-comments", file: "./routes/activityComments" },
   { path: "/api/account-group", file: "./routes/accountGroup" },
   { path: "/api/account-head", file: "./routes/accountHeadMaster" },
   { path: "/api/activity-master", file: "./routes/activityMaster" },
+  { path: "/api/engineering-activity-master", file: "./routes/engineeringActivityMaster" },
   { path: "/api/bank-master", file: "./routes/bankMaster" },
+  { path: "/api/partner-master", file: "./routes/partnerMaster" },
   { path: "/api/billing-terms", file: "./routes/billingTerms" },
   { path: "/api/card-master", file: "./routes/cardMaster" },
   { path: "/api/cheque-master", file: "./routes/chequeMaster" },
@@ -161,6 +167,21 @@ const ALL_ROUTES = [
   { path: "/api/payment-reason-master", file: "./routes/paymentReasonMaster" },
   { path: "/api/loan-sanction", file: "./routes/loanSanction" },
   { path: "/api/cost-center", file: "./routes/costCenter" },
+  { path: "/api/employee-master", file: "./routes/employeeMaster" },
+  { path: "/api/designation-master", file: "./routes/designationMaster" },
+  { path: "/api/candidate-master", file: "./routes/candidateMaster" },
+  { path: "/api/shift-master", file: "./routes/shiftMaster" },
+  { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
+  { path: "/api/holiday-master", file: "./routes/holidayMaster" },
+  { path: "/api/deduction-addition-master", file: "./routes/deductionAdditionMaster" },
+  { path: "/api/salary-structure", file: "./routes/salaryStructure" },
+  { path: "/api/payroll-run", file: "./routes/payrollRun" },
+  { path: "/api/attendance-record", file: "./routes/attendanceRecord" },
+  { path: "/api/leave-record", file: "./routes/leaveRecord" },
+  { path: "/api/overtime-record", file: "./routes/overtimeRecord" },
+  { path: "/api/incentive-record", file: "./routes/incentiveRecord" },
+  { path: "/api/interviews", file: "./routes/interview" },
+  { path: "/api/offer-letter", file: "./routes/offerLetter" },
   { path: "/api/payment-terms", file: "./routes/vendorPaymentTerm" },
   { path: "/api/profit-center", file: "./routes/profitCenter" },
   { path: "/api/document-type", file: "./routes/document-type" },
@@ -168,6 +189,11 @@ const ALL_ROUTES = [
   { path: "/api/fin-year", file: "./routes/finYear" },
   { path: "/api/general-ledger", file: "./routes/generalLedger" },
   { path: "/api/hsn", file: "./routes/hsn" },
+  { path: "/api/charge-head", file: "./routes/chargeHead" },
+  { path: "/api/maintenance", file: "./routes/maintenance" },
+  { path: "/api/maintenance-bills", file: "./routes/maintenanceBill" },
+  { path: "/api/security-attendance", file: "./routes/securityAttendance" },
+  { path: "/api/electricity-maintenance", file: "./routes/electricityMaintenance" },
   { path: "/api/item-groups", file: "./routes/itemGroup" },
   { path: "/api/item-master", file: "./routes/itemMaster" },
   { path: "/api/tds-master", file: "./routes/tdsMaster" },
@@ -231,13 +257,14 @@ const ALL_ROUTES = [
   { path: "/api/fixed-asset-assignment", file: "./routes/fixedAssetAssignment" },
   { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
   { path: "/api/fixed-asset-quality-check", file: "./routes/fixedAssetQualityCheck" },
-  { path: "/api/home/activity-feed", file: "./routes/homeActivity" },
+  { path: "/api/fixed-asset-maintenance", file: "./routes/fixedAssetMaintenance" },
+  { path: "/api/home", file: "./routes/homeActivity" },
   { path: "/api/id-template-master", file: "./routes/idTemplateMaster" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
-  { path: "/api/contractor-allocation", file: "./routes/contractorAllocation" },
   { path: "/api/daily-labour", file: "./routes/dailyLabour" },
   { path: "/api/worker-attendance", file: "./routes/workerAttendance" },
   { path: "/api/activity-items", file: "./routes/activityItems" },
+  { path: "/api/engineering-activity-items", file: "./routes/engineeringActivityItems" },
   { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
   { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
   { path: "/api/tasks", file: "./routes/tasks" },
@@ -248,9 +275,14 @@ const ALL_ROUTES = [
   { path: "/api/applicants", file: "./routes/applicants" },
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
+  { path: "/api/project-type-master", file: "./routes/projectTypeMaster" },
+  { path: "/api/plot-facing-master", file: "./routes/plotFacingMaster" },
+  { path: "/api/villa-type-master", file: "./routes/villaTypeMaster" },
   { path: "/api/block-master", file: "./routes/blockMaster" },
   { path: "/api/unit-master", file: "./routes/unitMaster" },
+  { path: "/api/plot-master", file: "./routes/plotMaster" },
   { path: "/api/room-master", file: "./routes/roomMaster" },
+  { path: "/api/unit-layout-overrides", file: "./routes/unitLayoutOverride" },
   { path: "/api/room-category-master", file: "./routes/roomCategoryMaster" },
   { path: "/api/activity-checkpoint", file: "./routes/activityCheckpoint" },
   { path: "/api/unit-bhk-config", file: "./routes/unitBhkConfig" },
@@ -283,6 +315,7 @@ const ALL_ROUTES = [
   { path: "/api/engineering/dpr", file: "./routes/dpr" },
   { path: "/api/godowns", file: "./routes/godowns" },
   { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
+  { path: "/api/stock-updates", file: "./routes/stockUpdates" },
   { path: "/api/inter-company-transfer", file: "./routes/interCompanyTransfer" },
   { path: "/api/sale-orders", file: "./routes/saleOrders" },
   { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
@@ -323,21 +356,19 @@ const ALL_ROUTES = [
   { path: "/api/crm/handover",       file: "./routes/crmHandover"       },
   { path: "/api/crm/service-tickets",file: "./routes/crmServiceTickets" },
   { path: "/api/crm/cancellations",  file: "./routes/crmCancellations"  },
+  { path: "/api/crm/refunds",        file: "./routes/crmRefunds"        },
+  { path: "/api/crm/resales",        file: "./routes/crmResales"        },
   { path: "/api/crm/customer-360",   file: "./routes/crmCustomer360"    },
   { path: "/api/crm/oc-cc",                file: "./routes/crmOcCc"               },
-  { path: "/api/crm/allotment-letter",     file: "./routes/crmAllotmentLetter"    },
   { path: "/api/crm/legal-milestones",     file: "./routes/crmLegalMilestones"     },
   { path: "/api/crm/noc",                  file: "./routes/crmNoc"                 },
   { path: "/api/crm/sales-deed",           file: "./routes/crmSalesDeed"           },
   { path: "/api/crm/afs-query-payment",    file: "./routes/crmAfsQueryPayment"     },
   { path: "/api/crm/afs-registry",        file: "./routes/crmAfsRegistry"         },
-  { path: "/api/crm/query-payment",        file: "./routes/crmQueryPayment"        },
-  { path: "/api/crm/registry",             file: "./routes/crmRegistry"            },
   { path: "/api/crm/mutation",             file: "./routes/crmMutation"            },
   { path: "/api/crm/pre-possession",       file: "./routes/crmPrePossession"       },
   { path: "/api/crm/possession-notice",    file: "./routes/crmPossessionNotice"    },
   { path: "/api/crm/construction-updates", file: "./routes/crmConstructionUpdates" },
-  { path: "/api/crm/communication",        file: "./routes/crmCommunication"       },
   { path: "/api/crm/dashboard",            file: "./routes/crmDashboard"           },
   { path: "/api/crm/reports",              file: "./routes/crmReports"             },
   { path: "/api/crm/customer-bank-details",file: "./routes/crmCustomerBankDetails" },
@@ -424,7 +455,7 @@ async function createApp() {
   if (!isTest) {
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 10,
+      max: 20,
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
       skip: (req) => isDev && isLocalRequest(req),
@@ -493,6 +524,14 @@ async function createApp() {
   // Version number is not sensitive — served publicly so the Login/Landing
   // footers (pre-auth) can show the real DB-driven version, not "…".
   app.use("/api/app-version", require("./routes/appVersion"));
+  // "New: X just launched" badge on the Login page — public/pre-auth for
+  // the same reason as app-version above.
+  app.use("/api/feature-announcement", require("./routes/featureAnnouncement"));
+  // APK Manager. Registered here, before the blanket staff auth wall, because
+  // GET /latest is called by the mobile apps on launch (possibly before login)
+  // to check for an update. Every other route in the file carries its own
+  // authenticateToken + requirePageRight, so publishing/listing stays gated.
+  app.use("/api/app-releases", require("./routes/appReleases"));
   // Customer portal manages its own auth entirely (public /login using the
   // separate CrmCustomerPortalUser table + JWT, then portalAuth for
   // everything past that) — same reason /api/users is registered here
@@ -510,6 +549,9 @@ async function createApp() {
     }
     next();
   });
+
+  // Per-user project scoping (req.projectScope: null = unrestricted).
+  app.use("/api", attachProjectScope);
 
   if (!isTest) logger.info("[ROUTES] Loading routes...");
 

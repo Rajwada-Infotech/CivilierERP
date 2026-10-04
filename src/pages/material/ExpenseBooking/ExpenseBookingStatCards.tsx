@@ -35,7 +35,7 @@ export function ExpenseBookingStatCards({
         label="Pending"
         value={pendingCount}
         icon={Clock}
-        color="text-amber-500 bg-amber-500/10"
+        color="text-amber-500 bg-[#ffe2021a]"
         accentColor="border-l-amber-500"
       />
       <StatCard

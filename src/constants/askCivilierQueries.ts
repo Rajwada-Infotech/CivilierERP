@@ -615,6 +615,8 @@ export const MODULE_QUERIES: Record<NonNullable<Module>, SuggestedQuery[]> = {
   crm: [],
   loan: [],
   "fixed-asset": [],
+  maintenance: [],
+  "hr-payroll": [],
 };
 
 // ─── Final fallback ─────────────────────────────────────────────────────
@@ -716,6 +718,8 @@ const MODULE_LABELS: Record<NonNullable<Module>, string> = {
   crm: "CRM",
   loan: "Loan",
   "fixed-asset": "Fixed Asset",
+  maintenance: "Maintenance",
+  "hr-payroll": "HR and Payroll",
 };
 
 // A route matches a config key if it IS that key, or is nested under it

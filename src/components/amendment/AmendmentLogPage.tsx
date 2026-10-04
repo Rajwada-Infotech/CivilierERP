@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { fmtIstDateTime } from "@/lib/istTime";
 import { History, X, FileDiff } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -109,7 +110,7 @@ function DiffCell({ before, after }: { before: number | null; after: number | nu
 function ItemsDiffTable({ entries }: { entries: ItemDiffEntry[] }) {
   return (
     <div className="rounded-lg border border-border overflow-x-auto">
-      <table className="w-full text-[11px] min-w-[420px]">
+      <table className="w-full text-[0.6875rem] min-w-[420px]">
         <thead className="bg-muted/40">
           <tr>
             <th className="text-left px-2.5 py-1.5 font-medium text-muted-foreground">Item</th>
@@ -123,7 +124,7 @@ function ItemsDiffTable({ entries }: { entries: ItemDiffEntry[] }) {
             <tr key={e.key} className="border-t border-border/60">
               <td className="px-2.5 py-1.5">
                 <div className="font-medium">{e.name}</div>
-                {e.unit && <div className="text-[10px] text-muted-foreground">{e.unit}</div>}
+                {e.unit && <div className="text-[0.625rem] text-muted-foreground">{e.unit}</div>}
               </td>
               <DiffCell before={e.before?.quantity ?? null} after={e.after?.quantity ?? null} />
               <DiffCell before={e.before?.rate ?? null} after={e.after?.rate ?? null} />
@@ -147,24 +148,9 @@ function fmtCellValue(v: string | null): string {
   return v;
 }
 
+// Timestamps come from the database clock (UTC) — always shown in IST (+5:30).
 function fmtDateTime(value: string | null) {
-  if (!value) return "—";
-  // Backend timestamps here come from SQL Server's SYSDATETIME(), which is
-  // timezone-naive wall-clock IST — but gets JSON-serialized with a
-  // trailing "Z" as if it were UTC. Parsing that at face value would make
-  // the browser "correct" it by adding another +5:30 on top of a value
-  // that's already IST. Stripping the "Z" makes Date parse it as a plain
-  // local wall-clock time instead, so it displays as recorded.
-  const naive = value.replace(/Z$/, "");
-  const d = new Date(naive);
-  if (isNaN(d.getTime())) return value;
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return fmtIstDateTime(value);
 }
 
 interface ShellProps {
@@ -237,7 +223,7 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
       cell: ({ row }) => (
         <div className="min-w-0">
           <p className="truncate">{row.original.RefDocLabel}</p>
-          <p className="font-mono text-[11px] text-muted-foreground truncate">
+          <p className="font-mono text-[0.6875rem] text-muted-foreground truncate">
             {row.original.RefDocNo || "—"}
           </p>
         </div>
@@ -271,7 +257,7 @@ export function AmendmentLogPage({ module, title, Shell }: Props) {
       cell: ({ row }) => (
         <div className="min-w-0">
           <p className="truncate text-xs">{row.original.CreatedBy || "—"}</p>
-          <p className="text-[11px] text-muted-foreground truncate">
+          <p className="text-[0.6875rem] text-muted-foreground truncate">
             {fmtDateTime(row.original.CreatedAt)}
           </p>
         </div>

@@ -112,7 +112,7 @@ router.post("/", adminOnly, async (req, res) => {
   try {
     const pool = getPool();
     const enterpriseId = f.belongsTo ? parseInt(f.belongsTo, 10) : null;
-    await pool
+    const insertResult = await pool
       .request()
       .input("name", sql.NVarChar(255), f.name || null)
       .input("short_name", sql.NVarChar(100), f.shortName || null)
@@ -169,7 +169,9 @@ router.post("/", adminOnly, async (req, res) => {
           phone_number, fax, email, website,
           authorized_capital, paid_up_capital, currency, fiscal_year_start, auditor_name,
           remarks, logo, enterprise_id, belongs_to, discontinue, status, date_of_entry
-        ) VALUES (
+        )
+        OUTPUT INSERTED.id
+        VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @cr_code, @date_of_establishment, @cin, @pan_no, @tan, @gst_type, @gst_no, @gst_issue_date,
           @trade_license, @rera_date, @address, @city, @state, @country, @pincode,
@@ -180,8 +182,24 @@ router.post("/", adminOnly, async (req, res) => {
           @discontinue, @status, @date_of_entry
         )
       `);
+    const newCompanyId = insertResult.recordset[0]?.id;
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("company-master");
+
+    // Every company keeps its own physical cash-on-hand balance, separate
+    // from every other company's — give it its own Cash in Hand ledger head
+    // right away rather than lazily on its first cash payment, so it's
+    // immediately selectable as a Fund Transfer destination (e.g.
+    // "withdraw cash from Bank X into this company's own Cash in Hand")
+    // even before any cash payment has ever been made against it.
+    if (newCompanyId) {
+      try {
+        const { ensureCashInHandHead } = require("../services/generalLedger");
+        await ensureCashInHandHead(pool, newCompanyId, req.user?.email || req.user?.name || "system");
+      } catch (cashErr) {
+        console.warn("[CompanyMaster] Cash in Hand head creation warning:", cashErr.message);
+      }
+    }
 
     // Auto-generate capital account structure based on entity type
     if (f.type) {

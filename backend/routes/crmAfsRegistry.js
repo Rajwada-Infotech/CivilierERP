@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -32,10 +33,19 @@ router.get("/", requirePageRight("crm-afs-registry", "view"), async (req, res) =
   try {
     const pool = getPool();
     const { status } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const where = [];
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("ar.Status = @st"); }
-    const result = await req0.query(`${AREG_SELECT} ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY ar.CreatedAt DESC`);
+    // Not paginated — status counts are computed client-side from the full
+    // set (see CrmAfsRegistry.tsx), same reasoning as CrmDemands.
+    // Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
+    const result = await req0.query(`${AREG_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY ar.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-afs-registry] GET error:", e.message);
@@ -75,12 +85,13 @@ router.get("/booking/:bookingId", requirePageRight("crm-afs-registry", "view"), 
   try {
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId, 10);
+    if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${AREG_SELECT} WHERE ar.BookingId = @bid`);
     res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-afs-registry] GET /booking/:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -122,7 +133,7 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
     const result = await pool.request()
       .input("no",    sql.NVarChar(30), afsRegNo)
       .input("bid",   sql.Int, bookingId)
-      .input("agrid", sql.Int, agr.recordset[0]?.Id || null)
+      .input("agrid", sql.Int, agr.recordset[0]?.Id != null ? agr.recordset[0].Id : null)
       .input("cb",    sql.Int, actorId(req))
       .query(`
         INSERT INTO dbo.CrmAfsRegistry (AfsRegNo, BookingId, AgreementId, Status, CreatedBy, CreatedAt)
@@ -142,7 +153,8 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
 router.put("/:id/schedule", requirePageRight("crm-afs-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (!b.ScheduledDate) return res.status(400).json({ error: "ScheduledDate is required" });
 
@@ -175,7 +187,8 @@ router.put("/:id/schedule", requirePageRight("crm-afs-registry", "edit"), async 
 router.put("/:id/complete", requirePageRight("crm-afs-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmAfsRegistry WHERE Id = @id");

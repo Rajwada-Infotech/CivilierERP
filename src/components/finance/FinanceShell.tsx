@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Landmark } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface FinanceShellProps {
   title: string;
@@ -23,7 +23,7 @@ export const FinanceShell: React.FC<FinanceShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {
@@ -169,7 +169,7 @@ export const FinanceGlassCard: React.FC<{
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div
@@ -212,7 +212,7 @@ export const FinanceGlassCard: React.FC<{
       <div className="relative z-10 p-4">
         <div className="flex items-start justify-between gap-2 mb-3">
           <p
-            className="text-[10px] font-heading font-semibold uppercase tracking-widest"
+            className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest"
             style={{ color: accentColor, opacity: 0.85 }}
           >
             {label}
@@ -261,7 +261,7 @@ export const GlassSection: React.FC<{
   accentColor?: string;
 }> = ({ title, icon: Icon, action, children, accentColor = "#6366f1" }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <div className="space-y-3">

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import TreeDropdown from "@/components/common/TreeDropdown";
 import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -16,6 +16,8 @@ import {
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import {
   Pencil,
   Trash2,
@@ -33,6 +35,7 @@ import {
   Lock,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface AccountGroup {
@@ -123,7 +126,7 @@ function buildGLColumns(
           </span>
           {row.original.IsSystemGenerated && (
             <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold"
               style={{ background: "rgba(99,102,241,0.12)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.25)" }}
               title="System-generated — protected"
             >
@@ -166,7 +169,7 @@ function buildGLColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -186,7 +189,7 @@ function buildGLColumns(
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10"
               title="View details"
@@ -232,7 +235,7 @@ const GeneralLedgerMaster: React.FC = () => {
   const { currentUser } = useAuth();
   const isSuperAdmin = currentUser?.role === "super_admin";
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useDraftForm<LedgerForm>("general-ledger-master", EMPTY_FORM, {
     skip: editingId !== null,
@@ -246,7 +249,13 @@ const GeneralLedgerMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("");
   const [page, setPage] = useState(1);
-  const limit = 10;
+  // Chart of accounts is bounded/human-curated (hundreds, not the
+  // hundreds-of-thousands a real transactional table can reach) — one
+  // request for "basically everything" (backend caps at 2000) instead of
+  // 10-at-a-time, so DataTable's own pagination below is the only paging
+  // control a user sees instead of two disagreeing ones stacked on each
+  // other.
+  const limit = 2000;
   const [sortField] = useState<
     "LHeadName" | "LHeadCode" | "GroupName"
   >("LHeadName");
@@ -255,6 +264,43 @@ const GeneralLedgerMaster: React.FC = () => {
   useEffect(() => {
     setPage(1);
   }, [search, filterGroup]);
+
+  const ledgerExportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Code", accessor: "LHeadCode" },
+      { header: "Account Name", accessor: "LHeadName" },
+      { header: "Account Group", accessor: "GroupName" },
+      {
+        header: "Status",
+        accessor: (row: any) => (row.LHeadStatus ? "Active" : "Inactive"),
+      },
+    ],
+    [],
+  );
+
+  const fetchAllLedgersForExport = async () => {
+    // Backend caps `limit` at 100 per request — page through until every
+    // matching row (across all filters) has been pulled, not just the
+    // currently-visible page.
+    const EXPORT_PAGE_SIZE = 100;
+    const first = await getLedgers({
+      page: 1,
+      limit: EXPORT_PAGE_SIZE,
+      search,
+      groupId: filterGroup,
+    });
+    let all = [...first.data];
+    for (let p = 2; p <= first.totalPages; p++) {
+      const next = await getLedgers({
+        page: p,
+        limit: EXPORT_PAGE_SIZE,
+        search,
+        groupId: filterGroup,
+      });
+      all = all.concat(next.data);
+    }
+    return all as unknown as Record<string, unknown>[];
+  };
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const { data: groupsData, isLoading: groupsLoading } = useQuery({
@@ -289,7 +335,6 @@ const GeneralLedgerMaster: React.FC = () => {
     () => ledgersData?.data ?? [],
     [ledgersData],
   );
-  const totalPages = Math.max(ledgersData?.totalPages ?? 1, 1);
   const totalRecords = ledgersData?.total ?? ledgers.length;
 
   // ── Local UI state ─────────────────────────────────────────────────────────
@@ -519,7 +564,7 @@ const GeneralLedgerMaster: React.FC = () => {
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Ledger Account" : "Add Ledger Account"}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are required
               </p>
             </div>
@@ -531,7 +576,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <BookOpen size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Account Details
                 </p>
               </div>
@@ -583,7 +628,7 @@ const GeneralLedgerMaster: React.FC = () => {
                       className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                     />
                   </div>
-                  <p className="text-[11px] text-muted-foreground/70">
+                  <p className="text-[0.6875rem] text-muted-foreground/70">
                     Auto-generated from account name (you can override manually)
                   </p>
                 </div>
@@ -655,7 +700,7 @@ const GeneralLedgerMaster: React.FC = () => {
 
           {/* Card footer — actions */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave
                 ? <span className="text-emerald-500 font-medium">Ready to save</span>
                 : "Fill in the required fields to save"}
@@ -725,6 +770,15 @@ const GeneralLedgerMaster: React.FC = () => {
                 <X size={11} /> Clear
               </button>
             )}
+
+            <ExportMenu
+              data={filtered as unknown as Record<string, unknown>[]}
+              fetchData={fetchAllLedgersForExport}
+              columns={ledgerExportColumns}
+              title="General Ledger Master"
+              filename="general-ledger-master"
+              disabled={!rights.canExport || (ledgersData?.total ?? 0) === 0}
+            />
           </div>
 
           {/* Table */}
@@ -747,33 +801,12 @@ const GeneralLedgerMaster: React.FC = () => {
             }
           />
           </div>
-          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-            <span className="text-xs text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
         </div>
       </FinanceShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -795,7 +828,7 @@ const GeneralLedgerMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Account Name
                 </p>
                 <p className="text-sm font-medium text-foreground">
@@ -803,7 +836,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Short Code
                 </p>
                 <p className="font-mono text-sm font-semibold text-primary">
@@ -811,7 +844,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Account Group
                 </p>
                 <p className="text-sm text-foreground">
@@ -823,7 +856,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -834,7 +867,7 @@ const GeneralLedgerMaster: React.FC = () => {
               </div>
               {viewRecord.IsSystemGenerated && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Protection
                   </p>
                   <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold"
@@ -863,7 +896,7 @@ const GeneralLedgerMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

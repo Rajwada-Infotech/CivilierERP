@@ -27,9 +27,11 @@ import {
   getBRS,
   getBRSFilters,
   markClear,
+  markUnclear,
   markBounced,
   type BrsEntry,
   type BrsFilterOption,
+  type BrsSourceType,
 } from "@/api/brsApi";
 import { useQuery } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -48,6 +50,8 @@ import {
   ChevronRight,
   ArrowDownLeft,
   ArrowUpRight,
+  ArrowLeftRight,
+  Banknote,
   CalendarDays,
   ShieldCheck,
   AlertTriangle,
@@ -56,6 +60,7 @@ import {
   ArrowRight,
   CornerDownRight,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -94,19 +99,51 @@ function isCancelled(e: BrsEntry): boolean {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function TypePill({ type }: { type: "PAYMENT" | "RECEIVED" }) {
-  if (type === "RECEIVED") {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-        <ArrowDownLeft size={9} strokeWidth={2.5} />
-        Received
-      </span>
-    );
-  }
+const TYPE_PILL_META: Record<BrsSourceType, { label: string; icon: React.ElementType; className: string }> = {
+  RECEIVED: {
+    label: "Received",
+    icon: ArrowDownLeft,
+    className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+  },
+  CRM_RECEIVED: {
+    label: "Received",
+    icon: ArrowDownLeft,
+    className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+  },
+  PAYMENT: {
+    label: "Payment",
+    icon: ArrowUpRight,
+    className: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+  },
+  FUND_TRANSFER_OUT: {
+    label: "Transfer Out",
+    icon: ArrowLeftRight,
+    className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
+  },
+  FUND_TRANSFER_IN: {
+    label: "Transfer In",
+    icon: ArrowLeftRight,
+    className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
+  },
+  LOAN_DISBURSED: {
+    label: "Loan Given",
+    icon: Banknote,
+    className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20",
+  },
+  LOAN_RECEIVED: {
+    label: "Loan Received",
+    icon: Banknote,
+    className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20",
+  },
+};
+
+function TypePill({ type }: { type: BrsSourceType }) {
+  const meta = TYPE_PILL_META[type] ?? TYPE_PILL_META.PAYMENT;
+  const Icon = meta.icon;
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-      <ArrowUpRight size={9} strokeWidth={2.5} />
-      Payment
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.625rem] font-medium border whitespace-nowrap ${meta.className}`}>
+      <Icon size={9} strokeWidth={2.5} className="shrink-0" />
+      {meta.label}
     </span>
   );
 }
@@ -114,7 +151,7 @@ function TypePill({ type }: { type: "PAYMENT" | "RECEIVED" }) {
 function ClearBadge({ cleared, bounced, cancelled }: { cleared: boolean; bounced: boolean; cancelled?: boolean }) {
   if (cancelled) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[0.6875rem] font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800">
         <Ban size={10} className="shrink-0" />
         Cheque Cancelled
       </span>
@@ -122,7 +159,7 @@ function ClearBadge({ cleared, bounced, cancelled }: { cleared: boolean; bounced
   }
   if (bounced) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[0.6875rem] font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800">
         <Ban size={10} className="shrink-0" />
         Bounced
       </span>
@@ -130,14 +167,14 @@ function ClearBadge({ cleared, bounced, cancelled }: { cleared: boolean; bounced
   }
   if (cleared) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[0.6875rem] font-semibold rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
         Clear
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[0.6875rem] font-semibold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
       <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
       Unclear
     </span>
@@ -146,30 +183,26 @@ function ClearBadge({ cleared, bounced, cancelled }: { cleared: boolean; bounced
 
 function PayStatusBadge({ status }: { status: string | null }) {
   if (!status || status === "Draft")
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-muted text-muted-foreground border border-border">Draft</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-muted text-muted-foreground border border-border">Draft</span>;
   if (status === "Approved")
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20"><ShieldCheck size={9} strokeWidth={2.5} />Approved</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20"><ShieldCheck size={9} strokeWidth={2.5} />Approved</span>;
   if (status === "Pending")
-    return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />Pending</span>;
+    return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border border-amber-500/20"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />Pending</span>;
   if (status === "Rejected")
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"><span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />Rejected</span>;
-  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-muted text-muted-foreground border border-border">{status}</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"><span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />Rejected</span>;
+  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-muted text-muted-foreground border border-border">{status}</span>;
 }
 
 function PassbookCheck({ checked, loading, onChange }: { checked: boolean; loading: boolean; onChange: () => void }) {
-  // Once cleared, this is locked — the bank has confirmed the payment in
-  // the passbook, so it can never be un-cleared from here again (server
-  // enforces the same rule independently, see PUT /:sourceType/:id/unclear).
-  const locked = checked;
   return (
     <button
       onClick={onChange}
-      disabled={loading || locked}
-      title={locked ? "Cleared — cannot be undone" : "Mark as Clear"}
+      disabled={loading}
+      title={checked ? "Cleared — click to revert to Unclear" : "Mark as Clear"}
       className={`
         relative flex items-center justify-center w-5 h-5 rounded border-2 transition-all duration-150
         focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50
-        ${loading ? "opacity-40 cursor-wait" : locked ? "cursor-not-allowed" : "cursor-pointer"}
+        ${loading ? "opacity-40 cursor-wait" : "cursor-pointer"}
         ${checked
           ? "bg-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/30"
           : "bg-transparent border-border hover:border-emerald-400 hover:bg-emerald-500/5"
@@ -258,8 +291,7 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
             Bounce / Return Date <span className="text-red-500">*</span>
           </label>
-          <input
-            type="date"
+          <DateInput
             value={bounceDate}
             onChange={(e) => setBounceDate(e.target.value)}
             className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-red-400 outline-none"
@@ -320,6 +352,92 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
   );
 }
 
+// ─── Clear Modal ──────────────────────────────────────────────────────────────
+// Asks for the actual bank clearing date before marking an entry Clear —
+// previously this was an instant one-click toggle with no way to record
+// which date the bank itself cleared the transaction (as opposed to
+// whenever the operator happened to click), same gap the Bounce flow
+// already fixed for bounce dates.
+
+interface ClearModalProps {
+  entry: BrsEntry;
+  onClose: () => void;
+  onConfirm: (bankClearingDate: string) => void;
+  saving: boolean;
+}
+
+function ClearModal({ entry, onClose, onConfirm, saving }: ClearModalProps) {
+  const [bankClearingDate, setBankClearingDate] = useState(format(new Date(), "yyyy-MM-dd"));
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5" onKeyDown={preventEnterSubmit}>
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
+            <CheckCircle2 size={18} className="text-emerald-500" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-foreground font-heading">Mark as Clear</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {entry.DocNo ?? entry.TxnId ?? `${entry.SourceType} #${entry.SourceID}`}
+              {entry.ChequeNo && <> · Cheque <span className="font-mono">{entry.ChequeNo}</span></>}
+            </p>
+          </div>
+          <button onClick={onClose} className="ml-auto text-muted-foreground hover:text-foreground transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20 px-4 py-3 space-y-1.5">
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">Payee / Party</span>
+            <span className="font-medium text-foreground truncate max-w-[180px]">{entry.PaymentName || "—"}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">Amount</span>
+            <span className="font-mono font-semibold text-foreground">{formatINR(entry.Amount)}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">Bank</span>
+            <span className="font-medium text-foreground">{entry.BankName || "—"}</span>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Bank Clearing Date <span className="text-red-500">*</span>
+          </label>
+          <DateInput
+            value={bankClearingDate}
+            onChange={(e) => setBankClearingDate(e.target.value)}
+            className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-emerald-400 outline-none"
+          />
+          <p className="text-[0.6875rem] text-muted-foreground">The date this transaction actually cleared in the bank passbook.</p>
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 h-9 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm(bankClearingDate)}
+            disabled={saving || !bankClearingDate}
+            className="flex-1 h-9 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            {saving ? <RotateCw size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+            Confirm Clear
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ─── Bounce Detail Tooltip ────────────────────────────────────────────────────
 
 function BounceDetailPanel({ entry }: { entry: BrsEntry }) {
@@ -348,7 +466,7 @@ function BounceDetailPanel({ entry }: { entry: BrsEntry }) {
       <button
         ref={btnRef}
         onClick={open}
-        className="inline-flex items-center gap-1 text-[10px] font-medium text-red-600 dark:text-red-400 hover:text-red-700 transition-colors"
+        className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-red-600 dark:text-red-400 hover:text-red-700 transition-colors"
       >
         <Info size={11} />
         Details
@@ -421,6 +539,10 @@ export default function Brs() {
   const [bounceEntry, setBounceEntry] = useState<BrsEntry | null>(null);
   const [bounceSaving, setBounceSaving] = useState(false);
 
+  // ── Clear modal state ─────────────────────────────────────────────────────
+  const [clearEntry, setClearEntry] = useState<BrsEntry | null>(null);
+  const [clearSaving, setClearSaving] = useState(false);
+
   const navigate = useNavigate();
 
   // ── Filter options load ───────────────────────────────────────────────────
@@ -471,26 +593,46 @@ export default function Brs() {
   useEffect(() => { setPage(1); }, [bankId, fromDate, toDate, statusFilter]);
 
   // ── Toggle clear / unclear ────────────────────────────────────────────────
+  // Unclear -> Clear opens the Clear modal (needs a bank clearing date).
+  // Clear -> Unclear is a direct call after a native confirm — reverting a
+  // mistaken tick no longer needs a form, just a "are you sure" (the lock
+  // that used to make this permanent was removed; see PUT .../unclear).
   const toggle = useCallback(async (entry: BrsEntry) => {
     if (isBounced(entry) || isCancelled(entry)) return; // can't toggle a bounced or cancelled-cheque entry
-    // Clearing is one-way — once matched, it's locked (server enforces this
-    // independently in PUT /:sourceType/:id/unclear). PassbookCheck already
-    // disables the control at that point; this is the second guard so
-    // nothing else calling toggle() can slip past it either.
-    if (isCleared(entry)) return;
-    const key = `${entry.SourceType}-${entry.SourceID}`;
-    setTogglingId(key);
+    if (isCleared(entry)) {
+      if (!window.confirm("Revert this entry to Unclear? This clears the bank clearing date and cleared-by record.")) return;
+      const key = `${entry.SourceType}-${entry.SourceID}`;
+      setTogglingId(key);
+      try {
+        await markUnclear(entry.SourceType, entry.SourceID);
+        toast.success("Reverted to Unclear");
+        await fetchData();
+      } catch (err) {
+        console.error("BRS unclear error", err);
+        toast.error("Failed to update status");
+      } finally {
+        setTogglingId(null);
+      }
+      return;
+    }
+    setClearEntry(entry);
+  }, [fetchData]);
+
+  const handleConfirmClear = useCallback(async (bankClearingDate: string) => {
+    if (!clearEntry) return;
+    setClearSaving(true);
     try {
-      await markClear(entry.SourceType, entry.SourceID);
+      await markClear(clearEntry.SourceType, clearEntry.SourceID, bankClearingDate);
       toast.success("Marked as Clear ✓");
+      setClearEntry(null);
       await fetchData();
     } catch (err) {
-      console.error("BRS toggle error", err);
+      console.error("BRS clear error", err);
       toast.error("Failed to update status");
     } finally {
-      setTogglingId(null);
+      setClearSaving(false);
     }
-  }, [fetchData]);
+  }, [clearEntry, fetchData]);
 
   // ── Bounce actions ────────────────────────────────────────────────────────
   const handleConfirmBounce = useCallback(async (bounceDate: string, bounceReason: string, bounceRemarks: string) => {
@@ -549,7 +691,7 @@ export default function Brs() {
   const exportData = useMemo(() => filtered as unknown as Record<string, unknown>[], [filtered]);
 
   const EXPORT_COLUMNS: ExportColumn[] = useMemo(() => [
-    { header: "Type",       accessor: (r) => (r.SourceType === "RECEIVED" ? "Received" : "Payment") },
+    { header: "Type",       accessor: (r) => TYPE_PILL_META[r.SourceType as BrsSourceType]?.label ?? String(r.SourceType) },
     { header: "Company",    accessor: "CompanyName" },
     { header: "Bank", accessor: (r) => {
       const bank = allBanks.find((b) => b.name === r.BankName);
@@ -568,11 +710,21 @@ export default function Brs() {
       if (e.IsBounced === 1 || e.IsBounced === true) return "Bounced";
       return e.IsMatched === 1 || e.IsMatched === true ? "Clear" : "Unclear";
     }},
+    { header: "Bank Clearing Date", accessor: (r) => {
+      const e = r as unknown as BrsEntry;
+      if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
+      return e.BankClearingDate ? fmt(e.BankClearingDate) : "—";
+    }},
     { header: "Cleared On", accessor: (r) => {
       const e = r as unknown as BrsEntry;
       if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
       const { date, time } = fmtDT(e.ClearingDate);
       return time ? `${date}, ${time}` : date;
+    }},
+    { header: "Cleared By", accessor: (r) => {
+      const e = r as unknown as BrsEntry;
+      if (!(e.IsMatched === 1 || e.IsMatched === true)) return "—";
+      return e.ClearedBy ?? "—";
     }},
     { header: "Bounce Date",   accessor: (r) => fmt((r as unknown as BrsEntry).BounceDate) },
     { header: "Bounce Reason", accessor: (r) => (r as unknown as BrsEntry).BounceReason ?? "—" },
@@ -598,7 +750,7 @@ export default function Brs() {
       sub: formatINR(unclearAmount),
       icon: Clock,
       ring: "ring-amber-500/20",
-      bg: "bg-amber-500/10",
+      bg: "bg-[#ffe2021a]",
       blob: "bg-amber-500",
       borderL: "border-l-amber-500",
       color: "text-amber-500",
@@ -679,8 +831,8 @@ export default function Brs() {
               </div>
               <div className="min-w-0">
                 <p className="text-lg font-bold font-heading text-foreground leading-none">{value}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">{label}</p>
-                <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">{sub}</p>
+                <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">{label}</p>
+                <p className="text-[0.6875rem] text-muted-foreground font-mono mt-0.5 truncate">{sub}</p>
               </div>
             </div>
           ))}
@@ -761,8 +913,7 @@ export default function Brs() {
           <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center">
             <div className="relative">
               <CalendarDays size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <input
-                type="date"
+              <DateInput
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
                 className="h-8 w-full sm:w-auto pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
@@ -773,8 +924,7 @@ export default function Brs() {
 
             <div className="relative">
               <CalendarDays size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <input
-                type="date"
+              <DateInput
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
                 className="h-8 w-full sm:w-auto pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
@@ -817,7 +967,7 @@ export default function Brs() {
                         ? s === "clear"
                           ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 font-semibold"
                           : s === "unclear"
-                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold"
+                            ? "bg-[#ffe2021a] text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold"
                             : s === "bounced"
                               ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30 font-semibold"
                               : "bg-primary/10 text-primary border-primary/30 font-semibold"
@@ -826,7 +976,7 @@ export default function Brs() {
                   >
                     {label}
                     {s === "bounced" && bounceCount > 0 && (
-                      <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold">{bounceCount}</span>
+                      <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[0.5625rem] font-bold">{bounceCount}</span>
                     )}
                   </button>
                 );
@@ -887,27 +1037,27 @@ export default function Brs() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                           <TypePill type={entry.SourceType} />
-                          <span className="text-[10px] text-muted-foreground tabular-nums">{fmt(entry.PayDate)}</span>
+                          <span className="text-[0.625rem] text-muted-foreground tabular-nums">{fmt(entry.PayDate)}</span>
                         </div>
                         <p className="text-xs font-semibold text-foreground leading-snug truncate">
                           {entry.CompanyName || "—"}
                         </p>
                         {entry.PaymentName && entry.PaymentName !== entry.CompanyName && (
-                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">{entry.PaymentName}</p>
+                          <p className="text-[0.625rem] text-muted-foreground truncate mt-0.5">{entry.PaymentName}</p>
                         )}
                         {entry.DocNo && (
-                          <span className="inline-block font-mono text-[10px] px-1.5 py-0.5 mt-1 rounded bg-primary/10 text-primary border border-primary/20">
+                          <span className="inline-block font-mono text-[0.625rem] px-1.5 py-0.5 mt-1 rounded bg-primary/10 text-primary border border-primary/20">
                             {entry.DocNo}
                           </span>
                         )}
                         {entry.BankName && (
                           <div className="flex items-center gap-1 mt-1.5">
                             <Landmark size={9} className="text-blue-400 shrink-0" />
-                            <span className="text-[10px] text-muted-foreground truncate">{entry.BankName}</span>
+                            <span className="text-[0.625rem] text-muted-foreground truncate">{entry.BankName}</span>
                           </div>
                         )}
                         {entry.Mode && (
-                          <p className="text-[10px] text-muted-foreground mt-0.5 capitalize">
+                          <p className="text-[0.625rem] text-muted-foreground mt-0.5 capitalize">
                             {entry.Mode}
                             {entry.ChequeNo && <span className="font-mono ml-1 text-muted-foreground/60">#{entry.ChequeNo}</span>}
                           </p>
@@ -920,15 +1070,26 @@ export default function Brs() {
                         </span>
                         <ClearBadge cleared={cleared} bounced={bounced} cancelled={cancelled} />
                         {bounced && <BounceDetailPanel entry={entry} />}
-                        {cleared && entry.ClearingDate && (() => {
-                          const { date, time } = fmtDT(entry.ClearingDate);
-                          return (
-                            <div className="text-right">
-                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">{date}</p>
-                              {time && <p className="text-[10px] text-muted-foreground">{time}</p>}
-                            </div>
-                          );
-                        })()}
+                        {cleared && (entry.BankClearingDate || entry.ClearedBy || entry.ClearingDate) && (
+                          <div className="text-right">
+                            {/* Bank Clearance (passbook date) vs Cleared On
+                                (when it was ticked in the app) — genuinely
+                                separate dates, never merged. */}
+                            {entry.BankClearingDate && (
+                              <p className="text-[0.625rem] text-emerald-600 dark:text-emerald-400 font-medium">
+                                {fmt(entry.BankClearingDate)} <span className="text-muted-foreground/70 font-normal">(bank)</span>
+                              </p>
+                            )}
+                            {entry.ClearingDate && (
+                              <p className="text-[0.625rem] text-muted-foreground/70 tabular-nums">
+                                {fmtDT(entry.ClearingDate).date}{fmtDT(entry.ClearingDate).time ? `, ${fmtDT(entry.ClearingDate).time}` : ""}
+                              </p>
+                            )}
+                            {entry.ClearedBy && (
+                              <p className="text-[0.625rem] text-muted-foreground truncate max-w-[110px]">{entry.ClearedBy}</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -936,28 +1097,28 @@ export default function Brs() {
                     <div className="mt-2.5 pl-8">
                       {bounced ? (
                         entry.ReplacementDocNo ? (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[0.625rem] font-semibold text-emerald-700 dark:text-emerald-400">
                             <ArrowRight size={10} className="shrink-0" />
                             <span className="font-mono">{entry.ReplacementDocNo}</span>
                           </span>
                         ) : (
                           <button
                             onClick={() => handleReissue(entry)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-lg border border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-400 hover:bg-[#ffe2021a] transition-colors"
                           >
                             <CornerDownRight size={11} />
                             Re-issue
                           </button>
                         )
                       ) : entry.OriginalDocNo ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#ffe2021a] border border-amber-500/25 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-400">
                           <CornerDownRight size={10} className="shrink-0" />
                           <span className="font-mono">{entry.OriginalDocNo}</span>
                         </span>
                       ) : entry.ChequeNo && !cleared ? (
                         <button
                           onClick={() => setBounceEntry(entry)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
                         >
                           <Ban size={10} />
                           Mark Bounced
@@ -979,25 +1140,27 @@ export default function Brs() {
               <thead>
                 <tr className="border-b border-border bg-muted/10">
                   <th className="px-3 py-3 text-center w-10">
-                    <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">✓</span>
+                    <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">✓</span>
                   </th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[72px]">Type</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[130px]">Company / Party</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Bank</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[90px]">Date</th>
-                  <th className="px-3 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">Amount</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Mode / Cheque</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[82px]">Status</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">BRS</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared On</th>
-                  <th className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-[140px]">Action</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[72px]">Type</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[130px]">Company / Party</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Bank</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[90px]">Date</th>
+                  <th className="px-3 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">Amount</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Mode / Cheque</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[82px]">Status</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">BRS</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[90px] hidden xl:table-cell">Bank Clearance</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[130px] hidden xl:table-cell">Cleared On</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared By</th>
+                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[140px]">Action</th>
                 </tr>
               </thead>
 
               <tbody className="divide-y divide-border">
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="px-5 py-14 text-center text-muted-foreground text-sm">
+                    <td colSpan={12} className="px-5 py-14 text-center text-muted-foreground text-sm">
                       No entries match your filters.
                     </td>
                   </tr>
@@ -1045,12 +1208,12 @@ export default function Brs() {
                           {entry.CompanyName || "—"}
                         </p>
                         {entry.PaymentName && entry.PaymentName !== entry.CompanyName && (
-                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                          <p className="text-[0.625rem] text-muted-foreground truncate mt-0.5">
                             {entry.PaymentName}
                           </p>
                         )}
                         {entry.DocNo && (
-                          <span className="inline-block font-mono text-[10px] px-1.5 py-0.5 mt-1 rounded bg-primary/10 text-primary border border-primary/20 truncate max-w-full">
+                          <span className="inline-block font-mono text-[0.625rem] px-1.5 py-0.5 mt-1 rounded bg-primary/10 text-primary border border-primary/20 truncate max-w-full">
                             {entry.DocNo}
                           </span>
                         )}
@@ -1078,7 +1241,7 @@ export default function Brs() {
                       <td className="px-3 py-4 hidden lg:table-cell align-middle">
                         <span className="text-xs text-foreground capitalize">{entry.Mode || "—"}</span>
                         {entry.ChequeNo && (
-                          <p className="font-mono text-[10px] text-muted-foreground/70 mt-0.5 truncate">
+                          <p className="font-mono text-[0.625rem] text-muted-foreground/70 mt-0.5 truncate">
                             #{entry.ChequeNo}
                           </p>
                         )}
@@ -1092,23 +1255,44 @@ export default function Brs() {
                           {bounced && <BounceDetailPanel entry={entry} />}
                         </div>
                       </td>
+                      {/* Bank Clearance — the date the bank itself cleared it
+                          (passbook date), as typed in the clear popup. Distinct
+                          from Cleared On below, which is when this was ticked
+                          in the app — the two can genuinely differ by days. */}
                       <td className="px-3 py-4 hidden xl:table-cell align-middle">
-                        {cleared && entry.ClearingDate ? (() => {
-                          const { date, time } = fmtDT(entry.ClearingDate);
-                          return (
-                            <div>
-                              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{date}</p>
-                              {time && <p className="text-[10px] text-muted-foreground">{time}</p>}
-                            </div>
-                          );
-                        })() : (
-                          <span className="text-[10px] text-muted-foreground">—</span>
+                        {cleared && entry.BankClearingDate ? (
+                          <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                            {fmt(entry.BankClearingDate)}
+                          </p>
+                        ) : (
+                          <span className="text-[0.625rem] text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      {/* Cleared On — when the entry was actually ticked clear
+                          in the app (system timestamp), date + time. */}
+                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
+                        {cleared && entry.ClearingDate ? (
+                          <>
+                            <p className="text-xs text-foreground">{fmtDT(entry.ClearingDate).date}</p>
+                            {fmtDT(entry.ClearingDate).time && (
+                              <p className="text-[0.625rem] text-muted-foreground/70 tabular-nums">{fmtDT(entry.ClearingDate).time}</p>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-[0.625rem] text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-4 hidden xl:table-cell align-middle">
+                        {cleared && entry.ClearedBy ? (
+                          <p className="text-xs text-foreground truncate max-w-[110px]" title={entry.ClearedBy}>{entry.ClearedBy}</p>
+                        ) : (
+                          <span className="text-[0.625rem] text-muted-foreground">—</span>
                         )}
                       </td>
                       <td className="px-3 py-4 align-middle">
                         {bounced ? (
                           entry.ReplacementDocNo ? (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 overflow-hidden max-w-full">
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[0.625rem] font-semibold text-emerald-700 dark:text-emerald-400 overflow-hidden max-w-full">
                               <ArrowRight size={10} className="shrink-0" />
                               <span className="font-mono truncate">{entry.ReplacementDocNo}</span>
                             </span>
@@ -1116,14 +1300,14 @@ export default function Brs() {
                             <button
                               onClick={() => handleReissue(entry)}
                               title="Create a replacement payment for this bounced cheque"
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors whitespace-nowrap"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-lg border border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-400 hover:bg-[#ffe2021a] transition-colors whitespace-nowrap"
                             >
                               <CornerDownRight size={11} />
                               Re-issue
                             </button>
                           )
                         ) : entry.OriginalDocNo ? (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[10px] font-semibold text-amber-700 dark:text-amber-400 overflow-hidden max-w-full">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#ffe2021a] border border-amber-500/25 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-400 overflow-hidden max-w-full">
                             <CornerDownRight size={10} className="shrink-0" />
                             <span className="font-mono truncate">{entry.OriginalDocNo}</span>
                           </span>
@@ -1131,7 +1315,7 @@ export default function Brs() {
                           <button
                             onClick={() => setBounceEntry(entry)}
                             title="Mark this cheque as bounced / dishonoured"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
                           >
                             <Ban size={10} />
                             Mark Bounced
@@ -1174,7 +1358,7 @@ export default function Brs() {
 
         {/* ── Legend ─────────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-4 mt-4 px-1">
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
             <span className="inline-flex items-center gap-1 font-medium text-foreground">
               <span className="w-3.5 h-3.5 rounded border-2 border-emerald-500 bg-emerald-500 inline-flex items-center justify-center">
                 <svg viewBox="0 0 10 8" className="w-2 h-2 fill-none stroke-white stroke-[2]">
@@ -1185,13 +1369,13 @@ export default function Brs() {
             </span>{" "}
             — confirmed in your bank passbook (Clear)
           </span>
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
             <span className="inline-flex items-center gap-1 font-medium text-foreground">
               <Ban size={11} className="text-red-500" /> Bounce
             </span>{" "}
             — dishonoured / returned by bank
           </span>
-          <p className="text-[11px] text-muted-foreground ml-auto">
+          <p className="text-[0.6875rem] text-muted-foreground ml-auto">
             Showing payments with a linked bank account
           </p>
         </div>
@@ -1204,6 +1388,16 @@ export default function Brs() {
           onClose={() => setBounceEntry(null)}
           onConfirm={handleConfirmBounce}
           saving={bounceSaving}
+        />
+      )}
+
+      {/* ── Clear Modal (portal) ───────────────────────────────────────────── */}
+      {clearEntry && (
+        <ClearModal
+          entry={clearEntry}
+          onClose={() => setClearEntry(null)}
+          onConfirm={handleConfirmClear}
+          saving={clearSaving}
         />
       )}
     </>

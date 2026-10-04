@@ -11,6 +11,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, ChevronDown, ChevronRight, Play, ToggleLeft, ToggleRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/distribution-rules";
 
@@ -45,7 +46,7 @@ const methodBadge = (m: string) => {
     Weighted: "bg-purple-500/10 text-purple-600",
     Manual: "bg-muted text-muted-foreground",
   };
-  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${colors[m] ?? "bg-muted text-muted-foreground"}`}>{m}</span>;
+  return <span className={`px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${colors[m] ?? "bg-muted text-muted-foreground"}`}>{m}</span>;
 };
 
 const EMPTY_FORM = { Level: 1, ScopeType: "Global", ScopeId: "", Method: "RoundRobin" };
@@ -182,7 +183,7 @@ const SaDistributionRules: React.FC = () => {
                       : `Team Lead: ${rule.ScopeTeamLeadName || rule.ScopeId}`}
                   </span>
                   {methodBadge(rule.Method)}
-                  {!rule.IsActive && <span className="text-[10px] text-muted-foreground italic">inactive</span>}
+                  {!rule.IsActive && <span className="text-[0.625rem] text-muted-foreground italic">inactive</span>}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{rule.members.length} member{rule.members.length !== 1 ? "s" : ""}</p>
               </div>
@@ -229,7 +230,7 @@ const SaDistributionRules: React.FC = () => {
           {canManage && (
             <button
               onClick={() => { setAddOpen(true); setForm({ ...EMPTY_FORM }); setMembers([{ UserId: "", Weight: "1" }]); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold btn-module text-white transition-colors"
             >
               <Plus size={13} /> Add Rule
             </button>
@@ -282,11 +283,11 @@ const SaDistributionRules: React.FC = () => {
               {form.ScopeType === "TeamLead" && (
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1.5">Team Lead</label>
-                  <select value={form.ScopeId} onChange={(e) => setForm((f) => ({ ...f, ScopeId: e.target.value }))}
+                  <SearchableNativeSelect value={form.ScopeId} onChange={(e) => setForm((f) => ({ ...f, ScopeId: e.target.value }))}
                     className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
                     <option value="">Select team lead...</option>
                     {(userOptions as any[]).filter((u: any) => u.label.includes("team lead")).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                  </select>
+                  </SearchableNativeSelect>
                 </div>
               )}
             </div>
@@ -302,11 +303,11 @@ const SaDistributionRules: React.FC = () => {
               <div className="space-y-2">
                 {members.map((m, i) => (
                   <div key={i} className="flex gap-2 items-center">
-                    <select value={m.UserId} onChange={(e) => handleMemberChange(i, "UserId", e.target.value)}
+                    <SearchableNativeSelect value={m.UserId} onChange={(e) => handleMemberChange(i, "UserId", e.target.value)}
                       className="flex-1 text-sm border border-border rounded-lg px-2 py-1.5 bg-background">
                       <option value="">Select user...</option>
                       {(userOptions as any[]).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                    </select>
+                    </SearchableNativeSelect>
                     <input type="number" value={m.Weight} onChange={(e) => handleMemberChange(i, "Weight", e.target.value)}
                       className="w-16 text-sm border border-border rounded-lg px-2 py-1.5 bg-background text-center" placeholder="Wt" min="0.1" step="0.1" title="Weight" />
                     {members.length > 1 && (
@@ -318,14 +319,14 @@ const SaDistributionRules: React.FC = () => {
                 ))}
               </div>
               {form.Method === "Weighted" && (
-                <p className="text-[10px] text-muted-foreground mt-1.5">Weight determines relative share of leads (e.g. 2 gets twice as many as 1)</p>
+                <p className="text-[0.625rem] text-muted-foreground mt-1.5">Weight determines relative share of leads (e.g. 2 gets twice as many as 1)</p>
               )}
             </div>
 
             <div className="flex justify-end gap-2 pt-1 border-t border-border">
               <button onClick={() => setAddOpen(false)} className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
               <button onClick={handleSave} disabled={saving}
-                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold btn-module text-white disabled:opacity-40 transition-colors">
                 {saving ? "Saving..." : "Create Rule"}
               </button>
             </div>

@@ -245,7 +245,7 @@ export function ApprovalSetupFormModal({
                   </View>
                   <Pressable onPress={() => setPickerForLevel(lv.id)} className="flex-row flex-wrap items-center gap-1.5 mt-2">
                     {levelUsers.length === 0 ? (
-                      <View className="flex-row items-center gap-1 px-2 py-0.5 rounded-full" style={{ backgroundColor: "#f59e0b1a", borderWidth: 1, borderColor: "#f59e0b40" }}>
+                      <View className="flex-row items-center gap-1 px-2 py-0.5 rounded-full" style={{ backgroundColor: "#ffe2021a", borderWidth: 1, borderColor: "#f59e0b40" }}>
                         <AlertCircle size={9} color="#f59e0b" />
                         <Text style={{ color: "#f59e0b", fontSize: 10 }}>Tap to assign approvers</Text>
                       </View>

@@ -6,10 +6,16 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
-
-const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
+const { PARKING_TYPES } = require("../constants/parkingTypes");
 
 bumpCacheVersion("parking-master").catch(() => {});
+
+// GET /types — the canonical list of parking types, sourced from the shared
+// constant so every frontend that needs a parking type dropdown reads the
+// same authoritative list rather than maintaining its own hardcoded copy.
+router.get("/types", async (req, res) => {
+  res.json(PARKING_TYPES);
+});
 
 // GET all parking rates — includes an InUse flag (any CrmParkingAllotment
 // row ever referencing this rate) so the frontend can grey out Delete
@@ -105,7 +111,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
         .request()
         .input("Id", sql.Int, existing.Id)
         .input("Charge", sql.Decimal(18, 2), parseFloat(Charge))
-        .input("Gst", sql.Decimal(5, 2), GstRate != null ? parseFloat(GstRate) : 18)
+        .input("Gst", sql.Decimal(5, 2), GstRate != null && GstRate !== "" ? parseFloat(GstRate) : 18)
         .input("UpdatedBy", sql.Int, createdBy)
         .query(`
           UPDATE dbo.ParkingMaster SET
@@ -123,7 +129,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("BlockId",   sql.Int, BlockId ? parseInt(BlockId) : null)
       .input("Type",      sql.NVarChar(50), ParkingType)
       .input("Charge",    sql.Decimal(18, 2), parseFloat(Charge))
-      .input("Gst",       sql.Decimal(5, 2), GstRate != null ? parseFloat(GstRate) : 18)
+      .input("Gst",       sql.Decimal(5, 2), GstRate != null && GstRate !== "" ? parseFloat(GstRate) : 18)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .query(`
@@ -178,7 +184,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("BlockId",    sql.Int, BlockId ? parseInt(BlockId) : null)
       .input("Type",       sql.NVarChar(50), ParkingType)
       .input("Charge",     sql.Decimal(18, 2), parseFloat(Charge))
-      .input("Gst",        sql.Decimal(5, 2), GstRate != null ? parseFloat(GstRate) : 18)
+      .input("Gst",        sql.Decimal(5, 2), GstRate != null && GstRate !== "" ? parseFloat(GstRate) : 18)
       .input("IsActive",   sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy",  sql.Int, updatedBy)
       .query(`

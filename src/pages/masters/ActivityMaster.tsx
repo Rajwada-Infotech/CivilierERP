@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { EngineeringShell } from "@/components/engineering/EngineeringShell";
+import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { useModule } from "@/contexts/ModuleContext";
 import {
   MasterPage,
@@ -23,6 +23,8 @@ import {
   Plus,
   Package,
   Trash2,
+  Pencil,
+  Flag,
 } from "lucide-react";
 import {
   getActivities,
@@ -37,9 +39,16 @@ import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getLedgerOptions } from "@/api/generalLedgerApi";
 import {
   getActivityItems,
-  addActivityItem,
+  addActivityItems,
   deleteActivityItem,
 } from "@/api/activityItemsApi";
+import {
+  getCheckpoints as getCheckpointCatalog,
+  getActivityCheckpointTemplate,
+  attachCheckpointsToActivity,
+  detachCheckpointFromActivity,
+} from "@/api/activityCheckpointApi";
+import { Checkbox } from "@/components/ui/checkbox";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   Dialog,
@@ -48,11 +57,12 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ active }: { active: boolean }) => (
   <span
-    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${
       active
         ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
         : "bg-red-500/10 border-red-500/20 text-red-400"
@@ -71,11 +81,19 @@ const GroupRow = ({
   activities,
   search,
   onView,
+  onEdit,
+  onDelete,
+  canEdit,
+  canDelete,
 }: {
   group: DbActivity;
   activities: DbActivity[];
   search: string;
   onView: (item: DbActivity) => void;
+  onEdit: (item: DbActivity) => void;
+  onDelete: (item: DbActivity) => void;
+  canEdit: boolean;
+  canDelete: boolean;
 }) => {
   const [open, setOpen] = useState(true);
 
@@ -106,14 +124,14 @@ const GroupRow = ({
         <span className="font-semibold text-sm text-foreground flex-1">
           {group.activity_name}
         </span>
-        <span className="px-2 py-0.5 rounded-md text-[10px] bg-violet-500/10 text-violet-400 font-mono mr-2">
+        <span className="px-2 py-0.5 rounded-md text-[0.625rem] bg-violet-500/10 text-violet-400 font-mono mr-2">
           {filtered.length} {filtered.length === 1 ? "activity" : "activities"}
         </span>
         <span className="hidden sm:block text-xs text-muted-foreground font-mono mr-3 truncate max-w-[220px]">
           {group.short_description}
         </span>
         <StatusBadge active={group.is_active} />
-        <button
+        <button data-row-view
           onClick={(e) => {
             e.stopPropagation();
             onView(group);
@@ -123,6 +141,30 @@ const GroupRow = ({
         >
           <Eye size={13} />
         </button>
+        {canEdit && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(group);
+            }}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0"
+            title="Edit"
+          >
+            <Pencil size={13} />
+          </button>
+        )}
+        {canDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(group);
+            }}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+            title="Delete"
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
       </div>
 
       {/* Activities */}
@@ -148,19 +190,37 @@ const GroupRow = ({
                   {activity.short_description}
                 </span>
                 {activity.hsn_code && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
                     <Hash size={9} />
                     {activity.hsn_code}
                   </span>
                 )}
                 <StatusBadge active={activity.is_active} />
-                <button
+                <button data-row-view
                   onClick={() => onView(activity)}
                   className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
                   title="View details"
                 >
                   <Eye size={13} />
                 </button>
+                {canEdit && (
+                  <button
+                    onClick={() => onEdit(activity)}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                    title="Edit"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                )}
+                {canDelete && (
+                  <button
+                    onClick={() => onDelete(activity)}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                    title="Delete"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
               </div>
             ))
           )}
@@ -218,15 +278,31 @@ const ActivityMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("activity-master");
   const { activeModule } = useModule();
-  // This master is shared across modules (Engineering's BOQ, Civil Work
-  // DPR's activity tracking, etc.) — the breadcrumb should reflect whichever
-  // module the user actually navigated from, not a single hardcoded one.
+  // Civil Work DPR's own Activity Master — Engineering split off onto its
+  // own copy (see src/pages/masters/EngineeringActivityMaster.tsx,
+  // migration 463). Keeping the module-aware breadcrumb rather than
+  // hardcoding "Civil Work DPR" since this page is also still reachable
+  // from the generic Masters area.
   const moduleBreadcrumb =
     (activeModule && MODULE_BREADCRUMB_LABEL[activeModule]) || "Masters";
   const [treeSearch, setTreeSearch] = useState("");
   const [viewRecord, setViewRecord] = useState<DbActivity | null>(null);
   const [addItemOpen, setAddItemOpen] = useState(false);
-  const [pickedItemId, setPickedItemId] = useState("");
+  const [pickedItemIds, setPickedItemIds] = useState<string[]>([]);
+  const [itemSearch, setItemSearch] = useState("");
+  const [addCheckpointOpen, setAddCheckpointOpen] = useState(false);
+  const [pickedCheckpointIds, setPickedCheckpointIds] = useState<number[]>([]);
+  const [checkpointSearch, setCheckpointSearch] = useState("");
+
+  // Edit, triggered from the grouped tree view below (the table itself is
+  // hidden — hideTable — so MasterPage's own row-level Edit button never
+  // renders; this drives its edit mode from the outside instead).
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editKey, setEditKey] = useState(0);
+  const handleEditRequest = (item: DbActivity) => {
+    setEditId(String(item.id));
+    setEditKey((k) => k + 1);
+  };
 
   const {
     data: dbData,
@@ -256,18 +332,72 @@ const ActivityMaster: React.FC = () => {
     (i) => !linkedItems.some((li) => li.itemId === i.M_Id),
   );
 
-  const handleAddItem = async () => {
-    if (!viewRecord || !pickedItemId) return;
+  // Checkpoints tagged onto the activity currently open in the detail
+  // drawer — this is now the ONLY place they're configured (see
+  // RungAssignmentModal, which used to let Work Allocation pick these by
+  // hand; a rung's own checklist auto-seeds from this the first time it's
+  // viewed instead).
+  const { data: checkpointTemplate = [] } = useQuery({
+    queryKey: ["activityCheckpointTemplate", viewRecord?.id],
+    queryFn: () => getActivityCheckpointTemplate(viewRecord!.id),
+    enabled: !!viewRecord && viewRecord.activity_type === 1,
+  });
+
+  // Work Checkpoint Master's full catalog, for the "Add Checkpoint" picker.
+  const { data: checkpointCatalog = [] } = useQuery({
+    queryKey: ["checkpoint-catalog-for-activity-link"],
+    queryFn: getCheckpointCatalog,
+    enabled: addCheckpointOpen,
+  });
+  const unattachedCheckpoints = checkpointCatalog.filter(
+    (c) => !checkpointTemplate.some((t) => t.id === c.id),
+  );
+
+  const handleAttachCheckpoint = async () => {
+    if (!viewRecord || pickedCheckpointIds.length === 0) return;
     try {
-      await addActivityItem(viewRecord.id, pickedItemId);
-      toast.success("Item linked to activity ✓");
+      await attachCheckpointsToActivity(viewRecord.id, pickedCheckpointIds);
+      toast.success(
+        pickedCheckpointIds.length === 1
+          ? "Checkpoint tagged to activity ✓"
+          : `${pickedCheckpointIds.length} checkpoints tagged to activity ✓`,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["activityCheckpointTemplate", viewRecord.id] });
+      setAddCheckpointOpen(false);
+      setPickedCheckpointIds([]);
+      setCheckpointSearch("");
+    } catch (err: any) {
+      toast.error("Failed to tag checkpoint(s): " + err.message);
+    }
+  };
+
+  const handleDetachCheckpoint = async (linkId: number) => {
+    if (!viewRecord) return;
+    try {
+      await detachCheckpointFromActivity(viewRecord.id, linkId);
+      await queryClient.invalidateQueries({ queryKey: ["activityCheckpointTemplate", viewRecord.id] });
+    } catch (err: any) {
+      toast.error("Failed to remove checkpoint: " + err.message);
+    }
+  };
+
+  const handleAddItem = async () => {
+    if (!viewRecord || pickedItemIds.length === 0) return;
+    try {
+      await addActivityItems(viewRecord.id, pickedItemIds);
+      toast.success(
+        pickedItemIds.length === 1
+          ? "Item linked to activity ✓"
+          : `${pickedItemIds.length} items linked to activity ✓`,
+      );
       await queryClient.invalidateQueries({
         queryKey: ["activityItems", viewRecord.id],
       });
       setAddItemOpen(false);
-      setPickedItemId("");
+      setPickedItemIds([]);
+      setItemSearch("");
     } catch (err: any) {
-      toast.error("Failed to link item: " + err.message);
+      toast.error("Failed to link item(s): " + err.message);
     }
   };
 
@@ -346,40 +476,42 @@ const ActivityMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        const payload = toPayload(event.record, groupOptions);
-        const res = await addActivity(payload);
-        toast.success("Activity saved!");
-        await refetch();
-        // Items can only be linked to an Activity (not a Group) — open its
-        // detail drawer immediately so the "Add Item" button is right there,
-        // instead of making the user hunt for it in the tree below.
-        if (payload.activity_type === 1 && res.id) {
-          const fresh = await getActivities();
-          const created = fresh.find((a) => a.id === res.id);
-          if (created) setViewRecord(created);
-        }
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
+      const payload = toPayload(event.record, groupOptions);
+      const res = await addActivity(payload);
+      toast.success("Activity saved!");
+      await refetch();
+      // Items can only be linked to an Activity (not a Group) — open its
+      // detail drawer immediately so the "Add Item" button is right there,
+      // instead of making the user hunt for it in the tree below.
+      if (payload.activity_type === 1 && res.id) {
+        const fresh = await getActivities();
+        const created = fresh.find((a) => a.id === res.id);
+        if (created) setViewRecord(created);
       }
     }
     if (event.action === "update") {
-      try {
-        await updateActivity(event.id, toPayload(event.record, groupOptions));
-        toast.success("Activity updated!");
-        await refetch();
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateActivity(event.id, toPayload(event.record, groupOptions));
+      toast.success("Activity updated!");
+      await refetch();
     }
     if (event.action === "delete") {
-      try {
-        await deleteActivity(event.id);
-        toast.success("Activity deleted!");
-        await refetch();
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteActivity(event.id);
+      toast.success("Activity deleted!");
+      await refetch();
+    }
+  };
+
+  // Delete, triggered from the grouped tree view — same reasoning as
+  // handleEditRequest above: the table (and its own inline delete-confirm)
+  // is hidden, so this drives deleteActivity directly instead.
+  const handleDeleteRequest = async (item: DbActivity) => {
+    const kind = item.activity_type === 0 ? "group" : "activity";
+    if (!window.confirm(`Delete this ${kind} — "${item.activity_name}"?`)) return;
+    try {
+      await handleDataEvent({ action: "delete", id: String(item.id), records: [] });
+      if (viewRecord?.id === item.id) setViewRecord(null);
+    } catch (err: any) {
+      toast.error("Failed to delete: " + (err?.message || "Unknown error"));
     }
   };
 
@@ -391,9 +523,9 @@ const ActivityMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", moduleBreadcrumb, "Activity Master"]} />
-      <EngineeringShell
+      <CivilWorkDprShell
         title="Activity Master"
-        subtitle="Manage activity groups and their individual activities across Engineering and Civil Work DPR modules"
+        subtitle="Manage Civil Work DPR's activity groups and their individual activities"
         icon={Activity}
       >
 
@@ -462,7 +594,7 @@ const ActivityMaster: React.FC = () => {
                         ))}
                     </select>
                     {!isActivity && (
-                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
                         <Hash size={10} />
                         SAC can only be linked to an Activity, not a Group
                       </p>
@@ -503,7 +635,7 @@ const ActivityMaster: React.FC = () => {
                         ))}
                     </select>
                     {!isActivity && (
-                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
                         <Hash size={10} />
                         GL Head can only be linked to an Activity, not a Group
                       </p>
@@ -530,6 +662,8 @@ const ActivityMaster: React.FC = () => {
           ]}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          requestEditId={editId}
+          requestEditKey={editId ? `${editId}:${editKey}` : null}
         />
       </div>
 
@@ -541,7 +675,7 @@ const ActivityMaster: React.FC = () => {
             <h2 className="text-base font-semibold text-foreground">
               Activities by Group
             </h2>
-            <span className="px-2 py-0.5 rounded-md text-[10px] bg-muted text-muted-foreground font-mono">
+            <span className="px-2 py-0.5 rounded-md text-[0.625rem] bg-muted text-muted-foreground font-mono">
               {groups.length} groups · {activityItems.length} activities
             </span>
           </div>
@@ -577,10 +711,10 @@ const ActivityMaster: React.FC = () => {
 
         {/* Legend */}
         <div className="flex items-center gap-4 mb-3 px-1">
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
             <Layers size={11} className="text-violet-400" /> Group
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
             <Tag size={11} className="text-teal-400" /> Activity (nested under
             its group)
           </div>
@@ -594,6 +728,10 @@ const ActivityMaster: React.FC = () => {
               activities={activityItems.filter((a) => a.group_id === group.id)}
               search={treeSearch}
               onView={setViewRecord}
+              onEdit={handleEditRequest}
+              onDelete={handleDeleteRequest}
+              canEdit={rights.canEdit}
+              canDelete={rights.canDelete}
             />
           ))}
 
@@ -604,7 +742,7 @@ const ActivityMaster: React.FC = () => {
                 <span className="text-sm font-medium text-muted-foreground">
                   Ungrouped Activities
                 </span>
-                <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground font-mono">
+                <span className="px-1.5 py-0.5 rounded text-[0.625rem] bg-muted text-muted-foreground font-mono">
                   {ungrouped.length}
                 </span>
               </div>
@@ -622,13 +760,31 @@ const ActivityMaster: React.FC = () => {
                       {a.short_description}
                     </span>
                     <StatusBadge active={a.is_active} />
-                    <button
+                    <button data-row-view
                       onClick={() => setViewRecord(a)}
                       className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
                       title="View details"
                     >
                       <Eye size={13} />
                     </button>
+                    {rights.canEdit && (
+                      <button
+                        onClick={() => handleEditRequest(a)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                        title="Edit"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    )}
+                    {rights.canDelete && (
+                      <button
+                        onClick={() => handleDeleteRequest(a)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                        title="Delete"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -643,11 +799,11 @@ const ActivityMaster: React.FC = () => {
           )}
         </div>
       </div>
-      </EngineeringShell>
+      </CivilWorkDprShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -675,7 +831,7 @@ const ActivityMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   {viewRecord.activity_type === 0
                     ? "Group Name"
                     : "Activity Name"}
@@ -685,7 +841,7 @@ const ActivityMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Short Description
                 </p>
                 <p className="text-sm text-foreground">
@@ -697,7 +853,7 @@ const ActivityMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Type
                 </p>
                 <span
@@ -716,7 +872,7 @@ const ActivityMaster: React.FC = () => {
               </div>
               {viewRecord.activity_type === 1 && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     SAC Code
                   </p>
                   {viewRecord.hsn_code ? (
@@ -733,7 +889,7 @@ const ActivityMaster: React.FC = () => {
               )}
               {viewRecord.activity_type === 1 && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     GL Head
                   </p>
                   {viewRecord.gl_head_name ? (
@@ -750,13 +906,13 @@ const ActivityMaster: React.FC = () => {
               {viewRecord.activity_type === 1 && (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
+                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
                       Items
                     </p>
                     {rights.canEdit && (
                       <button
                         onClick={() => setAddItemOpen(true)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.6875rem] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
                       >
                         <Plus size={11} /> Add Item
                       </button>
@@ -778,7 +934,7 @@ const ActivityMaster: React.FC = () => {
                             {li.itemName}
                           </span>
                           {li.uom && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
                               {li.uom}
                             </span>
                           )}
@@ -797,61 +953,282 @@ const ActivityMaster: React.FC = () => {
                   )}
                 </div>
               )}
+              {viewRecord.activity_type === 1 && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
+                      Checkpoints
+                    </p>
+                    {rights.canEdit && (
+                      <button
+                        onClick={() => setAddCheckpointOpen(true)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.6875rem] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        <Plus size={11} /> Add Checkpoint
+                      </button>
+                    )}
+                  </div>
+                  {checkpointTemplate.length === 0 ? (
+                    <p className="text-muted-foreground italic text-sm">
+                      No checkpoints tagged yet — every rung assigned this activity in Work
+                      Allocation will start with an empty checklist.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {checkpointTemplate.map((cp) => (
+                        <div
+                          key={cp.linkId}
+                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
+                        >
+                          <Flag size={11} className="text-amber-400 shrink-0" />
+                          <span className="text-sm text-foreground flex-1 truncate">
+                            {cp.fieldName}
+                          </span>
+                          {cp.minWaitDays != null && (
+                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                              {cp.minWaitDays}d wait
+                            </span>
+                          )}
+                          {cp.isDaily && (
+                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                              Daily
+                            </span>
+                          )}
+                          {rights.canEdit && (
+                            <button
+                              onClick={() => handleDetachCheckpoint(cp.linkId)}
+                              className="p-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                              title="Remove checkpoint"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <StatusBadge active={viewRecord.is_active} />
               </div>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* ── Add Item dialog ── */}
-      <Dialog open={addItemOpen} onOpenChange={setAddItemOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
+      <Dialog
+        open={addItemOpen}
+        onOpenChange={(open) => {
+          setAddItemOpen(open);
+          if (!open) {
+            setPickedItemIds([]);
+            setItemSearch("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-5 pt-5 pb-3">
             <DialogTitle className="font-heading text-base">
-              Link Item to {viewRecord?.activity_name}
+              Link Items to {viewRecord?.activity_name}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-1 pt-1">
-            <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wide">
-              Item
-            </label>
-            <select
-              value={pickedItemId}
-              onChange={(e) => setPickedItemId(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-            >
-              <option value="">Select item…</option>
-              {unlinkedItems.map((i) => (
-                <option key={i.M_Id} value={i.M_Id}>
-                  {i.M_Name}
-                  {i.M_UOM ? ` (${i.M_UOM})` : ""}
-                </option>
-              ))}
-            </select>
-            {unlinkedItems.length === 0 && (
-              <p className="text-xs text-muted-foreground italic mt-1">
-                All items are already linked to this activity.
-              </p>
-            )}
+
+          <div className="px-5 pb-3">
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="text"
+                autoFocus
+                value={itemSearch}
+                onChange={(e) => setItemSearch(e.target.value)}
+                placeholder="Search items…"
+                className="w-full pl-8 pr-3 py-2 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
           </div>
-          <DialogFooter>
+
+          {(() => {
+            const filteredItems = unlinkedItems.filter((i) =>
+              itemSearch
+                ? i.M_Name.toLowerCase().includes(itemSearch.toLowerCase())
+                : true,
+            );
+            return (
+              <div className="max-h-72 overflow-y-auto px-5 pb-5 space-y-1">
+                {unlinkedItems.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic text-center py-6">
+                    All items are already linked to this activity.
+                  </p>
+                ) : filteredItems.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic text-center py-6">
+                    No items match "{itemSearch}".
+                  </p>
+                ) : (
+                  filteredItems.map((i) => {
+                    const selected = pickedItemIds.includes(i.M_Id);
+                    const toggle = () =>
+                      setPickedItemIds((prev) =>
+                        prev.includes(i.M_Id) ? prev.filter((id) => id !== i.M_Id) : [...prev, i.M_Id],
+                      );
+                    return (
+                      <button
+                        key={i.M_Id}
+                        type="button"
+                        onClick={toggle}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
+                          selected
+                            ? "bg-primary/10 border border-primary/40 text-foreground"
+                            : "border border-transparent hover:bg-muted text-foreground"
+                        }`}
+                      >
+                        <Checkbox checked={selected} onCheckedChange={toggle} className="shrink-0" />
+                        <Package size={13} className="text-teal-400 shrink-0" />
+                        <span className="flex-1 truncate">{i.M_Name}</span>
+                        {i.M_UOM && (
+                          <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            {i.M_UOM}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            );
+          })()}
+
+          <DialogFooter className="px-5 py-4 border-t border-border">
             <button
-              onClick={() => setAddItemOpen(false)}
+              onClick={() => {
+                setAddItemOpen(false);
+                setPickedItemIds([]);
+                setItemSearch("");
+              }}
               className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted"
             >
               Cancel
             </button>
             <button
               onClick={handleAddItem}
-              disabled={!pickedItemId}
+              disabled={pickedItemIds.length === 0}
               className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-engineering text-white disabled:opacity-40 transition-all"
             >
-              Add
+              {pickedItemIds.length > 0 ? `Add ${pickedItemIds.length}` : "Add"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Checkpoint dialog ── */}
+      <Dialog
+        open={addCheckpointOpen}
+        onOpenChange={(open) => {
+          setAddCheckpointOpen(open);
+          if (!open) {
+            setPickedCheckpointIds([]);
+            setCheckpointSearch("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+          <DialogHeader className="px-5 pt-5 pb-3">
+            <DialogTitle className="font-heading text-base">
+              Tag Checkpoints to {viewRecord?.activity_name}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="px-5 pb-3">
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="text"
+                autoFocus
+                value={checkpointSearch}
+                onChange={(e) => setCheckpointSearch(e.target.value)}
+                placeholder="Search checkpoints…"
+                className="w-full pl-8 pr-3 py-2 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
+          </div>
+
+          {(() => {
+            const filteredCheckpoints = unattachedCheckpoints.filter((c) =>
+              checkpointSearch
+                ? c.fieldName.toLowerCase().includes(checkpointSearch.toLowerCase())
+                : true,
+            );
+            return (
+              <div className="max-h-72 overflow-y-auto px-5 pb-5 space-y-1">
+                {unattachedCheckpoints.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic text-center py-6">
+                    Every checkpoint in Work Checkpoint Master is already tagged to this activity.
+                  </p>
+                ) : filteredCheckpoints.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic text-center py-6">
+                    No checkpoint matches "{checkpointSearch}".
+                  </p>
+                ) : (
+                  filteredCheckpoints.map((c) => {
+                    const selected = pickedCheckpointIds.includes(c.id);
+                    const toggle = () =>
+                      setPickedCheckpointIds((prev) =>
+                        prev.includes(c.id) ? prev.filter((id) => id !== c.id) : [...prev, c.id],
+                      );
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={toggle}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
+                          selected
+                            ? "bg-primary/10 border border-primary/40 text-foreground"
+                            : "border border-transparent hover:bg-muted text-foreground"
+                        }`}
+                      >
+                        <Checkbox checked={selected} onCheckedChange={toggle} className="shrink-0" />
+                        <Flag size={13} className="text-amber-400 shrink-0" />
+                        <span className="flex-1 truncate">{c.fieldName}</span>
+                        {c.minWaitDays != null && (
+                          <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            {c.minWaitDays}d wait
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            );
+          })()}
+
+          <DialogFooter className="px-5 py-4 border-t border-border">
+            <button
+              onClick={() => {
+                setAddCheckpointOpen(false);
+                setPickedCheckpointIds([]);
+                setCheckpointSearch("");
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAttachCheckpoint}
+              disabled={pickedCheckpointIds.length === 0}
+              className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-engineering text-white disabled:opacity-40 transition-all"
+            >
+              {pickedCheckpointIds.length > 0 ? `Add ${pickedCheckpointIds.length}` : "Add"}
             </button>
           </DialogFooter>
         </DialogContent>

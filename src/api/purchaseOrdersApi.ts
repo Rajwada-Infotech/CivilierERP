@@ -192,9 +192,11 @@ export const getPurchaseOrders = (
     poType?: string;
     fyId?: number;
     includeShortClosed?: boolean;
+    projectId?: number;
+    groupBy?: "project";
   } = {},
 ) => {
-  const { page = 1, limit = 10, poType, fyId, includeShortClosed } = query;
+  const { page = 1, limit = 10, poType, fyId, includeShortClosed, projectId, groupBy } = query;
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
@@ -202,6 +204,8 @@ export const getPurchaseOrders = (
   if (poType) params.set("poType", poType);
   if (fyId) params.set("fyId", String(fyId));
   if (includeShortClosed) params.set("includeShortClosed", "1");
+  if (projectId) params.set("projectId", String(projectId));
+  if (groupBy) params.set("groupBy", groupBy);
   return fetchWithAuth(`/purchase-orders?${params.toString()}`)
     .then((r) => handleResponse<POListResponse>(r))
     .then((r: any): POListResponse => {
@@ -267,9 +271,13 @@ export const rejectPurchaseOrder = (id: number | string, note?: string) =>
   }).then((r) => handleResponse(r));
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
-// Returns [{ LHeadId, LHeadName, ... }]
+// Returns [{ LHeadId, LHeadName, ... }] — Vendors and Suppliers, not Landlords
+// (a Landlord is stored as LHeadType='S'/LHeadCategory='Landlord' — see
+// SupplierMaster.tsx — and has no place on a Purchase Order).
 export const getSuppliers = () =>
-  fetchWithAuth("/api/account-head?type=S").then((r) => handleResponse(r));
+  fetchWithAuth("/api/account-head?type=S,V&excludeCategory=Landlord").then((r) =>
+    handleResponse(r),
+  );
 
 // ─── Companies ────────────────────────────────────────────────────────────────
 // Returns [{ id, label, ... }] from enterprises/options?business_type=C
@@ -324,6 +332,10 @@ export interface SupplierDetails {
    *  to decide CGST+SGST vs IGST on PO line items relative to the company's
    *  own state. */
   LGSTState: string | null;
+  /** "Registered" / "Unregistered" — GST is only ever calculated on line
+   *  items when this is "Registered"; an Unregistered supplier can't charge
+   *  GST at all, regardless of what the item/HSN master's own rate is. */
+  LGSTType: string | null;
   LHeadPhone: string | null;
   LHeadEmail: string | null;
 }
@@ -342,6 +354,7 @@ export const getSupplierDetails = (
         LHeadContactPerson: data.LHeadContactPerson ?? null,
         LGST: data.LGST ?? null,
         LGSTState: data.LGSTState ?? null,
+        LGSTType: data.LGSTType ?? null,
         LHeadPhone: data.LHeadPhone ?? null,
         LHeadEmail: data.LHeadEmail ?? null,
       };

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const selectCls =
   "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
@@ -148,7 +149,7 @@ export default function L1Chart() {
       <div className="flex flex-col gap-3 bg-card border border-border rounded-xl px-4 py-3">
         {/* Quotation picker */}
         <div className="flex flex-col gap-1">
-          <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground/60 px-0.5">
+          <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground/60 px-0.5">
             Select Quotation
           </span>
           <div className="relative">
@@ -187,14 +188,14 @@ export default function L1Chart() {
             const sel = comparableQuotations.find((q) => String(q.QuotationId) === quotationId);
             return sel ? (
               <div className="flex items-center gap-2 px-1 pt-0.5">
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-[0.6875rem] text-muted-foreground">
                   {sel.ProjectName ?? sel.CompanyName}
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-heading font-medium">
+                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-heading font-medium">
                   {sel.Status}
                 </span>
                 {sel.DocNo && (
-                  <span className="text-[10px] font-mono text-muted-foreground/50 ml-auto">{sel.DocNo}</span>
+                  <span className="text-[0.625rem] font-mono text-muted-foreground/50 ml-auto">{sel.DocNo}</span>
                 )}
               </div>
             ) : null;
@@ -208,7 +209,7 @@ export default function L1Chart() {
               Add Supplier
             </span>
             <div className="relative flex-1 min-w-0">
-              <select
+              <SearchableNativeSelect
                 value={addSupplierId}
                 onChange={(e) => setAddSupplierId(e.target.value)}
                 className="text-sm rounded-lg border border-border px-3 py-2.5 pr-7 bg-background appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-full"
@@ -221,13 +222,13 @@ export default function L1Chart() {
                       {s.LHeadName ?? s.label ?? s.name}
                     </option>
                   ))}
-              </select>
+              </SearchableNativeSelect>
               <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             </div>
             <Button
               type="button"
               size="sm"
-              className="gap-1 bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0 shrink-0 h-[42px] px-3"
+              className="gap-1 btn-module text-white hover:opacity-90 border-0 shrink-0 h-[42px] px-3"
               disabled={!addSupplierId || addSupplierMutation.isPending}
               onClick={() => addSupplierMutation.mutate(addSupplierId)}
             >
@@ -305,10 +306,10 @@ export default function L1Chart() {
                     <thead>
                       <tr className="bg-muted/50 border-b border-border">
                         {/* Sticky item header */}
-                        <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground sticky left-0 z-20 bg-muted/50 w-[150px] sm:w-[200px]">
+                        <th className="px-4 py-3 text-left text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground sticky left-0 z-20 bg-muted/50 w-[150px] sm:w-[200px]">
                           Item
                         </th>
-                        <th className="px-3 py-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground text-center whitespace-nowrap w-[80px]">
+                        <th className="px-3 py-3 text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground text-center whitespace-nowrap w-[80px]">
                           Qty
                         </th>
                         {chart!.suppliers.map((s) => (
@@ -324,7 +325,7 @@ export default function L1Chart() {
                               ) : (
                                 <Clock size={11} className="text-amber-400 shrink-0" />
                               )}
-                              <span className={`text-[10px] font-semibold leading-tight ${s.SupplierLHeadId === cheapestSupplierId ? "text-emerald-600 dark:text-emerald-400" : ""}`}>
+                              <span className={`text-[0.625rem] font-semibold leading-tight ${s.SupplierLHeadId === cheapestSupplierId ? "text-emerald-600 dark:text-emerald-400" : ""}`}>
                                 {s.SupplierName}
                               </span>
                               {s.SupplierLHeadId === cheapestSupplierId && (
@@ -332,7 +333,7 @@ export default function L1Chart() {
                               )}
                             </div>
                             {supplierTotals[s.SupplierLHeadId] > 0 && (
-                              <div className={`text-[10px] mt-0.5 font-semibold ${s.SupplierLHeadId === cheapestSupplierId ? "text-emerald-500" : "text-muted-foreground"}`}>
+                              <div className={`text-[0.625rem] mt-0.5 font-semibold ${s.SupplierLHeadId === cheapestSupplierId ? "text-emerald-500" : "text-muted-foreground"}`}>
                                 {fmtAmt(supplierTotals[s.SupplierLHeadId])}
                               </div>
                             )}
@@ -352,7 +353,7 @@ export default function L1Chart() {
                             <div className="max-w-[140px] sm:max-w-[190px] truncate" title={item.ItemName}>
                               {item.ItemName}
                             </div>
-                            <div className="text-[10px] text-muted-foreground mt-0.5">{item.UOMName || item.UOMCode}</div>
+                            <div className="text-[0.625rem] text-muted-foreground mt-0.5">{item.UOMName || item.UOMCode}</div>
                           </td>
                           <td className="px-3 py-3 text-center text-xs text-muted-foreground whitespace-nowrap">
                             <span className="font-semibold text-foreground">{item.Quantity}</span>
@@ -372,7 +373,7 @@ export default function L1Chart() {
                                       {fmtAmt(p.Rate)}
                                     </div>
                                     {p.SupplyDate && (
-                                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                                      <div className="text-[0.625rem] text-muted-foreground mt-0.5">
                                         {fmtDate(p.SupplyDate)}
                                       </div>
                                     )}
@@ -390,7 +391,7 @@ export default function L1Chart() {
                     {/* Totals footer */}
                     <tfoot>
                       <tr className="bg-muted/60 border-t-2 border-border">
-                        <td className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground sticky left-0 z-10 bg-muted/60">
+                        <td className="px-4 py-3 text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground sticky left-0 z-10 bg-muted/60">
                           Grand Total
                         </td>
                         <td />
@@ -403,7 +404,7 @@ export default function L1Chart() {
                               {fmtAmt(supplierTotals[s.SupplierLHeadId] ?? 0)}
                             </div>
                             {s.SupplierLHeadId === cheapestSupplierId && (
-                              <div className="text-[10px] text-emerald-500 font-semibold flex items-center gap-0.5 mt-0.5">
+                              <div className="text-[0.625rem] text-emerald-500 font-semibold flex items-center gap-0.5 mt-0.5">
                                 <Trophy size={9} /> Lowest
                               </div>
                             )}
@@ -423,7 +424,7 @@ export default function L1Chart() {
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1">
-                      <select
+                      <SearchableNativeSelect
                         value={winningSupplierId || String(cheapestSupplierId || "")}
                         onChange={(e) => setWinningSupplierId(e.target.value)}
                         className={selectCls}
@@ -436,7 +437,7 @@ export default function L1Chart() {
                             {s.SupplierLHeadId === cheapestSupplierId ? " · Lowest" : ""}
                           </option>
                         ))}
-                      </select>
+                      </SearchableNativeSelect>
                       <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     </div>
                     {effectiveWinner && (
@@ -453,7 +454,7 @@ export default function L1Chart() {
                   <Button
                     type="button"
                     onClick={createPO}
-                    className="gap-1.5 w-full sm:w-auto bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0"
+                    className="gap-1.5 w-full sm:w-auto btn-module text-white hover:opacity-90 border-0"
                   >
                     <ShoppingCart size={14} /> Create Purchase Order
                   </Button>

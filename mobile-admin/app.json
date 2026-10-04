@@ -24,14 +24,24 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.rajwadainfotech.civiliererpadmin",
-      "usesCleartextTraffic": true
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {

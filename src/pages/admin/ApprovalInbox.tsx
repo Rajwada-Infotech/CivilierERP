@@ -1,14 +1,17 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { Button } from "@/components/ui/button";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { computeGrnNetWithTerms } from "@/pages/material/ExpenseBooking/helpers";
+import { confirmEngineerAssignment } from "@/api/dependencyActivityAssignmentApi";
 import {
   ClipboardCheck,
   ClipboardList,
@@ -30,16 +33,25 @@ import {
   Building2,
   Home,
   Car,
-  ChevronDown,
   SlidersHorizontal,
   Eye,
   FileText,
   Landmark,
   UserCheck,
   FileWarning,
+  Undo2,
+  ArrowDownWideNarrow,
+  ArrowUpWideNarrow,
+  Search,
+  X,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  ShieldCheck,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
+import { MultiSelectDropdown, type MultiSelectOption } from "@/components/ui/MultiSelectDropdown";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +64,12 @@ export interface InboxItem {
   Status: string;
   ContractorName: string | null;
   SupplierName: string | null;
+  // Resolved project name where that module's table (or one it already
+  // joins) ties to a project — purchase-orders, work-orders, goods-receipt,
+  // expense-booking, material-requests, vehicle-in-out, material-issues,
+  // material-issue-return, debit-note. NULL for everything else (payments,
+  // CRM modules, ...), which have no single project to show.
+  ProjectName: string | null;
   Amount: number | null;
   CreatedBy: string | null;
   ApprovedBy: string | null;
@@ -59,6 +77,9 @@ export interface InboxItem {
   RejectedBy: string | null;
   RejectionNote: string | null;
   LastModified: string | null;
+  // received-payment only: a CRM payment still waiting for Accounts to set
+  // its deposit bank — can't be approved yet, so the row shows "Review".
+  NeedsReview?: boolean | number | null;
   // expense-booking only — null for all other modules
   GrnTotalAmount: number | null;
   GrnBasicAmount: number | null;
@@ -67,6 +88,28 @@ export interface InboxItem {
   SourceTransferDocNo: string | null;
   FromGodownName: string | null;
   ToGodownName: string | null;
+  // journal-voucher only — "AccountHead Dr/Cr Amount | AccountHead Dr/Cr Amount"
+  // for every line on the voucher, null for all other modules.
+  JournalVoucherSummary: string | null;
+  // work-allocation-engineer only — the specific engineer this row's task
+  // confirmation belongs to; null for every other module.
+  AssigneeUserId: number | null;
+  // work-allocation-engineer only — DependencyMasterActivity.Id (the
+  // "rung"), used to fetch the full assignment detail (engineers, days,
+  // materials, checkpoints) via GET /api/dependency-activity-assignment/:rungId
+  // — RecordId itself is the DependencyActivityEngineer row (per-engineer,
+  // needed for the confirm action) and doesn't work as a lookup key there.
+  RungId: number | null;
+  // Set by the backend's visibility filter (approvalInbox.js) only when the
+  // viewer is named somewhere on this record's workflow but NOT on the
+  // level it's currently sitting at — e.g. a Level-2 approver looking at a
+  // record still waiting on Level 1. It's shown for awareness (so the inbox
+  // doesn't look like it's missing records), but Approve/Reject will
+  // correctly be refused by the backend until it actually reaches their
+  // level. Omitted entirely (undefined) for every normal, actionable row.
+  _canAct?: boolean;
+  _currentLevel?: number;
+  _totalLevels?: number;
 }
 
 // ─── Module config ────────────────────────────────────────────────────────────
@@ -90,7 +133,7 @@ export const MODULE_CONFIG: Record<
   },
   "work-orders": {
     icon: Hammer,
-    color: "text-amber-500 bg-amber-500/10",
+    color: "text-amber-500 bg-[#ffe2021a]",
     navPath: "/material/work-order",
     apiEndpoint: "/api/work-orders",
     label: "Work Orders",
@@ -101,6 +144,18 @@ export const MODULE_CONFIG: Record<
     navPath: "/payments",
     apiEndpoint: "/api/new-payment",
     label: "Payments",
+  },
+  // A CRM Refund's payout voucher — same table/route as "payments" above,
+  // just its own Module tag so it resolves its own single-level workflow
+  // (see approvalInbox.js's query split and approvalService.js's
+  // "crm-refund-payment" module) instead of the multi-module Payments
+  // bundle every other payment goes through.
+  "crm-refund-payment": {
+    icon: Banknote,
+    color: "text-orange-600 bg-orange-600/10",
+    navPath: "/payments",
+    apiEndpoint: "/api/new-payment",
+    label: "CRM Refund Payments",
   },
   "goods-receipt": {
     icon: Truck,
@@ -151,6 +206,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/material-issues",
     label: "Material Issues",
   },
+  "material-issue-return": {
+    icon: Undo2,
+    color: "text-lime-500 bg-lime-500/10",
+    navPath: "/material/issue-return",
+    apiEndpoint: "/api/material-issue-return",
+    label: "Material Issue Returns",
+  },
   "sale-orders": {
     icon: ShoppingCart,
     color: "text-fuchsia-500 bg-fuchsia-500/10",
@@ -164,6 +226,13 @@ export const MODULE_CONFIG: Record<
     navPath: "/material/vehicle-in-out",
     apiEndpoint: "/api/vehicle-in-out",
     label: "Vehicle In/Out",
+  },
+  "stock-transfers": {
+    icon: Warehouse,
+    color: "text-teal-500 bg-teal-500/10",
+    navPath: "/material/stock-transfer",
+    apiEndpoint: "/api/stock-transfers",
+    label: "Stock Transfer",
   },
   "journal-voucher": {
     icon: Receipt,
@@ -185,6 +254,18 @@ export const MODULE_CONFIG: Record<
     navPath: "/fund-transfer",
     apiEndpoint: "/api/fund-transfer",
     label: "Fund Transfers",
+  },
+  // One specific engineer confirming a task literally assigned to them —
+  // not a document a manager reviews. isVisibleToViewer (approvalInbox.js)
+  // only ever shows this to the named EngineerId (or admin/super_admin),
+  // and its Approve action is a bespoke confirm call (see InboxRow below),
+  // not the shared ApprovalActions role/workflow machinery.
+  "work-allocation-engineer": {
+    icon: UserCheck,
+    color: "text-cyan-600 bg-cyan-600/10",
+    navPath: "/civilworkdpr/work-done",
+    apiEndpoint: "/api/dependency-activity-assignment",
+    label: "Activity Assignments",
   },
   // crm-applications deliberately has no entry here anymore — Applications
   // no longer have their own approve/reject cycle (see approvalInbox.js's
@@ -225,7 +306,7 @@ export const MODULE_CONFIG: Record<
   },
   "crm-brokerage": {
     icon: Receipt,
-    color: "text-amber-500 bg-amber-500/10",
+    color: "text-amber-500 bg-[#ffe2021a]",
     navPath: "/crm/brokerage",
     apiEndpoint: "/api/crm/brokerage",
     label: "CRM Brokerage",
@@ -251,6 +332,38 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/noc",
     label: "CRM NOC",
   },
+  "crm-booking-amendment": {
+    icon: Car,
+    color: "text-amber-500 bg-[#ffe2021a]",
+    navPath: "/crm/booking-amendments",
+    apiEndpoint: "/api/crm/booking-amendments",
+    label: "Booking Amendments",
+  },
+  // Was missing entirely — CrmRefund already had a real Pending/Approve/
+  // Reject cycle, but with no entry here it never surfaced in the
+  // centralized inbox, only via CrmRefunds.tsx's own inline actions —
+  // inconsistent with every sibling CRM module (cancellations, agreements,
+  // brokerage, NOC, booking amendments), which all appear in both places.
+  "crm-refunds": {
+    icon: Undo2,
+    color: "text-orange-600 bg-orange-600/10",
+    navPath: "/crm/refunds",
+    apiEndpoint: "/api/crm/refunds",
+    label: "CRM Refunds",
+  },
+  // Second, separate approval tier (Finance's own sign-off, distinct from
+  // the CRM checker step above) — same split as crm-agreement-date vs.
+  // crm-agreements. Its /:id/finance-approve route needs a company-bank
+  // pick the inbox can't collect inline, so Approve always hands off to the
+  // real page (see REVIEW_INSTEAD_LABEL below); Reject needs no extra input
+  // and works as a normal one-click via the /finance/reject alias route.
+  "crm-refunds-finance": {
+    icon: Undo2,
+    color: "text-orange-700 bg-orange-700/10",
+    navPath: "/crm/refunds",
+    apiEndpoint: "/api/crm/refunds",
+    label: "CRM Refunds (Finance)",
+  },
   // Was missing entirely — without this, ApprovalActions fell back to
   // `/api/${item.Module}` = "/api/contracts" (plural), a 404: the route is
   // mounted at "/api/contract" (singular). Approve/Reject on Contract rows
@@ -269,6 +382,22 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/debit-note",
     label: "Debit Notes",
   },
+  // Civil Work DPR's per-assignment Approval Setup — a Completed, QC-passed
+  // activity awaiting whichever levels were configured for it in Work
+  // Allocation. Not a dbo.ApprovalWorkflows module (see approvalInbox.js's
+  // own comment on this query block and isVisibleToViewer branch), so it's
+  // deliberately not in RESTRICTED_MODULES' sibling role-list logic below —
+  // it's added to RESTRICTED_MODULES itself instead, which makes button
+  // visibility depend purely on _canAct (this activity's own named
+  // approvers, computed server-side) rather than the generic
+  // "approval-inbox edit" fallback.
+  "civilworkdpr-approval": {
+    icon: ShieldCheck,
+    color: "text-cyan-600 bg-cyan-600/10",
+    navPath: "/civilworkdpr/activity-reporting",
+    apiEndpoint: "/api/dependency-activity-assignment",
+    label: "Activity Approvals",
+  },
 };
 
 // Module → ApprovalAuditLog TableName, only for modules the backend's
@@ -282,12 +411,15 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "work-orders": "WorkOrderHeader",
   "expense-booking": "ExpenseBooking",
   payments: "NewPayment",
+  "crm-refund-payment": "NewPayment",
   "material-issues": "MaterialIssues",
+  "material-issue-return": "MaterialIssueReturn",
   "material-requests": "MaterialRequests",
   boq: "BOQ",
   "work-done": "WorkDone",
   "sale-orders": "SaleOrders",
   "vehicle-in-out": "VehicleInOut",
+  "stock-transfers": "StockTransfers",
   contracts: "Contract",
 };
 
@@ -295,7 +427,7 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
 export const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 export const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
-const MR_APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
+export const MR_APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "director"];
 // Agreement Date and Sales Deed Director approval are narrower, separate
 // gates — super_admin only, "for now" per instruction, unlike the rest of
@@ -303,7 +435,8 @@ const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "d
 // approvalService's MODULE_APPROVER_ROLE_OVERRIDES; this only controls
 // button visibility (and which /:id/<suffix>/approve path gets hit) here.
 export const DATE_APPROVER_ROLES = ["super_admin"];
-export const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director" };
+export const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director", "crm-refunds-finance": "finance" };
+export const REFUND_FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
 export const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 
 // Modules the backend keeps deliberately role-locked (see
@@ -314,10 +447,85 @@ export const RESTRICTED_MODULES = new Set([
   "inter-company-transfer",
   "fund-transfer",
   "crm-money-receipts",
+  "crm-refund-payment",
+  // Gates Approve/Reject to exactly this activity's own named approvers
+  // (server-computed _canAct) — the generic "approval-inbox edit" fallback
+  // must not open these, since that right has nothing to do with who's
+  // actually named in this one activity's Approval Setup.
+  "civilworkdpr-approval",
   ...SUB_GATE_MODULES,
 ]);
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
+
+// ─── Category grouping ────────────────────────────────────────────────────────
+// Every module bucketed under the business function it belongs to — MR/PO/GRN/
+// Material Issues etc. all read as "Material", Payments/JV/Fund Transfer as
+// "Finance", and so on — so the inbox groups like-with-like instead of one
+// long flat module list.
+export type CategoryId = "material" | "finance" | "engineering" | "sales" | "admin";
+
+export const CATEGORY_META: Record<CategoryId, { label: string; color: string }> = {
+  material: { label: "Material", color: "text-cyan-600" },
+  finance: { label: "Finance", color: "text-emerald-600" },
+  engineering: { label: "Engineering", color: "text-indigo-600" },
+  sales: { label: "Sales / CRM", color: "text-orange-600" },
+  admin: { label: "Admin", color: "text-purple-600" },
+};
+
+const CATEGORY_ORDER: CategoryId[] = ["material", "finance", "engineering", "sales", "admin"];
+
+export const MODULE_CATEGORY: Record<string, CategoryId> = {
+  "material-requests": "material",
+  "purchase-orders": "material",
+  "work-orders": "material",
+  "goods-receipt": "material",
+  "expense-booking": "material",
+  "material-issues": "material",
+  "material-issue-return": "material",
+  "vehicle-in-out": "material",
+  "stock-transfers": "material",
+  "inter-company-transfer": "material",
+  "debit-note": "material",
+
+  payments: "finance",
+  "received-payment": "finance",
+  "journal-voucher": "finance",
+  "fund-transfer": "finance",
+  contracts: "finance",
+
+  "work-done": "engineering",
+  boq: "engineering",
+  "work-allocation-engineer": "engineering",
+
+  "sale-orders": "sales",
+  "crm-bookings": "sales",
+  "crm-agreements": "sales",
+  "crm-agreement-date": "sales",
+  "crm-sales-deed-director": "sales",
+  "crm-brokerage": "sales",
+  "crm-cancellations": "sales",
+  "crm-money-receipts": "sales",
+  "crm-noc": "sales",
+  "crm-booking-amendment": "sales",
+  "crm-refunds": "sales",
+  "crm-refunds-finance": "sales",
+};
+
+export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
+
+// Within a category, MODULE_CATEGORY's own declaration order above doubles
+// as the module display order — e.g. Material Requests before Purchase
+// Orders before GRNs — so every module's rows stay contiguous instead of
+// interleaving with other modules in the same category by date.
+const MODULE_ORDER: Record<string, number> = Object.fromEntries(
+  Object.keys(MODULE_CATEGORY).map((mod, i) => [mod, i]),
+);
+const moduleOrderOf = (mod: string): number => MODULE_ORDER[mod] ?? Number.MAX_SAFE_INTEGER;
+
+// A CRM Received Payment Accounts hasn't assigned a deposit bank to yet.
+export const needsBankReview = (item: Pick<InboxItem, "Module" | "Status" | "NeedsReview">) =>
+  item.Module === "received-payment" && item.Status === "Pending" && !!item.NeedsReview;
 
 // Modules whose one-click Approve is either guaranteed to fail without a
 // review step first (crm-bookings' Data Review checklist gate) or whose
@@ -326,6 +534,11 @@ const ALL_MODULES = Object.keys(MODULE_CONFIG);
 const REVIEW_INSTEAD_LABEL: Record<string, string> = {
   "crm-bookings": "Open Booking",
   "crm-brokerage": "Review & Approve",
+  // finance-approve needs a company-bank pick (RefundBankLHeadId) the inbox
+  // has no field for — hands off to CrmRefunds.tsx's own Finance Approve
+  // dialog instead of a one-click that would 400 whenever no bank is
+  // already set on the refund.
+  "crm-refunds-finance": "Finance Approve",
 };
 
 // Modules whose page already supports a "?view=<RecordId>" deep link that
@@ -333,10 +546,12 @@ const REVIEW_INSTEAD_LABEL: Record<string, string> = {
 // `searchParams.get("view")` effect in each page). Modules not listed here
 // have no such modal yet, so we fall back to a bare navigate.
 const VIEW_PARAM_MODULES = new Set([
+  "received-payment",
   "purchase-orders",
   "goods-receipt",
   "expense-booking",
   "payments",
+  "crm-refund-payment",
   "vehicle-in-out",
   "material-requests",
   "crm-brokerage",
@@ -346,20 +561,25 @@ const VIEW_PARAM_MODULES = new Set([
 // preview mode, instead of dumping the user on a blank list page to hunt
 // for the record themselves.
 export function openInModulePath(item: InboxItem, navPath: string): string {
+  // Guard: a 0 or null RecordId produces ?view=0 which leaves a stuck URL
+  // on the destination page (the panel never opens but the URL never clears).
+  // Fall back to the plain list page when the id is invalid.
+  const hasValidId = parseInt(String(item.RecordId), 10) > 0;
+
   // crm-bookings' navPath (/crm/bookings) opens the real Booking detail
   // dialog via its existing "?view=" deep link — same convention
   // VIEW_PARAM_MODULES below uses, just listed explicitly here since it's
   // CRM-specific rather than shared with the generic modules.
   if (item.Module === "crm-bookings") {
-    return `${navPath}?view=${item.RecordId}`;
+    return hasValidId ? `${navPath}?view=${item.RecordId}` : navPath;
   }
   // crm-agreements/crm-agreement-date use "?id=" (opens the read-only detail
   // dialog directly via CrmApplication.tsx-style searchParams.get("id") effects).
   if (item.Module === "crm-agreements" || item.Module === "crm-agreement-date") {
-    return `${navPath}?id=${item.RecordId}`;
+    return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }
   if (VIEW_PARAM_MODULES.has(item.Module)) {
-    return `${navPath}?view=${item.RecordId}`;
+    return hasValidId ? `${navPath}?view=${item.RecordId}` : navPath;
   }
   return navPath;
 }
@@ -444,6 +664,7 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "material-issues":      "border-cyan-500",
   "sale-orders":          "border-fuchsia-500",
   "vehicle-in-out":       "border-sky-500",
+  "stock-transfers":      "border-teal-500",
   "journal-voucher":      "border-amber-600",
   "inter-company-transfer":"border-fuchsia-600",
   "fund-transfer":        "border-violet-600",
@@ -456,64 +677,8 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "crm-brokerage":        "border-amber-500",
   "crm-cancellations":    "border-rose-500",
   "crm-noc":              "border-teal-500",
-};
-
-const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
-  "purchase-orders": { icon: "text-blue-500", active: "bg-blue-500 border-blue-500" },
-  "work-orders": { icon: "text-amber-500", active: "bg-amber-500 border-amber-500" },
-  payments: { icon: "text-emerald-500", active: "bg-emerald-500 border-emerald-500" },
-  "goods-receipt": { icon: "text-violet-500", active: "bg-violet-500 border-violet-500" },
-  "expense-booking": { icon: "text-rose-500", active: "bg-rose-500 border-rose-500" },
-  "received-payment": { icon: "text-teal-500", active: "bg-teal-500 border-teal-500" },
-  "work-done": { icon: "text-emerald-600", active: "bg-emerald-600 border-emerald-600" },
-  boq: { icon: "text-indigo-500", active: "bg-indigo-500 border-indigo-500" },
-  "material-requests": { icon: "text-orange-500", active: "bg-orange-500 border-orange-500" },
-  "material-issues": { icon: "text-cyan-500", active: "bg-cyan-500 border-cyan-500" },
-  "journal-voucher": { icon: "text-amber-600", active: "bg-amber-600 border-amber-600" },
-  "inter-company-transfer": { icon: "text-fuchsia-600", active: "bg-fuchsia-600 border-fuchsia-600" },
-  "fund-transfer": { icon: "text-violet-600", active: "bg-violet-600 border-violet-600" },
-  "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
-  "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
-  "crm-money-receipts": { icon: "text-teal-600", active: "bg-teal-600 border-teal-600" },
-  contracts: { icon: "text-purple-500", active: "bg-purple-500 border-purple-500" },
-};
-
-const ModuleTab: React.FC<{
-  module: string | null;
-  label: string;
-  icon?: React.ElementType;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}> = ({ module, label, icon: Icon, count, active, onClick }) => {
-  const colors = module ? MODULE_TAB_COLORS[module] : null;
-
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-all whitespace-nowrap ${
-        active
-          ? `${colors?.active ?? "bg-primary border-primary"} text-white shadow-sm`
-          : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
-      }`}
-    >
-      {Icon && (
-        <Icon size={12} className={active ? "text-white" : colors?.icon} />
-      )}
-      <span>{label}</span>
-      {count > 0 && (
-        <span
-          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-            active
-              ? "bg-white/20 text-white"
-              : "bg-muted text-foreground/70"
-          }`}
-        >
-          {count}
-        </span>
-      )}
-    </button>
-  );
+  "crm-refunds":          "border-orange-600",
+  "crm-refunds-finance":  "border-orange-700",
 };
 
 // ─── Detail preview modal ───────────────────────────────────────────────────
@@ -598,7 +763,14 @@ export function labelizeKey(key: string): string {
 // other array, so a reviewer approving a PO actually sees what's on it.
 export function extractLineItems(detail: Record<string, unknown> | null): Record<string, unknown>[] {
   if (!detail) return [];
-  for (const key of ["LineItems", "POItems", "Items"]) {
+  // "items" (lowercase) covers Material Requests' own GET /:id response
+  // (materialRequests.js: `{ ...header, items: [...] }`) — missing it meant
+  // the review panel's line-items table silently never rendered for MRs at
+  // all, even though the data was right there in `detail`.
+  // "lines" (lowercase) covers Journal Vouchers' own GET /:id response
+  // (journalVoucher.js: `{ ...header, lines: [...] }`) — same class of gap
+  // as "items" above, just for JV's debit/credit lines.
+  for (const key of ["LineItems", "POItems", "Items", "items", "lines"]) {
     const v = detail[key];
     if (Array.isArray(v) && v.length > 0) return v as Record<string, unknown>[];
   }
@@ -622,6 +794,42 @@ export function formatPreviewValue(value: unknown): string {
   return str;
 }
 
+// One engineer confirming their own task assignment — deliberately not
+// routed through ApprovalActions (that component's whole job is picking an
+// approver role/workflow, which doesn't apply here: isVisibleToViewer
+// already means the only person who can ever see this row IS the engineer
+// it's for).
+const EngineerConfirmButton: React.FC<{ item: InboxItem; onDone: () => void }> = ({ item, onDone }) => {
+  const [loading, setLoading] = useState(false);
+  const handleConfirm = async () => {
+    setLoading(true);
+    try {
+      const result = await confirmEngineerAssignment(Number(item.RecordId));
+      toast.success(
+        result.allApproved
+          ? "Confirmed — activity moved to In Progress"
+          : "Confirmed — waiting on the other assigned engineer(s)",
+      );
+      onDone();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to confirm");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <Button
+      size="sm"
+      className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"
+      disabled={loading}
+      onClick={handleConfirm}
+    >
+      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+      Confirm
+    </Button>
+  );
+};
+
 // ─── Inbox row ────────────────────────────────────────────────────────────────
 
 const InboxRow: React.FC<{
@@ -642,57 +850,104 @@ const InboxRow: React.FC<{
 
   const actions = (
     <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
-      <button
+      <button data-row-view
         onClick={() => setReviewOpen(true)}
         className="p-1.5 rounded-md text-sky-500 hover:bg-sky-500/10 transition-colors"
         title="Review & Approve"
       >
         <Eye size={14} />
       </button>
-      <ApprovalActions
-        status={item.Status}
-        recordId={item.RecordId}
-        endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
-        actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
-        approverRoles={
-          SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
-          : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
-          : item.Module === "crm-money-receipts" ? MR_APPROVER_ROLES
-          : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
-          : undefined
-        }
-        // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
-        // until every Level-1/Level-2 checklist item is ticked — a one-click
-        // Approve here can never succeed on its own, it can only ever
-        // produce the "Complete the Level-X verification checklist..."
-        // error toast. crm-brokerage's approve CAN succeed one-click (no
-        // checklist gate), but the computed amount is meant to be reviewed
-        // — and is only ever editable — before approval (see crmBrokerage.js
-        // PUT /:id "can only be customized before approval"), so a blind
-        // one-click Approve here skips the one chance to catch/adjust a
-        // wrong figure. All three swap the Approve button for a direct
-        // hand-off to their own review screen instead. Reject is untouched
-        // for all of them — no checklist/review gate applies to rejecting.
-        reviewInstead={
-          REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
-            ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
-            : undefined
-        }
-        restricted={RESTRICTED_MODULES.has(item.Module)}
-        onSuccess={(action) => {
-          if (action === "approve" || action === "reject") {
+      {item.Module === "work-allocation-engineer" ? (
+        // No role/workflow gate applies here at all — isVisibleToViewer
+        // already restricted this row to exactly the engineer it's for, so
+        // reaching this branch means the button is always safe to show.
+        <EngineerConfirmButton
+          item={item}
+          onDone={() => {
             onOptimisticUpdate(item.RecordId, item.Module);
+            onActionDone();
+          }}
+        />
+      ) : item.Status === "Pending" && item._canAct === false ? (
+        // Visible for awareness (named on some other level of this
+        // record's workflow) but not their turn yet — Approve/Reject would
+        // just 403 from transition()'s own per-level gate. Say so instead
+        // of offering live-looking buttons that are guaranteed to fail.
+        <span
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[0.625rem] font-medium text-muted-foreground bg-muted border border-border whitespace-nowrap"
+          title="Named on this approval workflow, but this record hasn't reached your level yet."
+        >
+          Waiting on Level {item._currentLevel}
+          {item._totalLevels ? ` of ${item._totalLevels}` : ""}
+        </span>
+      ) : (
+        <ApprovalActions
+          status={item.Status}
+          recordId={item.RecordId}
+          endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
+          actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
+          approverRoles={
+            item.Module === "crm-refunds-finance" ? REFUND_FINANCE_APPROVER_ROLES
+            : SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+            : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
+            // Same role set as Received Payments (admin/super_admin/dba/
+            // accounts_head) — matches approvalService.js's
+            // MODULE_APPROVER_ROLE_OVERRIDES["crm-refund-payment"] exactly.
+            : item.Module === "crm-money-receipts" || item.Module === "crm-refund-payment" ? MR_APPROVER_ROLES
+            : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
+            // super_admin only — matches the backend's own gate exactly
+            // (dependencyActivityAssignment.js's approve/reject routes:
+            // named-on-the-level OR super_admin, never admin/dba generically).
+            // Everyone else's button visibility comes from workflowVisible
+            // (_canAct) below, not this role list.
+            : item.Module === "civilworkdpr-approval" ? ["super_admin"]
+            : undefined
           }
-          onActionDone();
-        }}
-      />
+          // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
+          // until every Level-1/Level-2 checklist item is ticked — a one-click
+          // Approve here can never succeed on its own, it can only ever
+          // produce the "Complete the Level-X verification checklist..."
+          // error toast. crm-brokerage's approve CAN succeed one-click (no
+          // checklist gate), but the computed amount is meant to be reviewed
+          // — and is only ever editable — before approval (see crmBrokerage.js
+          // PUT /:id "can only be customized before approval"), so a blind
+          // one-click Approve here skips the one chance to catch/adjust a
+          // wrong figure. All three swap the Approve button for a direct
+          // hand-off to their own review screen instead. Reject is untouched
+          // for all of them — no checklist/review gate applies to rejecting.
+          // CRM payments reach Finance with no deposit bank — Accounts sets
+          // it on the Received Payment page first (the approve route refuses
+          // without one), so "Review" opens that payment instead of Approve.
+          reviewInstead={
+            needsBankReview(item) && cfg?.navPath
+              ? { label: "Review — set bank", onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+              : REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
+              ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+              : undefined
+          }
+          restricted={RESTRICTED_MODULES.has(item.Module)}
+          // Reaching this branch at all already means _canAct !== false (the
+          // "waiting on level" badge above handles that case) — so for a
+          // restricted module, this row being here means the inbox's own
+          // isVisibleToViewer (approvalInbox.js) matched this viewer by
+          // userId on the record's current Approval Setup level. See
+          // ApprovalActions' workflowVisible prop doc.
+          workflowVisible={item._canAct !== false}
+          onSuccess={(action) => {
+            if (action === "approve" || action === "reject") {
+              onOptimisticUpdate(item.RecordId, item.Module);
+            }
+            onActionDone();
+          }}
+        />
+      )}
       {/* The separate "open in preview" arrow is redundant for any module
           with a reviewInstead button while Pending — that button above
           already does the exact same navigation. Once it leaves Pending
           (Approved/Rejected/Cancelled), reviewInstead isn't rendered above,
           so the arrow comes back as the only way to open the record from
           this row. */}
-      {cfg?.navPath && !(REVIEW_INSTEAD_LABEL[item.Module] && item.Status === "Pending") && (
+      {cfg?.navPath && !((REVIEW_INSTEAD_LABEL[item.Module] || needsBankReview(item)) && item.Status === "Pending") && (
         <button
           onClick={() => navigate(openInModulePath(item, cfg.navPath))}
           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
@@ -731,7 +986,7 @@ const InboxRow: React.FC<{
               <p className="text-xs font-semibold text-foreground truncate">
                 {item.ModuleLabel}
               </p>
-              <p className="text-[11px] text-muted-foreground font-mono truncate">
+              <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">
                 {item.Reference || `#${item.RecordId}`}
               </p>
             </div>
@@ -743,11 +998,11 @@ const InboxRow: React.FC<{
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
           {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
             <div className="flex flex-col gap-0.5 min-w-0">
-              <span className="font-mono text-[11px] font-semibold text-violet-600 dark:text-violet-400 truncate">
+              <span className="font-mono text-[0.6875rem] font-semibold text-violet-600 dark:text-violet-400 truncate">
                 {item.SourceTransferDocNo}
               </span>
               {item.FromGodownName && item.ToGodownName && (
-                <span className="flex items-center gap-1 text-[10px] truncate">
+                <span className="flex items-center gap-1 text-[0.625rem] truncate">
                   <Warehouse size={9} className="shrink-0 text-orange-500" />
                   <span className="truncate">{item.FromGodownName}</span>
                   <ArrowLeftRight size={8} className="shrink-0" />
@@ -758,13 +1013,13 @@ const InboxRow: React.FC<{
             </div>
           ) : item.Module === "sale-orders" ? (
             <div className="flex flex-col gap-0.5 min-w-0">
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+              <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
                 <span className="truncate">{item.ContractorName}</span>
                 <ArrowLeftRight size={8} className="shrink-0" />
                 <span className="truncate">{item.SupplierName}</span>
               </span>
               {item.FromGodownName && item.ToGodownName && (
-                <span className="flex items-center gap-1 text-[10px] truncate">
+                <span className="flex items-center gap-1 text-[0.625rem] truncate">
                   <Warehouse size={9} className="shrink-0 text-orange-500" />
                   <span className="truncate">{item.FromGodownName}</span>
                   <ArrowLeftRight size={8} className="shrink-0" />
@@ -773,11 +1028,29 @@ const InboxRow: React.FC<{
                 </span>
               )}
             </div>
+          ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
+            <span className="truncate" title={item.JournalVoucherSummary}>
+              {item.JournalVoucherSummary}
+            </span>
+          ) : item.Module === "fund-transfer" && item.ContractorName && item.SupplierName ? (
+            <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
+              <span className="truncate">{item.ContractorName}</span>
+              <ArrowLeftRight size={8} className="shrink-0" />
+              <span className="truncate">{item.SupplierName}</span>
+            </span>
           ) : (
             <span className="truncate">{party}</span>
           )}
           <span className="shrink-0">{fmtDate(item.RecordDate)}</span>
         </div>
+
+        {/* Row 2b: project (only when this module resolves to one) */}
+        {item.ProjectName && (
+          <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground -mt-1.5">
+            <Building2 size={10} className="shrink-0" />
+            <span className="truncate">{item.ProjectName}</span>
+          </div>
+        )}
 
         {/* Row 3: amount + approved/rejected by */}
         <div className="flex items-center justify-between gap-2">
@@ -786,12 +1059,12 @@ const InboxRow: React.FC<{
           </p>
           <div className="flex items-center gap-1.5">
             {approvedBy && (
-              <span className="flex items-center gap-1 text-[10px] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
+              <span className="flex items-center gap-1 text-[0.625rem] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
                 <CheckCircle2 size={9} /> {approvedBy}
               </span>
             )}
             {rejectedBy && (
-              <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
+              <span className="flex items-center gap-1 text-[0.625rem] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
                 <XCircle size={9} /> {rejectedBy}
               </span>
             )}
@@ -821,38 +1094,46 @@ const InboxRow: React.FC<{
             return map[m[1]]?.[m[2]] ?? "var(--border)";
           })() }}
         />
-        <div className={`flex-1 grid grid-cols-[190px_100px_1fr_120px_150px_110px_1fr] items-center gap-2 pl-3 pr-4 py-3.5`}>
+        {/* Wide screens: one table row. Narrower: a card — module on top,
+            labelled details in a grid, actions on their own line. */}
+        <div data-row className="flex-1 min-w-0 ai-row">
         {/* Col 1 — Module */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="ai-c-mod flex items-center gap-3 min-w-0">
           <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
             <Icon size={15} />
           </div>
           <div className="min-w-0">
-            <p className="text-[13px] font-semibold text-foreground truncate leading-tight">
+            <p className="text-[0.8125rem] font-semibold text-foreground truncate leading-tight">
               {item.ModuleLabel}
             </p>
-            <p className="text-[11px] text-muted-foreground font-mono truncate mt-0.5">
+            <p className="text-[0.6875rem] text-muted-foreground font-mono truncate mt-0.5">
               {item.Reference || `#${item.RecordId}`}
             </p>
           </div>
         </div>
 
+        {/* Details group — separate table columns on wide screens
+            (display: contents), one compact dotted line otherwise. */}
+        <div className="ai-meta">
         {/* Col 2 — Date */}
-        <div>
+        <div className="ai-c-date">
+          <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Date</span>
           <p className="text-xs font-medium text-foreground">{fmtDate(item.RecordDate)}</p>
         </div>
 
         {/* Col 3 — Party / Transfer route */}
+        <div className="ai-c-party min-w-0">
+        <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Party / Transfer</span>
         {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
               Transfer ref
             </span>
             <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400 truncate">
               {item.SourceTransferDocNo}
             </span>
             {item.FromGodownName && item.ToGodownName && (
-              <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+              <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground truncate">
                 <Warehouse size={9} className="shrink-0 text-orange-500" />
                 <span className="truncate">{item.FromGodownName}</span>
                 <ArrowLeftRight size={8} className="shrink-0" />
@@ -863,7 +1144,7 @@ const InboxRow: React.FC<{
           </div>
         ) : item.Module === "sale-orders" ? (
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+            <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
               <Building2 size={9} className="shrink-0 text-blue-500" />
               <span className="truncate">{item.ContractorName}</span>
               <ArrowLeftRight
@@ -874,7 +1155,7 @@ const InboxRow: React.FC<{
               <span className="truncate">{item.SupplierName}</span>
             </span>
             {item.FromGodownName && item.ToGodownName && (
-              <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+              <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground truncate">
                 <Warehouse size={9} className="shrink-0 text-orange-500" />
                 <span className="truncate">{item.FromGodownName}</span>
                 <ArrowLeftRight size={8} className="shrink-0" />
@@ -883,41 +1164,88 @@ const InboxRow: React.FC<{
               </span>
             )}
           </div>
+        ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
+              Account heads
+            </span>
+            <p className="text-xs text-foreground truncate" title={item.JournalVoucherSummary}>
+              {item.JournalVoucherSummary}
+            </p>
+          </div>
+        ) : item.Module === "fund-transfer" && item.ContractorName && item.SupplierName ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
+              From → To
+            </span>
+            <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
+              <Building2 size={9} className="shrink-0 text-blue-500" />
+              <span className="truncate">{item.ContractorName}</span>
+              <ArrowLeftRight size={8} className="shrink-0 text-muted-foreground" />
+              <Building2 size={9} className="shrink-0 text-violet-500" />
+              <span className="truncate">{item.SupplierName}</span>
+            </span>
+          </div>
         ) : (
           <p className="text-xs text-foreground truncate">{party}</p>
         )}
+        </div>
 
-        {/* Col 4 — Amount */}
+        {/* Col 4 — Project */}
+        <div className="ai-c-project min-w-0">
+          <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Project</span>
+          {item.ProjectName ? (
+            <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-foreground truncate max-w-full" title={item.ProjectName}>
+              <Building2 size={10} className="shrink-0 text-muted-foreground" />
+              <span className="truncate">{item.ProjectName}</span>
+            </span>
+          ) : (
+            <span className="text-[0.625rem] text-muted-foreground/50 italic">—</span>
+          )}
+        </div>
+
+        {/* Col 5 — Amount */}
+        <div className="ai-c-amount min-w-0">
+        <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Amount</span>
         <div className="inline-flex items-center px-2 py-1 rounded-lg bg-foreground/5 border border-border/60">
-          <p className="text-[13px] font-mono font-bold text-foreground tabular-nums">
+          <p className="text-[0.8125rem] font-mono font-bold text-foreground tabular-nums">
             {fmtAmount(effectiveAmount)}
           </p>
         </div>
+        </div>
 
-        {/* Col 5 — Approved/Rejected By */}
+        {/* Col 6 — Approved/Rejected By */}
+        <div className="ai-c-by min-w-0">
+        <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Approved / Rejected by</span>
         <div className="flex items-center gap-1.5 min-w-0">
           {approvedBy && (
-            <span className="flex items-center gap-1 text-[10px] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
+            <span className="flex items-center gap-1 text-[0.625rem] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
               <CheckCircle2 size={9} /> {approvedBy}
             </span>
           )}
           {rejectedBy && (
-            <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
+            <span className="flex items-center gap-1 text-[0.625rem] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
               <XCircle size={9} /> {rejectedBy}
             </span>
           )}
           {!approvedBy && !rejectedBy && (
-            <span className="text-[10px] text-muted-foreground/50 italic">—</span>
+            <span className="text-[0.625rem] text-muted-foreground/50 italic">—</span>
           )}
         </div>
-
-        {/* Col 6 — Status */}
-        <div className="flex items-center">
-          <StatusBadge status={item.Status} />
         </div>
 
-        {/* Col 7 — Actions */}
-        <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
+        </div>
+
+        {/* Col 7 — Status */}
+        <div className="ai-c-status">
+          <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Status</span>
+          <div className="flex items-center">
+            <StatusBadge status={item.Status} />
+          </div>
+        </div>
+
+        {/* Col 8 — Actions */}
+        <div className="ai-c-actions flex items-center gap-1.5 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
           {actions}
         </div>
         </div>
@@ -931,11 +1259,35 @@ const InboxRow: React.FC<{
 const ApprovalInbox: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("approval-inbox");
-  const [activeModule, setActiveModule] = useState<string | null>(null);
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  // Multi-select, nested-by-category filter — replaces the old single-select
+  // module tabs so an approver can pick e.g. "PO + GRN + Payment" at once
+  // instead of flipping between one module at a time. Empty = every module.
+  const [activeModules, setActiveModules] = useState<string[]>([]);
+  const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
+  // Free-text search over each item's own document number — separate from
+  // the module-type filter above, which only ever matched module *names*
+  // (e.g. "Journal Voucher"), not a document's Reference like
+  // "JV-2026-00067". Typing a doc number into that filter's search box
+  // matched nothing, which is what "document search isn't working" meant.
+  const [docSearch, setDocSearch] = useState("");
+  // Which module groups (Material Request, Purchase Order, GRN, ...) are
+  // expanded — collapsed by default, same reasoning as Work Allocation's
+  // dependency chains: 64 flat rows across a dozen module types was the
+  // actual complaint, not any one type's own row count. Keyed by category+
+  // module so two different categories' same-named module (there are none
+  // today, but nothing should assume it) can never collide.
+  const [expandedModuleGroups, setExpandedModuleGroups] = useState<Set<string>>(new Set());
+  const toggleModuleGroup = (key: string) =>
+    setExpandedModuleGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const {
     data: allItems = [],
+    dataUpdatedAt,
     isLoading,
     isRefetching,
     refetch,
@@ -948,9 +1300,69 @@ const ApprovalInbox: React.FC = () => {
 
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
 
+  // Approving/rejecting hides a row immediately (before the refetch this
+  // same action triggers has actually landed) by key, keyed on Module +
+  // RecordId. For most modules RecordId is stable forever once acted on,
+  // so that's fine — but civilworkdpr-approval's RecordId is the RUNG id,
+  // which is deliberately the SAME across every rework attempt of that
+  // rung (see approvalInbox.js's own comment on that module). Without
+  // this reset, rejecting attempt 1 permanently hid every later attempt
+  // of the same rung from this session's inbox — including a fully
+  // legitimate attempt 2 that QC re-approved and that genuinely needs
+  // review — since removedKeys never had a reason to forget that key.
+  // Any fresh fetch is authoritative for what's actually pending right
+  // now, so it's always safe to drop the whole overlay once one lands.
+  const lastClearedFetchRef = useRef(dataUpdatedAt);
+  useEffect(() => {
+    if (dataUpdatedAt !== lastClearedFetchRef.current) {
+      lastClearedFetchRef.current = dataUpdatedAt;
+      setRemovedKeys(new Set());
+    }
+  }, [dataUpdatedAt]);
+
   const items = (
-    activeModule ? allItems.filter((i) => i.Module === activeModule) : allItems
-  ).filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`));
+    activeModules.length > 0
+      ? allItems.filter((i) => activeModules.includes(i.Module))
+      : allItems
+  )
+    .filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`))
+    .filter((i) => {
+      const q = docSearch.trim().toLowerCase();
+      if (!q) return true;
+      return (i.Reference ?? "").toLowerCase().includes(q) || String(i.RecordId).includes(q);
+    })
+    // Grouped by module first (all Material Requests together, then all
+    // Purchase Orders, then all GRNs, etc. — MODULE_ORDER below) so like
+    // documents sit together instead of interleaving by date across
+    // modules within the same category. Sorted by the record's own date
+    // within each module, not the backend's LastModified order — a
+    // document dated last month that was only just resubmitted shouldn't
+    // outrank one genuinely raised yesterday.
+    .sort((a, b) => {
+      const moduleDelta = moduleOrderOf(a.Module) - moduleOrderOf(b.Module);
+      if (moduleDelta !== 0) return moduleDelta;
+      const da = a.RecordDate ? new Date(a.RecordDate).getTime() : 0;
+      const db = b.RecordDate ? new Date(b.RecordDate).getTime() : 0;
+      return dateSort === "desc" ? db - da : da - db;
+    });
+
+  // Group by category (Material, Finance, Engineering, Sales/CRM, Admin) so
+  // like modules — MR/PO/GRN under Material, Payment/JV under Finance, etc. —
+  // sit together in the list, in a fixed category order. Within a category,
+  // the date sort above is preserved.
+  const groupedItems = CATEGORY_ORDER.map((cat) => ({
+    cat,
+    items: items.filter((i) => categoryOf(i.Module) === cat),
+  })).filter((g) => g.items.length > 0);
+
+  // Feeds the nested filter dropdown — every module, grouped by its business
+  // category, with a live pending-count hint per option.
+  const moduleFilterOptions: MultiSelectOption[] = ALL_MODULES.map((mod) => ({
+    id: mod,
+    label: MODULE_CONFIG[mod].label,
+    group: CATEGORY_META[categoryOf(mod)].label,
+    hint: String(allItems.filter((i) => i.Module === mod).length || ""),
+  }));
 
   const handleOptimisticUpdate = (recordId: string, module: string) => {
     setRemovedKeys((prev) => new Set(prev).add(`${module}-${recordId}`));
@@ -971,8 +1383,6 @@ const ApprovalInbox: React.FC = () => {
     window.dispatchEvent(new CustomEvent("approval-action"));
   };
 
-  const countFor = (mod: string) =>
-    allItems.filter((i) => i.Module === mod).length;
   const totalCount = allItems.length;
 
   return (
@@ -986,7 +1396,7 @@ const ApprovalInbox: React.FC = () => {
         action={
           <div className="flex items-center gap-2">
             {totalCount > 0 && (
-              <span className="bg-red-500 text-white text-[11px] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full leading-none">
+              <span className="bg-red-500 text-white text-[0.6875rem] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full leading-none">
                 {totalCount}
               </span>
             )}
@@ -1005,55 +1415,59 @@ const ApprovalInbox: React.FC = () => {
           </div>
         }
       >
-        {/* Module filter — collapsible so the full module list doesn't
-            spill across multiple lines by default; expand to see/pick all. */}
-        <div className="rounded-xl border border-border bg-muted/30 overflow-hidden">
-          <button
-            onClick={() => setFiltersExpanded((v) => !v)}
-            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <span className="flex items-center gap-2">
-              <SlidersHorizontal size={12} />
-              Filter by module
-              {activeModule && (
-                <span className="text-[10px] font-semibold text-primary">
-                  · {MODULE_CONFIG[activeModule]?.label}
-                </span>
-              )}
-            </span>
-            <ChevronDown
-              size={14}
-              className={`transition-transform ${filtersExpanded ? "rotate-180" : ""}`}
-            />
-          </button>
-          {filtersExpanded && (
-            <div className="flex items-center gap-1.5 flex-wrap p-1.5 pt-0">
-              <ModuleTab
-                module={null}
-                label="All"
-                icon={ClipboardCheck}
-                count={totalCount}
-                active={activeModule === null}
-                onClick={() => setActiveModule(null)}
-              />
-              {ALL_MODULES.map((mod) => {
-                const cfg = MODULE_CONFIG[mod];
-                return (
-                  <ModuleTab
-                    key={mod}
-                    module={mod}
-                    label={cfg.label}
-                    icon={cfg.icon}
-                    count={countFor(mod)}
-                    active={activeModule === mod}
-                    onClick={() =>
-                      setActiveModule(activeModule === mod ? null : mod)
-                    }
-                  />
-                );
-              })}
-            </div>
+        {/* Nested filter — every approval type, grouped by its business
+            category (Material/Finance/Engineering/Sales-CRM), multi-select
+            so several types (e.g. PO + GRN + Payment) can be picked at once
+            instead of one module at a time. Paired with a date-sort toggle
+            since "filter, then sort" is how this list is actually worked. */}
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={docSearch}
+            onChange={(e) => setDocSearch(e.target.value)}
+            placeholder="Search by document number (e.g. JV-2026-00067)…"
+            className="w-full pl-9 pr-9 py-2.5 text-sm rounded-xl bg-card border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+          {docSearch && (
+            <button
+              type="button"
+              onClick={() => setDocSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Clear search"
+            >
+              <X size={13} />
+            </button>
           )}
+        </div>
+
+        <div className="rounded-xl border border-border bg-muted/30 p-2.5 space-y-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <SlidersHorizontal size={12} />
+              Filter by type
+            </span>
+            <button
+              onClick={() => setDateSort((s) => (s === "desc" ? "asc" : "desc"))}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Toggle date sort order"
+            >
+              {dateSort === "desc" ? (
+                <ArrowDownWideNarrow size={12} />
+              ) : (
+                <ArrowUpWideNarrow size={12} />
+              )}
+              {dateSort === "desc" ? "Newest first" : "Oldest first"}
+            </button>
+          </div>
+          <MultiSelectDropdown
+            options={moduleFilterOptions}
+            value={activeModules}
+            onChange={setActiveModules}
+            placeholder="All approval types"
+            searchPlaceholder="Search PO, GRN, Payment…"
+            itemNoun="type"
+          />
         </div>
 
         {/* Content */}
@@ -1081,34 +1495,39 @@ const ApprovalInbox: React.FC = () => {
                 <Inbox size={24} className="text-muted-foreground/40" />
               </div>
               <p className="text-sm font-semibold text-foreground">
-                {activeModule
-                  ? "No pending items in this module"
-                  : "All clear!"}
+                {docSearch.trim()
+                  ? `No document matches "${docSearch.trim()}"`
+                  : activeModules.length > 0
+                    ? "No pending items for the selected type(s)"
+                    : "All clear!"}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {activeModule
-                  ? "Switch to All to see the full inbox"
-                  : "No records are awaiting approval right now"}
+                {docSearch.trim()
+                  ? "Clear the search to see the full inbox"
+                  : activeModules.length > 0
+                    ? "Clear the filter to see the full inbox"
+                    : "No records are awaiting approval right now"}
               </p>
             </div>
           ) : (
-            <>
+            <div className="ai-wrap">
               {/* Desktop table header */}
-              <div className="hidden md:flex items-center border-b border-border rounded-t-xl bg-muted/40">
+              <div className="ai-head hidden items-center border-b border-border rounded-t-xl bg-muted/40">
                 <div className="w-[3px] shrink-0 self-stretch" />
-                <div className="flex-1 grid grid-cols-[190px_100px_1fr_120px_150px_110px_1fr] gap-2 pl-3 pr-4 py-2.5">
+                <div className="ai-row ai-row-head flex-1 grid gap-2 pl-3 pr-4 py-2.5">
                 {[
                   "Module / Ref",
                   "Date",
                   "Party / Transfer",
+                  "Project",
                   "Amount",
-                  "Approved/Rejected By",
+                  "Approved / Rejected By",
                   "Status",
                   "Actions",
                 ].map((h) => (
                   <p
                     key={h}
-                    className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                    className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
                   >
                     {h}
                   </p>
@@ -1117,25 +1536,84 @@ const ApprovalInbox: React.FC = () => {
               </div>
 
               <div>
-                {items.map((item) => (
-                  <InboxRow
-                    key={`${item.Module}-${item.RecordId}`}
-                    item={item}
-                    onActionDone={handleActionDone}
-                    onOptimisticUpdate={handleOptimisticUpdate}
-                  />
+                {groupedItems.map(({ cat, items: catItems }) => (
+                  <div key={cat}>
+                    {/* Category section header — only worth showing when the
+                        current result set spans more than one category; a
+                        filter narrow enough to leave just one category on
+                        screen makes the header redundant. */}
+                    {groupedItems.length > 1 && (
+                      <div className="sticky top-0 z-[1] flex items-center gap-1.5 px-4 py-1.5 bg-muted/60 backdrop-blur-sm border-b border-border">
+                        <span className={`text-[0.625rem] font-bold uppercase tracking-wider ${CATEGORY_META[cat].color}`}>
+                          {CATEGORY_META[cat].label}
+                        </span>
+                        <span className="text-[0.625rem] text-muted-foreground">({catItems.length})</span>
+                      </div>
+                    )}
+                    {(() => {
+                      // Group this category's items by Module, preserving
+                      // the order they already arrive in (moduleOrderOf,
+                      // then date within a module) — a Map iterates in
+                      // insertion order, so the first item of each module
+                      // fixes that module's position in the list.
+                      const byModule = new Map<string, InboxItem[]>();
+                      for (const item of catItems) {
+                        if (!byModule.has(item.Module)) byModule.set(item.Module, []);
+                        byModule.get(item.Module)!.push(item);
+                      }
+                      return Array.from(byModule.entries()).map(([mod, modItems]) => {
+                        const groupKey = `${cat}:${mod}`;
+                        const expanded = expandedModuleGroups.has(groupKey);
+                        const cfg = MODULE_CONFIG[mod];
+                        const Icon = cfg?.icon ?? ClipboardCheck;
+                        return (
+                          <div key={groupKey}>
+                            <button
+                              type="button"
+                              onClick={() => toggleModuleGroup(groupKey)}
+                              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left hover:bg-muted/20 transition-colors border-b border-border/60"
+                            >
+                              {expanded ? (
+                                <ChevronDown size={13} className="text-muted-foreground shrink-0" />
+                              ) : (
+                                <ChevronRight size={13} className="text-muted-foreground shrink-0" />
+                              )}
+                              <div className={`p-1.5 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
+                                <Icon size={13} />
+                              </div>
+                              <span className="text-sm font-semibold text-foreground">
+                                {cfg?.label ?? mod}
+                              </span>
+                              <span className="text-[0.6875rem] text-muted-foreground">
+                                ({modItems.length})
+                              </span>
+                            </button>
+                            {expanded &&
+                              modItems.map((item) => (
+                                <InboxRow
+                                  key={`${item.Module}-${item.RecordId}`}
+                                  item={item}
+                                  onActionDone={handleActionDone}
+                                  onOptimisticUpdate={handleOptimisticUpdate}
+                                />
+                              ))}
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
                 ))}
               </div>
 
               <div className="px-4 py-2.5 border-t border-border bg-muted/20 rounded-b-xl">
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   {items.length} record{items.length !== 1 ? "s" : ""} pending
                   approval
-                  {activeModule &&
-                    ` in ${MODULE_CONFIG[activeModule]?.label ?? activeModule}`}
+                  {activeModules.length > 0 &&
+                    ` — ${activeModules.map((m) => MODULE_CONFIG[m]?.label ?? m).join(", ")}`}
                 </p>
               </div>
-            </>
+            </div>
           )}
         </div>
       </AdminShell>

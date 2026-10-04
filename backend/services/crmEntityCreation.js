@@ -26,11 +26,85 @@ function normalizeEmail(value) {
   return trimmed || null;
 }
 
+const { assertVillaBuyerOwnsLand, VillaLandError } = require("./villaLand");
+
+// A villa built on plots can only be bought by the plot's current owner
+// (see services/villaLand.js); surfaced as the caller's own error type.
+async function assertVillaBuyer(pool, unitIds, customerId) {
+  try {
+    await assertVillaBuyerOwnsLand(pool, unitIds, customerId);
+  } catch (e) {
+    if (e instanceof VillaLandError) throw new CrmCreationError(e.message, e.status);
+    throw e;
+  }
+}
+
 class CrmCreationError extends Error {
   constructor(message, status = 400) {
     super(message);
     this.status = status;
   }
+}
+
+async function assertConnectedPlotGroup(pool, plotIds) {
+  if (plotIds.length < 2) return;
+  const pairs = await pool.request().query(`
+    SELECT PlotId, AdjacentPlotId FROM dbo.PlotAdjacency
+    WHERE PlotId IN (${plotIds.join(",")}) AND AdjacentPlotId IN (${plotIds.join(",")})
+  `);
+  const neighbours = new Map(plotIds.map((id) => [id, new Set()]));
+  pairs.recordset.forEach(({ PlotId, AdjacentPlotId }) => {
+    neighbours.get(PlotId)?.add(AdjacentPlotId);
+    neighbours.get(AdjacentPlotId)?.add(PlotId);
+  });
+  const reached = new Set([plotIds[0]]);
+  const queue = [plotIds[0]];
+  while (queue.length) {
+    const id = queue.shift();
+    for (const next of neighbours.get(id) || []) {
+      if (!reached.has(next)) { reached.add(next); queue.push(next); }
+    }
+  }
+  if (reached.size !== plotIds.length) {
+    throw new CrmCreationError("Selected plots must form one connected adjacent group", 409);
+  }
+}
+
+async function validatePlotSelection(pool, plotIds, { projectId = null, applicationId = null, requireAdjacent = true } = {}) {
+  if (!plotIds.length) return [];
+  const requestedProjectId = projectId != null && projectId !== "" ? Number(projectId) : null;
+  const result = await pool.request()
+    .input("applicationId", sql.Int, applicationId)
+    .query(`
+      SELECT p.Id, p.PlotName, p.ProjectId, p.BlockId
+      FROM dbo.PlotMaster p
+      WHERE p.Id IN (${plotIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmBookingPlot bp
+          JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
+          WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
+            AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmApplicationPlot ap
+          JOIN dbo.CrmApplication a ON a.Id = ap.ApplicationId
+          WHERE ap.PlotId = p.Id AND ap.Status = N'Active'
+            AND (@applicationId IS NULL OR ap.ApplicationId <> @applicationId)
+            AND a.IsActive = 1 AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')
+        )
+    `);
+  if (result.recordset.length !== plotIds.length) {
+    throw new CrmCreationError("One or more selected plots are unavailable", 409);
+  }
+  const first = result.recordset[0];
+  if (!result.recordset.every((plot) => plot.ProjectId === first.ProjectId && plot.BlockId === first.BlockId)) {
+    throw new CrmCreationError("Selected plots must belong to the same project and block", 400);
+  }
+  if (requestedProjectId != null && first.ProjectId !== requestedProjectId) {
+    throw new CrmCreationError("Selected plots do not belong to the application project", 400);
+  }
+  if (requireAdjacent) await assertConnectedPlotGroup(pool, plotIds);
+  return result.recordset;
 }
 
 // Every Application must resolve to a Customer — either an existing one the
@@ -42,10 +116,15 @@ class CrmCreationError extends Error {
 // lookup when a live Customer already exists for that Mobile — never
 // creates a second identity for the same phone number.
 async function findOrCreateCustomer(pool, { name, mobile, altMobile, email, leadId }, actorUserId) {
-  if (!mobile) return null;
-  const existing = await pool.request().input("mob", sql.NVarChar(20), mobile)
-    .query("SELECT Id FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
-  if (existing.recordset.length) return existing.recordset[0].Id;
+  // Mobile is optional now (business decision) — without one there's simply
+  // no phone number to dedupe against, so this just skips straight to
+  // creating a new Customer instead of returning null and leaving the
+  // caller's Application unlinked from any Customer record at all.
+  if (mobile) {
+    const existing = await pool.request().input("mob", sql.NVarChar(20), mobile)
+      .query("SELECT Id FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
+    if (existing.recordset.length) return existing.recordset[0].Id;
+  }
 
   const normalizedEmail = normalizeEmail(email);
   if (normalizedEmail) {
@@ -140,8 +219,11 @@ async function appendLeadHandoffNotes(pool, leadId, lead, existingNotes) {
 // filtering, since this is the single shared creation path both the human-
 // filed form and any future caller go through.
 async function createCrmApplicationRecord(pool, b, actorUserId) {
-  if (!b.CustomerId && !b.LeadId && (!b.ApplicantName?.trim() || !b.Mobile?.trim()))
-    throw new CrmCreationError("Either CustomerId, LeadId, or ApplicantName and Mobile are required");
+  // Mobile is no longer mandatory (business decision) — a raw walk-in
+  // creation (no CustomerId, no LeadId) still needs SOME way to identify
+  // who the applicant is, so ApplicantName alone is the minimum.
+  if (!b.CustomerId && !b.LeadId && !b.ApplicantName?.trim())
+    throw new CrmCreationError("Either CustomerId, LeadId, or ApplicantName is required");
   if (b.Source && !SOURCE_TYPES.includes(b.Source))
     throw new CrmCreationError(`Invalid Source. Must be one of: ${SOURCE_TYPES.join(", ")}`);
 
@@ -169,13 +251,25 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   // wins outright (its own name/mobile/email become authoritative, even if
   // the request also carries stale raw fields); otherwise fall back to
   // finding/creating one from whatever raw identity the caller supplied.
-  let customerId = b.CustomerId ? parseInt(b.CustomerId) : null;
+  let customerId = b.CustomerId !== undefined && b.CustomerId !== null && b.CustomerId !== "" ? parseInt(b.CustomerId) : null;
   let customerRow = null;
-  if (customerId) {
+  if (customerId != null) {
     const cr = await pool.request().input("cid", sql.Int, customerId)
-      .query("SELECT CustomerName, Mobile, AltMobile, Email FROM dbo.CrmCustomer WHERE Id = @cid AND IsActive = 1");
+      .query("SELECT CustomerNo, CustomerName, Mobile, AltMobile, Email FROM dbo.CrmCustomer WHERE Id = @cid AND IsActive = 1");
     if (!cr.recordset.length) throw new CrmCreationError("Selected customer does not exist");
     customerRow = cr.recordset[0];
+    // CrmApplication.ApplicantName is NOT NULL, and Customer Name is still
+    // mandatory on the Customers form — so a customer missing it can only
+    // mean a pre-existing legacy/corrupted record. Mobile is deliberately
+    // NOT checked here any more: it's an optional field end-to-end now
+    // (CrmCustomer.Mobile and CrmApplication.Mobile are both nullable —
+    // see migration 445), so a customer with no mobile is normal, expected
+    // data, not something to block on.
+    if (!customerRow.CustomerName?.trim() && !b.ApplicantName?.trim() && !prefill.CustomerName?.trim()) {
+      throw new CrmCreationError(
+        `Customer ${customerRow.CustomerNo || customerId} has no name on file — add one on the Customers page before creating an application.`
+      );
+    }
   } else {
     const name = b.ApplicantName?.trim() || prefill.CustomerName;
     const mobile = b.Mobile?.trim() || prefill.Mobile;
@@ -187,14 +281,14 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     }, actorUserId);
   }
 
-  const platformId = b.PlatformId ? parseInt(b.PlatformId) : (prefill.PlatformId || null);
-  const campaignId = b.CampaignId ? parseInt(b.CampaignId) : (prefill.CampaignId || null);
-  const adId       = b.AdId       ? parseInt(b.AdId)       : (prefill.AdId       || null);
-  const channelPartnerId = b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : (prefill.ChannelPartnerId || null);
-  const bridge = !b.BrokerId && channelPartnerId
+  const platformId = b.PlatformId !== undefined && b.PlatformId !== null && b.PlatformId !== "" ? parseInt(b.PlatformId) : (prefill.PlatformId != null ? prefill.PlatformId : null);
+  const campaignId = b.CampaignId !== undefined && b.CampaignId !== null && b.CampaignId !== "" ? parseInt(b.CampaignId) : (prefill.CampaignId != null ? prefill.CampaignId : null);
+  const adId       = b.AdId       !== undefined && b.AdId       !== null && b.AdId       !== "" ? parseInt(b.AdId)       : (prefill.AdId       != null ? prefill.AdId       : null);
+  const channelPartnerId = b.ChannelPartnerId !== undefined && b.ChannelPartnerId !== null && b.ChannelPartnerId !== "" ? parseInt(b.ChannelPartnerId) : (prefill.ChannelPartnerId != null ? prefill.ChannelPartnerId : null);
+  const bridge = (b.BrokerId === undefined || b.BrokerId === null || b.BrokerId === "") && channelPartnerId != null
     ? await ensureBrokerForChannelPartner(pool, channelPartnerId, actorUserId)
     : null;
-  const brokerId = b.BrokerId ? parseInt(b.BrokerId) : (bridge?.brokerId || null);
+  const brokerId = b.BrokerId !== undefined && b.BrokerId !== null && b.BrokerId !== "" ? parseInt(b.BrokerId) : (bridge?.brokerId != null ? bridge.brokerId : null);
   const brokerageRatePercent = b.BrokerageRatePercent != null && b.BrokerageRatePercent !== ""
     ? parseFloat(b.BrokerageRatePercent)
     : (bridge?.commissionRate ?? null);
@@ -203,17 +297,26 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   if (sourceError) throw new CrmCreationError(sourceError);
 
   let projectName = b.InterestedProject || null;
-  let companyId = b.CompanyId ? parseInt(b.CompanyId) : null;
-  if (b.ProjectId) {
+  let companyId = b.CompanyId !== undefined && b.CompanyId !== null && b.CompanyId !== "" ? parseInt(b.CompanyId) : null;
+  if (b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "") {
     const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
       .query("SELECT name, company_id FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
     if (!proj.recordset.length) throw new CrmCreationError("Selected project does not exist");
     projectName = proj.recordset[0].name;
-    companyId = companyId || proj.recordset[0].company_id || null;
+    companyId = companyId != null ? companyId : (proj.recordset[0].company_id != null ? proj.recordset[0].company_id : null);
   }
+  const hasValue = (v) => v !== undefined && v !== null && v !== "";
+  const rawAppPlotIds = Array.isArray(b.PreferredPlotIds) ? b.PreferredPlotIds.map(Number).filter(Number.isInteger) : [];
+  const rawAppUnitIds = Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0 ? b.PreferredUnitIds : (hasValue(b.PreferredUnitId) ? [b.PreferredUnitId] : []);
+  const preferredUnitId = rawAppUnitIds.length > 0 ? rawAppUnitIds[0] : null;
+  if (rawAppUnitIds.length > 0) await assertVillaBuyer(pool, rawAppUnitIds, customerId);
   let unitName = b.InterestedUnit || null;
-  if (b.PreferredUnitId) {
-    const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
+  if (rawAppPlotIds.length > 0) {
+    const plots = await validatePlotSelection(pool, rawAppPlotIds, { projectId: b.ProjectId });
+    unitName = rawAppPlotIds.map((id) => plots.find((p) => p.Id === id)?.PlotName).filter(Boolean).join(", ");
+  }
+  if (preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "") {
+    const unit = await pool.request().input("uid", sql.Int, parseInt(preferredUnitId))
       .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
     if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
     unitName = unit.recordset[0].UnitName;
@@ -234,33 +337,50 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     // actually picks the right HTTP status) still fires correctly instead of
     // silently falling through to a 500.
     try {
-      await assertEntityNotTaken(pool, "Unit", parseInt(b.PreferredUnitId));
+      await assertEntityNotTaken(pool, "Unit", parseInt(preferredUnitId));
     } catch (takenErr) {
       throw new CrmCreationError(takenErr.message, takenErr.status || 409);
     }
-    const existingHold = await findActiveHold(pool, "Unit", parseInt(b.PreferredUnitId));
+    const existingHold = await findActiveHold(pool, "Unit", parseInt(preferredUnitId));
     if (existingHold) {
       throw new CrmCreationError("This unit already has an active hold from another application", 409);
     }
   }
-  const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
-    preferredUnitId: b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null,
-    paymentPlanId: b.PaymentPlanId || null,
+  // A plot sale has no payment plan: land is paid as booking amount + balance
+  // (see landSaleSchedule), not in construction stages.
+  const effectivePaymentPlanId = rawAppPlotIds.length > 0
+    ? null
+    : await resolveApplicationPaymentPlan(pool, {
+    preferredUnitId: preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "" ? parseInt(preferredUnitId) : null,
+    paymentPlanId: b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? b.PaymentPlanId : null,
   });
+
+  // Last-line defense: CrmApplication.ApplicantName is NOT NULL, but every
+  // upstream source (an existing Customer, a Lead's own prefill, or the raw
+  // request body) can independently end up blank — the branch above already
+  // guards the "existing Customer selected" case with a specific message,
+  // but the Lead-only path (no CustomerId, a Lead whose own name is
+  // somehow blank) reaches here unguarded. Checking the actual final value
+  // right before the INSERT, once, covers every path instead of duplicating
+  // the same check per branch. Mobile is deliberately NOT checked here —
+  // it's optional end-to-end now (see migration 445).
+  const finalName = customerRow?.CustomerName || b.ApplicantName?.trim() || prefill.CustomerName;
+  const finalMobile = customerRow?.Mobile || b.Mobile?.trim() || prefill.Mobile || null;
+  if (!finalName?.trim()) throw new CrmCreationError("Applicant name is required — this booking's customer/lead record has no name on file");
 
   const appNo = await getNextDocNumber(pool, "APP", "APP");
   let result;
   try {
     result = await pool.request()
       .input("no",   sql.NVarChar(30),  appNo)
-      .input("lid",  sql.Int,           b.LeadId   ? parseInt(b.LeadId)   : null)
+      .input("lid",  sql.Int,           b.LeadId !== undefined && b.LeadId !== null && b.LeadId !== "" ? parseInt(b.LeadId)   : null)
       .input("custid", sql.Int,         customerId)
-      .input("name", sql.NVarChar(200), customerRow?.CustomerName || b.ApplicantName?.trim() || prefill.CustomerName)
-      .input("mob",  sql.NVarChar(20),  customerRow?.Mobile || b.Mobile?.trim() || prefill.Mobile)
+      .input("name", sql.NVarChar(200), finalName)
+      .input("mob",  sql.NVarChar(20),  finalMobile)
       .input("alt",  sql.NVarChar(20),  customerRow?.AltMobile || b.AltMobile || prefill.AltMobile || null)
       .input("em",   sql.NVarChar(200), customerRow?.Email     || b.Email     || prefill.Email     || null)
-      .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
-      .input("uid",  sql.Int,           b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null)
+      .input("pid",  sql.Int,           b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "" ? parseInt(b.ProjectId) : null)
+      .input("uid",  sql.Int,           preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "" ? parseInt(preferredUnitId) : null)
       .input("cid",  sql.Int,           companyId)
       .input("proj", sql.NVarChar(200), projectName)
       .input("unit", sql.NVarChar(100), unitName)
@@ -271,12 +391,12 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("campid", sql.Int, campaignId)
       .input("adid",   sql.Int, adId)
       .input("cpid",   sql.Int, channelPartnerId)
-      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
+      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
-      .input("ppid", sql.Int,           effectivePaymentPlanId || null)
+      .input("ppid", sql.Int,           effectivePaymentPlanId != null ? effectivePaymentPlanId : null)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
-      .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
-      .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
+      .input("tval", sql.Decimal(18,2), b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : null)
+      .input("bamt", sql.Decimal(18,2), b.BookingAmount != null && b.BookingAmount !== "" ? parseFloat(b.BookingAmount) : null)
       .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
       // AssignedTo respects an explicit caller value (saHandoff.js passes
       // the lead's already-routed salesperson) or falls back to whoever
@@ -285,10 +405,10 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       // filed Application form specifically — this shared function stays
       // permissive so the SA->CRM handoff's existing assignment logic keeps
       // working unchanged.
-      .input("asgn", sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : actorUserId)
-      .input("asgnby", sql.Int,         b.AssignedBy ? parseInt(b.AssignedBy) : actorUserId)
+      .input("asgn", sql.Int,           b.AssignedTo !== undefined && b.AssignedTo !== null && b.AssignedTo !== "" ? parseInt(b.AssignedTo) : actorUserId)
+      .input("asgnby", sql.Int,         b.AssignedBy !== undefined && b.AssignedBy !== null && b.AssignedBy !== "" ? parseInt(b.AssignedBy) : actorUserId)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("refApp", sql.Int,         b.ReferredByApplicationId ? parseInt(b.ReferredByApplicationId) : null)
+      .input("refApp", sql.Int,         b.ReferredByApplicationId !== undefined && b.ReferredByApplicationId !== null && b.ReferredByApplicationId !== "" ? parseInt(b.ReferredByApplicationId) : null)
       .input("cb",   sql.Int,           actorUserId)
       .input("brkid", sql.Int,          brokerId)
       .input("brkpct", sql.Decimal(5,2), brokerageRatePercent)
@@ -353,10 +473,27 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   // doesn't fail the whole creation; crmApplications.js's own submit-time
   // placeHoldIfNeeded call remains the backstop that catches it if it's
   // still unresolved by the time this application is submitted.
-  if (b.PreferredUnitId) {
+  if (rawAppUnitIds.length > 0) {
+    for (const uid of rawAppUnitIds) {
+      await pool.request()
+        .input('aid', sql.Int, applicationId)
+        .input('uid', sql.Int, parseInt(uid))
+        .input('pri', sql.Bit, uid === preferredUnitId ? 1 : 0)
+        .query("INSERT INTO dbo.CrmApplicationUnit (ApplicationId, UnitId, Status, IsPrimary, CreatedAt) VALUES (@aid, @uid, 'Active', @pri, SYSDATETIME())");
+    }
+  }
+  if (rawAppPlotIds.length > 0) {
+    for (let i = 0; i < rawAppPlotIds.length; i++) {
+      await pool.request()
+        .input("aid", sql.Int, applicationId).input("pid", sql.Int, rawAppPlotIds[i])
+        .input("pri", sql.Bit, i === 0 ? 1 : 0)
+        .query("INSERT INTO dbo.CrmApplicationPlot (ApplicationId, PlotId, Status, IsPrimary, CreatedAt) VALUES (@aid, @pid, 'Active', @pri, SYSDATETIME())");
+    }
+  }
+  if (preferredUnitId) {
     try {
       await placeHoldIfNeeded(pool, {
-        entityType: "Unit", entityId: parseInt(b.PreferredUnitId), applicationId, holdDays: 3,
+        entityType: "Unit", entityId: parseInt(preferredUnitId), applicationId, holdDays: 3,
         reason: "Application created — auto-hold", userId: actorUserId,
       });
     } catch (holdErr) {
@@ -382,8 +519,88 @@ const DEFAULT_MILESTONES = [
 // a plan (or the 7-stage default, when none is selected) into real
 // CrmPaymentMilestone rows, so a plan switch produces an identical shape
 // to what creation would have produced.
+// A plot sale's schedule. No payment plan applies to land: the customer pays
+// the Booking Amount (if one was taken) and then the balance. Every rupee is
+// due from the start, unlike a plan schedule that waits for a Booking Amount.
+function landSaleSchedule(totalValue, bookingAmount) {
+  const total = Math.round(Number(totalValue) * 100) / 100;
+  const booking = Math.min(total, Math.max(0, Math.round(Number(bookingAmount || 0) * 100) / 100));
+  if (booking <= 0 || booking >= total) return [{ no: 1, name: "Full Payment", amount: total, dept: "Sales" }];
+  return [
+    { no: 1, name: "Booking", amount: booking, dept: "Sales", docs: "Booking Receipt" },
+    { no: 2, name: "Balance", amount: Math.round((total - booking) * 100) / 100, dept: "Sales" },
+  ];
+}
+
+// Re-shares a booking's TotalValue across its active lines (plots or units)
+// pro-rata by area — the same allocation booking creation uses. Called
+// whenever TotalValue changes after creation; without it the line values
+// keep the old total, and everything that reads them (the land / built
+// split behind GST and the sale ledger) disagrees with the booking.
+async function reallocateBookingLines(poolOrTx, bookingId, totalValue) {
+  for (const table of ["CrmBookingPlot", "CrmBookingUnit"]) {
+    const lines = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(
+      `SELECT Id, AreaSqFt FROM dbo.${table} WHERE BookingId = @bid AND Status = N'Active' ORDER BY Id`)).recordset;
+    if (!lines.length) continue;
+    const parts = allocateConsideration({
+      lines: lines.map((l) => ({ unitId: l.Id, areaSqFt: l.AreaSqFt })),
+      totalConsideration: Number(totalValue),
+    });
+    for (const part of parts) {
+      await poolOrTx.request().input("id", sql.Int, part.unitId).input("v", sql.Decimal(18, 2), part.allocatedValue)
+        .query(`UPDATE dbo.${table} SET AllocatedValue = @v WHERE Id = @id`);
+    }
+  }
+}
+
+// A plot sale's schedule is always derived, never hand-shaped: Booking
+// Amount + Balance (or one Full Payment) of the booking's current TotalValue.
+// So whenever the value or the Booking Amount changes, the schedule is
+// rebuilt from those two figures — as long as no money has been recorded
+// against it. Returns { rebuilt, reason }. Parking / extra-charge rows are
+// separate line items and are never touched.
+async function rebuildLandSchedule(poolOrTx, bookingId, actorUserId = null) {
+  const bk = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(`
+    SELECT b.TotalValue, b.BookingAmount, b.BookingDate,
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = b.Id) THEN 1 ELSE 0 END AS IsPlotSale
+    FROM dbo.CrmBooking b WHERE b.Id = @bid`)).recordset[0];
+  if (!bk || !bk.IsPlotSale) return { rebuilt: false, reason: "not a plot sale" };
+  const touched = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(`
+    SELECT COUNT(*) AS n FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+      AND (ISNULL(AmountPaid, 0) > 0 OR Status IN (N'Paid', N'Waived'))`)).recordset[0].n;
+  if (touched) return { rebuilt: false, reason: "money is already recorded against the schedule" };
+  await poolOrTx.request().input("bid", sql.Int, bookingId).query(`
+    DELETE FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL`);
+  await generateMilestonesForBooking(poolOrTx, bookingId, Number(bk.TotalValue), null, bk.BookingDate, actorUserId, Number(bk.BookingAmount || 0));
+  return { rebuilt: true };
+}
+
 async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
   if (!totalValue || totalValue <= 0) return;
+  const plotLine = await poolOrTx.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
+  if (plotLine.recordset.length) {
+    const due = bookingDate ? new Date(bookingDate) : new Date();
+    for (const m of landSaleSchedule(totalValue, bookingAmount)) {
+      await poolOrTx.request()
+        .input("bid",  sql.Int,           bookingId)
+        .input("mno",  sql.Int,           m.no)
+        .input("mname",sql.NVarChar(200), m.name)
+        .input("amt",  sql.Decimal(18,2), m.amount)
+        .input("pct",  sql.Decimal(5,2),  Math.round((m.amount / totalValue) * 10000) / 100)
+        .input("due",  sql.Date,          due)
+        .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
+        .input("dept", sql.NVarChar(100), m.dept || null)
+        .input("cb",   sql.Int,           actorUserId)
+        .query(`
+          INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, [Percent], DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+          VALUES (@bid, @mno, @mname, @amt, @pct, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
+        `);
+    }
+    return;
+  }
   let milestones;
   // Booking Amount is now set on the Payment Plan itself (at plan-creation
   // time), not typed fresh per booking — see CrmPaymentPlans.tsx. When the
@@ -392,7 +609,7 @@ async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, pay
   // the `bookingAmount` parameter only still matters as a fallback for
   // bookings with no tagged plan (DEFAULT_MILESTONES) or a legacy plan saved
   // before this field existed (BookingAmount IS NULL).
-  if (paymentPlanId) {
+  if (paymentPlanId !== null && paymentPlanId !== undefined) {
     const planRes = await poolOrTx.request().input("pid", sql.Int, parseInt(paymentPlanId))
       .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
     const planBookingAmount = planRes.recordset[0]?.BookingAmount;
@@ -529,7 +746,16 @@ async function getApplicablePaymentPlans(pool, { unitId, blockId, projectId }) {
 //   - Nothing tagged anywhere in the Unit's hierarchy -> any active plan is
 //     acceptable (the cascade's own final fallback already covers this).
 async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPlanId }) {
-  if (!preferredUnitId) return null;
+  // preferredUnitId/paymentPlanId are real IDENTITY values, which are never
+  // guaranteed to start at 1 — this codebase has already hit rows sitting at
+  // Id 0 once (CrmCustomer, migrations 441-443), and CrmPaymentPlanTemplate
+  // has one too. A plain `!x`/`x || y` check treats 0 the same as
+  // null/undefined/"" in JS, which silently discarded a genuinely-selected
+  // plan and is exactly what caused bookings to fail with "must be tagged"
+  // even though the plan was correctly chosen and tagged. Every check here
+  // uses an explicit null/undefined/"" test so 0 survives as a real id.
+  const hasId = (v) => v !== null && v !== undefined && v !== "";
+  if (!hasId(preferredUnitId)) return null;
 
   const unitRow = await pool.request().input("uid", sql.Int, preferredUnitId)
     .query("SELECT BlockId, ProjectId FROM dbo.UnitMaster WHERE Id = @uid");
@@ -538,7 +764,7 @@ async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPla
   const applicable = await getApplicablePaymentPlans(pool, { unitId: preferredUnitId, blockId: BlockId, projectId: ProjectId });
   const applicableIds = applicable.map((r) => r.Id);
 
-  if (!paymentPlanId) {
+  if (!hasId(paymentPlanId)) {
     if (applicableIds.length === 1) return applicableIds[0];
     throw new CrmCreationError(
       applicableIds.length > 1
@@ -562,9 +788,18 @@ async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPla
 // ApplicationId -> BookingId backfill every other Application-stage capture
 // (bank/KYC, documents, parking) already gets a few lines below.
 
+const { priceBooking, allocateConsideration } = require("./bookingUnits");
+
 async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
-  if (!b.UnitId) throw new CrmCreationError("UnitId is required — a unit must be selected from Unit Master");
+  const rawPlotIds = Array.isArray(b.PlotIds) && b.PlotIds.length > 0 ? b.PlotIds : [];
+  const rawUnitIds = Array.isArray(b.UnitIds) && b.UnitIds.length > 0 ? b.UnitIds : (b.UnitId ? [b.UnitId] : []);
+  const isPlotBooking = rawPlotIds.length > 0;
+  if (!isPlotBooking && rawUnitIds.length === 0) throw new CrmCreationError("UnitId or UnitIds is required — at least one unit must be selected");
+  const unitIds = (isPlotBooking ? rawPlotIds : rawUnitIds).map((id) => parseInt(id));
+  if (!unitIds.every(Number.isInteger) || new Set(unitIds).size !== unitIds.length) {
+    throw new CrmCreationError("Select one or more distinct valid plots or units");
+  }
 
   // One Application, one Booking — enforced here (not just at the
   // Application-approval call site) so the manual/fallback creation path
@@ -585,7 +820,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // never exist for are the genuinely dead ones — the same "not dead"
   // exclusion this used before Approved briefly became a real gate.
   const appRow = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
-    .query("SELECT Status, IsActive, PaymentPlanId, BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ChannelPartnerId FROM dbo.CrmApplication WHERE Id = @aid");
+    .query("SELECT Status, IsActive, PaymentPlanId, BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ChannelPartnerId, CustomerId FROM dbo.CrmApplication WHERE Id = @aid");
   if (!appRow.recordset.length) throw new CrmCreationError("Application not found");
   const deadApplicationStatuses = ["Rejected", "Cancelled", "Expired"];
   if (appRow.recordset[0].IsActive === false || deadApplicationStatuses.includes(appRow.recordset[0].Status)) {
@@ -593,18 +828,44 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       `A Booking can't be created for an application that is ${appRow.recordset[0].Status}`, 400);
   }
 
-  const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
-    SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+  if (isPlotBooking) {
+    await validatePlotSelection(pool, unitIds, { applicationId: parseInt(b.ApplicationId) });
+  } else {
+    await assertVillaBuyer(pool, unitIds, appRow.recordset[0].CustomerId);
+  }
+
+  // Fetch all selected units
+  const unitsRes = await pool.request().query(isPlotBooking ? `
+    SELECT p.Id, p.PlotName AS UnitName, p.ProjectId, p.BlockId, CAST(NULL AS NVARCHAR(50)) AS UnitType,
+           p.AreaSqFt, p.RatePerSqFt, proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
+    FROM dbo.PlotMaster p
+    LEFT JOIN dbo.enterprise proj ON proj.id = p.ProjectId AND proj.business_type = 'P'
+    LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
+    WHERE p.Id IN (${unitIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+  ` : `
+    SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.UnitKind, u.AreaSqFt,
            u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
            proj.name AS ProjectName, proj.company_id AS CompanyId,
            blk.BlockName
     FROM dbo.UnitMaster u
     LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
     LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-    WHERE u.Id = @uid AND u.IsActive = 1
+    WHERE u.Id IN (${unitIds.join(",")}) AND u.IsActive = 1
   `);
-  if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
-  const unitRow = unit.recordset[0];
+  if (unitsRes.recordset.length !== unitIds.length) {
+    throw new CrmCreationError("One or more selected units do not exist or are inactive");
+  }
+  // Order to match input array (primary is first)
+  const unitRows = unitIds.map((id) => unitsRes.recordset.find((u) => u.Id === id));
+  const unitRow = unitRows[0]; // Primary unit provides the descriptive fields
+
+  // The project / block type decides what may be sold and whether several
+  // units can share one booking (Project Type Master flags).
+  {
+    const { bookingTypeViolation, loadLandKinds } = require("./projectType");
+    const why = await bookingTypeViolation(pool, unitRows, { isPlotBooking, landKinds: await loadLandKinds(pool) });
+    if (why) throw new CrmCreationError(why);
+  }
 
   // A customer can't actually get their Booking approved/paid against an
   // unapproved Application, so the real "confirm within N days" clock only
@@ -617,10 +878,10 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // below is what the Matrix keeps counting down against in the meantime.
   const confirmDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
   const application = appRow.recordset[0];
-  const bookingBridge = !b.BrokerId && !application.BrokerId && application.ChannelPartnerId
+  const bookingBridge = (b.BrokerId === undefined || b.BrokerId === null || b.BrokerId === "") && application.BrokerId == null && application.ChannelPartnerId != null
     ? await ensureBrokerForChannelPartner(pool, application.ChannelPartnerId, actorUserId)
     : null;
-  const bookingBrokerId = b.BrokerId ? parseInt(b.BrokerId) : (application.BrokerId || bookingBridge?.brokerId || null);
+  const bookingBrokerId = b.BrokerId !== undefined && b.BrokerId !== null && b.BrokerId !== "" ? parseInt(b.BrokerId) : (application.BrokerId != null ? application.BrokerId : (bookingBridge?.brokerId != null ? bookingBridge.brokerId : null));
   const bookingBrokerageRatePercent = b.BrokerageRatePercent != null && b.BrokerageRatePercent !== ""
     ? parseFloat(b.BrokerageRatePercent)
     : (application.BrokerageRatePercent ?? bookingBridge?.commissionRate ?? null);
@@ -633,7 +894,9 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // uses its own internal locking and has partial-failure tolerance; the real
   // double-booking prevention is the UPDLOCK re-check inside the transaction
   // below.
-  await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
+  for (const uid of (isPlotBooking ? [] : unitIds)) {
+    await guardAndConvertHold(pool, "Unit", uid, parseInt(b.ApplicationId));
+  }
 
   // The Application already went through the mandatory-plan-selection gate
   // (see resolveApplicationPaymentPlan in createCrmApplicationRecord / the
@@ -641,23 +904,33 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // choice, so that's the fallback here rather than re-deriving one. An
   // explicit b.PaymentPlanId still wins if the caller is deliberately
   // changing it at booking time.
-  const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
+  const hasId = (v) => v !== null && v !== undefined && v !== "";
+  const effectivePaymentPlanId = isPlotBooking
+    ? null
+    : await resolveApplicationPaymentPlan(pool, {
     preferredUnitId: unitRow.Id,
-    paymentPlanId: b.PaymentPlanId || appRow.recordset[0].PaymentPlanId || null,
+    paymentPlanId: hasId(b.PaymentPlanId) ? b.PaymentPlanId : (hasId(appRow.recordset[0].PaymentPlanId) ? appRow.recordset[0].PaymentPlanId : null),
   });
 
-  // AreaSqFt is the single pricing/saleable area. Structural breakdown fields
-  // are copied to the booking as descriptive snapshots only.
-  const area  = unitRow.AreaSqFt != null ? unitRow.AreaSqFt
-              : (b.AreaSqFt != null ? parseFloat(b.AreaSqFt) : null);
-  // Rate: request body wins (editable at booking time); falls back to unit master's defined rate.
-  const rate  = b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt)
-              : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
-  const total = b.TotalValue  != null ? parseFloat(b.TotalValue)
-              : (area && rate ? Math.round(area * rate) : null);
+  // Calculate pricing using the combined multi-unit apportionment logic.
+  // Rate: request body wins (editable at booking time); falls back to primary unit's defined rate.
+  const userRate = b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt)
+                 : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
 
+  const linesInput = unitRows.map((u) => ({
+    unitId: u.Id,
+    areaSqFt: u.AreaSqFt,
+  }));
+  const pricing = priceBooking({ lines: linesInput, ratePerSqFt: userRate });
+
+  // If a manual TotalValue was typed, it overrides the computed sum, but we
+  // still use the combined area.
+  const area  = b.AreaSqFt != null && b.AreaSqFt !== "" ? parseFloat(b.AreaSqFt) : pricing.combinedArea;
+  const rate  = userRate;
+  const total = b.TotalValue != null && b.TotalValue !== "" ? parseFloat(b.TotalValue) : pricing.total;
+  
   const tokenType = b.TokenType === "Amount" ? "Amount" : "Percentage";
-  const tokenValue = b.TokenValue != null ? parseFloat(b.TokenValue) : null;
+  const tokenValue = b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : null;
   // Booking Amount is ALWAYS the fixed ₹ figure set on the tagged Payment
   // Plan itself (see CrmPaymentPlans.tsx) — never derived from a % of
   // TotalValue, and never taken from the Booking form's own Token%/manual
@@ -667,16 +940,27 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // without a fixed BookingAmount set (e.g. an old plan saved before this
   // field existed) can no longer produce a booking via a silent %
   // fallback — staff must open the plan and set one first.
-  if (!effectivePaymentPlanId) {
-    throw new CrmCreationError("A Payment Plan must be tagged to this unit before a Booking can be created — Booking Amount can only come from the plan.");
+  // A plot sale has no payment plan — its Booking Amount is the figure
+  // entered on the application, and the balance is one further milestone.
+  let bookingAmount;
+  if (isPlotBooking) {
+    // The application form records it as the Token (Booking) Amount in ₹.
+    const typed = hasId(b.BookingAmount) ? Number(b.BookingAmount) : (hasId(b.TokenValue) ? Number(b.TokenValue) : 0);
+    if (!Number.isFinite(typed) || typed < 0) throw new CrmCreationError("Booking Amount must be zero or more");
+    if (typed > total) throw new CrmCreationError("Booking Amount cannot be more than the plot value");
+    bookingAmount = typed;
+  } else {
+    if (effectivePaymentPlanId === null || effectivePaymentPlanId === undefined) {
+      throw new CrmCreationError("A Payment Plan must be tagged to this unit before a Booking can be created — Booking Amount can only come from the plan.");
+    }
+    const planRes = await pool.request().input("pid", sql.Int, parseInt(effectivePaymentPlanId))
+      .query("SELECT PlanName, BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
+    const planRow = planRes.recordset[0];
+    if (!planRow || planRow.BookingAmount == null) {
+      throw new CrmCreationError(`Payment Plan "${planRow?.PlanName || effectivePaymentPlanId}" has no fixed Booking Amount set — open it in Payment Plan Master and set one before booking this unit.`);
+    }
+    bookingAmount = Number(planRow.BookingAmount);
   }
-  const planRes = await pool.request().input("pid", sql.Int, parseInt(effectivePaymentPlanId))
-    .query("SELECT PlanName, BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
-  const planRow = planRes.recordset[0];
-  if (!planRow || planRow.BookingAmount == null) {
-    throw new CrmCreationError(`Payment Plan "${planRow?.PlanName || effectivePaymentPlanId}" has no fixed Booking Amount set — open it in Payment Plan Master and set one before booking this unit.`);
-  }
-  const bookingAmount = Number(planRow.BookingAmount);
 
   // getNextDocNumber uses its own internal sp_getapplock transaction and must
   // always run on pool (not on tx) — see crmPayments.js comment at line ~121.
@@ -699,19 +983,20 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   let bookingId;
   try {
     const taken = await tx.request()
-      .input("uid", sql.Int, parseInt(b.UnitId))
-      .query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, ROWLOCK) WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
-    if (taken.recordset.length) throw new CrmCreationError("This unit is already booked", 409);
+      .query(`SELECT Id FROM dbo.${isPlotBooking ? "CrmBookingPlot" : "CrmBookingUnit"} WITH (UPDLOCK, ROWLOCK) WHERE ${isPlotBooking ? "PlotId" : "UnitId"} IN (${unitIds.join(",")}) AND Status = N'Active'`);
+    if (taken.recordset.length) throw new CrmCreationError("One or more units are already booked", 409);
 
     const result = await tx.request()
       .input("no",    sql.NVarChar(30),  bookingNo)
       .input("appId", sql.Int,           parseInt(b.ApplicationId))
-      .input("uid",   sql.Int,           parseInt(b.UnitId))
-      .input("pid",   sql.Int,           unitRow.ProjectId || null)
+      .input("uid",   sql.Int,           isPlotBooking ? null : unitRow.Id)
+      .input("pid",   sql.Int,           unitRow.ProjectId != null ? unitRow.ProjectId : null)
       .input("pname", sql.NVarChar(200), unitRow.ProjectName || b.ProjectName || null)
-      .input("cid",   sql.Int,           unitRow.CompanyId || null)
-      .input("unit",  sql.NVarChar(100), unitRow.UnitName)
+      .input("cid",   sql.Int,           unitRow.CompanyId != null ? unitRow.CompanyId : null)
+      // Name concatenates multiple unit names if there are several
+      .input("unit",  sql.NVarChar(100), unitRows.map(u => u.UnitName).join(", "))
       .input("blk",   sql.NVarChar(100), unitRow.BlockName || b.BlockName || null)
+      .input("blkid", sql.Int,           unitRow.BlockId != null ? unitRow.BlockId : null)
       .input("flr",   sql.NVarChar(100), b.FloorName   || null)
       .input("utype", sql.NVarChar(100), unitRow.UnitType || b.UnitType || null)
       .input("area",  sql.Decimal(18,2), area)
@@ -736,7 +1021,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .input("cdl",   sql.DateTime2(3),  confirmDeadline)
       .query(`
         INSERT INTO dbo.CrmBooking
-          (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, FloorName, UnitType,
+          (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, BlockId, FloorName, UnitType,
            AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt,
            RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
            BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
@@ -744,7 +1029,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
            BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ConfirmDeadline)
         OUTPUT INSERTED.Id
         VALUES
-          (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
+          (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @blkid, @flr, @utype,
            @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea,
            @rate, @tot, @bamt, @ttype, @tval, @ppid,
            ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
@@ -754,6 +1039,40 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       `);
 
     bookingId = result.recordset[0].Id;
+
+    // Insert unit lines (Migration 505 support for multi-plot sales)
+    // Primary flag set on the first unit in the array.
+    //
+    // When staff type a negotiated lump sum, the booking stores THAT total
+    // (see `total` above) — so the per-line values must be apportioned from it,
+    // not left at what rate x area would have produced. Otherwise each plot's
+    // AllocatedValue — the figure its own conveyance deed and stamp duty are
+    // drawn from — no longer sums to the agreement value a sub-registrar will
+    // compare it against, and with no rate entered at all every line was 0.
+    // allocateConsideration splits pro-rata by area and reconciles to the paisa.
+    const manualTotal = b.TotalValue != null && b.TotalValue !== "";
+    const lineValues = manualTotal
+      ? allocateConsideration({ lines: linesInput, totalConsideration: total }).map((l) => l.allocatedValue)
+      : pricing.lines.map((l) => l.allocatedValue);
+    for (let i = 0; i < pricing.lines.length; i++) {
+      const line = { ...pricing.lines[i], allocatedValue: lineValues[i] };
+      await tx.request()
+        .input("bid", sql.Int, bookingId)
+        .input("uid", sql.Int, line.unitId)
+        .input("area", sql.Decimal(18,2), line.areaSqFt)
+        .input("rate", sql.Decimal(18,2), line.ratePerSqFt)
+        .input("premium", sql.Decimal(18,2), line.premiumAmount)
+        .input("alloc", sql.Decimal(18,2), line.allocatedValue)
+        .input("cb", sql.Int, actorUserId)
+        .input("isp", sql.Bit, i === 0 ? 1 : 0)
+        .query(`
+          INSERT INTO dbo.${isPlotBooking ? "CrmBookingPlot" : "CrmBookingUnit"}
+            (BookingId, ${isPlotBooking ? "PlotId" : "UnitId"}, AreaSqFt, RatePerSqFt, PremiumAmount, AllocatedValue, Status, IsPrimary, CreatedBy, CreatedAt)
+          VALUES
+            (@bid, @uid, @area, @rate, @premium, @alloc, N'Active', @isp, @cb, SYSDATETIME())
+        `);
+    }
+
 
     // The Application-stage capture (bank/KYC, documents, parking) was saved
     // keyed by ApplicationId with BookingId left NULL, since no Booking existed
@@ -901,6 +1220,6 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, resolveApplicationPaymentPlan, getApplicablePaymentPlans,
+  generateMilestonesForBooking, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

@@ -36,8 +36,8 @@ async function findActiveHold(pool, entityType, entityId) {
 
 async function placeHold(pool, { entityType, entityId, applicationId, holdDays, reason, userId, applicationProjectId }) {
   if (!ENTITY_TYPES.includes(entityType)) { const e = new Error("Invalid EntityType"); e.status = 400; throw e; }
-  if (!entityId) { const e = new Error("EntityId is required"); e.status = 400; throw e; }
-  if (!applicationId) { const e = new Error("ApplicationId is required"); e.status = 400; throw e; }
+  if (entityId == null) { const e = new Error("EntityId is required"); e.status = 400; throw e; }
+  if (applicationId == null) { const e = new Error("ApplicationId is required"); e.status = 400; throw e; }
   const days = parseInt(holdDays);
   if (!Number.isFinite(days) || days < 1 || days > MAX_HOLD_DAYS) {
     const e = new Error(`HoldDays must be between 1 and ${MAX_HOLD_DAYS}`); e.status = 400; throw e;

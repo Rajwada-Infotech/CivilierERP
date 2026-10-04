@@ -14,11 +14,34 @@
 // in try/catch and log the outcome via approvalService.recordGLPosting).
 
 const { sql } = require("../db");
-const { getGLHeadId, postVoucher, hasPosting } = require("./generalLedger");
+const { getGLHeadId, postVoucher, hasPosting, GL_ACCOUNTS } = require("./generalLedger");
+const { getGLHeadIdByCode } = require("./generalLedger");
+const { getBookingLandSplit } = require("./projectType");
 
 const CRM_COLLECTIONS_ACCOUNT = "CRM Collections A/c";
 const CRM_STAMP_DUTY_ACCOUNT = "Stamp Duty & Registration Expense";
 const CRM_GST_OUTPUT_ACCOUNT = "GST Output Liability - CRM Sales";
+// Migration 472. Recognised only once a booking's invoice is generated —
+// which itself only happens once the booking is 100% collected (see
+// crmBookings.js's full-payment gate) — never on cash receipt, since until
+// then the money is a pure liability, not yet earned income.
+const CRM_SALE_INCOME_ACCOUNT = "Sale of Flat/Parking";
+// Seeded by migration 504. Kept strictly separate from the construction head
+// above — see postCrmInvoiceToGL for why they must never be pooled.
+const CRM_SALE_LAND_ACCOUNT = "Sale of Land";
+// Stable keys for the two heads above. Names are editable from Account Head
+// Master and a rename would make these postings throw at posting time, after
+// the invoice is already approved — so resolution goes code-first, with the
+// name kept only as a fallback for databases predating migrations 472/484.
+const CRM_SALE_INCOME_CODE = "CRM-SALE-INCOME";
+const CRM_SALE_LAND_CODE = "CRM-SALE-LAND";
+// Migration 522. A villa built on a plot the buyer already owns is a
+// construction-only sale, kept apart from flats sold with their land.
+const CRM_SALE_VILLA_CODE = "CRM-SALE-VILLA";
+const CRM_SALE_VILLA_ACCOUNT = "Villa Construction Income";
+// Income head the company keeps when a cancelled booking is refunded (not
+// re-booked). Seeded by migration 416.
+const CRM_FORFEITURE_ACCOUNT = "Booking Cancellation Forfeiture";
 
 /**
  * Live GST rate for a booking, resolved from its HsnCode against dbo.HSN —
@@ -40,6 +63,90 @@ async function getGstRateForBooking(pool, bookingId) {
   if (!row) return 0;
   const cgstSgst = (Number(row.HCGST) || 0) + (Number(row.HSGST) || 0);
   return cgstSgst || Number(row.HIGST) || 0;
+}
+
+/**
+ * THE single, canonical GST split for a CRM payment amount against a
+ * booking — every GL posting (postCrmReceiptToGL, postCrmOnAccountToGL
+ * below) and every CrmPaymentReceipt row's own stored BaseAmount/GSTAmount
+ * (crmPayments.js, previously its own separate local copy of this exact
+ * function) must go through this one implementation, not re-derive GST
+ * independently. Two independently-maintained calculations of "the same"
+ * split is exactly the kind of drift bug this consolidation closes — a
+ * receipt's stored GSTAmount disagreeing with what actually got posted to
+ * the GST Output Liability account in GL would be a real reconciliation
+ * problem, not just a cosmetic one.
+ *
+ * Deliberately NOT the live-HSN-rate back-calculation getGstRateForBooking
+ * above uses — this instead takes the *ratio* of the booking's own already-
+ * computed TotalGstAmount to its GrandTotal (both set once, at booking
+ * time, from the live HSN rate that applied then) and applies that ratio to
+ * the payment amount. Rationale: a booking's locked-in GST amount must
+ * never silently drift just because the HSN master's rate changed later —
+ * only a fresh booking (or an explicit re-price) should ever pick up a new
+ * rate. No hardcoded percentage anywhere: both TotalGstAmount and
+ * GrandTotal are themselves live, HSN-derived figures computed once at
+ * booking/re-price time (see crmLedger.js's own booking-level GST columns).
+ * Returns a zero split (no GST) if the booking has no GST recorded at all —
+ * same conservative "don't invent a split" behavior as getGstRateForBooking.
+ */
+async function getGstSplit(pool, bookingId, amount) {
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
+  const row = r.recordset[0] || {};
+  const ratio = Number(row.GrandTotal) > 0 ? Number(row.TotalGstAmount) / Number(row.GrandTotal) : 0;
+  const gstAmount = Math.round(amount * ratio * 100) / 100;
+  return { gstAmount, baseAmount: Math.round((amount - gstAmount) * 100) / 100 };
+}
+
+/**
+ * GST share of a booking's next money posting, CUMULATIVELY.
+ *
+ * Splitting each receipt or invoice on its own (getGstSplit) rounds every
+ * one separately, so a booking paid in parts and invoiced in other parts
+ * collects paise of drift: the advance released by the invoices no longer
+ * equals the advance received, and Advance from Customer is left with a
+ * permanent residue. Instead each posting takes "GST due on everything posted
+ * so far including this one, minus GST already posted" — so once the whole
+ * value has been received and invoiced, both sides land exactly on the
+ * booking's GST, whatever the instalments were.
+ *
+ * side 'receipt': money in (CrmPaymentReceipt / CrmOnAccountPayment vouchers)
+ * side 'invoice': revenue recognition (CrmInvoice vouchers)
+ */
+async function getCumulativeGstSplit(pool, bookingId, amount, side) {
+  const bk = (await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT ISNULL(TotalGstAmount,0) AS Gst, ISNULL(GrandTotal,0) AS Grand FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0] || {};
+  const ratio = Number(bk.Grand) > 0 ? Number(bk.Gst) / Number(bk.Grand) : 0;
+  const amt = Math.round((Number(amount) || 0) * 100) / 100;
+  if (ratio <= 0 || amt <= 0) return { gstAmount: 0, baseAmount: amt };
+
+  const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
+  const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+  // Vouchers this booking has already posted on the same side.
+  const sources = side === "invoice"
+    ? `(g.SourceType = 'CrmInvoice' AND g.SourceId IN (SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid))`
+    : `((g.SourceType = 'CrmPaymentReceipt' AND g.SourceId IN (
+           SELECT r.Id FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid))
+        OR (g.SourceType = 'CrmOnAccountPayment' AND g.SourceId IN (SELECT Id FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid)))`;
+  // Gross posted = everything debited on the receipt side (the bank leg), or
+  // the advance released + its GST on the invoice side. GST posted = the GST
+  // output credits on the receipt side; on the invoice side GST was never
+  // posted by the invoice, so it is gross minus the advance released.
+  const prior = (await pool.request().input("bid", sql.Int, bookingId)
+    .input("gst", sql.Int, gstHeadId).input("adv", sql.Int, advanceHeadId).query(side === "invoice"
+      ? `SELECT ISNULL(SUM(inv.Amount), 0) AS Gross,
+                ISNULL((SELECT SUM(g.DebitAmount) FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND g.LHeadId = @adv AND ISNULL(g.IsReversed, 0) = 0), 0) AS Base
+         FROM dbo.CrmInvoice inv
+         WHERE inv.BookingId = @bid AND EXISTS (SELECT 1 FROM dbo.GeneralLedgerEntry g WHERE g.SourceType = 'CrmInvoice' AND g.SourceId = inv.Id)`
+      : `SELECT ISNULL(SUM(g.DebitAmount), 0) AS Gross,
+                ISNULL(SUM(CASE WHEN g.LHeadId = @gst THEN g.CreditAmount ELSE 0 END), 0) AS Gst
+         FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND ISNULL(g.IsReversed, 0) = 0`)).recordset[0] || {};
+  const priorGross = Number(prior.Gross || 0);
+  const priorGst = side === "invoice" ? priorGross - Number(prior.Base || 0) : Number(prior.Gst || 0);
+  const target = Math.round((priorGross + amt) * ratio * 100) / 100;
+  const gstAmount = Math.min(amt, Math.max(0, Math.round((target - priorGst) * 100) / 100));
+  return { gstAmount, baseAmount: Math.round((amt - gstAmount) * 100) / 100 };
 }
 
 let _sundryDebtorsGroupId;
@@ -70,7 +177,7 @@ async function ensureCrmCustomerLedgerHead(pool, crmCustomerId, createdBy) {
   if (existing.recordset.length) return existing.recordset[0].LHeadId;
 
   const cust = await pool.request().input("id", sql.Int, crmCustomerId)
-    .query("SELECT CustomerName, Mobile, Email, Address, PanNo FROM dbo.CrmCustomer WHERE Id = @id");
+    .query("SELECT CustomerName, Mobile, Email, Address, PanNo, InvoiceMode FROM dbo.CrmCustomer WHERE Id = @id");
   const c = cust.recordset[0];
   if (!c) throw new Error(`CrmCustomer ${crmCustomerId} not found — cannot create ledger head`);
 
@@ -86,20 +193,33 @@ async function ensureCrmCustomerLedgerHead(pool, crmCustomerId, createdBy) {
     .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
     .input("LHeadPan", sql.NVarChar(50), c.PanNo || null)
     .input("LCountry", sql.VarChar(50), "India")
-    .input("LHeadType", sql.VarChar(50), "A")
+    // Deliberately its own type ('RC' — Real-estate/CRM Customer), never
+    // 'A' (the general Customer Master used by Finance for any party the
+    // business invoices — scrap sales, material sales, anything outside
+    // CRM). A CRM customer is specifically someone buying a flat from us;
+    // conflating the two meant every CRM buyer polluted Finance's general
+    // Customer Master list the moment they were created. This was
+    // previously LHeadType='C' (collided with Contractor, fixed by
+    // migration 224 to 'A' — which then collided with the OTHER master
+    // instead). Trial Balance / financial-statement inclusion is driven by
+    // LBelongsTo (Sundry Debtors group, set below), not by this type code,
+    // so GL posting/receivables reporting is unaffected by the type change
+    // — only which UI list these rows show up in.
+    .input("LHeadType", sql.VarChar(50), "RC")
     .input("LHeadStatus", sql.Bit, 1)
     .input("Status", sql.NVarChar(20), "Approved")
     .input("LBelongsTo", sql.Int, groupId)
+    .input("InvoiceMode", sql.NVarChar(20), c.InvoiceMode || "NonInvoice")
     .input("CreatedBy", sql.NVarChar(100), createdBy || "system")
     .query(`
       INSERT INTO dbo.AccountHeadMaster
         (LHeadName, LHeadCode, LHeadPhone, LHeadEmail, LHeadAddress, LHeadContactPerson,
-         LHeadPaymentTerms, LHeadPan, LCountry, LHeadType, LHeadStatus, Status, LBelongsTo,
+         LHeadPaymentTerms, LHeadPan, LCountry, LHeadType, LHeadStatus, Status, LBelongsTo, InvoiceMode,
          ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
       OUTPUT INSERTED.LHeadId
       VALUES
         (@LHeadName, @LHeadCode, @LHeadPhone, @LHeadEmail, @LHeadAddress, @LHeadContactPerson,
-         @LHeadPaymentTerms, @LHeadPan, @LCountry, @LHeadType, @LHeadStatus, @Status, @LBelongsTo,
+         @LHeadPaymentTerms, @LHeadPan, @LCountry, @LHeadType, @LHeadStatus, @Status, @LBelongsTo, @InvoiceMode,
          @CreatedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
     `);
   return result.recordset[0].LHeadId;
@@ -124,6 +244,14 @@ async function syncCrmCustomerLedgerHead(pool, crmCustomerId, fields) {
     .input("email",  sql.NVarChar(100), fields.Email ?? null)
     .input("addr",   sql.VarChar(300), fields.Address || null)
     .input("pan",    sql.NVarChar(50), fields.PanNo || null)
+    // InvoiceMode has no ISNULL fallback like the fields above — CrmCustomer
+    // is the canonical source for this flag (it's NOT NULL there with a real
+    // default), so every sync call always carries a real value and this
+    // ledger head must always end up matching it exactly, never keeping a
+    // stale value from before. This is what makes "no invoice for this
+    // customer" hold from BOTH the CRM booking-invoice pipeline and the
+    // standalone Accounts Sale Invoice module, which reads this same row.
+    .input("invmode", sql.NVarChar(20), fields.InvoiceMode || "NonInvoice")
     .query(`
       UPDATE dbo.AccountHeadMaster SET
         LHeadName          = ISNULL(@name, LHeadName),
@@ -131,7 +259,8 @@ async function syncCrmCustomerLedgerHead(pool, crmCustomerId, fields) {
         LHeadPhone         = ISNULL(@phone, LHeadPhone),
         LHeadEmail         = @email,
         LHeadAddress       = ISNULL(@addr, LHeadAddress),
-        LHeadPan           = ISNULL(@pan, LHeadPan)
+        LHeadPan           = ISNULL(@pan, LHeadPan),
+        InvoiceMode        = @invmode
       WHERE LHeadCode = @code
     `);
 }
@@ -152,6 +281,7 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
 
   const r = await pool.request().input("id", sql.Int, receiptId).query(`
     SELECT r.Id, r.ReceiptNo, r.Amount, r.ReceivedDate, r.PaymentMode, r.OnAccountPaymentId,
+           r.DepositBankId,
            b.Id AS BookingId, b.CompanyId, b.ProjectId, a.CustomerId
     FROM dbo.CrmPaymentReceipt r
     JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
@@ -169,25 +299,55 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   const amount = Number(row.Amount) || 0;
   if (amount <= 0) return { posted: false, reason: `Receipt ${receiptId} amount is ${amount} (<= 0)` };
 
-  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // Still ensured (not used in a GL leg below anymore — see the Advance
+  // from Customer note further down) because other CRM reports/screens
+  // (Customer 360, statements) look this head up directly and expect it to
+  // exist for any customer with a real payment on record.
+  await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
+  // Debit the real bank the money was actually deposited into (DepositBankId
+  // is already an AccountHeadMaster.LHeadId — same convention
+  // generalLedger.js's postReceivedPaymentApproval uses for
+  // RPDepositBankId). No fallback to a generic proxy account — Accounts sets
+  // the bank on the Received Payment (PATCH /:id/deposit-bank) and the
+  // approve route refuses a CRM payment without one, so a real bank should
+  // always be present here; if it's somehow missing, that's a bug to surface loudly, not
+  // paper over with a suspense balance that can never reconcile.
+  if (!row.DepositBankId)
+    return { posted: false, reason: `Receipt ${receiptId} has no DepositBankId — cannot post without a real bank` };
+  const collectionsHeadId = row.DepositBankId;
 
-  // Pricing is GST-inclusive — back-calculate the GST portion from the live
-  // HSN rate rather than storing/hardcoding one. A booking with no HsnCode
-  // (or an unresolvable one) posts exactly as before this feature existed:
-  // the full amount credited to the customer, no GST leg.
-  const gstRate = await getGstRateForBooking(pool, row.BookingId);
+  // Pricing is GST-inclusive — split via the same canonical getGstSplit()
+  // every other CRM money event (including this receipt's own stored
+  // BaseAmount/GSTAmount columns) uses, so the GL posting can never disagree
+  // with what the receipt itself records. A booking with no GST recorded
+  // posts exactly as before this feature existed: the full amount credited
+  // to the customer, no GST leg.
+  // Explicit business rule: ALL money received from a customer is held as
+  // Advance from Customer (liability) until the booking is 100% collected
+  // and invoiced — see crmBookings.js's full-payment gate and
+  // postCrmInvoiceToGL's own income recognition. A milestone receipt via
+  // the "Pay" button runs at exactly that pre-invoice stage (an invoice
+  // can't exist yet for the milestone this receipt is against, by the same
+  // rule), so it must land on the SAME pooled Advance from Customer head
+  // postCrmOnAccountToGL already uses — not the customer's own Sundry
+  // Debtors-style head, which would bury it as an invisible credit balance
+  // instead of a clean liability line, and would be inconsistent with an
+  // on-account deposit of the exact same kind of money.
+  const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+  const { gstAmount, baseAmount } = await getCumulativeGstSplit(pool, row.BookingId, amount, "receipt");
   const legs = [
     { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM payment received (${row.PaymentMode || "—"})` },
   ];
-  if (gstRate > 0) {
-    const gstAmount = Math.round((amount - amount / (1 + gstRate / 100)) * 100) / 100;
-    const baseAmount = Math.round((amount - gstAmount) * 100) / 100;
+  if (gstAmount > 0) {
+    // GST on an advance for under-construction property is due at receipt
+    // (Section 13 CGST Act) — that timing is independent of when the SALE
+    // itself is recognised as income, so this leg is unaffected by the
+    // liability-vs-income question above and still posts on every receipt.
     const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
-    legs.push({ lHeadId: customerHeadId, credit: baseAmount, narration: `${row.ReceiptNo} — CRM payment received (base, excl. GST)` });
-    legs.push({ lHeadId: gstHeadId, credit: gstAmount, narration: `${row.ReceiptNo} — GST output liability @ ${gstRate}%` });
+    legs.push({ lHeadId: advanceHeadId, credit: baseAmount, narration: `${row.ReceiptNo} — CRM payment received (base, excl. GST)` });
+    legs.push({ lHeadId: gstHeadId, credit: gstAmount, narration: `${row.ReceiptNo} — GST output liability` });
   } else {
-    legs.push({ lHeadId: customerHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM payment received` });
+    legs.push({ lHeadId: advanceHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM payment received` });
   }
 
   await postVoucher(pool, {
@@ -218,8 +378,9 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, onAccountId).query(`
-    SELECT oa.Id, oa.ReceiptNo, oa.Amount, oa.ReceivedDate, oa.PaymentMode,
-           b.CompanyId, b.ProjectId, a.CustomerId
+    SELECT oa.Id, oa.ReceiptNo, oa.Amount, oa.ReceivedDate, oa.PaymentMode, oa.DepositBankId,
+           oa.SourceReceivedPaymentId,
+           b.Id AS BookingId, b.CompanyId, b.ProjectId, a.CustomerId, a.ApplicantName
     FROM dbo.CrmOnAccountPayment oa
     JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -233,8 +394,69 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
   const amount = Number(row.Amount) || 0;
   if (amount <= 0) return { posted: false, reason: `On-account ${onAccountId} amount is ${amount} (<= 0)` };
 
+  // customerHeadId is still needed below for the OnAccountLedger row (the
+  // per-customer audit trail CRM's own on-account/adjustment UI reads) —
+  // just no longer where the GL leg itself lands.
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // No fallback proxy — see postCrmReceiptToGL's identical note.
+  // POST /booking/:bookingId/on-account already requires DepositBankId.
+  //
+  // But this row may instead have come from applyCrmOnAccountPaymentApproval
+  // (Finance approving a ReceivedPayment), which snapshots DepositBankId off
+  // that ReceivedPayment at approval time — if the bank hadn't been added to
+  // the ReceivedPayment yet, the snapshot is NULL and posting fails here. If
+  // the ReceivedPayment has since had a bank added (the normal way someone
+  // fixes this), pick it up now rather than requiring a manual backfill
+  // every time this happens — self-heals on the next retry.
+  if (!row.DepositBankId && row.SourceReceivedPaymentId) {
+    const srcBank = await pool.request().input("srp", sql.Int, row.SourceReceivedPaymentId).query(`
+      SELECT RPDepositBankId, RPDepositBankName FROM dbo.ReceivedPayment WHERE RPPaymentID = @srp
+    `);
+    const src = srcBank.recordset[0];
+    if (src?.RPDepositBankId) {
+      await pool.request()
+        .input("id", sql.Int, onAccountId)
+        .input("bkid", sql.Int, src.RPDepositBankId)
+        .input("bkname", sql.NVarChar(200), src.RPDepositBankName || null)
+        .query(`
+          UPDATE dbo.CrmOnAccountPayment SET DepositBankId = @bkid, DepositBankName = @bkname WHERE Id = @id
+        `);
+      row.DepositBankId = src.RPDepositBankId;
+    }
+  }
+  if (!row.DepositBankId)
+    return { posted: false, reason: `On-account ${onAccountId} has no DepositBankId — cannot post without a real bank` };
+  const collectionsHeadId = row.DepositBankId;
+  // Pooled liability head, same one a standalone (non-CRM) Received
+  // Payment advance posts to (see generalLedger.js's postReceivedPaymentApproval) —
+  // an on-account deposit with nothing allocated yet is a liability
+  // (goods/services still owed), not a reduction of what the customer
+  // owes us, so it belongs here rather than directly on the customer's
+  // own Sundry Debtors head. Per-customer traceability is preserved via
+  // this leg's narration and the OnAccountLedger row below, not by
+  // crediting the customer's own head.
+  const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+  const customerLabel = row.ApplicantName || `Customer #${row.CustomerId}`;
+
+  // Same canonical getGstSplit() as postCrmReceiptToGL above — an on-account
+  // deposit is real cash against the same GST-inclusive booking price, just
+  // not yet allocated to a specific milestone. It must carry the identical
+  // GST split so GST liability is recognised the moment cash actually
+  // arrives, not deferred until the deposit happens to get applied to a
+  // milestone later — postCrmOnAccountApplied below is a pure reallocation
+  // of already-posted cash, not new income, so it correctly does NOT
+  // re-split GST a second time.
+  const { gstAmount, baseAmount } = await getCumulativeGstSplit(pool, row.BookingId, amount, "receipt");
+  const legs = [
+    { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM on-account deposit received` },
+  ];
+  if (gstAmount > 0) {
+    const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
+    legs.push({ lHeadId: advanceHeadId, credit: baseAmount, narration: `${row.ReceiptNo} — advance from ${customerLabel} (base, excl. GST)` });
+    legs.push({ lHeadId: gstHeadId, credit: gstAmount, narration: `${row.ReceiptNo} — GST output liability` });
+  } else {
+    legs.push({ lHeadId: advanceHeadId, credit: amount, narration: `${row.ReceiptNo} — advance from ${customerLabel}` });
+  }
 
   await postVoucher(pool, {
     voucherNo: row.ReceiptNo,
@@ -244,15 +466,12 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
     companyId: row.CompanyId ?? null,
     projectId: row.ProjectId ?? null,
     createdBy: userEmail,
-    legs: [
-      { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM on-account deposit received` },
-      { lHeadId: customerHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM on-account deposit received` },
-    ],
+    legs,
   });
 
   await pool.request()
     .input("PartyId", sql.Int, customerHeadId)
-    .input("PartyType", sql.NVarChar(20), "A")
+    .input("PartyType", sql.NVarChar(20), "Customer") // readable label, same as Finance's own rows (onAccount.js PARTY_LABEL)
     .input("TxnDate", sql.Date, row.ReceivedDate)
     .input("TxnType", sql.NVarChar(10), "CREDIT")
     .input("Amount", sql.Decimal(18, 2), amount)
@@ -277,14 +496,29 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
 }
 
 /**
- * An on-account deposit being applied to a specific milestone — not new
- * cash (already posted by postCrmOnAccountToGL when the deposit came in),
- * just a reallocation. DEBITs the OnAccountLedger to reduce the balance,
- * mirroring newPayment.js's auto-apply-OA-to-invoice DEBIT pattern exactly.
+ * An on-account deposit being applied (earmarked) to a specific milestone.
+ *
+ * No GL entry, deliberately — and this is now a permanent design decision,
+ * not a gap. Explicit business rule: ALL customer money stays as Advance
+ * from Customer (liability) until the whole booking is 100% collected and
+ * invoiced (see crmBookings.js's full-payment gate + postCrmInvoiceToGL,
+ * which is the ONE place this liability ever moves, straight to Sale of
+ * Flat/Parking income). "Applying" a deposit to a milestone mid-booking is
+ * purely an internal bookkeeping step — which milestone this money is
+ * earmarked for — with no invoice yet to net against, so there is nothing
+ * for the GL to move here. It used to reallocate Dr Advance from Customer
+ * / Cr the customer's own head, back when invoices were raised per
+ * milestone as each one was demanded (see postCrmReceiptToGL's own note on
+ * why receipts changed too) — that premise no longer holds.
+ *
+ * Still updates the OnAccountLedger / AccountHeadMaster.OnAccountBalance
+ * tracking below — that is a separate, still-valid "how much of this
+ * customer's deposit is earmarked vs free" figure several screens read,
+ * independent of which GL head the underlying cash actually sits on.
  */
 async function postCrmOnAccountApplied(pool, onAccountId, appliedAmount, userEmail, txnDate) {
   const r = await pool.request().input("id", sql.Int, onAccountId).query(`
-    SELECT oa.ReceiptNo, b.CompanyId, b.ProjectId, a.CustomerId
+    SELECT oa.ReceiptNo, b.CompanyId, b.ProjectId, a.CustomerId, a.ApplicantName
     FROM dbo.CrmOnAccountPayment oa
     JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -292,12 +526,15 @@ async function postCrmOnAccountApplied(pool, onAccountId, appliedAmount, userEma
   `);
   const row = r.recordset[0];
   if (!row?.CustomerId) return { posted: false, reason: `On-account ${onAccountId}: no linked CrmCustomer` };
+  if (!(Number(appliedAmount) > 0)) return { posted: false, reason: `Applied amount ${appliedAmount} (<= 0)` };
 
+  // Still ensured for the same reason postCrmReceiptToGL keeps calling it —
+  // other CRM screens look this head up directly.
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
 
   await pool.request()
     .input("PartyId", sql.Int, customerHeadId)
-    .input("PartyType", sql.NVarChar(20), "A")
+    .input("PartyType", sql.NVarChar(20), "Customer") // readable label, same as Finance's own rows (onAccount.js PARTY_LABEL)
     .input("TxnDate", sql.Date, txnDate || new Date())
     .input("TxnType", sql.NVarChar(10), "DEBIT")
     .input("Amount", sql.Decimal(18, 2), appliedAmount)
@@ -380,7 +617,7 @@ async function postCrmCancellationRefundToGL(pool, cancellationId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, cancellationId).query(`
-    SELECT c.Id, c.CancellationNo, c.RefundAmount, c.RefundDate, c.RefundMode,
+    SELECT c.Id, c.CancellationNo, c.RefundAmount, c.RefundDate, c.RefundMode, c.RefundBankId,
            b.CompanyId, b.ProjectId, a.CustomerId
     FROM dbo.CrmCancellation c
     JOIN dbo.CrmBooking b ON b.Id = c.BookingId
@@ -395,7 +632,13 @@ async function postCrmCancellationRefundToGL(pool, cancellationId, userEmail) {
   if (amount <= 0) return { none: true, reason: `Cancellation ${cancellationId} refund amount is ${amount} (<= 0) — nothing to refund` };
 
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // No fallback proxy — see postCrmReceiptToGL's identical note. (This
+  // function is currently unreferenced by any live route — the real
+  // refund-payout path is postCrmRefundPaid/CrmRefund — but kept correct
+  // rather than left with a dead fallback in case it's wired up again.)
+  if (!row.RefundBankId)
+    return { posted: false, reason: `Cancellation ${cancellationId} has no RefundBankId — cannot post without a real bank` };
+  const collectionsHeadId = row.RefundBankId;
   const docNo = row.CancellationNo || `CXLRF-${cancellationId}`;
 
   await postVoucher(pool, {
@@ -409,6 +652,189 @@ async function postCrmCancellationRefundToGL(pool, cancellationId, userEmail) {
     legs: [
       { lHeadId: customerHeadId, debit: amount, narration: `${docNo} — cancellation refund (${row.RefundMode || "—"})` },
       { lHeadId: collectionsHeadId, credit: amount, narration: `${docNo} — cancellation refund paid` },
+    ],
+  });
+  return { posted: true };
+}
+
+/**
+ * The FORFEITURE leg of a refund payout (dbo.CrmRefund). The spawned Finance
+ * NewPayment voucher already posts  Dr Customer / Cr <real bank>  for the NET
+ * amount when Finance approves it. This poster adds only the deduction the
+ * company keeps:
+ *   Dr Customer .......................... extinguishes the rest of their credit
+ *   Cr Booking Cancellation Forfeiture ... recognised as other income
+ * No-op when DeductionAmount = 0 (overpayment / manual refunds).
+ */
+async function postCrmRefundPaid(pool, refundId, userEmail) {
+  if (await hasPosting(pool, "CrmRefund", refundId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const r = await pool.request().input("id", sql.Int, refundId).query(`
+    SELECT Id, RefundNo, DeductionAmount, NetAmount, BookingId, CompanyId, ProjectId, CustomerId, PaidAt
+    FROM dbo.CrmRefund WHERE Id = @id
+  `);
+  const row = r.recordset[0];
+  if (!row) return { posted: false, reason: `CrmRefund ${refundId} not found` };
+  if (!row.CustomerId) return { posted: false, reason: `Refund ${refundId}: no linked CrmCustomer` };
+
+  const deduction = Number(row.DeductionAmount) || 0;
+  const netAmount = Number(row.NetAmount) || 0;
+  const docNo = row.RefundNo || `CRFD-${refundId}`;
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
+  const legs = [];
+
+  // GST reversal on the portion actually credited BACK to the customer —
+  // the "issue a credit note, reduce output liability" mechanism under
+  // Section 34 CGST Act for a cancelled supply. Only the amount genuinely
+  // returned qualifies: the forfeited/retained slice (below) is NOT reversed
+  // — the company keeps that money, so from a GST standpoint nothing was
+  // "returned" on it. NOTE: Section 34 time-bars a credit note to 30 Sept of
+  // the FY following the original supply/advance — this posts the reversal
+  // unconditionally and does NOT check that deadline (CRM has no reliable
+  // per-rupee trace back to the original receipt's FY to check it against).
+  // If a refund is settled after that window has lapsed, Finance/the GST
+  // filer must verify this leg is still correct rather than trusting it
+  // blindly — the correct treatment past the deadline is the CUSTOMER filing
+  // for a refund directly with the tax authority, not the company adjusting
+  // its own output liability.
+  //
+  // NOT a full Dr Customer / Cr Bank entry here — that's the generic
+  // PaymentPosting voucher NewPayment's own "Post to GL" action books
+  // separately for the full NetAmount (resolvePaymentSupplierHeadId falls
+  // back to PPartyId = this same customerHeadId for a refund payout). This
+  // is purely the RECLASSIFICATION on top of that: of the NetAmount that
+  // voucher debits to the customer, gstAmount of it actually belongs against
+  // GST Output Liability, not the customer — Dr GST-Output / Cr Customer
+  // moves it there. Crediting the customer here a second time (e.g. with
+  // baseAmount) would double-count against that other voucher.
+  if (row.BookingId && netAmount > 0) {
+    const { gstAmount } = await getGstSplit(pool, row.BookingId, netAmount);
+    if (gstAmount > 0) {
+      const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
+      legs.push({ lHeadId: gstHeadId, debit: gstAmount, narration: `${docNo} — GST output liability reversed (credit note on refund; verify Sec.34 time limit)` });
+      legs.push({ lHeadId: customerHeadId, credit: gstAmount, narration: `${docNo} — reclass GST portion off customer head` });
+    }
+  }
+
+  if (deduction > 0) {
+    const forfeitureHeadId = await getGLHeadId(pool, CRM_FORFEITURE_ACCOUNT);
+    legs.push({ lHeadId: customerHeadId, debit: deduction, narration: `${docNo} — cancellation forfeiture retained` });
+    legs.push({ lHeadId: forfeitureHeadId, credit: deduction, narration: `${docNo} — booking cancellation forfeiture income` });
+  }
+
+  if (!legs.length) return { none: true, reason: `Refund ${refundId} has nothing to post (no GST, no forfeiture)` };
+
+  await postVoucher(pool, {
+    voucherNo: `${docNo}-ADJ`,
+    voucherDate: row.PaidAt || new Date(),
+    sourceType: "CrmRefund",
+    sourceId: refundId,
+    companyId: row.CompanyId ?? null,
+    projectId: row.ProjectId ?? null,
+    createdBy: userEmail,
+    legs,
+  });
+  return { posted: true };
+}
+
+/**
+ * Ledger-only reallocation when held credit is applied to a NEW booking's
+ * fresh on-account row (same company). NO GL voucher — the customer head
+ * already carries this liability from the cancelled booking's original
+ * receipts; this just makes the money show as an available advance on the new
+ * booking via OnAccountLedger + AccountHeadMaster.OnAccountBalance, exactly
+ * like a normal on-account deposit's ledger side. The existing
+ * applyOnAccountToMilestone sweep then DEBITs it back down onto milestones.
+ */
+async function postCrmHeldCreditReallocateLedgerOnly(pool, { customerId, newOnAccountId, amount, companyId, projectId, receiptNo, userEmail, executor }) {
+  const exec = executor || pool;
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, customerId, userEmail);
+  await exec.request()
+    .input("PartyId", sql.Int, customerHeadId)
+    .input("PartyType", sql.NVarChar(20), "Customer") // readable label, same as Finance's own rows (onAccount.js PARTY_LABEL)
+    .input("TxnDate", sql.Date, new Date())
+    .input("TxnType", sql.NVarChar(10), "CREDIT")
+    .input("Amount", sql.Decimal(18, 2), amount)
+    .input("RefType", sql.NVarChar(30), "CrmOnAccountPayment")
+    .input("RefDocNo", sql.NVarChar(100), receiptNo || null)
+    .input("RefId", sql.Int, newOnAccountId)
+    .input("CompanyId", sql.Int, companyId ?? null)
+    .input("ProjectId", sql.Int, projectId ?? null)
+    .input("Notes", sql.NVarChar(500), `Re-booking credit from cancelled booking (${receiptNo || "held"})`)
+    .input("CreatedBy", sql.NVarChar(150), userEmail)
+    .query(`
+      INSERT INTO dbo.OnAccountLedger
+        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+      VALUES
+        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+      UPDATE dbo.AccountHeadMaster SET OnAccountBalance = OnAccountBalance + @Amount WHERE LHeadId = @PartyId;
+    `);
+  return { posted: true };
+}
+
+/**
+ * CRM mirror for a CROSS-company re-booking transfer (dbo.CrmRebookingTransfer).
+ * Reclassifies the customer's advance liability from the source company's CRM
+ * books to the target company's, through the CRM Collections proxy:
+ *   Company A voucher:  Dr Customer / Cr "CRM Collections A/c"   (companyId = A)
+ *   Company B voucher:  Dr "CRM Collections A/c" / Cr Customer   (companyId = B)
+ * Net movement on the (single) customer head is zero. The real bank + LOAN-C
+ * bridge is squared separately by the linked Finance Inter-Company FundTransfer.
+ * Same-company transfers do NOT call this (no cross-company reclass needed).
+ */
+async function postCrmHeldCreditCrossCompanyMirror(pool, rebookingTransferId, userEmail) {
+  if (await hasPosting(pool, "CrmRebookingTransfer", rebookingTransferId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const r = await pool.request().input("id", sql.Int, rebookingTransferId).query(`
+    SELECT rt.Id, rt.Amount, rt.FromCompanyId, rt.ToCompanyId, rt.ToBookingId,
+           fb.ProjectId AS FromProjectId, tb.ProjectId AS ToProjectId,
+           ta.CustomerId
+    FROM dbo.CrmRebookingTransfer rt
+    JOIN dbo.CrmOnAccountPayment hc ON hc.Id = rt.HeldOnAccountId
+    JOIN dbo.CrmBooking fb ON fb.Id = hc.BookingId
+    JOIN dbo.CrmBooking tb ON tb.Id = rt.ToBookingId
+    JOIN dbo.CrmApplication ta ON ta.Id = tb.ApplicationId
+    WHERE rt.Id = @id
+  `);
+  const row = r.recordset[0];
+  if (!row) return { posted: false, reason: `CrmRebookingTransfer ${rebookingTransferId} not found` };
+  if (!row.CustomerId) return { posted: false, reason: `Rebooking transfer ${rebookingTransferId}: no linked CrmCustomer` };
+
+  const amount = Number(row.Amount) || 0;
+  if (amount <= 0) return { none: true, reason: `Rebooking transfer ${rebookingTransferId} amount is ${amount}` };
+
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
+  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  const docNo = `REBK-${rebookingTransferId}`;
+
+  // Company A — liability leaves A's CRM books
+  await postVoucher(pool, {
+    voucherNo: `${docNo}-A`,
+    voucherDate: new Date(),
+    sourceType: "CrmRebookingTransfer",
+    sourceId: rebookingTransferId,
+    companyId: row.FromCompanyId ?? null,
+    projectId: row.FromProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: customerHeadId, debit: amount, narration: `${docNo} — held credit transferred out for re-booking` },
+      { lHeadId: collectionsHeadId, credit: amount, narration: `${docNo} — held credit transferred out` },
+    ],
+  });
+  // Company B — liability arrives in B's CRM books
+  await postVoucher(pool, {
+    voucherNo: `${docNo}-B`,
+    voucherDate: new Date(),
+    sourceType: "CrmRebookingTransfer",
+    sourceId: rebookingTransferId,
+    companyId: row.ToCompanyId ?? null,
+    projectId: row.ToProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: collectionsHeadId, debit: amount, narration: `${docNo} — held credit received for re-booking` },
+      { lHeadId: customerHeadId, credit: amount, narration: `${docNo} — held credit received` },
     ],
   });
   return { posted: true };
@@ -510,17 +936,192 @@ async function postCrmParkingPaymentToGL(pool, allotmentId, userEmail) {
   return { posted: true };
 }
 
+/**
+ * Income recognition — the whole reason a booking's money sat in Advance
+ * from Customer instead of anywhere else. Only ever called once an invoice
+ * is actually created, and invoice creation itself is gated on the booking
+ * being 100% collected (crmBookings.js's POST /:id/invoices and
+ * generateMilestoneInvoiceForBooking) — so by the time this runs, every
+ * rupee of the invoiced amount is already real, received cash sitting in
+ * Advance from Customer, never a forward-looking accrual.
+ *   Dr Advance from Customer .... releases the liability
+ *   Cr Sale of Flat/Parking ..... recognised as income
+ *
+ * Invoice type "Milestone"/"Booking" only — Maintenance/Other/OnAccount
+ * invoices aren't part of the flat/parking sale price and don't touch this
+ * income head at all.
+ */
+async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
+  if (await hasPosting(pool, "CrmInvoice", invoiceId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const r = await pool.request().input("id", sql.Int, invoiceId).query(`
+    SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate,
+           b.Id AS BookingId, b.CompanyId, b.ProjectId
+    FROM dbo.CrmInvoice inv
+    JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
+    WHERE inv.Id = @id
+  `);
+  const row = r.recordset[0];
+  if (!row) return { posted: false, reason: `CrmInvoice ${invoiceId} not found` };
+  if (row.InvoiceType !== "Milestone" && row.InvoiceType !== "Booking")
+    return { none: true, reason: `Invoice type "${row.InvoiceType}" is not a flat/parking sale invoice — no income to recognise` };
+
+  const invoiceAmount = Number(row.Amount) || 0;
+  if (invoiceAmount <= 0) return { posted: false, reason: `Invoice ${invoiceId} amount is ${invoiceAmount} (<= 0)` };
+
+  // The invoice amount is GST-inclusive, but the GST share was already moved
+  // to GST Output Liability when the money was received (postCrmReceiptToGL /
+  // postCrmOnAccountToGL credit Advance with the pre-tax part only). So the
+  // invoice releases — and recognises as income — only the pre-tax part,
+  // split with the same canonical ratio. Releasing the gross amount would
+  // drive Advance from Customer negative by the GST and overstate income by
+  // the same figure.
+  const { baseAmount: amount } = await getCumulativeGstSplit(pool, row.BookingId, invoiceAmount, "invoice");
+  if (amount <= 0) return { posted: false, reason: `Invoice ${invoiceId} has no pre-tax amount to recognise` };
+
+  const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+
+  // Which income head is credited follows WHAT WAS SOLD, never the project's
+  // type. Land and construction must not share a head: the sale of land is
+  // outside GST (Schedule III, CGST Act) while construction is a taxable
+  // supply, so pooling them makes the P&L impossible to reconcile against the
+  // GST returns — part of the turnover would carry no output tax by design,
+  // with nothing in the ledger to show why.
+  const split = await getBookingLandSplit(pool, row.BookingId, amount);
+
+  let legs;
+  if (split.isPureLand) {
+    const landHeadId = await getGLHeadIdByCode(pool, CRM_SALE_LAND_CODE, CRM_SALE_LAND_ACCOUNT);
+    legs = [
+      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
+      { lHeadId: landHeadId, credit: amount, narration: `${row.InvoiceNo} — land sale income recognised` },
+    ];
+  } else if (split.hasLand) {
+    // A land + villa package on one invoice. Apportion this invoice between the
+    // two heads in the same land:construction ratio as the booking, so each
+    // head accumulates only its own kind of turnover. Residual paise go to the
+    // construction leg so the voucher balances to the rupee.
+    const base = split.landValue + split.constructionValue;
+    const landPart = base > 0 ? Math.round(((amount * split.landValue) / base) * 100) / 100 : 0;
+    const constructionPart = Math.round((amount - landPart) * 100) / 100;
+    const landHeadId = await getGLHeadIdByCode(pool, CRM_SALE_LAND_CODE, CRM_SALE_LAND_ACCOUNT);
+    const incomeHeadId = await getGLHeadIdByCode(pool, CRM_SALE_INCOME_CODE, CRM_SALE_INCOME_ACCOUNT);
+    legs = [
+      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
+    ];
+    if (landPart > 0)
+      legs.push({ lHeadId: landHeadId, credit: landPart, narration: `${row.InvoiceNo} — land sale income recognised` });
+    if (constructionPart > 0)
+      legs.push({ lHeadId: incomeHeadId, credit: constructionPart, narration: `${row.InvoiceNo} — flat/villa sale income recognised` });
+  } else if (await require("./crmGst").resolveLandOwnedByBookingCustomer(pool, row.BookingId)) {
+    // A villa on a plot the buyer already owns: construction only, its own head.
+    // (crmGst is required here, not at the top: it loads modules that load this file.)
+    const villaHeadId = await getGLHeadIdByCode(pool, CRM_SALE_VILLA_CODE, CRM_SALE_VILLA_ACCOUNT);
+    legs = [
+      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
+      { lHeadId: villaHeadId, credit: amount, narration: `${row.InvoiceNo} — villa construction income recognised` },
+    ];
+  } else {
+    const incomeHeadId = await getGLHeadIdByCode(pool, CRM_SALE_INCOME_CODE, CRM_SALE_INCOME_ACCOUNT);
+    legs = [
+      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
+      { lHeadId: incomeHeadId, credit: amount, narration: `${row.InvoiceNo} — flat/parking sale income recognised` },
+    ];
+  }
+
+  await postVoucher(pool, {
+    voucherNo: row.InvoiceNo,
+    voucherDate: row.InvoiceDate,
+    sourceType: "CrmInvoice",
+    sourceId: invoiceId,
+    companyId: row.CompanyId ?? null,
+    projectId: row.ProjectId ?? null,
+    createdBy: userEmail,
+    legs,
+  });
+  return { posted: true };
+}
+
+// Migration 522.
+const CRM_RESALE_FEE_CODE = "CRM-RESALE-FEE";
+const CRM_RESALE_FEE_ACCOUNT = "Plot Resale / Transfer Fee";
+
+/**
+ * The developer's fee on a completed plot resale. The land price passes
+ * between the two buyers and never touches the developer's books; the fee is
+ * the developer's only income here, charged to the ORIGINAL buyer (the
+ * transferor), with GST at the rate snapshotted on the resale (HSN 999794 by
+ * default, from the GST rules master):
+ *
+ *   Dr  original buyer's customer ledger   fee + GST
+ *       Cr  Plot Resale / Transfer Fee      fee
+ *       Cr  GST Output Liability            GST
+ *
+ * The buyer then settles it through an ordinary Received Payment against
+ * their customer ledger. Idempotent per resale.
+ */
+async function postCrmResaleFeeToGL(pool, resaleId, userEmail) {
+  if (await hasPosting(pool, "CrmUnitResale", resaleId))
+    return { posted: true, reason: "already posted (idempotent)" };
+  const r = (await pool.request().input("id", sql.Int, resaleId).query(`
+    SELECT r.Id, r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, r.FromCustomerId, r.ResaleDate,
+           COALESCE(p.ProjectId, u.ProjectId) AS ProjectId, proj.company_id AS CompanyId,
+           COALESCE(p.PlotName, u.UnitName) AS Item
+    FROM dbo.CrmUnitResale r
+    LEFT JOIN dbo.PlotMaster p ON p.Id = r.PlotId
+    LEFT JOIN dbo.UnitMaster u ON u.Id = r.UnitId
+    LEFT JOIN dbo.enterprise proj ON proj.id = COALESCE(p.ProjectId, u.ProjectId)
+    WHERE r.Id = @id`)).recordset[0];
+  if (!r) return { posted: false, reason: `Resale ${resaleId} not found` };
+  const fee = Math.round(Number(r.DeveloperFeeAmount || 0) * 100) / 100;
+  const gst = Math.round(Number(r.DeveloperFeeGstAmount || 0) * 100) / 100;
+  if (fee <= 0) return { none: true, reason: "No developer fee on this resale — nothing to post" };
+  if (r.FromCustomerId == null) return { posted: false, reason: "Resale has no original buyer to charge the fee to" };
+
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FromCustomerId, userEmail);
+  const feeHeadId = await getGLHeadIdByCode(pool, CRM_RESALE_FEE_CODE, CRM_RESALE_FEE_ACCOUNT);
+  const voucherNo = `RSL-${resaleId}`;
+  const legs = [
+    { lHeadId: customerHeadId, debit: fee + gst, narration: `${voucherNo} — resale fee for ${r.Item}` },
+    { lHeadId: feeHeadId, credit: fee, narration: `${voucherNo} — plot resale / transfer fee` },
+  ];
+  if (gst > 0) {
+    const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
+    legs.push({ lHeadId: gstHeadId, credit: gst, narration: `${voucherNo} — GST output liability on resale fee` });
+  }
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate: r.ResaleDate || new Date(),
+    sourceType: "CrmUnitResale",
+    sourceId: resaleId,
+    companyId: r.CompanyId ?? null,
+    projectId: r.ProjectId ?? null,
+    createdBy: userEmail,
+    legs,
+  });
+  return { posted: true };
+}
+
 module.exports = {
+  postCrmResaleFeeToGL,
   CRM_COLLECTIONS_ACCOUNT,
   CRM_GST_OUTPUT_ACCOUNT,
+  CRM_SALE_INCOME_ACCOUNT,
+  CRM_SALE_LAND_ACCOUNT,
   ensureCrmCustomerLedgerHead,
   syncCrmCustomerLedgerHead,
   getGstRateForBooking,
+  getGstSplit,
   postCrmReceiptToGL,
   postCrmOnAccountToGL,
   postCrmOnAccountApplied,
   postCrmBrokerPaymentToGL,
   postCrmCancellationRefundToGL,
+  postCrmRefundPaid,
+  postCrmHeldCreditReallocateLedgerOnly,
+  postCrmHeldCreditCrossCompanyMirror,
   postCrmSalesDeedStatutoryToGL,
   postCrmParkingPaymentToGL,
+  postCrmInvoiceToGL,
 };

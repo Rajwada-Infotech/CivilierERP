@@ -7,16 +7,16 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Search, UserPlus, ExternalLink, Users, CheckCircle2 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 const LEADS_API = "/api/sa/leads";
 const CUSTOMER_API = "/api/crm/customers";
 
-// Converted leads from Sales Automation land here first, as a pool � they
+// Converted leads from Sales Automation land here first, as a pool — they
 // are NOT CrmApplications yet. Converting a lead (SaLead.Status ->
 // 'Converted', see saHandoff.js) never auto-creates one anymore. Staff pick
 // a lead from this pool via "Create Customer" (deep-links into
-// CrmCustomers.tsx's New Customer dialog with ?leadId=X pre-selected) �
+// CrmCustomers.tsx's New Customer dialog with ?leadId=X pre-selected) —
 // that's the real Leads -> Customer step (also the actual "only a converted
 // lead may enter the CRM module" gate, enforced again server-side in
 // crmCustomers.js POST /). An Application only ever gets created afterwards,
@@ -37,7 +37,7 @@ async function fetchCustomers(): Promise<any[]> {
 const CrmLeads: React.FC = () => {
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"Available" | "Used">("Available");
 
@@ -45,7 +45,7 @@ const CrmLeads: React.FC = () => {
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-for-leads-pool"], queryFn: fetchCustomers, staleTime: 30_000 });
 
   // A lead is "used" the moment it's linked to a Customer (CrmCustomer.LeadId)
-  // � an Application beyond that is just the next, later step and doesn't
+  // — an Application beyond that is just the next, later step and doesn't
   // change this. Merging in the linked customer here (rather than trusting
   // CrmApplicationId alone) is what keeps this pool in sync with the actual
   // gate now enforced in crmCustomers.js POST /.
@@ -71,21 +71,21 @@ const CrmLeads: React.FC = () => {
       cell: (i) => (
         <div>
           <div className="font-mono text-xs">{i.row.original.LeadUid}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.DateGenerated ? String(i.row.original.DateGenerated).slice(0, 10) : "�"}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.DateGenerated ? String(i.row.original.DateGenerated).slice(0, 10) : "—"}</div>
         </div>
       ) },
     { accessorKey: "CustomerName", header: "Customer", size: 160,
       cell: (i) => (
         <div>
           <div className="font-medium">{i.row.original.CustomerName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}{i.row.original.Email ? ` � ${i.row.original.Email}` : ""}</div>
+          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}{i.row.original.Email ? ` — ${i.row.original.Email}` : ""}</div>
         </div>
       ) },
-    { accessorKey: "SourceType", header: "Source", size: 100, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "�"}</span> },
+    { accessorKey: "SourceType", header: "Source", size: 100, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "PropertyType", header: "Interested In", size: 120,
-      cell: (i) => <span className="text-xs">{[i.row.original.BhkPreference, i.row.original.PropertyType].filter(Boolean).join(" � ") || "�"}</span> },
-    { accessorKey: "PreferredLocation", header: "Preferred Location", size: 130, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "�"}</span> },
-    { accessorKey: "SalespersonName", header: "Salesperson", size: 120, cell: (i) => <span className="text-xs text-muted-foreground">{(i.getValue() as string) || "�"}</span> },
+      cell: (i) => <span className="text-xs">{[i.row.original.BhkPreference, i.row.original.PropertyType].filter(Boolean).join(" — ") || "—"}</span> },
+    { accessorKey: "PreferredLocation", header: "Preferred Location", size: 130, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
+    { accessorKey: "SalespersonName", header: "Salesperson", size: 120, cell: (i) => <span className="text-xs text-muted-foreground">{(i.getValue() as string) || "—"}</span> },
     { id: "action", header: "", size: 150, enableSorting: false,
       cell: (i) => {
         const l = i.row.original;
@@ -99,7 +99,7 @@ const CrmLeads: React.FC = () => {
         ) : (
           <button
             onClick={() => navigate(`/crm/customers?leadId=${l.Id}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all"
           >
             <UserPlus size={12} /> Create Customer
           </button>
@@ -109,18 +109,18 @@ const CrmLeads: React.FC = () => {
 
   const glassStyle: React.CSSProperties = {
     background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    border: isDark ? "1px solid rgba(14,165,233,0.15)" : "1px solid rgba(14,165,233,0.18)",
     backdropFilter: "blur(16px) saturate(150%)",
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
     boxShadow: isDark
       ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+      : "0 4px 24px rgba(14,165,233,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
   };
-  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+  const borderColor = isDark ? "rgba(14,165,233,0.15)" : "rgba(14,165,233,0.12)";
 
   return (
     <CrmShell
-      title="CRM � Leads"
+      title="CRM — Leads"
       subtitle="Converted leads from Sales Automation, waiting to be linked to a CRM Customer"
     >
       {/* Toolbar + table live in one continuous card instead of a loose
@@ -132,7 +132,7 @@ const CrmLeads: React.FC = () => {
               <button key={t} onClick={() => setTab(t)}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-medium rounded-lg transition-all ${
                   tab === t
-                    ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600"
+                    ? "text-white shadow-sm btn-module "
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 }`}>
                 {t === "Available" ? <Users size={13} /> : <CheckCircle2 size={13} />} {t} ({t === "Available" ? available.length : used.length})
@@ -143,23 +143,23 @@ const CrmLeads: React.FC = () => {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name, mobile, lead code..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
           </div>
         </div>
 
-        {/* Custom, actionable empty state � DataTable's own emptyMessage is
+        {/* Custom, actionable empty state — DataTable's own emptyMessage is
             plain text only, and "convert one in Sales Automation" used to
             be a dead end with no way to actually get there. */}
         {!isLoading && filtered.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-14 px-6 text-center">
             <div
               className="w-11 h-11 rounded-full flex items-center justify-center"
-              style={{ background: "rgba(245,158,11,0.12)" }}
+              style={{ background: "rgba(14,165,233,0.12)" }}
             >
               {tab === "Available" ? (
-                <Users size={20} style={{ color: "#f59e0b" }} />
+                <Users size={20} style={{ color: "#0ea5e9" }} />
               ) : (
-                <CheckCircle2 size={20} style={{ color: "#f59e0b" }} />
+                <CheckCircle2 size={20} style={{ color: "#0ea5e9" }} />
               )}
             </div>
             <div className="space-y-1">

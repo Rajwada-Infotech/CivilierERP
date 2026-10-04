@@ -8,7 +8,7 @@ import { TaskDrawer } from "@/components/followup/TaskDrawer";
 import { ProgressBar } from "@/components/followup/ProgressBar";
 import { ExportMenu } from "@/components/ExportMenu";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import type { ExportColumn } from "@/lib/export";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -66,7 +66,7 @@ function formatDate(dateStr: string): string {
 
 function useGlass() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const glassCard = isDark
     ? {
         background: "rgba(6, 20, 19, 0.45)",
@@ -85,7 +85,7 @@ function useGlass() {
   return { isDark, glassCard };
 }
 
-const TABLE_HEAD_CLS = "px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 whitespace-nowrap";
+const TABLE_HEAD_CLS = "px-2 py-2 text-left text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground/80 whitespace-nowrap";
 
 // Row-wise replacement for the old ClosedTaskCard — same fields, laid out as
 // a compact <tr> so many closed tasks are visible at once instead of one per
@@ -118,25 +118,25 @@ const ClosedTaskRow: React.FC<{ task: ClosedTask; index: number; onClick: () => 
           className="absolute left-0 top-0 bottom-0 w-0.5"
           style={{ background: "linear-gradient(to bottom, transparent 10%, #64748b 30%, #64748b 70%, transparent 90%)" }}
         />
-        <span className="font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
+        <span className="font-mono text-[0.625rem] text-muted-foreground uppercase tracking-widest">
           {task.TaskNo || "—"}
         </span>
         <p className="text-sm font-semibold text-foreground truncate">{task.Subject}</p>
         {task.ParentTaskNo && (
-          <p className="text-[11px] text-muted-foreground truncate">
+          <p className="text-[0.6875rem] text-muted-foreground truncate">
             Subtask of {task.ParentTaskNo}
             {task.ParentTaskSubject ? ` — ${task.ParentTaskSubject}` : ""}
           </p>
         )}
         {task.CaseProjectName && (
-          <p className="text-[11px] text-muted-foreground truncate">{task.CaseProjectName}</p>
+          <p className="text-[0.6875rem] text-muted-foreground truncate">{task.CaseProjectName}</p>
         )}
         {task.Tags?.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1">
             {task.Tags.map((tag) => (
               <span
                 key={tag.Id}
-                className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium truncate max-w-[100px]"
+                className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.5625rem] font-medium truncate max-w-[100px]"
                 style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: ACCENT }}
                 title={tag.Name}
               >
@@ -148,7 +148,7 @@ const ClosedTaskRow: React.FC<{ task: ClosedTask; index: number; onClick: () => 
       </td>
       <td className="px-2 py-2.5 align-top text-xs font-medium text-muted-foreground whitespace-nowrap">
         <span
-          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md mb-1"
+          className="inline-flex items-center gap-1 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md mb-1"
           style={{ background: "rgba(100,116,139,0.14)", color: "#64748b" }}
         >
           <CheckCircle2 size={10} /> Closed
@@ -157,7 +157,7 @@ const ClosedTaskRow: React.FC<{ task: ClosedTask; index: number; onClick: () => 
       </td>
       <td className="px-2 py-2.5 align-top">
         <span
-          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
+          className="inline-flex items-center gap-1 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
           style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
         >
           {task.Priority}
@@ -300,10 +300,10 @@ const ClosedTasks: React.FC = () => {
       ) : (
         <div className="space-y-2.5">
           <div className="flex items-center gap-2">
-            <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT_SOFT }}>
+            <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT_SOFT }}>
               Closed
             </p>
-            <span className="text-[10px] text-muted-foreground">{filtered.length}</span>
+            <span className="text-[0.625rem] text-muted-foreground">{filtered.length}</span>
             <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(13,148,136,0.25), transparent)" }} />
           </div>
           <div className="rounded-xl overflow-hidden" style={glassCard}>

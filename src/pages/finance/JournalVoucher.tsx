@@ -27,14 +27,14 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Plus, Trash2, Scale, Loader2, RefreshCw,
-  CheckCircle2, Clock, FileText, AlertCircle, Search, X, Check, BookOpen,
+  CheckCircle2, Clock, FileText, AlertCircle, Search, X, BookOpen, Pencil,
 } from "lucide-react";
 import {
   getJournalVouchers,
   getJournalVoucher,
   createJournalVoucher,
-  approveJournalVoucher,
-  rejectJournalVoucher,
+  updateJournalVoucher,
+  deleteJournalVoucher,
   getJournalVoucherLedgerOptions,
   type JournalVoucherSummary,
   type JournalVoucherLine,
@@ -44,21 +44,21 @@ import {
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
-
-// Matches the real LHeadType convention used everywhere else account heads
-// are created (see CustomerMaster/ContractorMaster/SupplierMaster/
-// CrmBrokerMaster's own CUSTOMER_TYPE/CONTRACTOR_TYPE/SUPPLIER_TYPE
-// constants) — this map previously had "C" labeled "Customer", which is
-// actually Contractor; Customer is "A". Left the group header showing the
-// wrong name for every Contractor head in the picker.
-const LHEAD_TYPE_LABEL: Record<string, string> = {
-  GL: "General Ledger",
-  A: "Customer",
-  C: "Contractor",
-  S: "Supplier",
-  BR: "Broker",
-  B: "Bank",
-};
+import { LedgerHeadPicker } from "./journalVoucher/LedgerHeadPicker";
+import { partnerLineKind } from "./journalVoucher/ledgerGroups";
+import { SettlementModeSection } from "./journalVoucher/SettlementModeSection";
+import {
+  emptySettlement,
+  hasSettlement,
+  settlementError,
+  settlementFromVoucher,
+  settlementPayload,
+  type SettlementValue,
+} from "./journalVoucher/settlement";
+import { getBanks, type BankRecord } from "@/api/bankMasterApi";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
+import { DateInput } from "@/components/ui/date-input";
 
 type JournalVoucherLineUI = JournalVoucherLine & { _id: string };
 const emptyLine = (): JournalVoucherLineUI => ({
@@ -71,7 +71,7 @@ const emptyLine = (): JournalVoucherLineUI => ({
 
 const STATUS_CFG: Record<string, { cls: string; dot: string; icon: React.ElementType }> = {
   Draft:    { cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",   dot: "bg-slate-400",   icon: FileText },
-  Pending:  { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",   dot: "bg-amber-400",   icon: Clock },
+  Pending:  { cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",   dot: "bg-amber-400",   icon: Clock },
   Approved: { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", dot: "bg-emerald-500", icon: CheckCircle2 },
   Rejected: { cls: "bg-rose-500/10 text-rose-600 border-rose-400/20",     dot: "bg-rose-500",    icon: AlertCircle },
 };
@@ -79,7 +79,7 @@ const STATUS_CFG: Record<string, { cls: string; dot: string; icon: React.Element
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CFG[status] ?? STATUS_CFG.Draft;
   return (
-    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border", cfg.cls)}>
+    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border", cfg.cls)}>
       <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
       {status}
     </span>
@@ -93,7 +93,7 @@ function GLBadge({ status, postedToGL }: { status: string; postedToGL?: boolean 
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border",
+        "inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border",
         postedToGL
           ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
           : "bg-rose-500/10 text-rose-600 border-rose-400/20",
@@ -121,16 +121,29 @@ export default function JournalVoucher() {
   const [jvDate, setJvDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [narration, setNarration] = useState("");
   const [lines, setLines] = useState<JournalVoucherLineUI[]>([emptyLine(), emptyLine()]);
+  // Payment mode (Cash / Cheque / PDC / NEFT / …) and its bank / cheque-lot detail.
+  const [settlement, setSettlement] = useState<SettlementValue>(emptySettlement());
+  const [banks, setBanks] = useState<BankRecord[]>([]);
+
+  // Edit — reuses the same dialog as New; editingId set means submit() calls
+  // updateJournalVoucher instead of createJournalVoucher. Loading a voucher
+  // for edit fetches its full detail (list rows don't carry LHeadId per
+  // line) rather than trusting whatever's already in the summary row.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+
+  // Delete — small confirm dialog, same pattern as VehicleInOut.tsx's own
+  // delete confirmation.
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // A JV must belong to a real Company (and optionally a Project within it)
   // just like every other document in the system — otherwise it floats
   // free of the entity structure everything else is scoped by.
   const [companies, setCompanies] = useState<{ id: number; label: string }[]>([]);
-  const [allProjects, setAllProjects] = useState<{ id: number; label: string; company_id: number | null }[]>([]);
+  const [allProjects, setAllProjects] = useState<{ id: number; label: string; company_id: number | null; tagged_company_ids?: string | null }[]>([]);
   const [companyId, setCompanyId] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
-
-  const [acting, setActing] = useState<{ id: number; action: "approve" | "reject" } | null>(null);
 
   // Detail view — clicking a row, or a deep link from elsewhere (Trial
   // Balance's ledger drill-down navigates here as /journal-voucher?view=<JVID>)
@@ -153,9 +166,13 @@ export default function JournalVoucher() {
   useEffect(() => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
-    openJVDetail(Number(viewId));
+    // Always clear the param first so it can't reopen on a back/refresh.
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
+    // Number("0") === 0 — a non-positive id is invalid; skip the API call
+    // rather than sending a request for JV id=0 which will 400/404.
+    const id = Number(viewId);
+    if (id > 0) openJVDetail(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -174,27 +191,47 @@ export default function JournalVoucher() {
   useEffect(() => {
     load();
     getJournalVoucherLedgerOptions().then(setLedgerOptions).catch(() => setLedgerOptions([]));
+    getBanks().then(setBanks).catch(() => setBanks([]));
     getEnterpriseOptions(undefined, "C")
       .then((rows) => setCompanies(rows.map((r) => ({ id: r.id, label: r.label }))))
       .catch(() => setCompanies([]));
     getEnterpriseOptions(undefined, "P")
-      .then((rows) => setAllProjects(rows.map((r) => ({ id: r.id, label: r.label, company_id: r.company_id }))))
+      .then((rows) =>
+        setAllProjects(
+          rows.map((r) => ({ id: r.id, label: r.label, company_id: r.company_id, tagged_company_ids: r.tagged_company_ids })),
+        ),
+      )
       .catch(() => setAllProjects([]));
   }, []);
 
+  // A project shows up for a company if it's either the project's primary
+  // (owning) company, or the company has been tagged onto the project via
+  // Project Master's multi-company tagging — see dbo.ProjectCompanies.
   const projectsForCompany = useMemo(
-    () => (companyId ? allProjects.filter((p) => String(p.company_id) === companyId) : []),
+    () =>
+      companyId
+        ? allProjects.filter(
+            (p) =>
+              String(p.company_id) === companyId ||
+              (p.tagged_company_ids?.split(",") ?? []).includes(companyId),
+          )
+        : [],
     [allProjects, companyId],
   );
 
-  const groupedLedgerOptions = useMemo(() => {
-    const groups: Record<string, JournalVoucherLedgerOption[]> = {};
-    ledgerOptions.forEach((opt) => {
-      const key = opt.type || "GL";
-      (groups[key] ||= []).push(opt);
-    });
-    return groups;
-  }, [ledgerOptions]);
+  // Banks are tagged to a company by name (BankRecord.BCompanyName), same as Fund Transfer.
+  const banksForCompany = useMemo(() => {
+    const label = companies.find((c) => String(c.id) === companyId)?.label;
+    return label ? banks.filter((b) => b.BCompanyName === label) : [];
+  }, [banks, companies, companyId]);
+
+  // Changing the company invalidates a bank that belongs to the old one.
+  useEffect(() => {
+    if (settlement.bankId && !banksForCompany.some((b) => String(b.BId) === settlement.bankId)) {
+      setSettlement((prev) => (prev.bankId ? { ...prev, bankId: "", chequeLotId: null, chequeNo: "" } : prev));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [banksForCompany]);
 
   const totals = useMemo(() => {
     const debit  = lines.reduce((s, l) => s + (Number(l.DebitAmount)  || 0), 0);
@@ -215,6 +252,8 @@ export default function JournalVoucher() {
     setLines([emptyLine(), emptyLine()]);
     setCompanyId("");
     setProjectId("");
+    setSettlement(emptySettlement());
+    setEditingId(null);
   };
 
   // A refresh used to silently drop an in-progress JV — this form's state
@@ -237,6 +276,7 @@ export default function JournalVoucher() {
         if (Array.isArray(draft.lines) && draft.lines.length > 0) setLines(draft.lines);
         if (draft.companyId) setCompanyId(draft.companyId);
         if (draft.projectId) setProjectId(draft.projectId);
+        if (draft.settlement?.mode) setSettlement({ ...emptySettlement(), ...draft.settlement });
         const hasContent =
           !!draft.narration?.trim() ||
           !!draft.companyId ||
@@ -262,43 +302,60 @@ export default function JournalVoucher() {
       !!narration.trim() ||
       !!companyId ||
       !!projectId ||
+      hasSettlement(settlement) ||
       lines.some(
         (l) => l.LHeadId != null || (l.DebitAmount || 0) > 0 || (l.CreditAmount || 0) > 0 || !!l.Narration?.trim(),
       );
     try {
       if (isDirty) {
-        localStorage.setItem(draftKey, JSON.stringify({ jvDate, narration, lines, companyId, projectId }));
+        localStorage.setItem(draftKey, JSON.stringify({ jvDate, narration, lines, companyId, projectId, settlement }));
       } else {
         localStorage.removeItem(draftKey);
       }
     } catch {
       // localStorage unavailable — the draft simply won't persist.
     }
-  }, [draftHydrated, jvDate, narration, lines, companyId, projectId]);
+  }, [draftHydrated, jvDate, narration, lines, companyId, projectId, settlement]);
 
-  const handleApprove = async (id: number) => {
-    setActing({ id, action: "approve" });
+  const startEdit = async (v: JournalVoucherSummary) => {
+    setEditLoading(true);
     try {
-      await approveJournalVoucher(id);
-      toast.success("Journal Voucher approved and posted to GL");
-      load();
+      const full = await getJournalVoucher(v.JVID);
+      setJvDate((full.JVDate || "").slice(0, 10) || new Date().toISOString().slice(0, 10));
+      setNarration(full.Narration || "");
+      setCompanyId(full.CompanyId ? String(full.CompanyId) : "");
+      setProjectId(full.ProjectId ? String(full.ProjectId) : "");
+      setSettlement(settlementFromVoucher(full));
+      setLines(
+        (full.lines || []).map((l) => ({
+          _id: (typeof crypto.randomUUID === "function" ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
+          LineID: l.LineID,
+          LHeadId: l.LHeadId,
+          DebitAmount: l.DebitAmount,
+          CreditAmount: l.CreditAmount,
+          Narration: l.Narration || "",
+        })),
+      );
+      setEditingId(v.JVID);
+      setDialogOpen(true);
     } catch (err: any) {
-      toast.error(err?.message || "Approval failed");
+      toast.error(err?.message || `Failed to load Journal Voucher #${v.JVID}`);
     } finally {
-      setActing(null);
+      setEditLoading(false);
     }
   };
 
-  const handleReject = async (id: number) => {
-    setActing({ id, action: "reject" });
+  const handleDelete = async (id: number) => {
+    setDeleting(true);
     try {
-      await rejectJournalVoucher(id);
-      toast.success("Journal Voucher rejected");
+      await deleteJournalVoucher(id);
+      toast.success("Journal Voucher deleted");
+      setDeleteId(null);
       load();
     } catch (err: any) {
-      toast.error(err?.message || "Rejection failed");
+      toast.error(err?.message || "Failed to delete Journal Voucher");
     } finally {
-      setActing(null);
+      setDeleting(false);
     }
   };
 
@@ -306,21 +363,34 @@ export default function JournalVoucher() {
     if (!companyId) { toast.error("Select the Company this voucher belongs to."); return; }
     if (!totals.balanced) { toast.error("Debit and Credit totals must match before saving."); return; }
     if (lines.some((l) => !l.LHeadId)) { toast.error("Every line requires an account head."); return; }
+    const modeProblem = settlementError(settlement);
+    if (modeProblem) { toast.error(modeProblem); return; }
     setSaving(true);
     try {
-      await createJournalVoucher({
+      const payload = {
         JVDate: jvDate,
         Narration: narration,
         CompanyId: parseInt(companyId, 10),
         ProjectId: projectId ? parseInt(projectId, 10) : null,
         lines,
-      });
-      toast.success("Journal Voucher created and submitted for approval");
+        ...settlementPayload(settlement),
+      };
+      if (editingId) {
+        const result: any = await updateJournalVoucher(editingId, payload);
+        toast.success(
+          result?.reopenedForApproval
+            ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
+            : "Journal Voucher updated",
+        );
+      } else {
+        await createJournalVoucher(payload);
+        toast.success("Journal Voucher created and submitted for approval");
+      }
       setDialogOpen(false);
       resetForm();
       load();
     } catch (err: any) {
-      toast.error(err?.message || "Failed to create Journal Voucher");
+      toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} Journal Voucher`);
     } finally {
       setSaving(false);
     }
@@ -333,6 +403,20 @@ export default function JournalVoucher() {
     pending:  vouchers.filter((v) => v.Status === "Pending").length,
     draft:    vouchers.filter((v) => v.Status === "Draft").length,
   }), [vouchers]);
+
+  const exportColumns: ExportColumn[] = useMemo(() => [
+    { header: "JV No", accessor: (r) => (r as unknown as JournalVoucherSummary).JVNo || `JV-${(r as unknown as JournalVoucherSummary).JVID}` },
+    { header: "Date", accessor: (r) => fmtDate((r as unknown as JournalVoucherSummary).JVDate) },
+    { header: "Company", accessor: (r) => (r as unknown as JournalVoucherSummary).CompanyName || "" },
+    { header: "Project", accessor: (r) => (r as unknown as JournalVoucherSummary).ProjectName || "" },
+    { header: "Narration", accessor: (r) => (r as unknown as JournalVoucherSummary).Narration || "" },
+    { header: "Amount", accessor: (r) => (r as unknown as JournalVoucherSummary).TotalAmount || 0 },
+    { header: "Status", accessor: (r) => (r as unknown as JournalVoucherSummary).Status || "" },
+    { header: "GL", accessor: (r) => {
+        const v = r as unknown as JournalVoucherSummary;
+        return v.Status !== "Approved" ? "--" : v.PostedToGL ? "Posted" : "Not posted";
+      } },
+  ], []);
 
   // Filtered list
   const filtered = useMemo(() => {
@@ -355,6 +439,13 @@ export default function JournalVoucher() {
         icon={Scale}
         action={
           <div className="flex items-center gap-2">
+            <ExportMenu
+              data={filtered as unknown as Record<string, unknown>[]}
+              columns={exportColumns}
+              title="Journal Voucher"
+              filename="journal-voucher"
+              disabled={loading}
+            />
             <button
               onClick={load}
               disabled={loading}
@@ -390,7 +481,7 @@ export default function JournalVoucher() {
                 </div>
                 <div>
                   <p className="text-lg font-bold text-foreground leading-none">{value}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{label}</p>
                 </div>
               </div>
             ))}
@@ -452,7 +543,7 @@ export default function JournalVoucher() {
                       <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
                         {v.JVNo || `JV-${v.JVID}`}
                       </span>
-                      <span className="text-[11px] text-muted-foreground tabular-nums">{fmtDate(v.JVDate)}</span>
+                      <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtDate(v.JVDate)}</span>
                     </div>
                     <span className="font-mono text-sm font-semibold text-foreground tabular-nums shrink-0">
                       {formatINR(v.TotalAmount || 0)}
@@ -462,12 +553,12 @@ export default function JournalVoucher() {
                   {v.CompanyName && (
                     <div className="mb-1.5">
                       <p className="text-xs font-medium text-foreground">{v.CompanyName}</p>
-                      {v.ProjectName && <p className="text-[11px] text-muted-foreground">{v.ProjectName}</p>}
+                      {v.ProjectName && <p className="text-[0.6875rem] text-muted-foreground">{v.ProjectName}</p>}
                     </div>
                   )}
                   {/* Row 3: narration */}
                   {v.Narration && (
-                    <p className="text-[11px] text-muted-foreground mb-2 line-clamp-2">{v.Narration}</p>
+                    <p className="text-[0.6875rem] text-muted-foreground mb-2 line-clamp-2">{v.Narration}</p>
                   )}
                   {/* Row 4: badges + actions */}
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -475,26 +566,27 @@ export default function JournalVoucher() {
                       <StatusBadge status={v.Status} />
                       <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
                     </div>
-                    {v.Status === "Pending" && rights.canEdit && (
-                      <div className="flex gap-1">
+                    <div className="flex gap-1">
+                      {v.Status !== "Pending" && rights.canEdit && (
                         <button
-                          disabled={acting?.id === v.JVID}
-                          onClick={() => handleApprove(v.JVID)}
-                          title="Approve"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                          disabled={editLoading}
+                          onClick={() => startEdit(v)}
+                          title={v.Status === "Approved" ? "Edit (reopens for approval)" : "Edit"}
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
                         >
-                          {acting?.id === v.JVID && acting.action === "approve" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                          <Pencil size={13} />
                         </button>
+                      )}
+                      {rights.canDelete && (
                         <button
-                          disabled={acting?.id === v.JVID}
-                          onClick={() => handleReject(v.JVID)}
-                          title="Reject"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
+                          onClick={() => setDeleteId(v.JVID)}
+                          title="Delete"
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                         >
-                          {acting?.id === v.JVID && acting.action === "reject" ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+                          <Trash2 size={13} />
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               ))
@@ -565,7 +657,7 @@ export default function JournalVoucher() {
                         <>
                           <p className="text-foreground truncate max-w-[160px]">{v.CompanyName}</p>
                           {v.ProjectName && (
-                            <p className="text-[11px] text-muted-foreground truncate max-w-[160px]">{v.ProjectName}</p>
+                            <p className="text-[0.6875rem] text-muted-foreground truncate max-w-[160px]">{v.ProjectName}</p>
                           )}
                         </>
                       ) : (
@@ -585,34 +677,27 @@ export default function JournalVoucher() {
                       <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {v.Status === "Pending" && rights.canEdit && (
-                        <div className="flex justify-end gap-1">
+                      <div className="flex justify-end gap-1">
+                        {v.Status !== "Pending" && rights.canEdit && (
                           <button
-                            disabled={acting?.id === v.JVID}
-                            onClick={(e) => { e.stopPropagation(); handleApprove(v.JVID); }}
-                            title="Approve"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                            disabled={editLoading}
+                            onClick={(e) => { e.stopPropagation(); startEdit(v); }}
+                            title={v.Status === "Approved" ? "Edit (reopens for approval)" : "Edit"}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
                           >
-                            {acting?.id === v.JVID && acting.action === "approve" ? (
-                              <Loader2 size={13} className="animate-spin" />
-                            ) : (
-                              <Check size={13} />
-                            )}
+                            <Pencil size={13} />
                           </button>
+                        )}
+                        {rights.canDelete && (
                           <button
-                            disabled={acting?.id === v.JVID}
-                            onClick={(e) => { e.stopPropagation(); handleReject(v.JVID); }}
-                            title="Reject"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
+                            onClick={(e) => { e.stopPropagation(); setDeleteId(v.JVID); }}
+                            title="Delete"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                           >
-                            {acting?.id === v.JVID && acting.action === "reject" ? (
-                              <Loader2 size={13} className="animate-spin" />
-                            ) : (
-                              <X size={13} />
-                            )}
+                            <Trash2 size={13} />
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -639,9 +724,13 @@ export default function JournalVoucher() {
                 <Scale size={15} className="text-primary" />
               </div>
               <div className="min-w-0">
-                <DialogTitle className="text-sm font-semibold">New Journal Voucher</DialogTitle>
-                <DialogDescription className="text-[11px] mt-0.5">
-                  Debit total must equal credit total before saving.
+                <DialogTitle className="text-sm font-semibold">
+                  {editingId ? "Edit Journal Voucher" : "New Journal Voucher"}
+                </DialogTitle>
+                <DialogDescription className="text-[0.6875rem] mt-0.5">
+                  {editingId
+                    ? "Editing an already-approved voucher reverses its GL posting and sends it back for approval."
+                    : "Debit total must equal credit total before saving."}
                 </DialogDescription>
               </div>
             </div>
@@ -651,7 +740,7 @@ export default function JournalVoucher() {
             {/* Header fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Company *</label>
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Company *</label>
                 <Select
                   value={companyId}
                   onValueChange={(v) => { setCompanyId(v); setProjectId(""); }}
@@ -667,7 +756,7 @@ export default function JournalVoucher() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Project</label>
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Project</label>
                 <Select
                   value={projectId}
                   onValueChange={setProjectId}
@@ -684,12 +773,12 @@ export default function JournalVoucher() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Date</label>
-                <Input type="date" value={jvDate} onChange={(e) => setJvDate(e.target.value)} />
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Date</label>
+                <DateInput value={jvDate} onChange={(e) => setJvDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Narration</label>
-                <Input value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this correction" />
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Narration</label>
+                <Input value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this Journal Voucher" />
               </div>
             </div>
 
@@ -700,9 +789,9 @@ export default function JournalVoucher() {
                 <table className="w-full text-sm min-w-[480px]">
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
-                      <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Account Head</th>
-                      <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Debit</th>
-                      <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Credit</th>
+                      <th className="px-3 py-2 text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Account Head</th>
+                      <th className="px-3 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Debit</th>
+                      <th className="px-3 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Credit</th>
                       <th className="w-10" />
                     </tr>
                   </thead>
@@ -710,31 +799,11 @@ export default function JournalVoucher() {
                     {lines.map((line, idx) => (
                       <tr key={line._id} className="group hover:bg-muted/20">
                         <td className="px-3 py-2">
-                          <Select
-                            value={line.LHeadId ? String(line.LHeadId) : ""}
-                            onValueChange={(v) => updateLine(idx, { LHeadId: parseInt(v, 10) })}
-                          >
-                            <SelectTrigger className="h-8 text-xs border-0 bg-transparent focus:ring-0 focus:ring-offset-0 px-0">
-                              <SelectValue placeholder="Select account…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(groupedLedgerOptions).map(([type, opts]) => (
-                                <SelectGroup key={type}>
-                                  <SelectLabel className="text-[10px] uppercase tracking-widest">
-                                    {LHEAD_TYPE_LABEL[type] || type}
-                                  </SelectLabel>
-                                  {opts.map((opt) => (
-                                    <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">
-                                      {opt.label}
-                                      {opt.accountNoLast4 && (
-                                        <span className="text-muted-foreground"> •••{opt.accountNoLast4}</span>
-                                      )}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <LedgerHeadPicker
+                            value={line.LHeadId}
+                            options={ledgerOptions}
+                            onChange={(id) => updateLine(idx, { LHeadId: id })}
+                          />
                         </td>
                         <td className="px-3 py-2">
                           <Input
@@ -808,6 +877,13 @@ export default function JournalVoucher() {
                 ? `Difference: ${formatINR(Math.abs(totals.debit - totals.credit))}`
                 : "Enter amounts on each line"}
             </div>
+
+            <SettlementModeSection
+              value={settlement}
+              onChange={setSettlement}
+              banks={banksForCompany}
+              companySelected={!!companyId}
+            />
           </div>
 
           <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/20">
@@ -824,7 +900,7 @@ export default function JournalVoucher() {
               className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
             >
               {saving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-              {saving ? "Saving…" : "Save & Submit"}
+              {saving ? "Saving…" : editingId ? "Save Changes" : "Save & Submit"}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -847,10 +923,11 @@ export default function JournalVoucher() {
                   <StatusBadge status={viewingJV.Status} />
                 </div>
                 <DialogTitle className="text-sm font-semibold mt-1.5">Journal Voucher</DialogTitle>
-                <DialogDescription className="text-[11px] mt-0.5">
+                <DialogDescription className="text-[0.6875rem] mt-0.5">
                   {fmtDate(viewingJV.JVDate)}
                   {viewingJV.CompanyName ? ` · ${viewingJV.CompanyName}` : ""}
                   {viewingJV.ProjectName ? ` · ${viewingJV.ProjectName}` : ""}
+                  {viewingJV.CreatedByName || viewingJV.CreatedBy ? ` · Created by ${viewingJV.CreatedByName || viewingJV.CreatedBy}` : ""}
                 </DialogDescription>
               </DialogHeader>
 
@@ -860,7 +937,7 @@ export default function JournalVoucher() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <BookOpen size={14} className="text-primary" />
-                    <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                    <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
                       Journal Entry — JV Posting
                     </span>
                   </div>
@@ -871,14 +948,32 @@ export default function JournalVoucher() {
                   <p className="text-sm text-foreground">{viewingJV.Narration}</p>
                 )}
 
+                {viewingJV.Mode && (
+                  <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs space-y-1">
+                    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Payment Mode</p>
+                    <p className="text-sm font-medium text-foreground">{viewingJV.Mode}</p>
+                    {viewingJV.BankName && <p className="text-muted-foreground">Bank: {viewingJV.BankName}</p>}
+                    {viewingJV.ChequeNo && (
+                      <p className="text-muted-foreground font-mono">
+                        {viewingJV.ChequeLotNumber ? `${viewingJV.ChequeLotNumber} · ` : ""}Cheque #{viewingJV.ChequeNo}
+                        {viewingJV.ChequeDate ? ` · ${fmtDate(viewingJV.ChequeDate)}` : ""}
+                      </p>
+                    )}
+                    {viewingJV.DigitalRefNumber && (
+                      <p className="text-muted-foreground font-mono">Ref: {viewingJV.DigitalRefNumber}</p>
+                    )}
+                  </div>
+                )}
+
                 <div className="rounded-xl border border-border overflow-hidden">
-                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[0.5625rem] sm:text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
                     <span>Ledger</span>
                     <span className="text-right">Debit (₹)</span>
                     <span className="text-right">Credit (₹)</span>
                   </div>
                   {viewingJV.lines.map((l) => {
                     const isDebit = Number(l.DebitAmount) > 0;
+                    const kind = partnerLineKind(l);
                     return (
                       <div
                         key={l.LineID}
@@ -887,9 +982,20 @@ export default function JournalVoucher() {
                         <div className="flex items-center gap-2 min-w-0 pl-1">
                           <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDebit ? "bg-emerald-500" : "bg-rose-500"}`} />
                           <div className="min-w-0">
-                            <p className="text-[11px] sm:text-xs text-foreground truncate">{l.LHeadName || "—"}</p>
+                            <p className="text-[0.6875rem] sm:text-xs text-foreground truncate flex items-center gap-1.5">
+                              <span className="truncate">{l.LHeadName || "—"}</span>
+                              {kind && (
+                                <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                  kind === "Investment"
+                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
+                                }`}>
+                                  {kind}
+                                </span>
+                              )}
+                            </p>
                             {l.Narration && (
-                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{l.Narration}</p>
+                              <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{l.Narration}</p>
                             )}
                           </div>
                         </div>
@@ -903,7 +1009,7 @@ export default function JournalVoucher() {
                     );
                   })}
                   <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
-                    <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                    <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
                     <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
                       {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0))}
                     </span>
@@ -942,6 +1048,35 @@ export default function JournalVoucher() {
               </DialogFooter>
             </>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete confirmation ── */}
+      <Dialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Journal Voucher?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This action cannot be undone. If this voucher was already posted to the General Ledger, that posting will be reversed.
+          </p>
+          <DialogFooter>
+            <button
+              onClick={() => setDeleteId(null)}
+              disabled={deleting}
+              className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => deleteId && handleDelete(deleteId)}
+              disabled={deleting}
+              className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-destructive text-destructive-foreground text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
+            >
+              {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

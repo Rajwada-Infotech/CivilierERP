@@ -9,6 +9,7 @@ import { Plus, Trash2, Pencil, Layers, ListChecks, X, Calendar, Building2, Perce
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/payment-plans";
 const MILESTONE_MASTER_API = "/api/crm/milestone-master";
@@ -18,7 +19,7 @@ const MILESTONE_MASTER_API = "/api/crm/milestone-master";
 // milestones the plan has.
 const SEGMENT_COLORS = [
   "bg-primary", "bg-sky-500", "bg-emerald-500", "bg-violet-500",
-  "bg-amber-500", "bg-rose-500", "bg-cyan-500", "bg-fuchsia-500",
+  "bg-sky-500", "bg-rose-500", "bg-cyan-500", "bg-fuchsia-500",
 ];
 
 type MilestoneRow = { name: string; pct: number };
@@ -31,8 +32,32 @@ function parseMilestones(json: string | null | undefined): MilestoneRow[] {
   } catch { return []; }
 }
 
-async function fetchAll(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+type TaggedProjectRow = { ProjectId: number; ProjectName: string };
+function parseTaggedProjects(json: string | null | undefined): TaggedProjectRow[] {
+  if (!json) return [];
+  try {
+    const raw = JSON.parse(json);
+    return (raw as any[]).map((r) => ({ ProjectId: Number(r.ProjectId), ProjectName: r.ProjectName }));
+  } catch { return []; }
+}
+
+const PAGE_SIZE = 20;
+interface PlanListFilters { companyId: string; projectId: string }
+// Plans tag to a Project (no Block dimension), so this list scopes by
+// Company/Project only. Paginated only when ?page= is present — the 5 other
+// callers of /api/crm/payment-plans (Unit Master, Block Master, the
+// Application wizard, CrmBooking, CrmBookingDetail) never send it and keep
+// getting a bare array.
+async function fetchPlansList(filters: PlanListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 async function fetchMilestoneMaster(): Promise<any[]> {
   try { const r = await fetchWithAuth(MILESTONE_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -92,17 +117,30 @@ const CrmPaymentPlans: React.FC = () => {
   // as the authoritative Booking amount for any booking tagged to this plan.
   const [bookingAmount, setBookingAmount] = useState("");
   const [items, setItems] = useState([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
-  // Which Project this plan is tagged to — the top tier of the Project ->
+  // Which Project(s) this plan is tagged to — the top tier of the Project ->
   // Block -> Unit cascade (see crmEntityCreation.js's getApplicablePaymentPlans).
-  // 1:1 from the Plan's side (migration 270) — a Project can have many Plans
-  // tagged to it, but a Plan can only ever point at one Project. Optional:
-  // an untagged plan still participates in every level's "all active plans"
+  // Many-to-many (migration 417) — a Project can have many Plans tagged to
+  // it, and a Plan can likewise be tagged to many Projects. Optional: an
+  // untagged plan still participates in every level's "all active plans"
   // fallback, it just never appears in a Project-filtered list.
-  const [projectId, setProjectId] = useState("");
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  // True only once the user actually adds/removes a tag chip this session —
+  // NOT set just by loading the current tags into the form on Edit open.
+  // Without this, saving a plan for any unrelated reason (renaming it,
+  // tweaking a milestone) always re-synced ProjectIds to whatever state
+  // happened to be loaded, silently wiping real tags if that load was ever
+  // incomplete/raced (see the openEdit request-token guard below) — real
+  // tag rows were found deactivated in exactly this way. Now ProjectIds is
+  // only ever sent (and only ever re-synced server-side) when this is true.
+  const [projectTagsTouched, setProjectTagsTouched] = useState(false);
   // Company picked first, Project narrows to that Company's list and stays
   // disabled until then (same disciplined Company->Project gate every other
   // master page in the app now uses).
   const [tagCompanyId, setTagCompanyId] = useState("");
+  // Scratch value for the "Company + Project + Add" row above — the
+  // in-progress pick before it's appended to projectIds, not part of the
+  // saved data itself.
+  const [tagProjectPick, setTagProjectPick] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [isActive, setIsActive] = useState(true);
@@ -113,11 +151,31 @@ const CrmPaymentPlans: React.FC = () => {
 
   const inputCls = "w-full text-sm border border-border rounded px-2 py-1.5 bg-background";
 
-  const { data: plans = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchAll, staleTime: 30_000 });
+  // List-view Company -> Project filter (distinct from the edit form's own
+  // tagging picker further down). Block never applies to a plan.
+  const [filterCompanyId, setFilterCompanyId] = useState("");
+  const [filterProjectId, setFilterProjectId] = useState("");
+  const [page, setPage] = useState(1);
+  const listFilters: PlanListFilters = useMemo(
+    () => ({ companyId: filterCompanyId, projectId: filterProjectId }),
+    [filterCompanyId, filterProjectId],
+  );
+
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-payment-plans", listFilters, page],
+    queryFn: () => fetchPlansList(listFilters, page),
+    staleTime: 30_000,
+  });
+  const plans = listResult?.rows ?? [];
+  const planTotal = listResult?.total ?? 0;
   const { data: milestoneMaster = [] } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchMilestoneMaster, staleTime: 5 * 60_000 });
   const { data: dropdownData } = useQuery({ queryKey: ["business-dropdown"], queryFn: fetchCompanyProjectDropdown, staleTime: 5 * 60_000 });
   const companies = dropdownData?.companies ?? [];
   const projects = dropdownData?.projects ?? [];
+  const filterProjects = useMemo(
+    () => (filterCompanyId ? projects.filter((p) => String(p.company_id) === filterCompanyId) : projects),
+    [projects, filterCompanyId],
+  );
   // Lookups for the dropdown-wise Add-a-Project flow and the selected-chips
   // list below — a plan can legitimately tag Projects across multiple
   // Companies, so Company here is just which list the Project dropdown
@@ -128,25 +186,26 @@ const CrmPaymentPlans: React.FC = () => {
     () => (tagCompanyId ? projects.filter((p) => String(p.company_id) === tagCompanyId) : []),
     [projects, tagCompanyId],
   );
-  const selectedTaggedProject = useMemo(() => {
-    if (!projectId) return null;
-    const p = projectsById.get(projectId);
-    if (!p) return null;
-    const company = companiesById.get(String(p.company_id));
-    return { id: projectId, name: p.name, companyName: company?.name ?? "" };
-  }, [projectId, projectsById, companiesById]);
-  // Same resolution as selectedTaggedProject above, but driven off the
-  // previewed plan's own ProjectId rather than the edit form's local state
-  // — keeps the read-only preview showing the live Project name too, not
-  // just the ProjectName string PLAN_SELECT also returns (which is only
-  // used as a fallback if the dropdown data hasn't loaded yet).
-  const previewTaggedProject = useMemo(() => {
-    if (!previewPlan?.ProjectId) return null;
-    const p = projectsById.get(String(previewPlan.ProjectId));
-    if (!p) return null;
-    const company = companiesById.get(String(p.company_id));
-    return { id: String(previewPlan.ProjectId), name: p.name, companyName: company?.name ?? "" };
-  }, [previewPlan, projectsById, companiesById]);
+  const selectedTaggedProjects = useMemo(() => {
+    return projectIds.map((id) => {
+      const p = projectsById.get(id);
+      const company = p ? companiesById.get(String(p.company_id)) : null;
+      return { id, name: p?.name ?? "Unknown project", companyName: company?.name ?? "" };
+    });
+  }, [projectIds, projectsById, companiesById]);
+  // Same resolution as selectedTaggedProjects above, but driven off the
+  // previewed plan's own ProjectsJson rather than the edit form's local
+  // state — keeps the read-only preview showing live Project names too, not
+  // just whatever PLAN_SELECT returned (used as a fallback below if the
+  // dropdown data hasn't loaded yet).
+  const previewTaggedProjectRows = useMemo(() => parseTaggedProjects(previewPlan?.ProjectsJson), [previewPlan]);
+  const previewTaggedProjects = useMemo(() => {
+    return previewTaggedProjectRows.map((row) => {
+      const p = projectsById.get(String(row.ProjectId));
+      const company = p ? companiesById.get(String(p.company_id)) : null;
+      return { id: String(row.ProjectId), name: p?.name ?? row.ProjectName, companyName: company?.name ?? "" };
+    });
+  }, [previewTaggedProjectRows, projectsById, companiesById]);
 
   // Item 0 is always "Booking" — a fixed ₹ figure decided per booking, never
   // a slice of the plan's 100%. Only the milestones that come after Booking
@@ -169,27 +228,41 @@ const CrmPaymentPlans: React.FC = () => {
     setEditingId(null);
     setPlanName(""); setDescription(""); setBookingAmount("");
     setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
-    setProjectId("");
+    setProjectIds([]);
+    setProjectTagsTouched(false);
     setTagCompanyId("");
+    setTagProjectPick("");
     setIsActive(true);
   };
 
   const openCreate = () => { resetForm(); setDialogOpen(true); };
 
+  // Guards against a genuine async race: clicking Edit on one plan, then
+  // Edit on a different plan before the first fetchPlanDetail resolves,
+  // could let the first (now-stale) response land AFTER the second and
+  // stomp its freshly-loaded, correct project tags. openEditRequestId
+  // tracks which call is the most recent; a response only applies its data
+  // if it's still that one.
+  const openEditRequestIdRef = React.useRef(0);
   const openEdit = async (id: number) => {
+    const requestId = ++openEditRequestIdRef.current;
     setPreviewPlan(null);
     const detail = await fetchPlanDetail(id);
+    if (openEditRequestIdRef.current !== requestId) return; // a newer openEdit call has since superseded this one
     if (!detail) { toast.error("Could not load plan"); return; }
     const { plan, items: planItems } = detail;
     setEditingId(id);
     setPlanName(plan.PlanName);
     setDescription(plan.Description || "");
     setBookingAmount(plan.BookingAmount != null ? String(plan.BookingAmount) : "");
-    const taggedProjectId = plan.ProjectId ? String(plan.ProjectId) : "";
-    setProjectId(taggedProjectId);
+    const taggedProjectIds = parseTaggedProjects(plan.ProjectsJson).map((row) => String(row.ProjectId));
+    setProjectIds(taggedProjectIds);
+    // Loading the plan's existing tags is not the same as the user touching
+    // the picker — only an actual add/remove click should mark this dirty.
+    setProjectTagsTouched(false);
     setIsActive(plan.IsActive !== false && plan.IsActive !== 0);
-    const taggedProject = taggedProjectId ? projectsById.get(taggedProjectId) : null;
-    setTagCompanyId(taggedProject ? String(taggedProject.company_id) : "");
+    setTagCompanyId("");
+    setTagProjectPick("");
     setItems(
       (planItems as any[]).length
         ? planItems.map((i: any) => ({
@@ -230,14 +303,24 @@ const CrmPaymentPlans: React.FC = () => {
       // itself, so its stored Percent is always 0 regardless of what an
       // older plan (saved before this rule) had in that field.
       const normalizedItems = items.map((it, idx) => idx === 0 ? { ...it, Percent: "0" } : it);
+      // ProjectIds is only included when the user actually touched the
+      // tagging picker (or this is a brand-new plan, where "touched" is
+      // moot — there's nothing existing to preserve). The backend's PUT
+      // route only re-syncs tags when the key is present at all, so
+      // omitting it here means saving a plan for an unrelated reason
+      // (renaming it, tweaking a milestone) can never silently wipe its
+      // real project tags — see projectTagsTouched's own comment above.
+      const body: Record<string, any> = {
+        PlanName: planName, Description: description, BookingAmount: bookingAmount, Items: normalizedItems,
+        IsActive: isActive,
+      };
+      if (!isEdit || projectTagsTouched) {
+        body.ProjectIds = projectIds.map((id) => parseInt(id, 10));
+      }
       const res = await fetchWithAuth(isEdit ? `${API}/${editingId}` : API, {
         method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          PlanName: planName, Description: description, BookingAmount: bookingAmount, Items: normalizedItems,
-          ProjectId: projectId ? parseInt(projectId) : null,
-          IsActive: isActive,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -292,12 +375,39 @@ const CrmPaymentPlans: React.FC = () => {
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={openCreate}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg hover:shadow-lg ">
           <Plus size={14} /> New Plan
         </button>
         </div>
       }
     >
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <select
+          value={filterCompanyId}
+          onChange={(e) => { setFilterCompanyId(e.target.value); setFilterProjectId(""); setPage(1); }}
+          className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background"
+        >
+          <option value="">All Companies</option>
+          {companies.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+        </select>
+        <select
+          value={filterProjectId}
+          onChange={(e) => { setFilterProjectId(e.target.value); setPage(1); }}
+          className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background"
+        >
+          <option value="">All Projects</option>
+          {filterProjects.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+        </select>
+        {(filterCompanyId || filterProjectId) && (
+          <button
+            onClick={() => { setFilterCompanyId(""); setFilterProjectId(""); setPage(1); }}
+            className="text-xs text-muted-foreground hover:text-foreground underline px-1"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {isLoading ? (
           <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
@@ -322,7 +432,7 @@ const CrmPaymentPlans: React.FC = () => {
                   {p.Description && <div className="text-xs text-muted-foreground mt-0.5">{p.Description}</div>}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                  <span className={`text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border ${
                     p.IsActive
                       ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
                       : "text-muted-foreground bg-muted/50 border-border"
@@ -377,7 +487,7 @@ const CrmPaymentPlans: React.FC = () => {
 
               <div className="mt-2.5 pt-2 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1"><ListChecks size={12} /> {p.ItemCount} milestone{p.ItemCount === 1 ? "" : "s"}</span>
-                <span className={Math.round(p.TotalPercent) === 100 ? "text-green-600 dark:text-green-400 font-medium" : "text-amber-600 font-medium"}>
+                <span className={Math.round(p.TotalPercent) === 100 ? "text-green-600 dark:text-green-400 font-medium" : "text-sky-600 font-medium"}>
                   {p.TotalPercent}% total
                 </span>
               </div>
@@ -385,11 +495,12 @@ const CrmPaymentPlans: React.FC = () => {
           );
         })}
       </div>
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={planTotal} onPage={setPage} />
 
       {/* Read-only preview — tapping a card opens this instead of dropping
           straight into a greyed-out copy of the edit form. */}
       <Dialog open={!!previewPlan} onOpenChange={(o) => { if (!o) setPreviewPlan(null); }}>
-        <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-3xl max-h-[88vh] overflow-y-auto">
           {previewPlan && (
             <>
               <DialogHeader>
@@ -406,7 +517,7 @@ const CrmPaymentPlans: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <span className={`shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-full border ${
+                    <span className={`shrink-0 text-[0.625rem] font-semibold px-2.5 py-1 rounded-full border ${
                       previewPlan.IsActive
                         ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
                         : "text-muted-foreground bg-muted/50 border-border"
@@ -422,9 +533,9 @@ const CrmPaymentPlans: React.FC = () => {
 
                 {/* Stat strip — the three numbers worth knowing at a glance,
                     pulled out of the old plain-text footer into real tiles. */}
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
-                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       <ListChecks size={11} /> Milestones
                     </div>
                     <div className="mt-1 text-sm font-semibold text-foreground tabular-nums">
@@ -432,7 +543,7 @@ const CrmPaymentPlans: React.FC = () => {
                     </div>
                   </div>
                   <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
-                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       <Calendar size={11} /> Created
                     </div>
                     <div className="mt-1 text-sm font-semibold text-foreground tabular-nums">
@@ -440,10 +551,10 @@ const CrmPaymentPlans: React.FC = () => {
                     </div>
                   </div>
                   <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
-                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       <Percent size={11} /> After Booking
                     </div>
-                    <div className={`mt-1 text-sm font-semibold tabular-nums ${previewAfterBookingTotal === 100 ? "text-green-600 dark:text-green-400" : "text-amber-600"}`}>
+                    <div className={`mt-1 text-sm font-semibold tabular-nums ${previewAfterBookingTotal === 100 ? "text-green-600 dark:text-green-400" : "text-sky-600"}`}>
                       {previewAfterBookingTotal}%
                     </div>
                   </div>
@@ -454,7 +565,7 @@ const CrmPaymentPlans: React.FC = () => {
                     {previewMilestones.map((m, i) => (
                       <div key={i} className="relative flex items-center gap-2.5 text-sm rounded-lg border border-border bg-muted/20 pl-4 pr-3 py-2 overflow-hidden">
                         <span className={`absolute left-0 top-0 bottom-0 w-1 ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`} />
-                        <span className={`shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`}>
+                        <span className={`shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-[0.625rem] font-bold text-white ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`}>
                           {i + 1}
                         </span>
                         <span className="flex-1 min-w-0 break-words text-foreground font-medium">{m.name}</span>
@@ -466,19 +577,27 @@ const CrmPaymentPlans: React.FC = () => {
                   </div>
 
                   <div className="rounded-lg border border-border bg-muted/10 p-3 self-start">
-                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">
-                      <Building2 size={12} /> Tagged Project
+                    <div className="flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">
+                      <Building2 size={12} /> Tagged Projects
                     </div>
-                    {previewTaggedProject ? (
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30">
-                        {previewTaggedProject.name}
-                        {previewTaggedProject.companyName && <span className="text-muted-foreground font-normal"> — {previewTaggedProject.companyName}</span>}
-                      </span>
-                    ) : previewPlan.ProjectName ? (
+                    {previewTaggedProjects.length ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {previewTaggedProjects.map((p) => (
+                          <span key={p.id} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30">
+                            {p.name}
+                            {p.companyName && <span className="text-muted-foreground font-normal"> — {p.companyName}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    ) : previewTaggedProjectRows.length ? (
                       // Dropdown data (companies/projects) hasn't finished loading yet —
-                      // fall back to the plain name PLAN_SELECT already returned rather
+                      // fall back to the plain names PLAN_SELECT already returned rather
                       // than show nothing.
-                      <p className="text-xs text-foreground">{previewPlan.ProjectName}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {previewTaggedProjectRows.map((row) => (
+                          <span key={row.ProjectId} className="text-xs text-foreground">{row.ProjectName}</span>
+                        ))}
+                      </div>
                     ) : (
                       <p className="text-xs text-muted-foreground italic">Not tagged — offered as a fallback option everywhere instead.</p>
                     )}
@@ -497,7 +616,7 @@ const CrmPaymentPlans: React.FC = () => {
                   className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
                 {rights.canEdit && (
                   <button onClick={() => openEdit(previewPlan.Id)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
                     <Pencil size={13} /> Edit Plan
                   </button>
                 )}
@@ -509,7 +628,7 @@ const CrmPaymentPlans: React.FC = () => {
 
       {/* Create / Edit form — always editable while open. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetForm(); } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading">
               {editingId != null ? "Edit Payment Plan" : "New Payment Plan"}
@@ -530,7 +649,7 @@ const CrmPaymentPlans: React.FC = () => {
             <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
               <div>
                 <div className="text-xs font-medium text-foreground">Status</div>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   {isActive ? "Active — offered wherever payment plans are picked." : "Inactive — hidden from pickers, kept for existing bookings/history."}
                 </p>
               </div>
@@ -546,25 +665,25 @@ const CrmPaymentPlans: React.FC = () => {
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Tagged Project</label>
-              <p className="text-[11px] text-muted-foreground mb-2">
+              <label className="text-xs text-muted-foreground block mb-1">Tagged Projects</label>
+              <p className="text-[0.6875rem] text-muted-foreground mb-2">
                 Optional — leave empty and this plan still shows up everywhere as a fallback option.
-                Tag it to a Project to make it selectable from Block/Unit Payment Plan pickers under that Project.
-                A Project can have many Plans tagged to it, but a Plan can only ever be tagged to one Project.
+                Tag it to one or more Projects to make it selectable from Block/Unit Payment Plan pickers under those Projects.
+                A Project can have many Plans tagged to it, and a Plan can likewise be tagged to many Projects.
               </p>
 
               {/* Company -> Project gate, same disciplined pattern every other
                   master page in the app uses (Project stays disabled with a
-                  plain-language hint until a Company is chosen). Single-select
-                  — picking a Project here directly sets the plan's one tag,
-                  no separate Add step. */}
+                  plain-language hint until a Company is chosen). Picking a
+                  Project here and hitting Add appends it to the list below —
+                  a plan can be tagged across multiple Companies' projects. */}
               <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
                   <div>
-                    <label className="text-[11px] text-muted-foreground block mb-1">Company</label>
+                    <label className="text-[0.6875rem] text-muted-foreground block mb-1">Company</label>
                     <select
                       value={tagCompanyId}
-                      onChange={(e) => { setTagCompanyId(e.target.value); setProjectId(""); }}
+                      onChange={(e) => setTagCompanyId(e.target.value)}
                       className={inputCls}
                     >
                       <option value="">Select company</option>
@@ -572,36 +691,53 @@ const CrmPaymentPlans: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] text-muted-foreground block mb-1">Project</label>
+                    <label className="text-[0.6875rem] text-muted-foreground block mb-1">Project</label>
                     <select
-                      value={projectId}
-                      onChange={(e) => setProjectId(e.target.value)}
+                      value={tagProjectPick}
+                      onChange={(e) => setTagProjectPick(e.target.value)}
                       disabled={!tagCompanyId}
                       className={`${inputCls} ${!tagCompanyId ? "opacity-50 cursor-not-allowed" : ""}`}
                     >
-                      <option value="">{!tagCompanyId ? "Select a Company first" : "None"}</option>
-                      {projectsForTagCompany.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+                      <option value="">{!tagCompanyId ? "Select a Company first" : "Select a project"}</option>
+                      {projectsForTagCompany
+                        .filter((p) => !projectIds.includes(String(p.id)))
+                        .map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
                     </select>
                   </div>
+                  <button
+                    type="button"
+                    disabled={!tagProjectPick}
+                    onClick={() => {
+                      if (!tagProjectPick || projectIds.includes(tagProjectPick)) return;
+                      setProjectIds((ids) => [...ids, tagProjectPick]);
+                      setProjectTagsTouched(true);
+                      setTagProjectPick("");
+                    }}
+                    className="h-[34px] px-3 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    + Add
+                  </button>
                 </div>
               </div>
 
-              {selectedTaggedProject && (
-                <div className="mt-2.5">
-                  <span className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30">
-                    <span>
-                      {selectedTaggedProject.name}
-                      {selectedTaggedProject.companyName && <span className="text-muted-foreground font-normal"> — {selectedTaggedProject.companyName}</span>}
+              {selectedTaggedProjects.length > 0 && (
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {selectedTaggedProjects.map((tp) => (
+                    <span key={tp.id} className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30">
+                      <span>
+                        {tp.name}
+                        {tp.companyName && <span className="text-muted-foreground font-normal"> — {tp.companyName}</span>}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { setProjectIds((ids) => ids.filter((id) => id !== tp.id)); setProjectTagsTouched(true); }}
+                        title={`Remove ${tp.name}`}
+                        className="p-0.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                      >
+                        <X size={11} />
+                      </button>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => { setProjectId(""); setTagCompanyId(""); }}
-                      title={`Remove ${selectedTaggedProject.name}`}
-                      className="p-0.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    >
-                      <X size={11} />
-                    </button>
-                  </span>
+                  ))}
                 </div>
               )}
             </div>
@@ -624,12 +760,12 @@ const CrmPaymentPlans: React.FC = () => {
                           </span>
                           <div className="flex-1 min-w-0 space-y-2">
                             <div className="text-sm font-medium text-foreground">Booking</div>
-                            <p className="text-[11px] text-muted-foreground">
+                            <p className="text-[0.6875rem] text-muted-foreground">
                               Fixed ₹ amount, set here on the plan — never typed per booking, never a % of
                               the plan. Milestones below split 100% of whatever's left after this is deducted.
                             </p>
                             <div>
-                              <label className="text-[11px] text-muted-foreground block mb-1">Booking Amount (₹) *</label>
+                              <label className="text-[0.6875rem] text-muted-foreground block mb-1">Booking Amount (₹) *</label>
                               <div className="relative w-40">
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">₹</span>
                                 <input type="number" placeholder="0" value={bookingAmount}
@@ -650,7 +786,7 @@ const CrmPaymentPlans: React.FC = () => {
                         </span>
                         <div className="flex-1 min-w-0 space-y-2">
                           <div>
-                            <label className="text-[11px] text-muted-foreground block mb-1">Milestone *</label>
+                            <label className="text-[0.6875rem] text-muted-foreground block mb-1">Milestone *</label>
                             <select value={it.MilestoneMasterId}
                               onChange={(e) => {
                                 const master = (milestoneMaster as any[]).find((m: any) => String(m.Id) === e.target.value);
@@ -679,7 +815,7 @@ const CrmPaymentPlans: React.FC = () => {
                                 ))}
                             </select>
                             {!fromMaster && (
-                              <p className="text-[11px] text-amber-600 mt-1">
+                              <p className="text-[0.6875rem] text-sky-600 mt-1">
                                 {milestoneMasterHasUnusedOptions
                                   ? "Pick a milestone above before saving."
                                   : "No unused Milestone Master entries left — add one there first."}
@@ -688,7 +824,7 @@ const CrmPaymentPlans: React.FC = () => {
                           </div>
 
                           <div>
-                            <label className="text-[11px] text-muted-foreground block mb-1">% Share</label>
+                            <label className="text-[0.6875rem] text-muted-foreground block mb-1">% Share</label>
                             <div className="relative w-24">
                               <input type="number" placeholder="0" value={it.Percent}
                                 onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
@@ -715,7 +851,7 @@ const CrmPaymentPlans: React.FC = () => {
                 + Add milestone
               </button>
               {!milestoneMasterHasUnusedOptions && (
-                <p className="text-[11px] text-muted-foreground mt-1">
+                <p className="text-[0.6875rem] text-muted-foreground mt-1">
                   Every active Milestone Master entry is already used in this plan —{" "}
                   <a href="/crm/milestone-master" target="_blank" rel="noreferrer" className="underline">add more there</a> to include another.
                 </p>
@@ -725,7 +861,7 @@ const CrmPaymentPlans: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
             </button>
           </div>

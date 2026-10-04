@@ -16,7 +16,7 @@ import { CheckCircle2, SendHorizonal, XCircle, Loader2, ClipboardCheck } from "l
 // Reads role from JWT stored in localStorage under "token".
 function getUserRole(): string | null {
   try {
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     if (!token) return null;
     const payload = JSON.parse(atob(token.split(".")[1]));
     return payload.role ?? null;
@@ -34,7 +34,7 @@ function isApprover(allowedRoles: string[]): boolean {
 
 // ─── fetchWithAuth helper (inline — avoids import path assumptions) ───────────
 async function authFetch(url: string, method: string, body?: object) {
-  const token = localStorage.getItem("token");
+  const token = sessionStorage.getItem("token");
   const res = await fetch(url, {
     method,
     headers: {
@@ -96,6 +96,28 @@ interface ApprovalActionsProps {
    *  fallback below is skipped and only approverRoles can unlock the
    *  buttons, mirroring the backend gate exactly. */
   restricted?: boolean;
+  /** Extra source statuses (beyond Rejected/Issued/Partially Received) that
+   *  should show the Submit button. Every module using this component
+   *  auto-submits a Draft record the moment it's created, so a lingering
+   *  Draft normally never happens — except CRM Refund's cancellation-
+   *  triggered auto-create, which deliberately leaves a real Draft the
+   *  backend's own /:id/submit route accepts but this component's default
+   *  showSubmit logic didn't know about, leaving that row with no action at
+   *  all. Additive and opt-in so every other caller is unaffected. */
+  extraSubmitStatuses?: string[];
+  /** For a `restricted` module only: true when this specific record's
+   *  caller already determined (via the Approval Inbox list's own
+   *  isVisibleToViewer/_canAct computation, approvalInbox.js) that the
+   *  current viewer is named by userId on the record's current Approval
+   *  Setup level — e.g. Journal Voucher is hardcoded to super_admin by
+   *  approverRoles, but an admin can still name someone else (Prashant) as
+   *  an approver for it in Approval Setup. Without this, a restricted
+   *  module's buttons stayed locked to the hardcoded role list even for a
+   *  person Approval Setup explicitly named, even though the inbox row
+   *  already showed them the record as theirs to act on and
+   *  approvalService.js's transition() now honours the same match. Ignored
+   *  when `restricted` is false. */
+  workflowVisible?: boolean;
 }
 
 export function ApprovalActions({
@@ -109,6 +131,8 @@ export function ApprovalActions({
   actionPathSuffix,
   reviewInstead,
   restricted = false,
+  extraSubmitStatuses = [],
+  workflowVisible = false,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -117,16 +141,28 @@ export function ApprovalActions({
   // Fallback: holding "edit" on the "approval-inbox" page via Menu Rights
   // also unlocks the buttons — mirrors the backend's transition() gate in
   // approvalService.js. Not consulted for `restricted` modules, which stay
-  // locked to approverRoles on both sides.
+  // locked to approverRoles unless workflowVisible names this person
+  // specifically (see that prop's doc comment).
   const { canEdit: hasApprovalInboxEdit } = usePageRights("approval-inbox");
   const approver =
-    isApprover(approverRoles) || (!restricted && hasApprovalInboxEdit);
+    isApprover(approverRoles) ||
+    (!restricted && hasApprovalInboxEdit) ||
+    (restricted && workflowVisible);
 
   // ── Action handler ──────────────────────────────────────────────────────────
   async function handleAction(action: "submit" | "approve" | "reject") {
     setLoading(action);
     try {
-      const body = action === "reject" ? { note: rejectNote } : undefined;
+      // Send both field spellings the various backend reject routes read —
+      // most (crmSalesDeed, crmAgreements, crmNoc, etc.) read `Remarks`,
+      // some older ones read `note`. This component is shared across every
+      // module's approval inbox, so a single field name here silently
+      // breaks rejection wherever the backend expects the other one: typing
+      // a reason and confirming would 400 with "remarks are required" no
+      // matter what was entered. Sending both is harmless — every route
+      // destructures only the one key it actually reads.
+      const body =
+        action === "reject" ? { note: rejectNote, Remarks: rejectNote } : undefined;
       const path = actionPathSuffix
         ? `${endpoint}/${recordId}/${actionPathSuffix}/${action}`
         : `${endpoint}/${recordId}/${action}`;
@@ -202,7 +238,8 @@ export function ApprovalActions({
   const showSubmit =
     status === "Rejected" ||
     status === "Issued" ||
-    status === "Partially Received";
+    status === "Partially Received" ||
+    (!!status && extraSubmitStatuses.includes(status));
   const showApproveReject = !submitOnly && status === "Pending" && approver;
 
   if (!showSubmit && !showApproveReject) return null;
@@ -215,7 +252,7 @@ export function ApprovalActions({
           disabled={loading !== null}
           onClick={() => handleAction("submit")}
           title="Submit for Approval"
-          className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide transition-all disabled:opacity-50 bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm shadow-violet-500/30 hover:from-violet-500 hover:to-indigo-500 hover:shadow-md hover:shadow-violet-500/40 hover:-translate-y-px active:translate-y-0 active:shadow-sm"
+          className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold tracking-wide transition-all disabled:opacity-50 bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm shadow-violet-500/30 hover:from-violet-500 hover:to-indigo-500 hover:shadow-md hover:shadow-violet-500/40 hover:-translate-y-px active:translate-y-0 active:shadow-sm"
         >
           {loading === "submit" ? (
             <Loader2 className="w-3 h-3 animate-spin" />

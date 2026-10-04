@@ -18,7 +18,7 @@ function safeArray<T>(raw: unknown): T[] {
 export const getWorkOrders = async () => {
   const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const getWorkOrder = async (id: number) => {
@@ -104,6 +104,7 @@ export const fetchProjects = async (): Promise<
     belongs_to?: string | number | null;
     company_id?: number | null;
     company_ids?: string | null;
+    tagged_company_ids?: string | null;
   }[]
 
 > => {
@@ -116,7 +117,7 @@ export const fetchProjects = async (): Promise<
       belongs_to?: string | number | null;
       company_id?: number | null;
       company_ids?: string | null;
-
+      tagged_company_ids?: string | null;
     }>(await res.json());
     return data.map((r) => ({
       id: r.id,
@@ -124,7 +125,7 @@ export const fetchProjects = async (): Promise<
       belongs_to: r.belongs_to ?? null,
       company_id: r.company_id ?? null,
       company_ids: r.company_ids ?? null,
-
+      tagged_company_ids: r.tagged_company_ids ?? null,
     }));
   } catch (err) {
     console.error("[workOrderApi] fetchProjects failed:", err);
@@ -152,7 +153,7 @@ export const fetchSuppliers = async (): Promise<
   { id: number; name: string }[]
 > => {
   try {
-    const res = await fetchWithAuth("/api/account-head/options?type=S");
+    const res = await fetchWithAuth("/api/account-head/options?type=S,V&excludeCategory=Landlord");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = safeArray<{ id: number; label: string }>(await res.json());
     return data.map((r) => ({ id: r.id, name: r.label ?? "" }));
@@ -162,10 +163,12 @@ export const fetchSuppliers = async (): Promise<
   }
 };
 
-// Uses /api/activity-master directly (same source as ActivityMaster page)
+// Uses /api/engineering-activity-master directly (same source as the
+// Engineering Activity Master page — split from the shared Activity Master
+// in migration 463, Civil Work DPR keeps the original).
 // Filters client-side to avoid stale/duplicate meta routes.
 const _fetchAllActivities = async () => {
-  const res = await fetchWithAuth("/api/activity-master");
+  const res = await fetchWithAuth("/api/engineering-activity-master");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return safeArray<{
     id: number;

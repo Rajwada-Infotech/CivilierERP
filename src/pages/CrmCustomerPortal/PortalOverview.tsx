@@ -11,8 +11,8 @@ function StatCard({ icon: Icon, label, value, sub }: { icon: any; label: string;
     <Card className="p-4">
       <div className="w-9 h-9 rounded-lg flex items-center justify-center mb-3" style={{ background: GOLD_SOFT, color: GOLD }}><Icon size={16} /></div>
       <p className="text-xl font-semibold leading-none" style={{ ...serif, color: TEXT }}>{value}</p>
-      <p className="text-[11px] mt-1.5" style={{ color: TEXT_MUTED }}>{label}</p>
-      {sub && <p className="text-[10px] mt-0.5" style={{ color: TEXT_FAINT }}>{sub}</p>}
+      <p className="text-[0.6875rem] mt-1.5" style={{ color: TEXT_MUTED }}>{label}</p>
+      {sub && <p className="text-[0.625rem] mt-0.5" style={{ color: TEXT_FAINT }}>{sub}</p>}
     </Card>
   );
 }
@@ -31,7 +31,11 @@ const PortalOverview: React.FC = () => {
 
   const milestones = timeline.paymentMilestones || [];
   const totalDue = milestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
-  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+  // Includes money held in On Account but not yet swept onto a milestone —
+  // same fix as PortalPayments.tsx, so a customer who's paid in full doesn't
+  // see a stalled progress bar while staff work through the sweep.
+  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
+    + Number(timeline.onAccountTotalReceived || 0);
   const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
   const nextDue = milestones.find((m: any) => m.Status === "Pending");
 
@@ -100,7 +104,7 @@ const PortalOverview: React.FC = () => {
             <Clock size={18} className="mt-0.5 shrink-0" style={{ color: "#8A6D14" }} />
             <div className="text-sm">
               <p className="font-semibold" style={{ color: "#8A6D14" }}>{label} is on hold for you</p>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs mt-0.5" style={{ color: TEXT_MUTED }}>
                 Expires in {daysLeft} day{daysLeft === 1 ? "" : "s"} ({fmtDate(h.HoldUntil)}) — confirm your booking before it releases.
               </p>
             </div>
@@ -133,7 +137,7 @@ const PortalOverview: React.FC = () => {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard icon={Building2} label="Unit" value={timeline.booking?.UnitNo || "—"} sub={timeline.booking?.ProjectName} />
+        <StatCard icon={Building2} label={timeline.booking?.IsPlotSale ? "Plot" : "Unit"} value={timeline.booking?.UnitNo || "—"} sub={timeline.booking?.ProjectName} />
         <StatCard icon={TrendingUp} label="Payment Progress" value={`${pctPaid}%`} sub={`${fmtMoney(totalPaid)} of ${fmtMoney(totalDue)}`} />
         <StatCard icon={CreditCard} label="Next Payment" value={nextDue ? fmtMoney(nextDue.AmountDue) : "None due"} sub={nextDue?.MilestoneName} />
         <StatCard icon={legalStage.icon} label={legalStage.label} value={legalStage.value || "Not sent"} sub={legalStage.sub} />

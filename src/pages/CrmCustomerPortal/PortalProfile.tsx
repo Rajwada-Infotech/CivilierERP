@@ -31,7 +31,7 @@ function MiniStat({ icon: Icon, label, value }: { icon: any; label: string; valu
       <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: GOLD_SOFT, color: GOLD }}><Icon size={14} /></div>
       <div className="min-w-0">
         <p className="text-sm font-semibold truncate" style={{ color: TEXT }}>{value}</p>
-        <p className="text-[10px]" style={{ color: TEXT_FAINT }}>{label}</p>
+        <p className="text-[0.625rem]" style={{ color: TEXT_FAINT }}>{label}</p>
       </div>
     </div>
   );
@@ -70,7 +70,10 @@ const PortalProfile: React.FC = () => {
 
   const milestones = timeline.paymentMilestones || [];
   const totalDue = milestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
-  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+  // Includes money held in On Account but not yet swept onto a milestone —
+  // same fix as PortalPayments.tsx / PortalOverview.tsx.
+  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
+    + Number(timeline.onAccountTotalReceived || 0);
   const openTickets = (tickets as any[]).filter((t) => t.Status !== "Resolved" && t.Status !== "Closed").length;
 
   const keyDates = [
@@ -103,7 +106,7 @@ const PortalProfile: React.FC = () => {
           <InfoField label="Email" value={me.Email} />
           <InfoField label="Interested Project" value={selectedApp?.InterestedProject} />
           <div>
-            <p className="text-[10px] uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Application Status</p>
+            <p className="text-[0.625rem] uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Application Status</p>
             <div className="mt-1"><StatusPill status={selectedApp?.ApplicationStatus} /></div>
           </div>
         </div>
@@ -123,7 +126,7 @@ const PortalProfile: React.FC = () => {
         <div className="p-5 space-y-3">
           {keyDates.map((d) => (
             <div key={d.label} className="flex items-center gap-3">
-              {d.done ? <CheckCircle2 size={15} style={{ color: "#0F7A44" }} className="shrink-0" /> : <Circle size={15} className="text-slate-300 shrink-0" />}
+              {d.done ? <CheckCircle2 size={15} style={{ color: "#0F7A44" }} className="shrink-0" /> : <Circle size={15} className="shrink-0" style={{ color: TEXT_FAINT }} />}
               <span className="text-sm flex-1" style={{ color: TEXT_MUTED }}>{d.label}</span>
               <span className="text-sm font-medium" style={{ color: TEXT }}>{d.value ? fmtDate(d.value) : "—"}</span>
             </div>
@@ -139,7 +142,7 @@ const PortalProfile: React.FC = () => {
             <div key={t.Id} className="flex items-center justify-between gap-3 px-5 py-3 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate" style={{ color: TEXT }}>{t.Subject}</p>
-                <p className="text-[11px]" style={{ color: TEXT_FAINT }}>{t.TicketNo} · {fmtDate(t.CreatedAt)}</p>
+                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{t.TicketNo} · {fmtDate(t.CreatedAt)}</p>
               </div>
               <StatusPill status={t.Status} />
             </div>
@@ -163,7 +166,7 @@ const PortalProfile: React.FC = () => {
                     background: mode === key ? GOLD_SOFT : SURFACE_ALT,
                   }}>
                   <Icon size={16} style={{ color: mode === key ? GOLD : TEXT_MUTED }} />
-                  <span className="text-[11px] font-medium" style={{ color: mode === key ? TEXT : TEXT_MUTED }}>{label}</span>
+                  <span className="text-[0.6875rem] font-medium" style={{ color: mode === key ? TEXT : TEXT_MUTED }}>{label}</span>
                 </button>
               ))}
             </div>
@@ -184,7 +187,7 @@ const PortalProfile: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <span className="text-[11px] font-medium text-center leading-tight" style={{ color: TEXT }}>{a.label}</span>
+                  <span className="text-[0.6875rem] font-medium text-center leading-tight" style={{ color: TEXT }}>{a.label}</span>
                 </button>
               ))}
             </div>

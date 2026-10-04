@@ -71,38 +71,26 @@ const FinancialYearMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await addFinYear(toPayload(event.record));
-        toast.success("Financial year saved!");
-        await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await addFinYear(toPayload(event.record));
+      toast.success("Financial year saved!");
+      await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
     }
     if (event.action === "update") {
-      try {
-        await updateFinYear(event.id, toPayload(event.record));
-        toast.success("Financial year updated!");
-        await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateFinYear(event.id, toPayload(event.record));
+      toast.success("Financial year updated!");
+      await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
     }
     if (event.action === "delete") {
-      try {
-        await deleteFinYear(event.id);
-        toast.success("Financial year deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteFinYear(event.id);
+      toast.success("Financial year deleted!");
+      await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
     }
   };
 
   const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
     status: (value) => (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${value === "Active" ? "bg-green-500/10 border-green-500/20 text-green-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value === "Active" ? "bg-green-500/10 border-green-500/20 text-green-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
       >
         <span
           className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value === "Active" ? "bg-green-500" : "bg-red-500"}`}
@@ -112,7 +100,7 @@ const FinancialYearMaster: React.FC = () => {
     ),
     locked: (value) => (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${value ? "bg-orange-500/10 border-orange-500/20 text-orange-600" : "bg-muted border-border text-muted-foreground"}`}
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value ? "bg-orange-500/10 border-orange-500/20 text-orange-600" : "bg-muted border-border text-muted-foreground"}`}
       >
         {value ? "🔒 Locked" : "Unlocked"}
       </span>

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ASSIGNMENT_STATUSES,
+  allowedNextStatuses,
   ASSIGNMENT_STATUS_META,
   updateAssignmentStatus,
   type AssignmentStatus,
@@ -23,15 +23,30 @@ export function AssignmentStatusSelect({ rungId, status }: { rungId: number; sta
     onError: (err: any) => toast.error(err?.message || "Failed to update status."),
   });
   const meta = ASSIGNMENT_STATUS_META[status];
+  const options = allowedNextStatuses(status);
+
+  // Nothing to toggle to — Completed/Approved/Cancelled are no longer
+  // manually reachable from here (Completed comes from the progress bar,
+  // Rework from a QC or approval decision, Approved only from an explicit
+  // approval action afterwards), so this reads as a plain badge.
+  if (options.length <= 1) {
+    return (
+      <span
+        className={`text-[0.6875rem] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${meta.className}`}
+      >
+        {meta.label}
+      </span>
+    );
+  }
 
   return (
     <select
       value={status}
       disabled={mutation.isPending}
       onChange={(e) => mutation.mutate(e.target.value as AssignmentStatus)}
-      className={`text-[11px] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 ${meta.className}`}
+      className={`text-[0.6875rem] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 ${meta.className}`}
     >
-      {ASSIGNMENT_STATUSES.map((s) => (
+      {options.map((s) => (
         <option key={s} value={s}>
           {ASSIGNMENT_STATUS_META[s].label}
         </option>

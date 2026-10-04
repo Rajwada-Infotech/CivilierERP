@@ -21,6 +21,12 @@ export interface JournalVoucherLine {
   LineID?: number;
   LHeadId: number | null;
   LHeadName?: string;
+  /** Set on GET /:id (not on the create/edit payload) — used to tell a
+   *  Partner Master line's Capital head from its Current head, since both
+   *  share one LHeadName. See LHeadCode's "-CAP"/"-CUR" suffix convention
+   *  in backend/routes/partnerMaster.js. */
+  LHeadType?: string;
+  LHeadCode?: string | null;
   DebitAmount: number;
   CreditAmount: number;
   Narration?: string;
@@ -37,9 +43,19 @@ export interface JournalVoucherSummary {
   ProjectName?: string | null;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
   CreatedBy: string | null;
+  CreatedByName?: string | null;
   CreatedAt: string;
   TotalAmount: number | null;
   PostedToGL?: boolean;
+  /** Payment mode + settlement detail (all null on a plain journal). */
+  Mode?: string | null;
+  BankId?: number | null;
+  BankName?: string | null;
+  ChequeLotId?: number | null;
+  ChequeLotNumber?: string | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  DigitalRefNumber?: string | null;
 }
 
 export interface JournalVoucherLedgerOption {
@@ -47,6 +63,9 @@ export interface JournalVoucherLedgerOption {
   label: string;
   code: string | null;
   type: "GL" | "C" | "S" | "B" | string;
+  /** Picker group computed by the server (Landlord/Cash/Partner/Project ledger…
+   *  LHeadType alone can't tell those apart). See journalVoucher/ledgerGroups.ts. */
+  group: string;
   /** Last 4 digits of the bank account number — Bank ("B") heads only, null otherwise. */
   accountNoLast4: string | null;
 }
@@ -66,6 +85,12 @@ export interface JournalVoucherPayload {
   CompanyId?: number | null;
   ProjectId?: number | null;
   lines: JournalVoucherLine[];
+  Mode?: string | null;
+  BankId?: number | null;
+  ChequeLotId?: number | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  DigitalRefNumber?: string | null;
 }
 
 export interface JournalVoucherFilters {
@@ -115,6 +140,11 @@ export const updateJournalVoucher = async (id: number, payload: JournalVoucherPa
   return handleResponse(res);
 };
 
+export const deleteJournalVoucher = async (id: number) => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  return handleResponse(res);
+};
+
 export const approveJournalVoucher = async (id: number, note?: string) => {
   const res = await fetchWithAuth(`${BASE}/${id}/approve`, {
     method: "PUT",
@@ -131,6 +161,35 @@ export const rejectJournalVoucher = async (id: number, note?: string) => {
     body: JSON.stringify({ note }),
   });
   return handleResponse(res);
+};
+
+// A JV's CREDIT line still owed — see backend/routes/journalVoucher.js's
+// GET /payable-lines. Only lines from an Approved, GL-posted JV that still
+// carry an unpaid balance are ever returned; a plain payment (DR LHeadId,
+// CR bank) settles it.
+export interface PayableJVLine {
+  LineID: number;
+  JVID: number;
+  JVNo: string | null;
+  JVDate: string;
+  Narration: string | null;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  CompanyName: string | null;
+  ProjectName: string | null;
+  LHeadId: number;
+  LHeadName: string;
+  LHeadType: string;
+  CreditAmount: number;
+  PaidAmount: number;
+  RemainingAmount: number;
+}
+
+export const getPayableJVLines = async (
+  filters: { companyId?: number | string; projectId?: number | string } = {},
+): Promise<PayableJVLine[]> => {
+  const res = await fetchWithAuth(`${BASE}/payable-lines${toQuery(filters)}`);
+  return handleResponse<PayableJVLine[]>(res);
 };
 
 export interface JournalVoucherYearSummary {

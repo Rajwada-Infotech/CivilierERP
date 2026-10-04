@@ -19,6 +19,7 @@ import {
 import { useReminders, formatRelative, formatDate, REMINDER_TYPE_MODULE } from "@/hooks/useReminders";
 import { useModule } from "@/contexts/ModuleContext";
 import { getModuleAccent } from "@/lib/moduleColors";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 type ReminderMeta = {
   icon: React.ElementType;
@@ -189,7 +190,7 @@ export const ReminderBell = () => {
         {scoped.length > 0 && (
           <span className="absolute top-1.5 right-1.5 flex h-4 w-4">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-4 w-4 bg-red-600 text-[10px] font-bold text-white items-center justify-center border-2 border-background">
+            <span className="relative inline-flex rounded-full h-4 w-4 bg-red-600 text-[0.625rem] font-bold text-white items-center justify-center border-2 border-background">
               {scoped.length}
             </span>
           </span>
@@ -199,10 +200,10 @@ export const ReminderBell = () => {
       {open && (
         <>
           {/* Mobile scrim — tapping outside the panel closes it */}
-          <div
+          <BodyPortal><div
             className="fixed inset-0 z-40 sm:hidden"
             onClick={() => setOpen(false)}
-          />
+          /></BodyPortal>
 
           <div
             ref={panelRef}
@@ -226,7 +227,7 @@ export const ReminderBell = () => {
                     <p className="text-xs font-bold tracking-wide text-foreground truncate">
                       Reminders
                     </p>
-                    <p className="text-[10px] text-muted-foreground truncate">
+                    <p className="text-[0.625rem] text-muted-foreground truncate">
                       {scoped.length} pending alert
                       {scoped.length === 1 ? "" : "s"}
                     </p>
@@ -282,7 +283,7 @@ export const ReminderBell = () => {
                     <button
                       key={t}
                       onClick={() => setFilter(t)}
-                      className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg transition-all duration-150 ${
+                      className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-1 text-[0.625rem] font-semibold rounded-lg transition-all duration-150 ${
                         active
                           ? "bg-[var(--rb-accent)] text-white shadow-sm"
                           : "bg-card/60 text-muted-foreground hover:bg-card hover:text-foreground border border-border/60"
@@ -318,7 +319,7 @@ export const ReminderBell = () => {
                   <p className="text-xs font-semibold text-foreground">
                     All caught up
                   </p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                     No alerts to show right now.
                   </p>
                 </div>
@@ -345,24 +346,24 @@ export const ReminderBell = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between gap-2 items-baseline">
-                            <span className="truncate font-bold text-[11px] text-foreground group-hover:text-[var(--rb-accent)] transition-colors">
+                            <span className="truncate font-bold text-[0.6875rem] text-foreground group-hover:text-[var(--rb-accent)] transition-colors">
                               {r.title}
                             </span>
                             {r.amount && (
-                              <span className="text-emerald-600 text-[11px] font-bold shrink-0">
+                              <span className="text-emerald-600 text-[0.6875rem] font-bold shrink-0">
                                 ₹{r.amount.toLocaleString()}
                               </span>
                             )}
                           </div>
-                          <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                          <p className="text-[0.625rem] text-muted-foreground truncate mt-0.5">
                             {r.subtitle}
                           </p>
                           <div className="mt-2 flex gap-1.5 items-center flex-wrap">
                             <span
-                              className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                              className={`inline-flex items-center gap-1 text-[0.5625rem] font-bold px-1.5 py-0.5 rounded-full ${
                                 overdue
                                   ? "bg-red-500/10 text-red-600"
-                                  : "bg-amber-500/10 text-amber-600"
+                                  : "bg-[#ffe2021a] text-amber-600"
                               }`}
                             >
                               <span
@@ -370,7 +371,7 @@ export const ReminderBell = () => {
                               />
                               {formatRelative(r.dueDate)}
                             </span>
-                            <span className="text-[9px] text-muted-foreground/60 font-medium">
+                            <span className="text-[0.5625rem] text-muted-foreground/60 font-medium">
                               {formatDate(r.dueDate)}
                             </span>
                           </div>

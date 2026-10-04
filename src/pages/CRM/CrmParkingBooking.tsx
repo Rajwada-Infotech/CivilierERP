@@ -20,6 +20,9 @@ import {
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
@@ -59,8 +62,18 @@ interface Allotment {
   CreatedAt: string | null;
 }
 
-async function fetchAllotments(): Promise<Allotment[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+interface ParkingCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — standalone Pending/Paid totals are
+// computed client-side from the whole set (see `standalonePending`/
+// `standalonePaid` below), same as CrmDemands. Company/Project/Block
+// narrows the set server-side instead.
+async function fetchAllotments(cpb?: ParkingCpb): Promise<Allotment[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  try { const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchApplications(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${APP_API}?includeConverted=1`); return r.ok ? r.json() : []; } catch { return []; }
@@ -115,7 +128,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
   if (!a) return null;
 
-  const isLinked = !!a.BookingId;
+  const isLinked = a.BookingId != null;
   const pct = bookingCollectedPct(a);
 
   const handlePay = async () => {
@@ -141,7 +154,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                 Unit Booking
               </span>
             ) : (
-              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
                 {a.PaymentStatus === CrmStatus.PAID ? "Paid" : "Payment Pending"}
               </span>
             )}
@@ -220,7 +233,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                     </div>
                     <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
                       <div
-                        className={`h-1.5 rounded-full transition-all ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-amber-400" : "bg-muted-foreground/20"}`}
+                        className={`h-1.5 rounded-full transition-all ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-sky-400" : "bg-muted-foreground/20"}`}
                         style={{ width: `${Math.max(pct, 2)}%` }}
                       />
                     </div>
@@ -270,7 +283,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                       <span className="text-sm text-muted-foreground">Amount due</span>
                       <span className="text-base font-semibold">{inr(a.TotalAmount)}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
                         <select value={mode} onChange={(e) => setMode(e.target.value)}
@@ -281,7 +294,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground block mb-1">Received Date</label>
-                        <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                        <DateInput value={date} onChange={(e) => setDate(e.target.value)}
                           max={new Date().toISOString().split("T")[0]}
                           className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
                       </div>
@@ -352,9 +365,10 @@ const CrmParkingBooking: React.FC = () => {
   const [releaseReason, setReleaseReason] = useState("");
   const [releaseConfirmText, setReleaseConfirmText] = useState("");
   const [releaseSaving, setReleaseSaving] = useState(false);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   const { data: allotments = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-parking-all"], queryFn: fetchAllotments, staleTime: 30_000,
+    queryKey: ["crm-parking-all", cpb], queryFn: () => fetchAllotments(cpb), staleTime: 30_000,
   });
 
   // Row clicks only ever set local state — the URL stayed plain
@@ -371,13 +385,20 @@ const CrmParkingBooking: React.FC = () => {
     setSp((p) => { p.delete("allotmentId"); return p; }, { replace: true });
   };
   useEffect(() => {
-    if (!allotmentIdFilter || allotmentDeepLinkOpened || !(allotments as Allotment[]).length) return;
+    if (!allotmentIdFilter || allotmentDeepLinkOpened) return;
+    // Wait until the allotments query has finished loading before attempting
+    // to match — avoids a false "not found" clear on the initial render.
+    if (isLoading) return;
     const match = (allotments as Allotment[]).find((a) => String(a.Id) === allotmentIdFilter);
     if (match) {
       setAllotmentDeepLinkOpened(true);
       setSelectedAllotment(match);
+    } else {
+      // No record found (deleted / invalid ID) — clear the stale URL param so
+      // it doesn't stay stuck in the address bar forever.
+      setSp((p) => { p.delete("allotmentId"); return p; }, { replace: true });
     }
-  }, [allotmentIdFilter, allotmentDeepLinkOpened, allotments]);
+  }, [allotmentIdFilter, allotmentDeepLinkOpened, allotments, isLoading, setSp]);
   const { data: applications = [] } = useQuery({
     queryKey: ["crm-applications-dropdown"], queryFn: fetchApplications, staleTime: 60_000,
   });
@@ -434,17 +455,17 @@ const CrmParkingBooking: React.FC = () => {
       // Status filter is meaningful only for standalone rows. Unit-linked
       // parking has no independent payment status — the booking is the unit
       // of payment, so Pending/Paid filters should never hide unit-linked rows.
-      const matchStatus = !statusFilter || !!a.BookingId || a.PaymentStatus === statusFilter;
-      const matchLink = !linkFilter || (linkFilter === "linked" ? !!a.BookingId : !a.BookingId);
+      const matchStatus = !statusFilter || a.BookingId != null || a.PaymentStatus === statusFilter;
+      const matchLink = !linkFilter || (linkFilter === "linked" ? a.BookingId != null : a.BookingId == null);
       return matchSearch && matchStatus && matchLink;
     }), [allotments, search, statusFilter, linkFilter]);
 
   const standalonePending = filtered
-    .filter((a) => !a.BookingId && a.PaymentStatus !== CrmStatus.PAID)
+    .filter((a) => a.BookingId == null && a.PaymentStatus !== CrmStatus.PAID)
     .reduce((s, a) => s + Number(a.TotalAmount || 0), 0);
 
   const standalonePaid = filtered
-    .filter((a) => !a.BookingId && a.PaymentStatus === CrmStatus.PAID)
+    .filter((a) => a.BookingId == null && a.PaymentStatus === CrmStatus.PAID)
     .reduce((s, a) => s + Number(a.TotalAmount || 0), 0);
 
   const resetForm = () => { setForm({ ...EMPTY_FORM }); setNewDialogOpen(false); };
@@ -569,7 +590,7 @@ const CrmParkingBooking: React.FC = () => {
       id: "status", header: "Payment Status", size: 160, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
-        if (a.BookingId) {
+        if (a.BookingId != null) {
           const pct = bookingCollectedPct(a);
           return (
             <div className="space-y-1">
@@ -580,18 +601,18 @@ const CrmParkingBooking: React.FC = () => {
                 <div className="flex items-center gap-1.5">
                   <div className="flex-1 bg-muted rounded-full h-1 overflow-hidden">
                     <div
-                      className={`h-1 rounded-full ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-amber-400" : "bg-muted-foreground/20"}`}
+                      className={`h-1 rounded-full ${pct >= 100 ? "bg-green-500" : pct > 0 ? "bg-sky-400" : "bg-muted-foreground/20"}`}
                       style={{ width: `${Math.max(pct, 2)}%` }}
                     />
                   </div>
-                  <span className="text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
+                  <span className="text-[0.625rem] text-muted-foreground tabular-nums">{pct}%</span>
                 </div>
               )}
             </div>
           );
         }
         return (
-          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-orange-600 bg-orange-50 border-orange-200"}`}>
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${a.PaymentStatus === CrmStatus.PAID ? "text-green-700 bg-green-50 border-green-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
             {a.PaymentStatus === CrmStatus.PAID ? "Paid" : "Pending"}
           </span>
         );
@@ -623,7 +644,7 @@ const CrmParkingBooking: React.FC = () => {
       action={
         <button
           onClick={() => setNewDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg transition-colors"
         >
           <Plus size={14} /> New Standalone Sale
         </button>
@@ -679,6 +700,7 @@ const CrmParkingBooking: React.FC = () => {
             </button>
           ))}
         </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
         {(statusFilter || linkFilter || search) && (
           <button onClick={() => { setStatusFilter(""); setLinkFilter(""); setSearch(""); }}
             className="text-xs text-muted-foreground hover:text-foreground underline px-1">
@@ -710,14 +732,14 @@ const CrmParkingBooking: React.FC = () => {
 
       {/* Release confirmation — super admin, requires written reason + RELEASE text */}
       <Dialog open={!!releaseTarget} onOpenChange={(o) => { if (!o) { setReleaseTarget(null); setReleaseReason(""); setReleaseConfirmText(""); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <AlertTriangle size={16} /> Release Parking Allotment
             </DialogTitle>
             <DialogDescription className="text-sm leading-relaxed">
               You are about to release slot <strong>{releaseTarget?.SlotNo || releaseTarget?.ParkingSlotNo || "—"}</strong> ({releaseTarget?.CurrentParkingType}) allotted to <strong>{releaseTarget?.ApplicantName}</strong>.
-              {releaseTarget?.BookingId && " The linked booking's grand total and milestones will be recalculated."}
+              {releaseTarget?.BookingId != null && " The linked booking's grand total and milestones will be recalculated."}
               {" "}This action cannot be undone without re-allotting.
             </DialogDescription>
           </DialogHeader>
@@ -766,7 +788,7 @@ const CrmParkingBooking: React.FC = () => {
 
       {/* New standalone sale dialog */}
       <Dialog open={newDialogOpen} onOpenChange={(o) => { if (!o) resetForm(); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New Standalone Parking Sale</DialogTitle>
             <DialogDescription>
@@ -776,7 +798,7 @@ const CrmParkingBooking: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="text-sm font-medium block mb-1.5">Customer Application <span className="text-red-500">*</span></label>
-              <select value={form.ApplicationId} onChange={(e) => setForm((f) => ({ ...f, ApplicationId: e.target.value }))}
+              <SearchableNativeSelect value={form.ApplicationId} onChange={(e) => setForm((f) => ({ ...f, ApplicationId: e.target.value }))}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary">
                 <option value="">Select application</option>
                 {(applications as any[]).map((a: any) => (
@@ -784,9 +806,9 @@ const CrmParkingBooking: React.FC = () => {
                     {a.ApplicantName} — {a.Mobile} ({a.ApplicationNo})
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-sm font-medium block mb-1.5">Project</label>
                 <select value={form.ProjectId}
@@ -806,7 +828,7 @@ const CrmParkingBooking: React.FC = () => {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-sm font-medium block mb-1.5">Parking Type / Rate <span className="text-red-500">*</span></label>
                 <select value={form.ParkingMasterId}
@@ -845,7 +867,7 @@ const CrmParkingBooking: React.FC = () => {
               </div>
             </div>
             {form.ProjectId && ratesForScope.length === 0 && (
-              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <p className="text-xs text-sky-600 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
                 No parking rates configured for this project/block. Set them up in Parking Master before selling.
               </p>
             )}
@@ -860,7 +882,7 @@ const CrmParkingBooking: React.FC = () => {
                       onChange={(e) => setForm((f) => ({ ...f, RateOverride: e.target.value }))}
                       placeholder={String(selectedRate.Charge)}
                       className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-                    <p className="text-[11px] text-muted-foreground mt-1">
+                    <p className="text-[0.6875rem] text-muted-foreground mt-1">
                       Pre-filled with the master rate ({inr(selectedRate.Charge)}). Edit only if a different price was negotiated with this customer.
                     </p>
                   </div>
@@ -894,7 +916,7 @@ const CrmParkingBooking: React.FC = () => {
             <button
               onClick={handleCreate}
               disabled={saving || !form.ApplicationId || !form.ParkingMasterId || !form.ParkingSlotId}
-              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors"
+              className="px-4 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40 transition-colors"
             >
               {saving ? "Creating…" : "Create Allotment"}
             </button>

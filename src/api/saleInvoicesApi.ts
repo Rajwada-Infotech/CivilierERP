@@ -1,4 +1,4 @@
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+﻿import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/sale-invoices";
 
@@ -21,6 +21,7 @@ export interface SaleInvoice {
   PaymentStatus: PaymentStatus;
   HasPurchaseOrder?: boolean;
   CreatedBy: string | null;
+  CreatedByName?: string | null;
   CreatedAt: string;
   UpdatedAt: string | null;
 }
@@ -69,13 +70,13 @@ export const getSaleInvoiceById = async (
   return res.json().catch(() => ({}));
 };
 
-// Fully-paid invoices with no Purchase Order created against them yet —
+// Fully-paid invoices with no Purchase Order created against them yet â€”
 // used by the PO form's "Source Sale Invoice" picker.
 export const getPaidSaleInvoicesForPO = async (): Promise<SaleInvoice[]> => {
   const res = await fetchWithAuth(`${BASE}/paid-for-po`);
   if (!res.ok)
     throw new Error(`Failed to fetch payable sale invoices: ${res.status}`);
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export interface CreateSaleInvoicePayload {

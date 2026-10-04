@@ -72,6 +72,32 @@ async function handleError(res: Response, fallback: string) {
   throw new Error((err as { error?: string }).error || fallback);
 }
 
+export interface PendingBatch {
+  AssetId: number;
+  AssetName: string;
+  Quantity: number;
+  SourceType: "GRN" | "IMPORT";
+  SourceDocNo: string | null;
+  DocDate: string | null;
+  CompanyId: number | null;
+  CompanyName: string | null;
+  ProjectId: number | null;
+  ProjectName: string | null;
+  GodownName: string | null;
+  Reason: "NO_TEMPLATE" | "READY";
+}
+
+export const getPendingBatches = async (): Promise<PendingBatch[]> => {
+  const res = await fetchWithAuth(`${BASE}/pending-batches`);
+  if (!res.ok) await handleError(res, "Failed to fetch received stock awaiting tagging");
+  return res.json();
+};
+
+export const deletePendingBatch = async (assetId: number): Promise<void> => {
+  const res = await fetchWithAuth(`${BASE}/pending-batches/${assetId}`, { method: "DELETE" });
+  if (!res.ok) await handleError(res, "Failed to delete");
+};
+
 export const getEligibleAssetItems = async (params?: {
   godownId?: number;
   companyId?: number;
@@ -113,6 +139,44 @@ export const getFixedAssetTaggings = async (params?: {
   if (params?.toDate)    qs.set("toDate",    params.toDate);
   const res = await fetchWithAuth(`${BASE}${qs.toString() ? `?${qs}` : ""}`);
   if (!res.ok) await handleError(res, "Failed to fetch fixed asset tagging entries");
+  return res.json();
+};
+
+// ── Depreciation Tag sticker page ───────────────────────────────────────────
+export interface TaggedFAItemCode {
+  TagId: number;
+  FAItemCode: string;
+  ItemName: string | null;
+  AssetId: number;
+  AssetCode: string | null;
+  DocNo: string | null;
+  DocDate: string | null;
+  FinYear: string | null;
+  Status: "Tagged";
+  CompanyId: number | null;
+  CompanyName: string | null;
+  ProjectId: number | null;
+  ProjectName: string | null;
+  HasRecord: 1;
+}
+
+export const getTaggedFAItemCodes = async (params?: {
+  companyId?: number;
+  finYear?: string;
+  fromDate?: string;
+  toDate?: string;
+  faCode?: string;
+  itemName?: string;
+}): Promise<TaggedFAItemCode[]> => {
+  const qs = new URLSearchParams();
+  if (params?.companyId) qs.set("companyId", String(params.companyId));
+  if (params?.finYear)   qs.set("finYear",   params.finYear);
+  if (params?.fromDate)  qs.set("fromDate",  params.fromDate);
+  if (params?.toDate)    qs.set("toDate",    params.toDate);
+  if (params?.faCode)    qs.set("faCode",    params.faCode);
+  if (params?.itemName)  qs.set("itemName",  params.itemName);
+  const res = await fetchWithAuth(`${BASE}/tagged-codes${qs.toString() ? `?${qs}` : ""}`);
+  if (!res.ok) await handleError(res, "Failed to fetch tagged FA Item Codes");
   return res.json();
 };
 

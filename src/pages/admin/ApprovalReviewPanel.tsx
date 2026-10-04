@@ -27,8 +27,10 @@ import {
   CRM_MODULES,
   CRM_APPROVER_ROLES,
   DATE_APPROVER_ROLES,
+  MR_APPROVER_ROLES,
   RESTRICTED_MODULES,
   openInModulePath,
+  needsBankReview,
   fmtDate,
   fmtAmount,
   getEffectiveAmount,
@@ -40,6 +42,14 @@ import {
   extractLineItems,
   formatPreviewValue,
 } from "./ApprovalInbox";
+import { partnerLineKind } from "@/pages/finance/journalVoucher/ledgerGroups";
+import {
+  getRungAssignment,
+  getEngineers,
+  SOURCE_META,
+  type RungAssignmentDetail,
+  type Engineer,
+} from "@/api/dependencyActivityAssignmentApi";
 import {
   X,
   ClipboardCheck,
@@ -50,7 +60,15 @@ import {
   Clock,
   UserCheck,
   SendHorizonal,
+  Circle,
+  CalendarDays,
+  UserRound,
+  ListChecks,
+  Printer,
+  FileDown,
 } from "lucide-react";
+import { printMasterPreview, downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
+import { toast } from "sonner";
 
 // ─── Approval chain types — matches GET /api/approval-workflows/trail ────────
 
@@ -134,14 +152,14 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-xs font-semibold text-foreground">{step.label}</p>
           <span
-            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+            className={`text-[0.5625rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
               isRejected
                 ? "bg-red-500/10 text-red-600 dark:text-red-400"
                 : isApproved
                   ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                   : isSubmitted
                     ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
             }`}
           >
             {step.status}
@@ -151,7 +169,7 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
         {step.workflowType === "parallel" && step.approvers?.length ? (
           <div className="mt-1.5 space-y-1">
             {step.approvers.map((a, i) => (
-              <div key={i} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <div key={i} className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
                 <UserCheck size={10} className="shrink-0" />
                 <span className="text-foreground font-medium">{displayName(a.name, a.email)}</span>
                 {a.role && <span className="opacity-60">· {a.role}</span>}
@@ -161,17 +179,17 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
             ))}
           </div>
         ) : step.approverEmail || step.actionAt ? (
-          <p className="text-[11px] text-muted-foreground mt-0.5">
+          <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
             {displayName(step.approverName, step.approverEmail)}
             {step.role ? ` · ${step.role}` : ""}
             {step.actionAt ? ` · ${fmtWhen(step.actionAt)}` : ""}
           </p>
         ) : (
-          <p className="text-[11px] text-muted-foreground/60 mt-0.5 italic">Awaiting action</p>
+          <p className="text-[0.6875rem] text-muted-foreground/60 mt-0.5 italic">Awaiting action</p>
         )}
 
         {step.note && (
-          <blockquote className="mt-1.5 text-[11px] text-foreground/80 italic border-l-2 border-border pl-2.5 py-0.5">
+          <blockquote className="mt-1.5 text-[0.6875rem] text-foreground/80 italic border-l-2 border-border pl-2.5 py-0.5">
             "{step.note}"
           </blockquote>
         )}
@@ -182,8 +200,8 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
 
 const FormField: React.FC<{ label: string; value: React.ReactNode; accent?: boolean }> = ({ label, value, accent }) => (
   <div className="min-w-0">
-    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">{label}</p>
-    <div className={`text-[13px] font-medium text-foreground rounded-xl px-3 py-2.5 break-words min-h-[38px] flex items-center border ${
+    <p className="text-[0.5625rem] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">{label}</p>
+    <div className={`text-[0.8125rem] font-medium text-foreground rounded-xl px-3 py-2.5 break-words min-h-[38px] flex items-center border ${
       accent ? "bg-primary/5 border-primary/20 text-primary" : "bg-muted/30 border-border/50"
     }`}>
       {value ?? <span className="text-muted-foreground/40">—</span>}
@@ -204,9 +222,27 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   const Icon = cfg?.icon ?? ClipboardCheck;
   const approvalTable: ApprovalTable | undefined = MODULE_APPROVAL_TABLE[item.Module];
 
+  // Both modules key their "record" off a rung (DependencyMasterActivityId)
+  // rather than a normal table row with a matching id — work-allocation-
+  // engineer's is a per-engineer confirmation row (now dead, see its own
+  // MODULE_CONFIG comment) and civilworkdpr-approval's is the assignment
+  // itself. Both reuse the same full-assignment detail (engineers, dates,
+  // materials, checkpoints) RungAssignmentModal.tsx shows, keyed off RungId
+  // instead of the generic cfg.apiEndpoint/RecordId fetch below.
+  const usesRungDetail = item.Module === "work-allocation-engineer" || item.Module === "civilworkdpr-approval";
+
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detailFailed, setDetailFailed] = useState(false);
+
+  // work-allocation-engineer's "record" is a per-engineer confirmation row
+  // (dae.Id), not the assignment itself — the generic cfg.apiEndpoint/
+  // RecordId fetch above can't return anything useful for it. This fetches
+  // the same full assignment detail (engineers, days, materials,
+  // checkpoints) RungAssignmentModal.tsx shows, keyed off RungId instead.
+  const [rungDetail, setRungDetail] = useState<RungAssignmentDetail | null>(null);
+  const [engineers, setEngineers] = useState<Engineer[]>([]);
+  const [loadingRungDetail, setLoadingRungDetail] = useState(false);
 
   const [chain, setChain] = useState<ChainData | null>(null);
   const [loadingChain, setLoadingChain] = useState(false);
@@ -226,7 +262,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     let cancelled = false;
     setDetail(null);
     setDetailFailed(false);
-    if (cfg?.apiEndpoint) {
+    if (cfg?.apiEndpoint && !usesRungDetail) {
       setLoadingDetail(true);
       fetchWithAuth(`${cfg.apiEndpoint}/${item.RecordId}`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
@@ -238,6 +274,23 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         })
         .finally(() => {
           if (!cancelled) setLoadingDetail(false);
+        });
+    }
+
+    setRungDetail(null);
+    if (usesRungDetail && item.RungId != null) {
+      setLoadingRungDetail(true);
+      Promise.all([getRungAssignment(item.RungId), getEngineers()])
+        .then(([rd, eng]) => {
+          if (cancelled) return;
+          setRungDetail(rd);
+          setEngineers(eng);
+        })
+        .catch(() => {
+          if (!cancelled) setDetailFailed(true);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingRungDetail(false);
         });
     }
 
@@ -260,17 +313,44 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     return () => {
       cancelled = true;
     };
-  }, [open, item.Module, item.RecordId, cfg?.apiEndpoint, approvalTable]);
+  }, [open, item.Module, item.RecordId, item.RungId, usesRungDetail, cfg?.apiEndpoint, approvalTable]);
 
   if (!open) return null;
 
   const effectiveAmount = getEffectiveAmount(item);
   const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
   const lineItems = extractLineItems(detail);
+  // A Material Request has no Rate/Amount at all yet — pricing only enters
+  // the picture once a PO is raised against it — so the generic Item/Qty/
+  // Rate/Amount table would just show ₹0.00 in both money columns for
+  // every row. Name + Qty (+ UOM, if the detail response carries it) is all
+  // that's meaningful here.
+  const isMaterialRequest = item.Module === "material-requests";
+  // Journal Voucher lines are ledger postings (LHeadName/DebitAmount/
+  // CreditAmount), not PO-style Item/Qty/Rate rows — the generic table
+  // below was showing "—"/0/₹0 for every JV line since it read fields
+  // (ItemName/Quantity/Rate) that don't exist on a JV line at all.
+  const isJournalVoucher = item.Module === "journal-voucher";
+  const isInterCompanyTransfer = item.Module === "inter-company-transfer";
+
+  // TDS — Payments/ExpenseBooking both snapshot TDSId/TDSNature/TDSName/
+  // TDSPercentage/TDSAmount onto the record at booking/payment time (same
+  // columns Payment.tsx's own form reads). stripDbPrefix's single-capital-
+  // letter strip mangles "TDSAmount" (→ "DSAmount"), so these are matched
+  // and hidden by their own raw key here rather than relying on
+  // PREVIEW_HIDDEN_KEYS — they get a proper dedicated display below instead
+  // of showing up mislabeled in the generic Details grid.
+  const rawTdsAmount = detail ? Number((detail as Record<string, unknown>).TDSAmount) || 0 : 0;
+  const tdsName = detail ? ((detail as Record<string, unknown>).TDSName as string | null) : null;
+  const tdsNature = detail ? ((detail as Record<string, unknown>).TDSNature as string | null) : null;
+  const tdsPercentage = detail ? (detail as Record<string, unknown>).TDSPercentage : null;
+  const netPayableAfterTds = Math.max(0, (effectiveAmount ?? 0) - rawTdsAmount);
+
   const extraFields = detail
     ? Object.entries(detail).filter(
         ([k, v]) =>
           !PREVIEW_HIDDEN_KEYS.has(stripDbPrefix(k).toLowerCase()) &&
+          !/^tds/i.test(k) &&
           !isIdField(k) &&
           !isJsonBlob(v) &&
           !(Array.isArray(v) && v.length === 0) &&
@@ -278,9 +358,25 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
       )
     : [];
 
+  // NewPayment's PSupplierName/PSupplierContact columns are reused verbatim
+  // for a CRM Refund payout's customer ledger head (see ensureCrmCustomerLedgerHead
+  // in crmLedger.js) — labelizeKey's generic column-name split would show
+  // "Supplier Name"/"Supplier Contact" for what is actually the customer
+  // being refunded, which reads as a wrong-ledger red flag to a reviewer.
+  // Relabel just those two keys when this record is a CRM Refund voucher.
+  const isCrmRefundPayment = !!(detail as Record<string, unknown> | null)?.SourceCrmRefundId;
+  const labelFor = (k: string): string => {
+    if (isCrmRefundPayment) {
+      const stripped = stripDbPrefix(k).toLowerCase();
+      if (stripped === "suppliername") return "Customer Name";
+      if (stripped === "suppliercontact") return "Customer Contact";
+    }
+    return labelizeKey(k);
+  };
+
   const chainSection = (
     <>
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
         <UserCheck size={11} /> Approval Chain
       </p>
       {!approvalTable ? (
@@ -289,7 +385,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             <UserCheck size={16} className="text-muted-foreground/50" />
           </div>
           <p className="text-xs font-medium text-muted-foreground">No tracked workflow</p>
-          <p className="text-[11px] text-muted-foreground/60 mt-0.5">This module's approval chain is managed directly.</p>
+          <p className="text-[0.6875rem] text-muted-foreground/60 mt-0.5">This module's approval chain is managed directly.</p>
         </div>
       ) : loadingChain ? (
         <div className="space-y-3">
@@ -307,6 +403,124 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         </div>
       )}
     </>
+  );
+
+  // Print / Generate PDF both render this same shape — see
+  // masterPreviewPrint.ts's own comment on why that matters. Built from
+  // exactly what's already on screen (Overview, line items, Details,
+  // Approval Chain) so the exported doc can never show something the
+  // reviewer didn't actually see here.
+  const previewSections = (() => {
+    const sections: { title: string; fields: { label: string; value?: string | number | boolean | null }[] }[] = [];
+
+    const overviewFields: { label: string; value?: string | number | boolean | null }[] = [
+      { label: usesRungDetail ? "Start Date" : "Date", value: fmtDate(item.RecordDate) },
+      { label: "Party", value: party },
+      ...(item.ProjectName ? [{ label: "Project", value: item.ProjectName }] : []),
+      { label: "Created By", value: item.CreatedBy || "—" },
+      usesRungDetail
+        ? { label: "End Date", value: fmtDate(rungDetail?.assignment?.endDate ?? null) }
+        : { label: "Last Modified", value: fmtDate(item.LastModified) },
+    ];
+    if (item.Module === "goods-receipt" && item.SourceTransferDocNo) {
+      overviewFields.push({ label: "Transfer Ref", value: item.SourceTransferDocNo });
+    }
+    if (item.FromGodownName) overviewFields.push({ label: "From Godown", value: item.FromGodownName });
+    if (item.ToGodownName) overviewFields.push({ label: "To Godown", value: item.ToGodownName });
+    overviewFields.push({ label: usesRungDetail ? "Total Days" : "Total Amount", value: usesRungDetail ? (rungDetail?.assignment?.days != null ? `${rungDetail.assignment.days} day${rungDetail.assignment.days === 1 ? "" : "s"}` : "—") : fmtAmount(effectiveAmount) });
+    if (!usesRungDetail && rawTdsAmount > 0) {
+      overviewFields.push({ label: `TDS Deducted${tdsPercentage != null ? ` (${tdsPercentage}%)` : ""}`, value: `- ${fmtAmount(rawTdsAmount)}` });
+      overviewFields.push({ label: "Net Payable (After TDS)", value: fmtAmount(netPayableAfterTds) });
+    }
+    sections.push({ title: "Overview", fields: overviewFields });
+
+    if (lineItems.length > 0) {
+      const itemFields = isJournalVoucher
+        ? lineItems.map((li, i) => {
+            const debit = Number(li.DebitAmount) || 0;
+            const credit = Number(li.CreditAmount) || 0;
+            return {
+              label: `${i + 1}. ${(li.LHeadName as string) || "—"}`,
+              value: debit > 0 ? `Dr ${fmtAmount(debit)}` : `Cr ${fmtAmount(credit)}`,
+            };
+          })
+        : isMaterialRequest
+          ? lineItems.map((li, i) => {
+              const name = (li.ItemName ?? li.itemName ?? "—") as string;
+              const qty = Number(li.Quantity ?? li.quantity ?? 0);
+              const uom = (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
+              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""}` };
+            })
+          : lineItems.map((li, i) => {
+              const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
+              const qty = Number(li.Quantity ?? li.quantity ?? 0);
+              const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
+              const rate = Number(li.Rate ?? li.rate ?? 0);
+              const amount = Number(li.LineAmount ?? li.AmountInclGst ?? li.amount ?? qty * rate);
+              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""} × ${fmtAmount(rate)} = ${fmtAmount(amount)}` };
+            });
+      sections.push({ title: isJournalVoucher ? "Journal Entry" : `Items (${lineItems.length})`, fields: itemFields });
+    }
+
+    if (!usesRungDetail && extraFields.length > 0) {
+      sections.push({ title: "Details", fields: extraFields.map(([k, v]) => ({ label: labelFor(k), value: formatPreviewValue(v) })) });
+    }
+
+    if (item.RejectionNote) {
+      sections.push({ title: "Rejection Note", fields: [{ label: "Note", value: item.RejectionNote }] });
+    }
+
+    if (chain && chain.steps.length > 0) {
+      sections.push({
+        title: "Approval Chain",
+        fields: chain.steps.map((step) => ({
+          label: step.label,
+          value: `${step.status}${step.approverName || step.approverEmail ? ` — ${displayName(step.approverName, step.approverEmail)}` : ""}${step.actionAt ? ` (${fmtWhen(step.actionAt)})` : ""}`,
+        })),
+      });
+    }
+
+    return sections;
+  })();
+
+  const previewTitle = item.Reference || `#${item.RecordId}`;
+  const docActions = (
+    <div className="flex items-center gap-1.5 shrink-0">
+      <button
+        onClick={() =>
+          printMasterPreview({
+            title: previewTitle,
+            subtitle: item.ModuleLabel,
+            code: item.Reference,
+            status: item.Status,
+            sections: previewSections,
+          })
+        }
+        title="Print"
+        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+      >
+        <Printer size={16} />
+      </button>
+      <button
+        onClick={() => {
+          const toastId = toast.loading("Generating PDF...");
+          downloadMasterPreviewPdf({
+            title: previewTitle,
+            subtitle: item.ModuleLabel,
+            code: item.Reference,
+            status: item.Status,
+            sections: previewSections,
+            filename: `${(item.Reference || item.RecordId || "document").replace(/[^\w-]+/g, "_")}.pdf`,
+          })
+            .then(() => toast.success("PDF downloaded", { id: toastId }))
+            .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+        }}
+        title="Generate PDF"
+        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+      >
+        <FileDown size={16} />
+      </button>
+    </div>
   );
 
   return createPortal(
@@ -341,12 +555,13 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             <Icon size={20} />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-bold text-foreground truncate leading-tight">{item.ModuleLabel}</p>
-            <p className="text-[12px] text-muted-foreground font-mono truncate mt-0.5">
+            <p className="text-[0.9375rem] font-bold text-foreground truncate leading-tight">{item.ModuleLabel}</p>
+            <p className="text-[0.75rem] text-muted-foreground font-mono truncate mt-0.5">
               {item.Reference || `#${item.RecordId}`}
             </p>
           </div>
           <StatusBadge status={item.Status} />
+          {docActions}
           <button
             onClick={onClose}
             className="ml-2 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors shrink-0"
@@ -378,26 +593,60 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               })() }}
             >
               <div className="px-5 py-4">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Total Amount</p>
+                <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                  {usesRungDetail ? "Total Days" : rawTdsAmount > 0 ? "Total Amount (Before TDS)" : "Total Amount"}
+                </p>
                 <p className="text-3xl font-bold font-heading text-foreground tabular-nums tracking-tight">
-                  {fmtAmount(effectiveAmount)}
+                  {usesRungDetail
+                    ? rungDetail?.assignment?.days != null
+                      ? `${rungDetail.assignment.days} day${rungDetail.assignment.days === 1 ? "" : "s"}`
+                      : "—"
+                    : fmtAmount(effectiveAmount)}
                 </p>
                 {item.Status === "Pending" && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1 font-medium">
+                  <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1 font-medium">
                     <Clock size={10} /> Awaiting your approval
                   </p>
                 )}
               </div>
+              {!usesRungDetail && rawTdsAmount > 0 && (
+                <div className="grid grid-cols-2 divide-x divide-border border-t border-border/60 bg-background/40">
+                  <div className="px-5 py-3">
+                    <p className="text-[0.5625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                      TDS Deducted{tdsPercentage != null ? ` (${tdsPercentage}%)` : ""}
+                    </p>
+                    <p className="text-lg font-bold font-heading text-amber-600 dark:text-amber-400 tabular-nums">
+                      − {fmtAmount(rawTdsAmount)}
+                    </p>
+                    {(tdsName || tdsNature) && (
+                      <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{tdsName || tdsNature}</p>
+                    )}
+                  </div>
+                  <div className="px-5 py-3">
+                    <p className="text-[0.5625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                      Net Payable (After TDS)
+                    </p>
+                    <p className="text-lg font-bold font-heading text-emerald-600 dark:text-emerald-400 tabular-nums">
+                      {fmtAmount(netPayableAfterTds)}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Overview — form-style fields */}
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Overview</p>
+              <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Overview</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                <FormField label="Date" value={fmtDate(item.RecordDate)} />
+                <FormField label={usesRungDetail ? "Start Date" : "Date"} value={fmtDate(item.RecordDate)} />
                 <FormField label="Party" value={party} />
+                {item.ProjectName && <FormField label="Project" value={item.ProjectName} />}
                 <FormField label="Created By" value={item.CreatedBy || "—"} />
-                <FormField label="Last Modified" value={fmtDate(item.LastModified)} />
+                {usesRungDetail ? (
+                  <FormField label="End Date" value={fmtDate(rungDetail?.assignment?.endDate ?? null)} />
+                ) : (
+                  <FormField label="Last Modified" value={fmtDate(item.LastModified)} />
+                )}
                 {item.Module === "goods-receipt" && item.SourceTransferDocNo && (
                   <FormField label="Transfer Ref" value={item.SourceTransferDocNo} />
                 )}
@@ -406,9 +655,128 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               </div>
             </div>
 
+            {/* Work Allocation — engineers, labour/material source, description,
+                checkpoints. Same fields RungAssignmentModal.tsx's "Assign
+                engineers & material" form shows, read-only here for review. */}
+            {usesRungDetail && (
+              loadingRungDetail ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="h-[46px] rounded-lg bg-muted animate-pulse" />
+                  ))}
+                </div>
+              ) : rungDetail?.assignment ? (
+                <>
+                  <div>
+                    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <UserRound size={10} className="text-cyan-500" /> Engineers
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {rungDetail.assignment.engineerIds.length === 0 ? (
+                        <span className="text-xs text-muted-foreground italic">None assigned</span>
+                      ) : (
+                        rungDetail.assignment.engineerIds.map((id) => (
+                          <span
+                            key={id}
+                            className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
+                          >
+                            {engineers.find((e) => e.id === id)?.name || `#${id}`}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {rungDetail.assignment.labourSource && (
+                      <FormField
+                        label="Labour Given By"
+                        value={
+                          <span
+                            className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.labourSource].className}`}
+                          >
+                            {SOURCE_META[rungDetail.assignment.labourSource].label}
+                          </span>
+                        }
+                      />
+                    )}
+                    {rungDetail.assignment.materialSource && (
+                      <FormField
+                        label="Material Given By"
+                        value={
+                          <span
+                            className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.materialSource].className}`}
+                          >
+                            {SOURCE_META[rungDetail.assignment.materialSource].label}
+                          </span>
+                        }
+                      />
+                    )}
+                  </div>
+
+                  {rungDetail.assignment.description && (
+                    <div>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Description</p>
+                      <p className="text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
+                        {rungDetail.assignment.description}
+                      </p>
+                    </div>
+                  )}
+
+                  {rungDetail.assignment.materials.length > 0 && (
+                    <div>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <Package size={10} className="text-emerald-500" /> Materials ({rungDetail.assignment.materials.length})
+                      </p>
+                      <div className="rounded-xl border border-border divide-y divide-border/50">
+                        {rungDetail.assignment.materials.map((m, i) => {
+                          const candidate = rungDetail.candidateItems.find((c) => c.itemId === m.itemId);
+                          return (
+                            <div key={i} className="flex items-center justify-between px-3 py-2 text-xs">
+                              <span className="font-medium text-foreground">{candidate?.itemName || `#${m.itemId}`}</span>
+                              <span className="text-muted-foreground shrink-0">
+                                {m.quantity.toLocaleString("en-IN")}{candidate?.uom ? ` ${candidate.uom}` : ""}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {rungDetail.assignment.checkpoints.length > 0 && (
+                    <div>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <ListChecks size={10} className="text-cyan-500" /> Checkpoints ({rungDetail.assignment.checkpoints.length})
+                      </p>
+                      <div className="rounded-xl border border-border divide-y divide-border/50">
+                        {rungDetail.assignment.checkpoints.map((cp) => (
+                          <div key={cp.id ?? cp.fieldName} className="flex items-center gap-2 px-3 py-2 text-xs">
+                            {cp.isChecked ? (
+                              <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                            ) : (
+                              <Circle size={13} className="text-muted-foreground/40 shrink-0" />
+                            )}
+                            <span className={cp.isChecked ? "text-foreground" : "text-muted-foreground"}>{cp.fieldName}</span>
+                            {cp.isDaily && (
+                              <span className="ml-auto text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground/70 flex items-center gap-1">
+                                <CalendarDays size={10} /> Daily{cp.updateCount ? ` · ${cp.updateCount}` : ""}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">Couldn't load the full assignment — showing summary only.</p>
+              )
+            )}
+
             {item.RejectionNote && (
               <div className="rounded-lg border border-red-400/20 bg-red-500/5 px-3 py-2">
-                <p className="text-[9px] font-semibold uppercase tracking-widest text-red-500/80 mb-0.5">
+                <p className="text-[0.5625rem] font-semibold uppercase tracking-widest text-red-500/80 mb-0.5">
                   Rejection Note
                 </p>
                 <p className="text-xs text-foreground">{item.RejectionNote}</p>
@@ -418,43 +786,146 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             {/* Line items */}
             {lineItems.length > 0 && (
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <Package size={10} className="text-emerald-500" /> Items ({lineItems.length})
+                <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <Package size={10} className="text-emerald-500" />
+                  {isJournalVoucher ? "Journal Entry" : `Items (${lineItems.length})`}
                 </p>
-                <div className="rounded-xl border border-border overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/40 border-b border-border">
-                      <tr>
-                        <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
-                        <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
-                        <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Rate</th>
-                        <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {lineItems.map((li, i) => {
-                        const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
-                        const qty = Number(li.Quantity ?? li.quantity ?? 0);
-                        const rate = Number(li.Rate ?? li.rate ?? 0);
-                        const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
-                        return (
-                          <tr key={i} className="hover:bg-muted/20 transition-colors">
-                            <td className="px-3 py-2 font-medium">{name}</td>
-                            <td className="px-3 py-2 text-right">{qty.toLocaleString("en-IN")}</td>
-                            <td className="px-3 py-2 text-right">{formatINR(rate)}</td>
-                            <td className="px-3 py-2 text-right font-medium">{formatINR(amount)}</td>
+                {isJournalVoucher ? (
+                  <div className="rounded-xl border border-border overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/40 border-b border-border">
+                        <tr>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">Ledger</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Debit (₹)</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Credit (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {lineItems.map((li, i) => {
+                          const debit = Number(li.DebitAmount) || 0;
+                          const credit = Number(li.CreditAmount) || 0;
+                          const kind = partnerLineKind({
+                            LHeadType: li.LHeadType as string | undefined,
+                            LHeadCode: li.LHeadCode as string | null | undefined,
+                          });
+                          return (
+                            <tr key={i} className="hover:bg-muted/20 transition-colors">
+                              <td className="px-3 py-2 font-medium">
+                                <span className="flex items-center gap-2">
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${debit > 0 ? "bg-emerald-500" : "bg-red-500"}`} />
+                                  {(li.LHeadName as string) || "—"}
+                                  {kind && (
+                                    <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                      kind === "Investment"
+                                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                        : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
+                                    }`}>
+                                      {kind}
+                                    </span>
+                                  )}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">
+                                {debit > 0 ? formatINR(debit) : ""}
+                              </td>
+                              <td className="px-3 py-2 text-right text-red-600 dark:text-red-400">
+                                {credit > 0 ? formatINR(credit) : ""}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-muted/20 border-t border-border font-semibold">
+                        <tr>
+                          <td className="px-3 py-2 text-[0.625rem] uppercase tracking-widest text-muted-foreground">Total</td>
+                          <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">
+                            {formatINR(lineItems.reduce((s, li) => s + (Number(li.DebitAmount) || 0), 0))}
+                          </td>
+                          <td className="px-3 py-2 text-right text-red-600 dark:text-red-400">
+                            {formatINR(lineItems.reduce((s, li) => s + (Number(li.CreditAmount) || 0), 0))}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                ) : isMaterialRequest ? (
+                  <div className="rounded-xl border border-border divide-y divide-border/50">
+                    {lineItems.map((li, i) => {
+                      const name = (li.ItemName ?? li.itemName ?? "—") as string;
+                      const qty = Number(li.Quantity ?? li.quantity ?? 0);
+                      const uom = (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
+                      return (
+                        <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-muted/20 transition-colors">
+                          <span className="font-medium text-foreground">{name}</span>
+                          <span className="text-muted-foreground shrink-0">
+                            {qty.toLocaleString("en-IN")}{uom ? ` ${uom}` : ""}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border overflow-x-auto">
+    
+                <table className="w-full text-xs">
+                      <thead className="bg-muted/40 border-b border-border">
+                        <tr>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">UOM</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Rate</th>
+                          <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">
+                            {isInterCompanyTransfer ? "Amount (Incl. GST)" : "Amount"}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {lineItems.map((li, i) => {
+                          const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
+                          const qty = Number(li.Quantity ?? li.quantity ?? 0);
+                          // Every line-item shape across PO/WO/GRN/etc. spells this
+                          // differently — same fallback chain the Material Request
+                          // list above uses, so a doc missing one field still shows
+                          // whichever of the others it actually carries.
+                          const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
+                          const rate = Number(li.Rate ?? li.rate ?? 0);
+                          // Inter-Company Transfer items carry AmountInclGst
+                          // separately from their excl-GST Amount — preferring it
+                          // here keeps this column's sum in line with the incl-GST
+                          // "Total Amount" hero above instead of silently falling
+                          // back to qty*rate (excl-GST), which used to make the
+                          // two totals on the same screen disagree.
+                          const amount = Number(li.LineAmount ?? li.AmountInclGst ?? li.amount ?? qty * rate);
+                          return (
+                            <tr key={i} className="hover:bg-muted/20 transition-colors">
+                              <td className="px-3 py-2 font-medium">{name}</td>
+                              <td className="px-3 py-2 text-right">{qty.toLocaleString("en-IN")}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{uom || "—"}</td>
+                              <td className="px-3 py-2 text-right">{formatINR(rate)}</td>
+                              <td className="px-3 py-2 text-right font-medium">{formatINR(amount)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      {isInterCompanyTransfer && lineItems.length > 0 && (
+                        <tfoot className="bg-muted/20 border-t border-border font-semibold">
+                          <tr>
+                            <td colSpan={4} className="px-3 py-2 text-[0.625rem] uppercase tracking-widest text-muted-foreground text-right">Total (Incl. GST)</td>
+                            <td className="px-3 py-2 text-right">{formatINR(effectiveAmount ?? 0)}</td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Details — the rest of the record, form-style */}
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Details</p>
+            {/* Details — the rest of the record, form-style. Not shown for
+                work-allocation-engineer — its own Engineers/Materials/
+                Checkpoints sections above already cover its full record. */}
+            {!usesRungDetail && <div>
+              <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Details</p>
               {loadingDetail ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {Array.from({ length: 6 }).map((_, i) => (
@@ -468,11 +939,11 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {extraFields.map(([k, v]) => (
-                    <FormField key={k} label={labelizeKey(k)} value={formatPreviewValue(v)} />
+                    <FormField key={k} label={labelFor(k)} value={formatPreviewValue(v)} />
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* Chain shows here too on small screens, where the sidebar collapses out */}
             <div className="lg:hidden pt-1">{chainSection}</div>
@@ -492,14 +963,14 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
           </div>
 
           {/* Right: approval chain, pinned — desktop only */}
-          <div className="hidden lg:block w-[340px] shrink-0 border-l border-border bg-muted/5 overflow-y-auto px-5 py-5">
+          <div className="hidden lg:block w-full sm:w-[340px] shrink-0 border-l border-border bg-muted/5 overflow-y-auto px-5 py-5">
             {chainSection}
           </div>
         </div>
 
         {/* Footer — the action bar, spanning full width */}
         <div className="shrink-0 border-t border-border px-5 sm:px-6 py-4 bg-muted/10 flex items-center justify-between gap-3">
-          <p className="text-[11px] text-muted-foreground hidden sm:block">
+          <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
             {item.Status === "Pending" ? "Review the details above before taking action." : `This record is ${item.Status.toLowerCase()}.`}
           </p>
           <ApprovalActions
@@ -509,10 +980,16 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
             approverRoles={
               SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+              : item.Module === "crm-money-receipts" || item.Module === "crm-refund-payment" ? MR_APPROVER_ROLES
               : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
               : undefined
             }
             restricted={RESTRICTED_MODULES.has(item.Module)}
+            // CRM payment without a deposit bank yet: Accounts sets it on the
+            // Received Payment page first — Approve here would be refused.
+            reviewInstead={needsBankReview(item) && cfg?.navPath
+              ? { label: "Review — set bank", onClick: () => { onClose(); navigate(openInModulePath(item, cfg.navPath)); } }
+              : undefined}
             className="[&_button]:h-10 [&_button]:px-5 [&_button]:text-sm [&_button]:font-semibold [&_button]:rounded-xl"
             onSuccess={(action) => {
               if (action === "approve" || action === "reject") {

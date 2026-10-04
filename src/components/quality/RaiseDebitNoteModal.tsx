@@ -51,7 +51,7 @@ export function RaiseDebitNoteModal({
             </div>
             <div>
               <h2 className="font-heading font-bold text-sm">Raise Debit Note</h2>
-              <p className="text-[10px] text-muted-foreground">{item.itemName}</p>
+              <p className="text-[0.625rem] text-muted-foreground">{item.itemName}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-muted rounded-lg transition-colors">
@@ -61,7 +61,7 @@ export function RaiseDebitNoteModal({
 
         <div className="p-5 space-y-4">
           <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-            <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Received Quantity</p>
+            <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Received Quantity</p>
             <p className="text-sm font-semibold font-mono text-foreground">
               {receivedQty} {item.uomName || ""}
             </p>

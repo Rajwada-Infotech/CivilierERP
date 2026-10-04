@@ -3,11 +3,15 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a contract whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.Contract WHERE ContractId = @id"));
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -64,7 +68,7 @@ router.get("/", authenticateToken, async (req, res) => {
       FROM dbo.Contract c
       LEFT JOIN dbo.enterprise co ON co.id = c.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = c.ProjectId
-      WHERE 1=1
+      WHERE 1=1${projectPredicate(req.projectScope, "c.ProjectId")}
         ${companyId ? "AND c.CompanyId = @CompanyId" : ""}
         ${projectId ? "AND c.ProjectId = @ProjectId" : ""}
         ${finYear   ? "AND c.FinYear = @FinYear" : ""}
@@ -96,7 +100,7 @@ router.get("/contact-persons", authenticateToken, async (req, res) => {
         LGST                             AS gst,
         LHeadPan                         AS pan
       FROM dbo.AccountHeadMaster
-      WHERE LHeadType IN ('S', 'C', 'A')
+      WHERE LHeadType IN ('S', 'V', 'C', 'A')
         AND LHeadContactPerson IS NOT NULL
         AND LTRIM(RTRIM(LHeadContactPerson)) <> ''
       ORDER BY LHeadType, LHeadContactPerson
@@ -112,7 +116,7 @@ router.get("/meta/suppliers", authenticateToken, async (req, res) => {
   try {
     const result = await getPool().request().query(`
       SELECT LHeadId AS id, LHeadName AS name, LHeadCode AS code
-      FROM dbo.AccountHeadMaster WHERE LHeadType = 'S' AND Status IN ('Active', 'Approved')
+      FROM dbo.AccountHeadMaster WHERE LHeadType IN ('S', 'V') AND Status IN ('Active', 'Approved')
       ORDER BY LHeadName
     `);
     res.json(result.recordset);
@@ -155,7 +159,7 @@ router.get("/options", authenticateToken, async (req, res) => {
                     ISNULL(' — ' + c.ContactPerson, '')) AS label,
              c.ContractAmount
       FROM dbo.Contract c
-      WHERE c.Status <> 'Deleted'
+      WHERE c.Status <> 'Deleted'${projectPredicate(req.projectScope, "c.ProjectId")}
     `;
     if (req.query.companyId) {
       query += " AND c.CompanyId = @CompanyId";
@@ -258,6 +262,7 @@ router.get("/:id/attachment/:index", authenticateToken, async (req, res) => {
 router.post("/", authenticateToken, requirePageRight("finance-contracts", "create"), async (req, res) => {
   const email = requireUser(req, res);
   if (!email) return;
+  if (!assertProjectAllowed(req, res, req.body?.projectId)) return;
   try {
     const pool = getPool();
     const {
@@ -338,8 +343,11 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   const email = requireUser(req, res);
   if (!email) return;
+  if (!assertProjectAllowed(req, res, req.body?.projectId)) return;
+  let wasRejected = false;
   try {
     await guardEdit("contracts", id);
+    wasRejected = (await getRecordStatus("contracts", id)) === "Rejected";
   } catch (err) {
     return res.status(409).json({ error: err.message });
   }
@@ -396,7 +404,28 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
       `);
 
     await bumpCacheVersion("contracts");
-    res.json({ ok: true });
+
+    // A corrected, previously-Rejected contract goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("contracts", id, "Pending", email, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[contract] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          ok: true,
+          message: "Contract updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({ ok: true, resubmitted });
   } catch (err) {
     console.error("[contract] PUT /:id:", err.message);
     res.status(500).json({ error: err.message });
@@ -430,7 +459,7 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("contracts", id, "Approved", email, req.user?.role);
+    const result = await transition("contracts", id, "Approved", email, req.user?.role, null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("contracts");
     res.json({ message: "Contract approved", ...result });
   } catch (err) {
@@ -447,7 +476,7 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
 
     const { note } = req.body;
-    const result = await transition("contracts", id, "Rejected", email, req.user?.role, note || null);
+    const result = await transition("contracts", id, "Rejected", email, req.user?.role, note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("contracts");
     res.json({ message: "Contract rejected", ...result });
   } catch (err) {

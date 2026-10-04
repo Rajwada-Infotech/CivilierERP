@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml, raw } from "@/utils/escapeHtml";
+import { printStatusLabel } from "@/utils/printStatus";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { type DbItem } from "@/api/itemMasterApi";
-import { type DbActivity } from "@/api/activityMasterApi";
+import { type DbActivity } from "@/api/engineeringActivityMasterApi";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import {
   FileText,
@@ -43,6 +45,7 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -113,6 +116,7 @@ interface Project {
   label?: string;
   name?: string;
   companyId?: number | null;
+  companyIds?: string[];
 }
 interface DocType {
   id: number;
@@ -287,11 +291,11 @@ const Field = ({
   children: React.ReactNode;
 }) => (
   <div className="space-y-1.5">
-    <label className="block text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">
+    <label className="block text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground">
       {label} {required && <span className="text-destructive">*</span>}
     </label>
     {children}
-    {error && <p className="text-[11px] text-destructive">{error}</p>}
+    {error && <p className="text-[0.6875rem] text-destructive">{error}</p>}
   </div>
 );
 
@@ -303,7 +307,7 @@ const DetailRow = ({
   value?: React.ReactNode;
 }) => (
   <div>
-    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-1">
       {label}
     </p>
     <p className="font-medium text-foreground">{value || "—"}</p>
@@ -1294,6 +1298,7 @@ const FormModal: React.FC<FormModalProps> = ({
     ? projects.filter(
         (p) =>
           p.companyId == null || // show projects with no company link always
+          (p.companyIds ?? []).includes(form.CompanyId) ||
           String(p.companyId) === form.CompanyId,
       )
     : projects;
@@ -1573,8 +1578,7 @@ const FormModal: React.FC<FormModalProps> = ({
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     size={14}
                   />
-                  <input
-                    type="date"
+                  <DateInput
                     value={form.BoqDate}
                     onChange={(e) => set("BoqDate", e.target.value)}
                     className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer${errors.BoqDate ? " border-destructive" : " border-border"}`}
@@ -1827,7 +1831,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
             >
               {record.BoqNo || record.DocNo}
             </span>
-            <ApprovalStatusChain table="BOQ" recordId={record.BoqID} />
+            <ApprovalStatusChain table="BOQ" recordId={record.BoqID} fallback={<StatusBadge status={record.Status} />} />
           </div>
 
           {/* Right-side actions */}
@@ -1843,7 +1847,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
                 <Trash2 size={13} className="mr-1.5" /> Delete
               </Button>
             )}
-            {canEdit && (record.Status === "Draft" || record.Status === "Approved") && (
+            {canEdit && (record.Status === "Draft" || record.Status === "Approved" || record.Status === "Rejected") && (
               <Button
                 variant="secondary"
                 size="sm"
@@ -2145,7 +2149,7 @@ export default function BOQ() {
         apiFetch("/document-type?module=BOQ"),
         apiFetch("/uom-master"),
         apiFetch("/item-master"),
-        apiFetch("/activity-master"),
+        apiFetch("/engineering-activity-master"),
       ]);
 
       const cos = cosResult.status === "fulfilled" ? cosResult.value : [];
@@ -2203,6 +2207,7 @@ export default function BOQ() {
               : item.belongs_to != null
                 ? Number(item.belongs_to)
                 : null,
+          companyIds: projectCompanyIds(item),
         })),
       );
 
@@ -2401,7 +2406,7 @@ export default function BOQ() {
               <h1>Bill of Quantities</h1>
               <div class="muted">${record.BoqNo || record.DocNo || `#${record.BoqID}`}</div>
             </div>
-            <div><span class="badge">${record.Status || "Draft"}</span></div>
+            <div><span class="badge">${printStatusLabel(record.Status) || "Draft"}</span></div>
           </div>
           <div class="grid">
             <div><div class="label">Company</div><div class="value">${record.CompanyName || ""}</div></div>
@@ -2439,7 +2444,7 @@ export default function BOQ() {
       header: "Actions",
       cell: ({ row }: any) => (
         <div className="flex items-center gap-1">
-          <Button
+          <Button data-row-view
             variant="ghost"
             size="sm"
             onClick={() => openDetail(row.original)}
@@ -2687,6 +2692,7 @@ export default function BOQ() {
                     searchable={false}
                     paginated={false}
                     emptyMessage="No BOQs found. Adjust your filters or create a new one."
+                    getRowId={(r: any) => String(r.BoqID)}
                   />
                   {totalPages > 1 && (
                     <div className="flex items-center justify-between border-t p-4 text-sm">

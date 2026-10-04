@@ -2,7 +2,7 @@ const BASE_URL = "/api/tc-master";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
 });
 
 export const getTCRecords = async () => {

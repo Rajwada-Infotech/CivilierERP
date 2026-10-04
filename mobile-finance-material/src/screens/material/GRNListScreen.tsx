@@ -3,7 +3,8 @@
 // columns) — the card layout here follows the same visual language as the
 // PO/VIO list cards for consistency across the Material module.
 import { useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, TextInput, Alert } from "react-native";
+import { View, Text, Pressable, ActivityIndicator, TextInput, Alert } from "react-native";
+import { ProjectGroupedList } from "@/components/ProjectGroupedList";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { PackageCheck, Search, X, Plus, Eye, Trash2, ShieldOff, AlertCircle } from "lucide-react-native";
@@ -189,26 +190,23 @@ export default function GRNListScreen() {
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={filtered}
+        <ProjectGroupedList
+          items={filtered}
+          getProject={(r) => r.ProjectName}
           keyExtractor={(r) => String(r.GRNID)}
-          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          onEndReachedThreshold={0.4}
+          unit={["GRN", "GRNs"]}
+          accent="#10b981"
+          header={ListHeader}
+          expandAll={!!search.trim()}
+          emptyText="No GRNs yet."
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
-          ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => (
+          loadingMore={isFetchingNextPage}
+          contentPaddingBottom={insets.bottom + 24}
+          renderItem={(item) => (
             <GRNCard grn={item} onView={() => setViewingId(item.GRNID)} onDelete={() => handleDelete(item)} canDelete={rights.canDelete} />
           )}
-          ListEmptyComponent={
-            <View className="items-center py-16">
-              <AlertCircle size={20} color={`${colors.mutedForeground}80`} />
-              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No GRNs yet.</Text>
-            </View>
-          }
-          ListFooterComponent={isFetchingNextPage ? (
-            <View className="py-4 items-center"><ActivityIndicator size="small" color={colors.mutedForeground} /></View>
-          ) : null}
         />
       )}
 

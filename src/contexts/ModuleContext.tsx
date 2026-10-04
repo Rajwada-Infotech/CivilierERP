@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { useLocation } from "react-router-dom";
 import type { Module } from "@/contexts/module.utils";
+import { isModuleId, moduleFromPath } from "@/contexts/moduleFromPath";
 
 // Module/MODULE_DASHBOARD_ROUTES now live in module.utils.ts and are NOT
 // re-exported here — this file only exports components/hooks. Mixing
@@ -61,6 +62,12 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
                       ? "📣 Sales Automation"
                       : activeModule === "crm"
                         ? "🏠 CRM"
+                    : activeModule === "loan"
+                      ? "🏦 Loan"
+                    : activeModule === "maintenance"
+                      ? "🔧 Maintenance"
+                    : activeModule === "hr-payroll"
+                      ? "🧑‍💼 HR and Payroll"
                     : activeModule === "admin"
                       ? "🔧 Admin"
                       : "No Module Selected";
@@ -68,9 +75,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
   const setActiveModule = useCallback((m: Module) => {
     setActiveModuleState(m);
     if (m) {
-      localStorage.setItem("activeModule", m);
+      sessionStorage.setItem("activeModule", m);
     } else {
-      localStorage.removeItem("activeModule");
+      sessionStorage.removeItem("activeModule");
     }
   }, []);
 
@@ -79,9 +86,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     setActiveModuleState((prev) => {
       const next = prev === m ? null : m;
       if (next) {
-        localStorage.setItem("activeModule", next);
+        sessionStorage.setItem("activeModule", next);
       } else {
-        localStorage.removeItem("activeModule");
+        sessionStorage.removeItem("activeModule");
       }
       return next;
     });
@@ -96,83 +103,20 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
   // Priority: URL first for known module paths, then localStorage for
   // ambiguous paths (/masters/*, /reports, etc.), then null.
   useEffect(() => {
-    const stored = localStorage.getItem("activeModule") as Module | null;
-    const pathname = location.pathname;
-    const valid: Module[] = [
-      "finance",
-      "material",
-      "fixed-asset",
-      "followup",
-      "engineering",
-      "ticket",
-      "sales",
-      "records",
-      "civilworkdpr",
-      "sales-automation",
-      "crm",
-      "loan",
-      "admin",
-    ];
+    const resolved = moduleFromPath(location.pathname);
 
-    if (pathname.startsWith("/admin") || pathname.startsWith("/users")) {
-      setActiveModuleState("admin");
-      localStorage.setItem("activeModule", "admin");
-    } else if (pathname.startsWith("/followup")) {
-      setActiveModuleState("followup");
-      localStorage.setItem("activeModule", "followup");
-    } else if (pathname.startsWith("/material")) {
-      setActiveModuleState("material");
-      localStorage.setItem("activeModule", "material");
-    } else if (pathname.startsWith("/fixed-asset")) {
-      setActiveModuleState("fixed-asset");
-      localStorage.setItem("activeModule", "fixed-asset");
-    } else if (pathname.startsWith("/engineering")) {
-      setActiveModuleState("engineering");
-      localStorage.setItem("activeModule", "engineering");
-    } else if (pathname.startsWith("/ticket")) {
-      setActiveModuleState("ticket");
-      localStorage.setItem("activeModule", "ticket");
-    } else if (pathname.startsWith("/sales-automation")) {
-      setActiveModuleState("sales-automation");
-      localStorage.setItem("activeModule", "sales-automation");
-    } else if (pathname.startsWith("/crm")) {
-      setActiveModuleState("crm");
-      localStorage.setItem("activeModule", "crm");
-    } else if (pathname.startsWith("/sales")) {
-      setActiveModuleState("sales");
-      localStorage.setItem("activeModule", "sales");
-    } else if (pathname.startsWith("/records")) {
-      setActiveModuleState("records");
-      localStorage.setItem("activeModule", "records");
-    } else if (pathname.startsWith("/civilworkdpr")) {
-      setActiveModuleState("civilworkdpr");
-      localStorage.setItem("activeModule", "civilworkdpr");
-    } else if (pathname.startsWith("/loan")) {
-      setActiveModuleState("loan");
-      localStorage.setItem("activeModule", "loan");
-    } else if (
-      pathname.startsWith("/finance") ||
-      pathname === "/finance" ||
-      pathname.startsWith("/brs") ||
-      pathname.startsWith("/payments") ||
-      pathname.startsWith("/received-payments") ||
-      pathname.startsWith("/journal-voucher") ||
-      pathname.startsWith("/trial-balance")
-    ) {
-      setActiveModuleState("finance");
-      localStorage.setItem("activeModule", "finance");
-    } else if (pathname === "/home" || pathname === "/") {
+    if (resolved === "none") {
       // Landing page after login — always neutral, no module pre-selected
       setActiveModuleState(null);
-      localStorage.removeItem("activeModule");
-    } else {
+      sessionStorage.removeItem("activeModule");
+    } else if (resolved === "keep") {
       // Ambiguous path (e.g. /masters/*, /reports) — trust localStorage if valid,
       // but do NOT force a module when there's nothing stored
-      if (stored && valid.includes(stored)) {
-        setActiveModuleState(stored);
-      } else {
-        setActiveModuleState(null);
-      }
+      const stored = sessionStorage.getItem("activeModule");
+      setActiveModuleState(stored && isModuleId(stored) ? stored : null);
+    } else {
+      setActiveModuleState(resolved);
+      sessionStorage.setItem("activeModule", resolved);
     }
   }, [location.pathname]); // re-run on every navigation
 

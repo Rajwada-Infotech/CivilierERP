@@ -7,6 +7,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
+const { logAudit } = require("../services/auditTrail");
 
 // Where an AccountHeadMaster ledger head (Supplier/Contractor/Customer/Bank/GL)
 // can actually be referenced from — used to tell the user WHICH real
@@ -81,7 +82,7 @@ router.post("/", authenticateToken, requirePageRight("account-head", "create"), 
     }
 
     const pool = getPool();
-    await pool
+    const insertResult = await pool
       .request()
       .input("Name", sql.NVarChar, Name || null)
       .input("Code", sql.NVarChar, Code || null)
@@ -90,9 +91,23 @@ router.post("/", authenticateToken, requirePageRight("account-head", "create"), 
       .input("CreatedBy", sql.Int, userId)
       .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.AccountGroup (Name, Code, ParentGroupId, Status, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.AGId
         VALUES (@Name, @Code, @ParentGroupId, @Status, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("account-group");
+
+    const newAGId = insertResult.recordset[0]?.AGId;
+    if (newAGId) {
+      await logAudit(pool, {
+        entityType: "AccountGroup",
+        entityId: newAGId,
+        entityName: Name || null,
+        action: "CREATE",
+        userId,
+        userName: (req.user && (req.user.name || req.user.email)) || null,
+        details: { Name, Code, ParentGroupId: parentId, Status: !!Status },
+      });
+    }
 
     res.json({ message: "Account group added" });
   } catch (err) {
@@ -121,6 +136,13 @@ router.put("/:id", authenticateToken, requirePageRight("account-head", "edit"), 
     }
 
     const pool = getPool();
+
+    const beforeResult = await pool
+      .request()
+      .input("AGId", sql.Int, agId)
+      .query("SELECT Name, Code, ParentGroupId, Status FROM dbo.AccountGroup WHERE AGId=@AGId");
+    const before = beforeResult.recordset[0] || null;
+
     await pool
       .request()
       .input("AGId", sql.Int, agId)
@@ -136,6 +158,19 @@ router.put("/:id", authenticateToken, requirePageRight("account-head", "edit"), 
         WHERE AGId=@AGId
       `);
     await bumpCacheVersion("account-group");
+
+    await logAudit(pool, {
+      entityType: "AccountGroup",
+      entityId: agId,
+      entityName: Name || before?.Name || null,
+      action: "UPDATE",
+      userId,
+      userName: (req.user && (req.user.name || req.user.email)) || null,
+      details: {
+        before,
+        after: { Name, Code, ParentGroupId: parentId, Status: !!Status },
+      },
+    });
 
     res.json({ message: "Account group updated" });
   } catch (err) {
@@ -255,12 +290,32 @@ router.delete("/:id", authenticateToken, requirePageRight("account-head", "delet
     }
 
     // ── 4. Safe to delete ─────────────────────────────────────────────────
+    const beforeResult = await pool
+      .request()
+      .input("AGId", sql.Int, agId)
+      .query("SELECT Name, Code, ParentGroupId, Status FROM dbo.AccountGroup WHERE AGId=@AGId");
+    const before = beforeResult.recordset[0] || null;
+
     await pool
       .request()
       .input("AGId", sql.Int, agId)
       .query("DELETE FROM dbo.AccountGroup WHERE AGId=@AGId");
 
     await bumpCacheVersion("account-group");
+
+    const userId = req.user?.id ?? req.user?.userId;
+    if (userId) {
+      await logAudit(pool, {
+        entityType: "AccountGroup",
+        entityId: agId,
+        entityName: before?.Name || null,
+        action: "DELETE",
+        userId,
+        userName: (req.user && (req.user.name || req.user.email)) || null,
+        details: before,
+      });
+    }
+
     res.json({ message: "Account group deleted" });
   } catch (err) {
     console.error("[AccountGroup DELETE] Error:", err.message);

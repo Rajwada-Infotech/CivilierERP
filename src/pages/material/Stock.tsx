@@ -1,9 +1,16 @@
 import React from "react";
 import { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Warehouse,
   Building2,
@@ -16,10 +23,32 @@ import {
   MapPin,
   Info,
   Search,
+  Truck,
+  ArrowDownToLine,
+  ArrowRightLeft,
+  ExternalLink,
 } from "lucide-react";
 import { getGodowns, type Godown } from "@/api/godownsApi";
-import { getInventoryMaster } from "@/api/inventoryMasterApi";
+import {
+  getInventoryMaster,
+  getItemStockLedger,
+  type ItemLedgerRow,
+} from "@/api/inventoryMasterApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DateInput } from "@/components/ui/date-input";
+
+// ─── RefType presentation (Stock drill-down) ──────────────────────────────────
+const REF_TYPE_META: Record<
+  string,
+  { label: string; icon: React.ElementType; route?: string }
+> = {
+  GRN: { label: "GRN", icon: Truck, route: "/material/grn" },
+  ISS: { label: "Material Issue", icon: ArrowDownToLine, route: "/material/issues" },
+  TRF: { label: "Stock Transfer", icon: ArrowRightLeft },
+  STKUPD: { label: "Stock Update", icon: Package, route: "/material/stock-update" },
+  ICT: { label: "Inter-Company Transfer", icon: ArrowRightLeft },
+  SO: { label: "Sale Order", icon: Package },
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtNum = (n: number) =>
@@ -100,12 +129,12 @@ function GodownInfoCard({ godown }: { godown: Godown }) {
             {godown.GodownName}
           </p>
           {godown.GodownCode && (
-            <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-mono">
+            <span className="text-[0.625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-mono">
               {godown.GodownCode}
             </span>
           )}
           {!godown.IsActive && (
-            <span className="text-[9px] bg-red-500/10 text-red-600 px-2 py-0.5 rounded-full font-bold">
+            <span className="text-[0.5625rem] bg-red-500/10 text-red-600 px-2 py-0.5 rounded-full font-bold">
               INACTIVE
             </span>
           )}
@@ -122,22 +151,22 @@ function GodownInfoCard({ godown }: { godown: Godown }) {
         )}
         <div className="flex flex-wrap gap-3 mt-2">
           {godown.EnterpriseName && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
               <Building2 size={10} /> {godown.EnterpriseName}
             </span>
           )}
           {godown.ProjectName && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
               <FolderKanban size={10} /> {godown.ProjectName}
             </span>
           )}
           {godown.Location && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
               <MapPin size={10} /> {godown.Location}
             </span>
           )}
           {godown.Remarks && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground italic">
+            <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground italic">
               <Info size={10} /> {godown.Remarks}
             </span>
           )}
@@ -201,7 +230,7 @@ function SummaryRow({
             <Icon size={16} className={color} />
           </div>
           <div>
-            <p className="text-[11px] text-muted-foreground">{label}</p>
+            <p className="text-[0.6875rem] text-muted-foreground">{label}</p>
             <p className="text-sm font-heading font-bold text-foreground">
               {fmtNum(value)}
             </p>
@@ -209,6 +238,135 @@ function SummaryRow({
         </div>
       ))}
     </div>
+  );
+}
+
+// ─── Item Ledger Drill-down Modal ──────────────────────────────────────────────
+function ItemLedgerModal({
+  item,
+  godownId,
+  dateFrom,
+  dateTo,
+  onClose,
+}: {
+  item: { ItemID: string; ItemName: string | null } | null;
+  godownId: number;
+  dateFrom?: string;
+  dateTo?: string;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const { data, isLoading } = useQuery({
+    queryKey: ["item-stock-ledger", item?.ItemID, godownId, dateFrom, dateTo],
+    queryFn: () => getItemStockLedger(item!.ItemID, godownId, dateFrom, dateTo),
+    enabled: !!item,
+    staleTime: 30_000,
+  });
+
+  const rows = data?.data ?? [];
+
+  const openDoc = (row: ItemLedgerRow) => {
+    const meta = REF_TYPE_META[row.RefType];
+    if (!meta?.route) return;
+    onClose();
+    navigate(`${meta.route}?view=${row.RefID}`);
+  };
+
+  return (
+    <Dialog open={!!item} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Package size={16} className="text-emerald-600" />
+            {item?.ItemName || "Item"} — Stock Movements
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground -mt-2">
+          Every GRN, material issue, and other stock movement behind this
+          item's In/Out figures for the selected godown and period.
+        </p>
+
+        {isLoading ? (
+          <div className="space-y-2 py-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-11 bg-muted rounded-lg animate-pulse" />
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            No stock movements found for this item in the selected period.
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
+            {rows.map((row) => {
+              const meta: { label: string; icon: React.ElementType; route?: string } =
+                REF_TYPE_META[row.RefType] ?? {
+                  label: row.RefType,
+                  icon: Package,
+                };
+              const Icon = meta.icon;
+              const clickable = !!meta.route;
+              return (
+                <button
+                  key={row.StockID}
+                  type="button"
+                  disabled={!clickable}
+                  onClick={() => openDoc(row)}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                    clickable ? "hover:bg-muted/40 cursor-pointer" : "cursor-default"
+                  }`}
+                >
+                  <span
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                      row.Type === "IN"
+                        ? "bg-emerald-500/10 text-emerald-600"
+                        : "bg-red-500/10 text-red-600"
+                    }`}
+                  >
+                    <Icon size={14} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-foreground">
+                        {row.DocNo || `#${row.RefID}`}
+                      </span>
+                      <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+                        {meta.label}
+                      </span>
+                    </div>
+                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+                      {row.MovementDate
+                        ? new Date(row.MovementDate).toLocaleDateString("en-IN", {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                          })
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span
+                      className={`font-heading font-bold text-sm ${
+                        row.Type === "IN" ? "text-emerald-600" : "text-red-600"
+                      }`}
+                    >
+                      {row.Type === "IN" ? "+" : "-"}
+                      {fmtNum(row.Qty)}
+                    </span>
+                    {row.UOM && (
+                      <p className="text-[0.625rem] text-muted-foreground">{row.UOM}</p>
+                    )}
+                  </div>
+                  {clickable && (
+                    <ExternalLink size={12} className="text-muted-foreground shrink-0" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -228,6 +386,10 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
 
   const [itemSearch, setItemSearch] = useState("");
   const [appliedItemSearch, setAppliedItemSearch] = useState("");
+  const [selectedItem, setSelectedItem] = useState<{
+    ItemID: string;
+    ItemName: string | null;
+  } | null>(null);
 
   const allRows = data?.data ?? [];
   const q = appliedItemSearch.trim().toLowerCase();
@@ -367,7 +529,11 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                 rows.map((row, idx) => (
                   <tr
                     key={row.ItemID}
-                    className="border-b border-border hover:bg-muted/20 transition-colors"
+                    onClick={() =>
+                      setSelectedItem({ ItemID: row.ItemID, ItemName: row.ItemName })
+                    }
+                    title="View GRNs / Material Issues behind this stock"
+                    className="border-b border-border hover:bg-muted/20 transition-colors cursor-pointer"
                   >
                     <td className="px-4 py-2.5 text-muted-foreground font-mono hidden sm:table-cell">
                       {idx + 1}
@@ -378,10 +544,10 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                           <Package size={11} className="text-emerald-600" />
                         </span>
                         <div className="min-w-0">
-                          <span className="font-medium text-foreground">
+                          <span className="font-medium text-foreground hover:text-emerald-600 hover:underline">
                             {row.ItemName || "—"}
                           </span>
-                          <div className="text-[10px] text-muted-foreground sm:hidden">
+                          <div className="text-[0.625rem] text-muted-foreground sm:hidden">
                             {row.UOMSymbol || row.UOMName || ""}
                             {row.ItemGroupName ? ` · ${row.ItemGroupName}` : ""}
                           </div>
@@ -395,7 +561,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                       {row.UOMSymbol || row.UOMName ? (
                         <span
                           title={row.UOMName ?? undefined}
-                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-400/20"
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-400/20"
                         >
                           {row.UOMSymbol || row.UOMName}
                         </span>
@@ -480,6 +646,14 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
           </table>
         </div>
       </div>
+
+      <ItemLedgerModal
+        item={selectedItem}
+        godownId={godownId}
+        dateFrom={dateFrom}
+        dateTo={dateTo || queryDate}
+        onClose={() => setSelectedItem(null)}
+      />
     </div>
   );
 }
@@ -643,8 +817,7 @@ export default function Stock() {
           <div className="grid grid-cols-2 gap-3 mt-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground block">From Date</label>
-              <input
-                type="date"
+              <DateInput
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-emerald-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
@@ -652,8 +825,7 @@ export default function Stock() {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground block">To Date</label>
-              <input
-                type="date"
+              <DateInput
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-emerald-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"

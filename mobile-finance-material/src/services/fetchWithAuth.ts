@@ -3,7 +3,7 @@
 // don't exist here: localStorage/sessionStorage (-> expo-secure-store,
 // async) and window.location.href (-> sessionEvents, consumed by
 // AuthContext).
-import { apiUrl } from "@/utils/apiBase";
+import { apiUrl, API_BASE_URL } from "@/utils/apiBase";
 import { getToken, clearAuthStorage } from "./authStorage";
 import { emitSessionExpired } from "./sessionEvents";
 
@@ -58,9 +58,18 @@ export async function fetchWithAuth(
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "AbortError") throw err;
-    console.error("Network error:", err);
-    throw new Error("Network error. Please check your connection.");
+    console.error(`Network error reaching ${API_BASE_URL}:`, err);
+    throw new Error(
+      __DEV__
+        ? `Can't reach the backend at ${API_BASE_URL}. Make sure it's running and, on a phone, that EXPO_PUBLIC_API_URL points to your computer's LAN IP.`
+        : "Network error. Please check your connection.",
+    );
   }
+
+  // The login call's own 401 ("Invalid credentials") / 403 ("User inactive") are
+  // answers, not an expired session -- hand them back so AuthContext.login()
+  // can surface the server's real message.
+  if (/^\/?api\/users\/login(\?|$)/.test(url)) return response;
 
   if (response.status === 401) {
     if (!sessionExpiredFlow) {

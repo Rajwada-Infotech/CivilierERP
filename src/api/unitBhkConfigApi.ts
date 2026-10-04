@@ -10,9 +10,38 @@ const BASE = "/api/unit-bhk-config";
 export type BhkType = string;
 
 export interface LayoutType {
+  /** dbo.RoomLayoutType.Id — what UnitMaster.LayoutTypeId points at. */
+  id: number;
   typeKey: string;
+  /** Display label, also the value stored as UnitMaster.UnitType ("2 BHK"). */
   label: string;
+  /** Total rooms in its Unit Composition; 0 = no layout defined yet. */
+  roomCount: number;
+  /** e.g. "2 Bedroom · 1 Hall Room · 1 Kitchen"; empty when roomCount = 0. */
+  summary: string;
+  /** The global room list (active categories, quantity > 0). */
+  composition: { categoryId: number; alias: string; quantity: number }[];
+  /** One of the 4 seeded BHK defaults — can't be removed. */
   isSystem: boolean;
+}
+
+// Query key shared by every page that lists layout types, so saving a
+// composition refreshes the CRM / Unit Master pickers too.
+export const LAYOUT_TYPES_QUERY_KEY = ["layout-types"] as const;
+
+// Options for a Unit Type picker: only types with a defined layout (a unit's
+// rooms are built from it), plus the record's current value if it isn't one
+// of those, so an existing unit/template row still shows what it has.
+export function unitTypeOptions(types: LayoutType[], current?: string | null): { value: string; label: string; title?: string }[] {
+  const opts = types
+    .filter((t) => t.roomCount > 0)
+    .map((t) => ({ value: t.label, label: t.label, title: t.summary }));
+  const cur = (current ?? "").trim();
+  if (cur && !opts.some((o) => o.value === cur)) {
+    const known = types.find((t) => t.label === cur);
+    opts.push({ value: cur, label: known ? `${cur} (no layout yet)` : `${cur} (not in Unit Composition)`, title: undefined });
+  }
+  return opts;
 }
 
 export interface RoomCompositionRow {
@@ -29,8 +58,16 @@ export interface BhkTemplateDetail {
 }
 
 export interface RoomInstance {
+  /** Synthetic "categoryId-index" key, e.g. "3-1" — ephemeral, not stored in DB */
   key: string;
+  /** Human-readable label, e.g. "Bathroom 1" or "Kitchen" (no index for qty=1) */
   label: string;
+  /**
+   * Real dbo.RoomMaster.Id for this room, or null if "Generate from Layout"
+   * hasn't been run yet for this unit. Use this when you need a stable FK
+   * (e.g. linking work entries to blueprints or Dependency Master records).
+   */
+  roomMasterId: number | null;
 }
 
 async function handle<T>(res: Response): Promise<T> {
@@ -55,12 +92,23 @@ export const addLayoutType = (label: string) =>
     body: JSON.stringify({ label }),
   }).then((r) => handle<LayoutType>(r));
 
+// Retires a custom layout type. Refused server-side for a seeded BHK default
+// or for a type still assigned to an active Unit.
+export const removeLayoutType = (typeKey: string) =>
+  fetchWithAuth(`${BASE}/types/${encodeURIComponent(typeKey)}`, { method: "DELETE" }).then((r) =>
+    handle<{ success: boolean }>(r),
+  );
+
 // One composition template per layout type — every Unit whose own
 // UnitType (dbo.UnitMaster) matches inherits it automatically, so there's
 // no per-Unit setup step.
 export const getBhkTemplate = (bhkType: BhkType) =>
   fetchWithAuth(`${BASE}/template/${encodeURIComponent(bhkType)}`).then((r) => handle<BhkTemplateDetail>(r));
 
+// Deliberately never touches an already-built room — see the route's own
+// comment (backend/routes/unitBhkConfig.js). Room Master's own
+// project-scoped "Generate rooms" is the only thing that builds/reconciles
+// actual rooms from this composition.
 export const saveBhkTemplate = (
   bhkType: BhkType,
   payload: { composition: { roomCategoryId: number; quantity: number }[] },
@@ -69,7 +117,7 @@ export const saveBhkTemplate = (
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  }).then((r) => handle(r));
+  }).then((r) => handle<{ success: boolean; configId: number }>(r));
 
 // Work Allocation page's Room dropdown source — generated {alias} {index}
 // instances for the given Unit, resolved via its own UnitType against the

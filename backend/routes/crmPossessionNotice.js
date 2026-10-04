@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -7,13 +8,19 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
 const PN_SELECT = `
-  SELECT n.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile
+  SELECT n.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
+    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
+     WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
+       AND m.AmountDue > ISNULL(m.AmountPaid, 0)) AS OutstandingMilestones,
+    ISNULL((SELECT SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)) FROM dbo.CrmPaymentMilestone m
+     WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
+       AND m.AmountDue > ISNULL(m.AmountPaid, 0)), 0) AS OutstandingBalance
   FROM dbo.CrmPossessionNotice n
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -32,6 +39,7 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
         a.ApplicantName
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       OUTER APPLY (
         SELECT TOP 1 UnitNo FROM dbo.vw_CrmBookingDisplay WHERE BookingId = b.Id
       ) bv
@@ -41,10 +49,15 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
           SELECT 1 FROM dbo.CrmPrePossession pp
           WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'
         )
-        AND EXISTS (
+        -- Block-level OC/CC (migration 447) checked first, falling back to
+        -- the project's blanket cert — same fallback as crmPrePossession.js.
+        AND (b.ProjectId IS NULL OR EXISTS (
           SELECT 1 FROM dbo.CrmOccupancyCertificate oc
-          WHERE oc.ProjectId = b.ProjectId AND oc.Status = 'Received'
-        )
+          WHERE oc.Status = 'Received' AND (
+            (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
+            OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
+          )
+        ))
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmPossessionNotice pn
           WHERE pn.BookingId = b.Id AND pn.Status IN ('Draft', 'Sent')
@@ -58,11 +71,87 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
   }
 });
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Contract (same {rows,total} shape as CrmHandover, plus per-status counts):
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Draft, Sent, Acknowledged, Disputed } }
+// `counts` honours search + company/project/block but NOT status, so the tabs
+// always show what each status would contain. Without `page` the legacy
+// full-array response is returned so existing callers keep working.
+const PN_STATUSES = [CrmStatus.DRAFT, "Sent", "Acknowledged", "Disputed"];
+const PN_SORT = {
+  NoticeNo: "n.NoticeNo",
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  Status: "n.Status",
+  OfferedDate: "n.OfferedDate",
+  ResponseDeadline: "n.ResponseDeadline",
+  CreatedAt: "n.CreatedAt",
+};
+const PN_JOINS = `
+  JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+`;
+
+function buildPnWhere(request, query, includeStatus) {
+  const conds = [];
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR n.NoticeNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search OR a.Mobile LIKE @search)");
+  }
+  if (includeStatus && PN_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(30), query.status);
+    conds.push("n.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`${PN_SELECT} ORDER BY n.CreatedAt DESC`);
-    res.json(result.recordset);
+
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildPnWhere(r0, req.query, false);
+      const result = await r0.query(`${PN_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where} ORDER BY n.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    // Own keys only: "constructor" / "__proto__" would otherwise resolve to built-ins and break the SQL.
+    const sortCol = Object.hasOwn(PN_SORT, req.query.sortKey) ? PN_SORT[req.query.sortKey] : PN_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
+    const countReq = pool.request();
+    const countWhere = buildPnWhere(countReq, req.query, false);
+    const countRes = await countReq.query(
+      `SELECT n.Status, COUNT(*) AS C FROM dbo.CrmPossessionNotice n ${PN_JOINS} ${countWhere} GROUP BY n.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = PN_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildPnWhere(pageReq, req.query, true);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${PN_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${pageWhere}
+       ORDER BY ${sortCol} ${dir}, n.Id DESC
+       OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    res.json({ rows: rowsRes.recordset, total, counts });
   } catch (e) {
     console.error("[crm-possession-notice] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -91,14 +180,14 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
       return res.status(400).json({ error: "Possession notice requires the pre-possession check to be Ready first" });
     }
 
-    // OC / CC must be received for the project (same check as Pre-Possession).
+    // OC / CC must be received — block-level first, project blanket as
+    // fallback (same check as Pre-Possession; see resolveOcCcGate).
     const bk = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
     if (bk.recordset[0]?.ProjectId) {
-      const occc = await pool.request().input("pid", sql.Int, bk.recordset[0].ProjectId)
-        .query("SELECT TOP 1 Id FROM dbo.CrmOccupancyCertificate WHERE ProjectId = @pid AND Status = 'Received'");
-      if (!occc.recordset.length) {
-        return res.status(400).json({ error: "Possession notice requires the project's OC / CC to be received first" });
+      const gate = await resolveOcCcGate(pool, bookingId);
+      if (!gate.received) {
+        return res.status(400).json({ error: "Possession notice requires the project's (or this unit's block's) OC / CC to be received first" });
       }
     }
 
@@ -153,7 +242,8 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmPossessionNotice WHERE Id = @id");
@@ -161,17 +251,20 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    const noteSet = "Notes" in b;
     await pool.request()
       .input("id", sql.Int, id)
       .input("odt", sql.Date, b.OfferedDate || null)
       .input("rdl", sql.Date, b.ResponseDeadline || null)
       .input("mode", sql.NVarChar(50), b.DeliveryMode || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes ?? null)
+      .input("note_set", sql.Bit, noteSet ? 1 : 0)
       .input("ub", sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmPossessionNotice SET
           OfferedDate = ISNULL(@odt, OfferedDate), ResponseDeadline = ISNULL(@rdl, ResponseDeadline),
-          DeliveryMode = ISNULL(@mode, DeliveryMode), Notes = @note,
+          DeliveryMode = ISNULL(@mode, DeliveryMode),
+          Notes = CASE WHEN @note_set = 1 THEN @note ELSE Notes END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -187,7 +280,8 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
 router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const actor = actorId(req);
 
@@ -222,7 +316,8 @@ router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), 
 router.put("/:id/mark-acknowledged", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id)
@@ -251,7 +346,8 @@ router.put("/:id/mark-acknowledged", requirePageRight("crm-possession-notice", "
 router.put("/:id/mark-disputed", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const actor = actorId(req);
     if (!b.DisputeReason) return res.status(400).json({ error: "DisputeReason is required" });
@@ -286,7 +382,8 @@ router.put("/:id/mark-disputed", requirePageRight("crm-possession-notice", "edit
 router.put("/:id/retract-dispute", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     if (!b.RetractReason?.trim()) {
       return res.status(400).json({ error: "RetractReason is required — document how the dispute was resolved" });

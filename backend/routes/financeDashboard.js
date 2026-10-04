@@ -112,7 +112,7 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
           COUNT(*)                                                AS TotalCount,
           COUNT(CASE WHEN LHeadStatus = 1 THEN 1 END)            AS ActiveCount
         FROM dbo.AccountHeadMaster
-        WHERE LHeadType = 'S'
+        WHERE LHeadType IN ('S', 'V')
       `),
 
       // ── Recent Payments Made (last 8) ───────────────────────────────────────

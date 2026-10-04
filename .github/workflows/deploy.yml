@@ -1,0 +1,92 @@
+# Manual-trigger deploy to the EC2 box — replaces downloading the CI
+# artifact zip and dragging it onto the box by hand. Go to the Actions tab,
+# pick "Deploy to EC2", click "Run workflow", choose the branch, and it SSHs
+# in and does the rest: git pull, rebuild backend + frontend, run pending
+# migrations, restart the stack, then wait for /health/live to come back up.
+#
+# Requires three repo secrets (Settings > Secrets and variables > Actions):
+#   EC2_HOST — the box's public IP or domain
+#   EC2_USER — the SSH user (e.g. administrator)
+#   EC2_SSH_KEY — the private half of a dedicated deploy keypair, with its
+#                 public half already in that user's ~/.ssh/authorized_keys
+#                 on the box. Never reuse a personal key here.
+name: Deploy to EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to deploy"
+        required: false
+        default: "main"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # Long-ish — a full backend image rebuild + frontend build under
+          # Docker on a modest EC2 box can take several minutes.
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            # Absolute path, not ~ — $HOME in this box's WSL environment
+            # resolves to a broken value ("C:UsersAdministrator", no
+            # slashes) inherited from Windows, so ~ expansion fails under a
+            # fresh non-interactive SSH login even though it works fine in
+            # an already-open interactive shell.
+            cd /home/administrator/CivilierERP
+
+            BRANCH="${{ github.event.inputs.branch }}"
+            echo "Deploying branch: $BRANCH"
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+            git pull --ff-only origin "$BRANCH"
+
+            # Stamp the real deployed commit into both halves of the app —
+            # same shape ci.yml's "Stamp build info" step bakes into an
+            # artifact release, just written directly into this checkout
+            # before the images build, since this workflow deploys straight
+            # from git instead of a downloaded artifact. Without this,
+            # GET /health and /version.json keep reporting whatever commit
+            # was last deployed via the artifact path (or nothing at all),
+            # even after a real, successful deploy here — exactly the "did
+            # it actually deploy" confusion this stamp exists to prevent.
+            echo "Stamping build info..."
+            COMMIT="$(git rev-parse HEAD)"
+            BUILT_AT="$(date -u +%FT%TZ)"
+            INFO=$(printf '{"commit":"%s","ref":"%s","runNumber":"${{ github.run_number }}","builtAt":"%s"}' "$COMMIT" "$BRANCH" "$BUILT_AT")
+            echo "$INFO" | tee public/version.json
+            echo "$INFO" | tee backend/build-info.json
+
+            echo "Rebuilding backend image..."
+            docker compose build backend
+
+            echo "Running pending migrations..."
+            docker compose run --rm backend npm run migrate
+
+            echo "Rebuilding frontend..."
+            docker compose --profile build run --rm frontend-build
+
+            echo "Restarting stack..."
+            docker compose up -d redis backend nginx
+
+            echo "Waiting for backend health..."
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://localhost/health/live >/dev/null 2>&1; then
+                docker compose ps
+                echo "Deploy complete."
+                exit 0
+              fi
+              sleep 2
+            done
+
+            docker compose ps
+            docker compose logs --tail=80 backend
+            echo "Deploy failed: health check did not pass." >&2
+            exit 1

@@ -8,7 +8,7 @@ import {
   Eye, Pencil, Trash2, AlertTriangle, Image as ImageIcon,
   Bell, CalendarClock, CalendarPlus, CircleAlert, CheckCircle2, Ban, Camera as CameraIcon,
 } from "lucide-react";
-import { useCameraCapture } from "@/hooks/useCameraCapture";
+import { CameraCaptureModal } from "@/components/CameraCaptureModal";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +26,7 @@ import {
   QUALITY_STATUSES, FOLLOWUP_TYPES, FOLLOWUP_STATUSES,
   type QCAsset, type QualityCheckItem, type QualityStatus, type FollowUpStatus,
 } from "@/api/fixedAssetQualityCheckApi";
+import { DateInput } from "@/components/ui/date-input";
 
 function ensureArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -139,60 +140,6 @@ function FAItemCodeCombobox({
   );
 }
 
-// ── camera-first picture field ──────────────────────────────────────────────
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result || ""));
-    r.onerror = () => reject(new Error("read failed"));
-    r.readAsDataURL(blob);
-  });
-}
-
-function CameraModal({ onCapture, onClose }: { onCapture: (dataUrl: string) => void; onClose: () => void }) {
-  const cam = useCameraCapture();
-  const [starting, setStarting] = React.useState(true);
-  const [shooting, setShooting] = React.useState(false);
-
-  React.useEffect(() => {
-    let alive = true;
-    cam.start().then((ok) => { if (alive) { setStarting(false); if (!ok) toast.error("Camera unavailable on this device"); } });
-    return () => cam.stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const shutter = async () => {
-    setShooting(true);
-    const blob = await cam.capture();
-    if (blob) { onCapture(await blobToDataUrl(blob)); cam.stop(); onClose(); }
-    else { setShooting(false); toast.error("Could not capture — try again"); }
-  };
-
-  return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" onClick={() => { cam.stop(); onClose(); }}>
-      <div className="absolute inset-0 bg-black/70" />
-      <div className="relative w-full max-w-md rounded-2xl overflow-hidden bg-black border border-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="relative bg-black min-h-[240px] flex items-center justify-center">
-          {(starting || cam.unsupported) && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/70 text-xs">
-              {cam.unsupported ? <><CameraIcon size={22} /> Camera not available</> : <><Loader2 size={20} className="animate-spin" /> Starting camera…</>}
-            </div>
-          )}
-          <video ref={cam.videoRef} playsInline muted className="w-full max-h-[60vh] object-contain" />
-          <button type="button" onClick={() => { cam.stop(); onClose(); }}
-            className="absolute right-3 top-3 w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white"><X size={15} /></button>
-        </div>
-        <div className="flex items-center justify-center p-4 bg-black">
-          <button type="button" onClick={shutter} disabled={!cam.isActive || shooting}
-            className="w-16 h-16 rounded-full bg-white border-4 border-white/40 hover:border-white/70 transition-colors disabled:opacity-40 flex items-center justify-center">
-            {shooting ? <Loader2 size={20} className="animate-spin text-black" /> : <CameraIcon size={22} className="text-black" />}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
 
 // ── Item Picture: record-wise image, camera-only capture (no gallery) ───────
 // Shows the previous/latest image for reference until a new photo is captured;
@@ -220,7 +167,7 @@ function ItemPictureField({
           </div>
         )}
         <div className="flex flex-col gap-1.5 min-w-0">
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[0.6875rem] text-muted-foreground">
             {disabled ? "Select an FA Item Code first"
               : captured ? "New photo — saved with this record"
               : showingReference ? (hint || "Previous image (reference only)")
@@ -228,13 +175,13 @@ function ItemPictureField({
               : "No item picture yet — capture one"}
           </p>
           <button type="button" disabled={disabled} onClick={() => setCamOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 text-white px-3 py-1.5 text-xs font-semibold hover:shadow transition-all disabled:opacity-50 w-fit">
+            className="inline-flex items-center gap-1.5 rounded-lg btn-module text-white px-3 py-1.5 text-xs font-semibold hover:shadow transition-all disabled:opacity-50 w-fit">
             <CameraIcon size={13} />
             {captured || image ? "Retake with Camera" : "Capture with Camera"}
           </button>
         </div>
       </div>
-      {camOpen && <CameraModal onCapture={onCapture} onClose={() => setCamOpen(false)} />}
+      {camOpen && <CameraCaptureModal onCapture={onCapture} onClose={() => setCamOpen(false)} />}
     </div>
   );
 }
@@ -243,7 +190,7 @@ function ItemPictureField({
 function ReadOnlyUserPhoto({ image, disabled, onView }: { image: string | null; disabled?: boolean; onView?: (src: string) => void }) {
   return (
     <div>
-      <label className={labelCls}><UserRound size={11} /> User Photo <span className="text-[10px] font-normal text-muted-foreground">(read-only)</span></label>
+      <label className={labelCls}><UserRound size={11} /> User Photo <span className="text-[0.625rem] font-normal text-muted-foreground">(read-only)</span></label>
       <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 p-3">
         {image ? (
           <img src={image} alt="User" onClick={() => onView?.(image)} className="h-16 w-16 shrink-0 rounded-lg border border-border object-cover opacity-95 cursor-zoom-in" />
@@ -252,7 +199,7 @@ function ReadOnlyUserPhoto({ image, disabled, onView }: { image: string | null; 
             <UserRound size={20} />
           </div>
         )}
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[0.6875rem] text-muted-foreground">
           {disabled ? "Select an FA Item Code first"
             : image ? "From the Assignment record — change it on the Assignment page."
             : "No User Photo Available"}
@@ -362,7 +309,7 @@ export default function FixedAssetQualityCheck() {
         docDate: d.DocDate?.slice(0, 10) || "",
         companyId: String(d.CompanyId || ""),
         projectId: String(d.ProjectId || ""),
-        assetId: String(d.AssetId || ""),
+        assetId: String(d.AssetId != null ? d.AssetId : ""),
         qualityStatus: d.QualityStatus,
         remarks: d.Remarks || "",
         nextFollowUpDate: d.NextFollowUpDate?.slice(0, 10) || "",
@@ -449,7 +396,7 @@ export default function FixedAssetQualityCheck() {
       ...emptyForm(),
       companyId: String(c.CompanyId || ""),
       projectId: String(c.ProjectId || ""),
-      assetId: String(c.AssetId || ""),
+      assetId: String(c.AssetId != null ? c.AssetId : ""),
       followUpType: "Recheck",
       lastFollowUpDate: (c.NextFollowUpDate || c.DocDate || "").slice(0, 10),
     });
@@ -490,7 +437,7 @@ export default function FixedAssetQualityCheck() {
       lastFollowUpDate: form.lastFollowUpDate || undefined,
       nextActionNotes: form.nextActionNotes || undefined,
     };
-    if (editingId) updateMut.mutate({ id: editingId, data: payload });
+    if (editingId != null) updateMut.mutate({ id: editingId, data: payload });
     else createMut.mutate(payload);
   };
 
@@ -522,7 +469,7 @@ export default function FixedAssetQualityCheck() {
               <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               <Check size={13} /> {saving ? "Saving…" : editingId ? "Update" : "Save Record"}
             </button>
           </div>
@@ -555,7 +502,7 @@ export default function FixedAssetQualityCheck() {
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Check Date</label>
-                <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
               </div>
               <div className="sm:col-span-2 lg:col-span-3">
                 <label className={labelCls}><Hash size={11} /> FA Item Code *</label>
@@ -563,9 +510,9 @@ export default function FixedAssetQualityCheck() {
                   <div className="flex items-center justify-between gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/[0.04] px-3 py-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">{itemName || editDetail?.ItemName || "—"}</p>
-                      <p className="text-[11px] font-mono text-yellow-600 dark:text-yellow-400 truncate">{editDetail?.FAItemCode || "—"}</p>
+                      <p className="text-[0.6875rem] font-mono text-yellow-600 dark:text-yellow-400 truncate">{editDetail?.FAItemCode || "—"}</p>
                     </div>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">Fixed for this record</span>
+                    <span className="shrink-0 text-[0.6875rem] text-muted-foreground">Fixed for this record</span>
                   </div>
                 ) : (
                   <FAItemCodeCombobox assets={ensureArray<QCAsset>(qcAssets)} value={form.assetId} loading={loadingAssets}
@@ -628,7 +575,7 @@ export default function FixedAssetQualityCheck() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}><Bell size={11} /> Next Follow-Up Date *</label>
-                <input type="date" value={form.nextFollowUpDate} onChange={(e) => setField("nextFollowUpDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.nextFollowUpDate} onChange={(e) => setField("nextFollowUpDate", e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}>Follow-Up Type</label>
@@ -638,7 +585,7 @@ export default function FixedAssetQualityCheck() {
                 </select>
               </div>
               <div>
-                <label className={labelCls}><User size={11} /> Responsible User <span className="text-[10px] font-normal text-muted-foreground">(auto · read-only)</span></label>
+                <label className={labelCls}><User size={11} /> Responsible User <span className="text-[0.625rem] font-normal text-muted-foreground">(auto · read-only)</span></label>
                 <div className={`${inputCls} h-auto min-h-9 py-1.5 flex items-center gap-2 bg-muted/30`}>
                   {ctxLoading && form.assetId ? (
                     <Loader2 size={13} className="animate-spin text-muted-foreground" />
@@ -651,7 +598,7 @@ export default function FixedAssetQualityCheck() {
                     <span className="text-xs text-muted-foreground">{form.assetId ? "No Responsible User Assigned" : "Select an FA Item Code"}</span>
                   )}
                 </div>
-                <p className="text-[11px] text-muted-foreground mt-1">From this FA Item Code's current Assignment — set it on the Assignment page.</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-1">From this FA Item Code's current Assignment — set it on the Assignment page.</p>
               </div>
               <div>
                 <label className={labelCls}>Follow-Up Status</label>
@@ -661,7 +608,7 @@ export default function FixedAssetQualityCheck() {
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Last Follow-Up Date</label>
-                <input type="date" value={form.lastFollowUpDate} onChange={(e) => setField("lastFollowUpDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.lastFollowUpDate} onChange={(e) => setField("lastFollowUpDate", e.target.value)} className={inputCls} />
               </div>
               <div className="sm:col-span-2 lg:col-span-1">
                 <label className={labelCls}>Follow-Up Remarks</label>
@@ -674,7 +621,7 @@ export default function FixedAssetQualityCheck() {
                   placeholder="What to do next…" className={inputCls} />
               </div>
             </div>
-            <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+            <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1.5">
               <Bell size={11} /> A reminder is sent to the Responsible User on the follow-up date and each day it stays overdue, until it's marked Completed or Cancelled.
             </p>
           </div>
@@ -683,7 +630,7 @@ export default function FixedAssetQualityCheck() {
         {/* ── preview ── */}
         <div className="bg-card border border-border rounded-xl overflow-hidden h-fit shadow-lg shadow-black/5 dark:shadow-black/20">
           <div className="bg-gradient-to-br from-yellow-500 via-amber-500 to-yellow-700 p-4 text-white">
-            <p className="text-[10px] uppercase tracking-wide text-white/70 mb-1.5">Quality Check</p>
+            <p className="text-[0.625rem] uppercase tracking-wide text-white/70 mb-1.5">Quality Check</p>
             <div className="flex items-center gap-2.5">
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 shrink-0"><ShieldCheck size={16} /></span>
               <p className="text-sm font-bold truncate">{itemName || "New Record"}</p>
@@ -726,7 +673,7 @@ export default function FixedAssetQualityCheck() {
       accentColor="#eab308"
       action={rights.canCreate && (
         <button onClick={goToCreate}
-          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
           <Plus size={13} /> New Quality Check
         </button>
       )}
@@ -773,7 +720,7 @@ export default function FixedAssetQualityCheck() {
               <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/60"><ShieldCheck size={26} className="opacity-40" /></span>
               <p className="text-sm">No quality checks found</p>
               {rights.canCreate && (
-                <button onClick={goToCreate} className="mt-2 inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-3 py-1.5 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600">
+                <button onClick={goToCreate} className="mt-2 inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-3 py-1.5 rounded-lg btn-module ">
                   <Plus size={13} /> Add First Record
                 </button>
               )}
@@ -799,11 +746,11 @@ export default function FixedAssetQualityCheck() {
                       className="hover:bg-muted/30 transition-colors cursor-pointer">
                       <td className="px-4 py-3 font-mono text-xs">
                         {c.DocNo || "—"}
-                        <span className="block text-[10px] font-sans text-muted-foreground">{fmtDate(c.DocDate)}</span>
+                        <span className="block text-[0.625rem] font-sans text-muted-foreground">{fmtDate(c.DocDate)}</span>
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-mono text-xs text-yellow-600 dark:text-yellow-400 truncate">{c.FAItemCode || "—"}</p>
-                        <p className="text-[11px] text-muted-foreground truncate">{c.ItemName || "—"}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground truncate">{c.ItemName || "—"}</p>
                       </td>
                       <td className="px-4 py-3">
                         {c.CurrentUserName ? (
@@ -821,11 +768,11 @@ export default function FixedAssetQualityCheck() {
                           {fmtDate(c.NextFollowUpDate)}
                         </span>
                         {c.IsOverdue === 1 && (
-                          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">
+                          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[0.625rem] font-semibold text-red-600 dark:text-red-400">
                             <CircleAlert size={10} /> OVERDUE
                           </span>
                         )}
-                        {c.FollowUpType && <span className="block text-[10px] text-muted-foreground">{c.FollowUpType}</span>}
+                        {c.FollowUpType && <span className="block text-[0.625rem] text-muted-foreground">{c.FollowUpType}</span>}
                       </td>
                       <td className="px-4 py-3 text-xs">
                         {c.ResponsibleUserName ? (
@@ -844,7 +791,7 @@ export default function FixedAssetQualityCheck() {
                             <button onClick={() => goToFollowUp(c)} title="Generate follow-up for this FA Item Code"
                               className="p-1.5 rounded-lg text-muted-foreground hover:text-violet-600 dark:hover:text-violet-400 hover:bg-muted transition-colors"><CalendarPlus size={14} /></button>
                           )}
-                          <button onClick={() => setViewingId(c.QualityCheckId)} title="View"
+                          <button data-row-view="hide" onClick={() => setViewingId(c.QualityCheckId)} title="View"
                             className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"><Eye size={14} /></button>
                           {rights.canEdit && c.FollowUpStatus === "Pending" && (
                             <button onClick={() => statusMut.mutate({ id: c.QualityCheckId, status: "Completed" })} title="Mark follow-up completed"
@@ -894,21 +841,21 @@ export default function FixedAssetQualityCheck() {
                     <button type="button" onClick={() => setLightbox({ src: viewDetail.ItemPicture!, label: `Item Picture · ${viewDetail.DocNo || ""}` })}
                       className="group relative rounded-lg overflow-hidden" title="View full size">
                       <img src={viewDetail.ItemPicture} alt="Item" className="h-20 w-20 rounded-lg border border-border object-cover transition-transform group-hover:scale-[1.03]" />
-                      <span className="absolute bottom-0 inset-x-0 bg-black/45 text-white text-[9px] text-center py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">Item Picture</span>
+                      <span className="absolute bottom-0 inset-x-0 bg-black/45 text-white text-[0.5625rem] text-center py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">Item Picture</span>
                     </button>
                   )}
                   {viewDetail.UserPhoto && (
                     <button type="button" onClick={() => setLightbox({ src: viewDetail.UserPhoto!, label: "User Photo" })}
                       className="group relative rounded-lg overflow-hidden" title="View full size">
                       <img src={viewDetail.UserPhoto} alt="User" className="h-20 w-20 rounded-lg border border-border object-cover transition-transform group-hover:scale-[1.03]" />
-                      <span className="absolute bottom-0 inset-x-0 bg-black/45 text-white text-[9px] text-center py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">User Photo</span>
+                      <span className="absolute bottom-0 inset-x-0 bg-black/45 text-white text-[0.5625rem] text-center py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">User Photo</span>
                     </button>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${QUALITY_COLORS[viewDetail.QualityStatus]}`}>{viewDetail.QualityStatus}</span>
                   <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${FU_COLORS[viewDetail.FollowUpStatus]}`}>{viewDetail.FollowUpStatus}</span>
-                  {viewDetail.IsOverdue === 1 && <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-red-600 dark:text-red-400"><CircleAlert size={11} /> Overdue</span>}
+                  {viewDetail.IsOverdue === 1 && <span className="inline-flex items-center gap-0.5 text-[0.6875rem] font-semibold text-red-600 dark:text-red-400"><CircleAlert size={11} /> Overdue</span>}
                 </div>
                 <div className="space-y-2.5 text-sm border-t border-border pt-3">
                   {[
@@ -969,7 +916,7 @@ export default function FixedAssetQualityCheck() {
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:text-red-400"><AlertTriangle size={16} /></span>
               <p className="font-semibold text-sm">Delete this quality check?</p>
             </div>
-            <p className="text-xs text-muted-foreground">The record is removed from the active list but kept in history for audit. Any pending reminder for it stops.</p>
+            <p className="text-xs text-muted-foreground">This permanently removes it and cannot be undone. Any pending reminder for it stops.</p>
             <div className="flex gap-2 justify-end pt-1">
               <button onClick={() => setDeleteId(null)} className="h-9 px-4 rounded-lg border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
               <button onClick={() => deleteMut.mutate(deleteId)} disabled={deleteMut.isPending}

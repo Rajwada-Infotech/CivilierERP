@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -9,6 +10,7 @@ import { getSuppliers, getCompanies, getProjects } from "@/api/purchaseOrdersApi
 import { getTCRecords } from "@/api/tcMasterApi";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import { printStatusLabel } from "@/utils/printStatus";
 import {
   CalendarDays,
   FileText,
@@ -44,6 +46,9 @@ import {
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ─── Shared styles ──────────────────────────────────────────────────────────────
 
@@ -86,7 +91,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Date", accessor: (r) => fmtDate(r.DocDate as string) },
   { header: "Suppliers", accessor: (r) => Number(r.SupplierCount) || 0 },
   { header: "Items", accessor: (r) => Number(r.ItemCount) || 0 },
-  { header: "Status", accessor: "Status" },
+  { header: "Status", accessor: (r) => printStatusLabel(r.Status as string) },
 ];
 
 const SectionHeader = ({ icon: Icon, title, sub }: { icon: React.ElementType; title: string; sub?: string }) => (
@@ -166,7 +171,7 @@ export default function Quotation() {
   });
 
   const filteredProjects = (projects as any[]).filter(
-    (p) => !header.companyId || String(p.company_id ?? p.enterprise_id) === String(header.companyId) || !p.company_id,
+    (p) => !header.companyId || projectBelongsToCompany(p, header.companyId) || String(p.enterprise_id) === String(header.companyId) || !p.company_id,
   );
 
   const { data: finYears = [] } = useQuery({
@@ -437,7 +442,7 @@ export default function Quotation() {
       return;
     }
     const payload = buildPayload();
-    if (editingId) updateMutation.mutate(payload);
+    if (editingId != null) updateMutation.mutate(payload);
     else createMutation.mutate(payload);
   };
 
@@ -513,7 +518,7 @@ export default function Quotation() {
         const status = row.original.Status;
         return (
           <div className="flex items-center justify-end gap-1.5">
-            <button
+            <button data-row-view
               type="button"
               onClick={() => handleView(row.original)}
               className="p-1.5 rounded-md text-sky-500 hover:bg-sky-500/10 transition-colors"
@@ -580,7 +585,7 @@ export default function Quotation() {
                 onClick={() => setStatusFilter(s)}
                 className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                   statusFilter === s
-                    ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm"
+                    ? "btn-module text-white border-transparent shadow-sm"
                     : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"
                 }`}
               >
@@ -763,14 +768,14 @@ export default function Quotation() {
               <Field label="Quotation Date" required>
                 <div className="relative">
                   <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <input type="date" value={header.docDate} onChange={(e) => setH("docDate", e.target.value)} className={`${inputCls} pl-8`} />
+                  <DateInput value={header.docDate} onChange={(e) => setH("docDate", e.target.value)} className={`${inputCls} pl-8`} />
                 </div>
               </Field>
 
               <Field label="Response Due Date">
                 <div className="relative">
                   <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <input type="date" value={header.dueDate} onChange={(e) => setH("dueDate", e.target.value)} className={`${inputCls} pl-8`} />
+                  <DateInput value={header.dueDate} onChange={(e) => setH("dueDate", e.target.value)} className={`${inputCls} pl-8`} />
                 </div>
               </Field>
             </div>
@@ -792,7 +797,7 @@ export default function Quotation() {
               <div className="rounded-lg border border-border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-muted/40 border-b border-border text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    <tr className="bg-muted/40 border-b border-border text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                       <th className="px-4 py-2.5 w-8">#</th>
                       <th className="px-4 py-2.5">Item</th>
                       <th className="px-4 py-2.5 w-24 text-right">UOM</th>
@@ -819,7 +824,7 @@ export default function Quotation() {
             <SectionHeader icon={Users} title="Suppliers to Quote" sub="Tag every supplier who should receive this RFQ" />
             <div className="flex items-center gap-2 mb-3">
               <div className="relative flex-1 max-w-sm">
-                <select value={addSupplierId} onChange={(e) => setAddSupplierId(e.target.value)} className={selectCls}>
+                <SearchableNativeSelect value={addSupplierId} onChange={(e) => setAddSupplierId(e.target.value)} className={selectCls}>
                   <option value="">Select a supplier…</option>
                   {(suppliers as any[])
                     .filter((s) => !supplierIds.includes(String(s.LHeadId ?? s.id)))
@@ -828,7 +833,7 @@ export default function Quotation() {
                         {s.LHeadName ?? s.label ?? s.name}
                       </option>
                     ))}
-                </select>
+                </SearchableNativeSelect>
                 <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               </div>
               <Button type="button" variant="outline" size="sm" onClick={addSupplier} disabled={!addSupplierId} className="gap-1.5 shrink-0">
@@ -888,10 +893,10 @@ export default function Quotation() {
                       </button>
                       {tcDropdownOpen && (
                         <>
-                          <div className="fixed inset-0 z-10" onClick={() => setTcDropdownOpen(false)} />
+                          <BodyPortal><div className="fixed inset-0 z-10" onClick={() => setTcDropdownOpen(false)} /></BodyPortal>
                           <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
                             <div className="px-3 py-2 border-b border-border">
-                              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Select Terms &amp; Conditions</p>
+                              <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider">Select Terms &amp; Conditions</p>
                             </div>
                             <div className="max-h-56 overflow-y-auto divide-y divide-border">
                               {(tcRecords as any[]).length === 0 ? (
@@ -927,7 +932,7 @@ export default function Quotation() {
                     <div className="space-y-2">
                       {(tcRecords as any[]).filter((tc) => tcIds.includes(String(tc.Id))).map((tc, idx) => (
                         <div key={tc.Id} className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3">
-                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center mt-0.5">{idx + 1}</span>
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.625rem] font-bold flex items-center justify-center mt-0.5">{idx + 1}</span>
                           <p className="flex-1 text-sm font-semibold text-foreground min-w-0 truncate">{tc.Name}</p>
                           <button
                             type="button"
@@ -954,7 +959,7 @@ export default function Quotation() {
       {/* Actions */}
       <div className="flex items-center justify-end gap-3">
         <Button type="button" variant="outline" onClick={goToList}>Cancel</Button>
-        <Button type="button" onClick={onSave} disabled={isSaving || !headerIsValid} className="gap-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:opacity-90 border-0 disabled:opacity-40">
+        <Button type="button" onClick={onSave} disabled={isSaving || !headerIsValid} className="gap-1.5 btn-module text-white hover:opacity-90 border-0 disabled:opacity-40">
           <Save size={14} /> {isSaving ? "Saving…" : "Save as Draft"}
         </Button>
       </div>
@@ -990,7 +995,7 @@ export default function Quotation() {
   @media print{body{padding:0}}
 </style></head><body>
 <h1>Request for Quotation</h1>
-<div class="sub">${esc(r.DocNo)} &nbsp;·&nbsp; ${esc(r.Status)}</div>
+<div class="sub">${esc(r.DocNo)} &nbsp;·&nbsp; ${esc(printStatusLabel(r.Status))}</div>
 <div class="meta">
   <div class="meta-item"><label>Company</label><span>${esc(r.CompanyName || "—")}</span></div>
   <div class="meta-item"><label>Project</label><span>${esc(r.ProjectName || "—")}</span></div>
@@ -1062,7 +1067,7 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
               </button>
             )}
             {rights.canEdit && r.Status === "Draft" && (
-              <Button type="button" size="sm" onClick={() => sendMutation.mutate(r.QuotationId)} disabled={sendMutation.isPending} className="gap-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:opacity-90 border-0">
+              <Button type="button" size="sm" onClick={() => sendMutation.mutate(r.QuotationId)} disabled={sendMutation.isPending} className="gap-1.5 btn-module text-white hover:opacity-90 border-0">
                 <Send size={13} /> Send to Suppliers
               </Button>
             )}
@@ -1079,7 +1084,7 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
               { label: "Source MR", value: r.SourceMRDocNo },
             ].map(({ label, value }) => (
               <div key={label}>
-                <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-1">{label}</p>
+                <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1">{label}</p>
                 <p className="text-sm font-medium">{value || "—"}</p>
               </div>
             ))}
@@ -1096,7 +1101,7 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <tr className="bg-muted/40 border-b border-border text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                   <th className="px-5 py-2.5 w-8">#</th>
                   <th className="px-5 py-2.5">Item</th>
                   <th className="px-5 py-2.5 text-right">UOM</th>
@@ -1130,7 +1135,7 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
             ) : (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  <tr className="bg-muted/40 border-b border-border text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                     <th className="px-5 py-2.5">Supplier</th>
                     <th className="px-5 py-2.5">Status</th>
                     <th className="px-5 py-2.5">Invited</th>
@@ -1174,7 +1179,7 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
               <button
                 type="button"
                 onClick={startNew}
-                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
               >
                 <Plus size={13} />
                 New Quotation
@@ -1185,9 +1190,14 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
       }
     >
       <Breadcrumbs items={[{ label: "Material", path: "/material" }, { label: "Quotation" }]} />
-      {viewMode === "list" && <ListView />}
-      {viewMode === "form" && <FormView />}
-      {viewMode === "view" && <ViewMode />}
+      {/* Called as functions, not rendered as <ListView/> etc.: they are
+          defined inside this component, so JSX would give React a brand-new
+          component type on every render and remount the whole form on each
+          keystroke (Remarks accepted one letter, then lost focus). None of
+          them use hooks. */}
+      {viewMode === "list" && ListView()}
+      {viewMode === "form" && FormView()}
+      {viewMode === "view" && ViewMode()}
     </MaterialShell>
   );
 }

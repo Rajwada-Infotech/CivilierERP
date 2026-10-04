@@ -9,6 +9,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/commissions";
 
@@ -150,24 +151,24 @@ const SaCommissions: React.FC = () => {
       <div className="space-y-5">
         {canDoAction("sa-commissions", "create") && (
           <form onSubmit={createCommission} className="grid grid-cols-1 md:grid-cols-5 gap-3 rounded-lg border border-border p-4 bg-background">
-            <select value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
+            <SearchableNativeSelect value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
               <option value="">Lead optional</option>
               {leads.map((l: any) => <option key={l.Id} value={l.Id}>{l.LeadUid} - {l.CustomerName}</option>)}
-            </select>
+            </SearchableNativeSelect>
             <input value={form.BookingId} onChange={(e) => setForm({ ...form, BookingId: e.target.value })} placeholder="Booking ID" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <input type="number" value={form.BookingValue} onChange={(e) => setForm({ ...form, BookingValue: e.target.value })} placeholder="Booking value" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <select value={form.SalespersonId} onChange={(e) => setForm({ ...form, SalespersonId: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
+            <SearchableNativeSelect value={form.SalespersonId} onChange={(e) => setForm({ ...form, SalespersonId: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
               <option value="">Salesperson</option>
               {users.filter((u: any) => u.role === "sales_person").map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
-            </select>
-            <select value={form.TeamLeadId} onChange={(e) => setForm({ ...form, TeamLeadId: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
+            </SearchableNativeSelect>
+            <SearchableNativeSelect value={form.TeamLeadId} onChange={(e) => setForm({ ...form, TeamLeadId: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
               <option value="">Team lead</option>
               {users.filter((u: any) => u.role === "sales_team_lead").map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
-            </select>
+            </SearchableNativeSelect>
             <input type="number" value={form.SpRate} onChange={(e) => setForm({ ...form, SpRate: e.target.value })} placeholder="SP %" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <input type="number" value={form.TlRate} onChange={(e) => setForm({ ...form, TlRate: e.target.value })} placeholder="TL %" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <input value={form.Notes} onChange={(e) => setForm({ ...form, Notes: e.target.value })} placeholder="Notes" className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <button className="inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium">
+            <button className="inline-flex items-center justify-center gap-2 rounded-md btn-module text-white px-3 py-2 text-sm font-medium">
               <Plus size={15} /> Add
             </button>
           </form>

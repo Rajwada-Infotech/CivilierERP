@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import {
   Chart2,
-  Calendar,
+  Grid1,
   ArrowLeft2,
   Crown,
   Data,
@@ -25,7 +25,10 @@ import {
   TickCircle,
   MoneyRecive,
   Cpu,
+  Profile2User,
 } from "iconsax-react";
+import { Wrench } from "lucide-react";
+import { TimelineIcon } from "@/components/icons/TimelineIcon";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
 import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
@@ -38,11 +41,14 @@ import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
-import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
+import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
 import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
+import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
+
+import { hrPayrollNavItems } from "./sidebars/HrPayrollSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -78,7 +84,7 @@ const MODULE_HEADER: Record<
   },
   followup: {
     label: "Follow-Up",
-    icon: Calendar,
+    icon: Grid1,
     color: "#0d9488",
     from: "from-teal-600/30",
     to: "to-teal-600/0",
@@ -113,7 +119,7 @@ const MODULE_HEADER: Record<
   },
   civilworkdpr: {
     label: "Civil Work DPR",
-    icon: Buildings2,
+    icon: TimelineIcon,
     color: "#0891b2",
     from: "from-cyan-600/30",
     to: "to-cyan-600/0",
@@ -142,6 +148,20 @@ const MODULE_HEADER: Record<
   "fixed-asset": {
     label: "Fixed Asset",
     icon: Cpu,
+    color: "#eab308",
+    from: "from-yellow-500/30",
+    to: "to-yellow-500/0",
+  },
+  maintenance: {
+    label: "Maintenance",
+    icon: Wrench,
+    color: "#65a30d",
+    from: "from-lime-500/30",
+    to: "to-lime-500/0",
+  },
+  "hr-payroll": {
+    label: "HR and Payroll",
+    icon: Profile2User,
     color: "#eab308",
     from: "from-yellow-500/30",
     to: "to-yellow-500/0",
@@ -196,7 +216,7 @@ function useApprovalCount() {
       timerRef.current = setTimeout(poll, 60_000);
       return;
     }
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     window
       .fetch("/api/approval-inbox/count", {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -241,6 +261,67 @@ function useApprovalCount() {
   return count;
 }
 
+// ── Civil Work DPR approval count poller ─────────────────────────────────────
+// Same shape as useApprovalCount above, just scoped to the separate
+// per-assignment approval workflow (dependencyActivityAssignmentApi.ts's
+// getPendingApprovalCount) instead of the module-wide Approval Inbox.
+function useCivilWorkDprApprovalCount() {
+  const [count, setCount] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const failRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  const poll = () => {
+    if (!mountedRef.current) return;
+    if (document.visibilityState === "hidden") {
+      timerRef.current = setTimeout(poll, 60_000);
+      return;
+    }
+    const token = sessionStorage.getItem("token");
+    window
+      .fetch("/api/dependency-activity-assignment/approvals/pending-count", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : Promise.reject()))
+      .then((d) => {
+        if (!mountedRef.current) return;
+        failRef.current = 0;
+        setCount(d.count ?? 0);
+        timerRef.current = setTimeout(poll, 60_000);
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        failRef.current += 1;
+        timerRef.current = setTimeout(
+          poll,
+          Math.min(5 * 60_000, 60_000 * failRef.current),
+        );
+      });
+  };
+
+  // Immediately re-poll after this session's own Approval tab records an
+  // approval, same reasoning as onApprovalAction above — otherwise the
+  // badge can lag up to 60s behind an action just taken.
+  const onCivilWorkDprApprovalAction = () => {
+    if (!mountedRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    poll();
+  };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    poll();
+    window.addEventListener("civilworkdpr-approval-action", onCivilWorkDprApprovalAction);
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      window.removeEventListener("civilworkdpr-approval-action", onCivilWorkDprApprovalAction);
+    };
+  }, []);
+
+  return count;
+}
+
 // ── AppSidebar (nav panel) ────────────────────────────────────────────────────
 export const AppSidebar = () => {
   const location = useLocation();
@@ -250,6 +331,7 @@ export const AppSidebar = () => {
   const { currentUser } = useAuth();
   useAppVersion();
   const pendingApprovalCount = useApprovalCount();
+  const civilWorkDprApprovalCount = useCivilWorkDprApprovalCount();
 
   const { canAccessPage } = useAuth();
 
@@ -356,7 +438,7 @@ export const AppSidebar = () => {
         raw = recordsNavItems;
         break;
       case "civilworkdpr":
-        raw = civilWorkDprNavItems;
+        raw = buildCivilWorkDprNavItems(civilWorkDprApprovalCount);
         break;
       case "sales-automation":
         raw = salesAutomationNavItems;
@@ -369,6 +451,12 @@ export const AppSidebar = () => {
         break;
       case "fixed-asset":
         raw = fixedAssetNavItems;
+        break;
+      case "maintenance":
+        raw = maintenanceNavItems;
+        break;
+      case "hr-payroll":
+        raw = hrPayrollNavItems;
         break;
       case "admin":
         raw = buildAdminNavItems(pendingApprovalCount);
@@ -479,7 +567,7 @@ export const AppSidebar = () => {
               </motion.div>
               {/* Label */}
               <span
-                className="relative z-10 text-[11px] font-bold tracking-widest uppercase"
+                className="relative z-10 text-[0.6875rem] font-bold tracking-widest uppercase"
                 style={{ color: accentColor }}
               >
                 {header.label}
@@ -496,7 +584,7 @@ export const AppSidebar = () => {
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
           className="relative z-10 flex-1 overflow-y-auto p-2 sidebar-scroll"
         >
-          <p className="px-2 pb-2 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
+          <p className="px-2 pb-2 text-[0.625rem] font-bold uppercase tracking-widest text-sidebar-foreground/40">
             Menu
           </p>
           <SidebarNav

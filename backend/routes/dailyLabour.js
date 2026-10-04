@@ -4,6 +4,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const { projectPredicate, projectParamGuard, assertAllocationAllowed } = require("../services/projectScope");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
 const cleanStr = (v, len = 500) => {
@@ -52,6 +53,10 @@ const JOINS = `
 `;
 
 // ─── GET / — optionally filtered by allocationId / projectId / date range ─────
+router.param("id", projectParamGuard(
+  `SELECT ca.ProjectId FROM dbo.DailyLabourEntry dl
+   JOIN dbo.ContractorAllocation ca ON ca.AllocationId = dl.AllocationId WHERE dl.EntryId = @id`));
+
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
@@ -69,7 +74,7 @@ router.get("/", authMiddleware, async (req, res) => {
         SELECT ${SELECT_COLUMNS}
         ${JOINS}
         WHERE (@allocationId IS NULL OR dl.AllocationId = @allocationId)
-          AND (@projectId IS NULL OR ca.ProjectId = @projectId)
+          AND (@projectId IS NULL OR ca.ProjectId = @projectId)${projectPredicate(req.projectScope, "ca.ProjectId")}
           AND (@from IS NULL OR dl.EntryDate >= @from)
           AND (@to IS NULL OR dl.EntryDate <= @to)
         ORDER BY dl.EntryDate DESC
@@ -82,7 +87,7 @@ router.get("/", authMiddleware, async (req, res) => {
 });
 
 // ─── POST / ────────────────────────────────────────────────────────────────────
-router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-register", "create"), async (req, res) => {
+router.post("/", authMiddleware, requirePageRight("civilworkdpr-daily-labour", "create"), async (req, res) => {
   const {
     allocationId, entryDate, skilledLabourCount, unskilledLabourCount,
     skilledLabourNames, unskilledLabourNames,
@@ -91,10 +96,11 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
   } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
-  if (!allocationId) return res.status(400).json({ error: "Allocation is required" });
+  if (!Number.isFinite(parseInt(allocationId, 10))) return res.status(400).json({ error: "Allocation is required" });
   if (!entryDate) return res.status(400).json({ error: "Date is required" });
 
   try {
+    if (!(await assertAllocationAllowed(req, res, allocationId))) return;
     const pool = getPool();
     const result = await pool.request()
       .input("allocationId", sql.Int, allocationId)
@@ -103,9 +109,9 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
       .input("unskilled", sql.Int, unskilledLabourCount || 0)
       .input("skilledNames", sql.NVarChar(sql.MAX), cleanStr(skilledLabourNames, 4000))
       .input("unskilledNames", sql.NVarChar(sql.MAX), cleanStr(unskilledLabourNames, 4000))
-      .input("blockId", sql.Int, blockId || null)
-      .input("unitId", sql.Int, unitId || null)
-      .input("roomId", sql.Int, roomId || null)
+      .input("blockId", sql.Int, blockId != null && blockId !== "" ? blockId : null)
+      .input("unitId", sql.Int, unitId != null && unitId !== "" ? unitId : null)
+      .input("roomId", sql.Int, roomId != null && roomId !== "" ? roomId : null)
       .input("shift", sql.NVarChar, cleanStr(shift, 20))
       .input("attendanceStatus", sql.NVarChar, cleanStr(attendanceStatus, 20))
       .input("remarks", sql.NVarChar, cleanStr(remarks))
@@ -129,7 +135,7 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
 });
 
 // ─── PUT /:id ──────────────────────────────────────────────────────────────────
-router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-register", "edit"), async (req, res) => {
+router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-daily-labour", "edit"), async (req, res) => {
   const entryId = parseInt(req.params.id, 10);
   if (isNaN(entryId)) return res.status(400).json({ error: "Invalid ID" });
 
@@ -157,9 +163,9 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
       .input("unskilled", sql.Int, unskilledLabourCount || 0)
       .input("skilledNames", sql.NVarChar(sql.MAX), cleanStr(skilledLabourNames, 4000))
       .input("unskilledNames", sql.NVarChar(sql.MAX), cleanStr(unskilledLabourNames, 4000))
-      .input("blockId", sql.Int, blockId || null)
-      .input("unitId", sql.Int, unitId || null)
-      .input("roomId", sql.Int, roomId || null)
+      .input("blockId", sql.Int, blockId != null && blockId !== "" ? blockId : null)
+      .input("unitId", sql.Int, unitId != null && unitId !== "" ? unitId : null)
+      .input("roomId", sql.Int, roomId != null && roomId !== "" ? roomId : null)
       .input("shift", sql.NVarChar, cleanStr(shift, 20))
       .input("attendanceStatus", sql.NVarChar, cleanStr(attendanceStatus, 20))
       .input("remarks", sql.NVarChar, cleanStr(remarks))
@@ -183,7 +189,7 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
 });
 
 // ─── DELETE /:id ───────────────────────────────────────────────────────────────
-router.delete("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-register", "delete"), async (req, res) => {
+router.delete("/:id", authMiddleware, requirePageRight("civilworkdpr-daily-labour", "delete"), async (req, res) => {
   const entryId = parseInt(req.params.id, 10);
   if (isNaN(entryId)) return res.status(400).json({ error: "Invalid ID" });
 

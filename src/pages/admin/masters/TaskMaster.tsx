@@ -27,6 +27,8 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { DateInput, DateTimeInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/task-master";
 const PRIORITIES = ["Very Important", "Important", "Normal"];
@@ -172,7 +174,7 @@ const DocNumberPreview: React.FC<{
 // Reminder date/time — when to pop this task into the reminder bell /
 // login-popup pipeline (src/hooks/useReminders.ts's fetchFollowUpReminders),
 // same one Follow-Up notes' "Next follow-up" already feeds. A plain
-// <input type="datetime-local"> since MasterPage's built-in "date" field
+// <DateTimeInput> since MasterPage's built-in "date" field
 // type has no time component.
 const ReminderDateTimeInput: React.FC<{
   value: unknown;
@@ -183,8 +185,7 @@ const ReminderDateTimeInput: React.FC<{
       size={14}
       className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
     />
-    <input
-      type="datetime-local"
+    <DateTimeInput
       value={(value as string) || ""}
       onChange={(e) => onChange(e.target.value)}
       className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground pl-8 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
@@ -192,7 +193,7 @@ const ReminderDateTimeInput: React.FC<{
   </div>
 );
 
-// Server sends ReminderAt as an ISO/UTC string; <input type="datetime-local">
+// Server sends ReminderAt as an ISO/UTC string; <DateTimeInput>
 // needs "YYYY-MM-DDTHH:mm" in the browser's local time — Date's local
 // getters do that conversion, toISOString() would not (it stays UTC).
 function toDatetimeLocalValue(iso: string | null | undefined): string {
@@ -900,28 +901,28 @@ const TaskMaster: React.FC = () => {
       priority: t.Priority ?? "Normal",
       status: t.Status ?? "Active",
       isActiveToggle: (t.Status ?? "Active") === "Active",
-      caseCompanyId: t.CaseCompanyId ? String(t.CaseCompanyId) : "",
+      caseCompanyId: t.CaseCompanyId != null ? String(t.CaseCompanyId) : "",
       caseCompanyName: t.CaseCompanyName ?? "",
-      caseProjectId: t.CaseProjectId ? String(t.CaseProjectId) : "",
+      caseProjectId: t.CaseProjectId != null ? String(t.CaseProjectId) : "",
       caseProjectName: t.CaseProjectName ?? "",
-      caseFinYearId: t.CaseFinYearId ? String(t.CaseFinYearId) : "",
+      caseFinYearId: t.CaseFinYearId != null ? String(t.CaseFinYearId) : "",
       caseFinYearName: t.CaseFinYearName ?? "",
-      typeOfDocId: t.TypeOfDocId ? String(t.TypeOfDocId) : "",
+      typeOfDocId: t.TypeOfDocId != null ? String(t.TypeOfDocId) : "",
       typeOfDocLabel: t.TypeOfDocLabel ?? "",
       createdByName: t.CreatedByName ?? "",
       createdAt: t.CreatedAt ?? "",
-      parentTaskId: t.ParentTaskId ? String(t.ParentTaskId) : "",
+      parentTaskId: t.ParentTaskId != null ? String(t.ParentTaskId) : "",
       parentTaskNo: t.ParentTaskNo ?? "",
       parentTaskSubject: t.ParentTaskSubject ?? "",
       reminderAt: toDatetimeLocalValue(t.ReminderAt),
       entryTypeId: t.EntryTypeId ?? "",
       entryTypeLabel: t.EntryTypeLabel ?? "",
-      linkedTypeOfDocId: t.LinkedTypeOfDocId ? String(t.LinkedTypeOfDocId) : "",
+      linkedTypeOfDocId: t.LinkedTypeOfDocId != null ? String(t.LinkedTypeOfDocId) : "",
       linkedTypeOfDocLabel:
         t.LinkedTypeOfDocPrefix || t.LinkedTypeOfDocLabel
           ? `${t.LinkedTypeOfDocPrefix ?? ""}${t.LinkedTypeOfDocPrefix && t.LinkedTypeOfDocLabel ? " — " : ""}${t.LinkedTypeOfDocLabel ?? ""}`
           : "",
-      linkedDocId: t.LinkedDocRecordId ? String(t.LinkedDocRecordId) : "",
+      linkedDocId: t.LinkedDocRecordId != null ? String(t.LinkedDocRecordId) : "",
       linkedDocNo: t.LinkedDocNo ?? "",
     }));
   }, [tasks]);
@@ -992,7 +993,7 @@ const TaskMaster: React.FC = () => {
     TypeOfDocId: r.typeOfDocId ? parseInt(r.typeOfDocId) : null,
     AssignedTo: r.assignedTo ? parseInt(r.assignedTo) : null,
     ParentTaskId: r.parentTaskId ? parseInt(r.parentTaskId) : null,
-    // r.reminderAt is "YYYY-MM-DDTHH:mm" from <input type="datetime-local">,
+    // r.reminderAt is "YYYY-MM-DDTHH:mm" from <DateTimeInput>,
     // parsed as local time — new Date() does that correctly with no "Z"
     // suffix; toISOString() then converts it to UTC for storage.
     ReminderAt: r.reminderAt ? new Date(r.reminderAt).toISOString() : null,
@@ -1244,7 +1245,7 @@ const TaskMaster: React.FC = () => {
                   )}
                   <span>{value as string}</span>
                   {hasChildren && (
-                    <span className="text-[11px] text-muted-foreground shrink-0">
+                    <span className="text-[0.6875rem] text-muted-foreground shrink-0">
                       ({count})
                     </span>
                   )}
@@ -1285,7 +1286,7 @@ const TaskMaster: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => updateStatus(row._id, "Hold")}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10 transition-colors"
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                     title="Put on hold"
                   >
                     <PauseCircle size={14} />
@@ -1400,11 +1401,10 @@ const TaskMaster: React.FC = () => {
                 placeholder="What needs to be done?"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Due Date</label>
-                <input
-                  type="date"
+                <DateInput
                   value={subtaskForm.dueDate}
                   onChange={(e) => setSubtaskForm((f) => ({ ...f, dueDate: e.target.value }))}
                   className="w-full mt-1 px-3 py-2 rounded-lg text-sm bg-muted/40 border border-border focus:outline-none focus:ring-1 focus:ring-primary"
@@ -1425,7 +1425,7 @@ const TaskMaster: React.FC = () => {
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Assignee</label>
-              <select
+              <SearchableNativeSelect
                 value={subtaskForm.assignedTo}
                 onChange={(e) => setSubtaskForm((f) => ({ ...f, assignedTo: e.target.value }))}
                 className="w-full mt-1 px-3 py-2 rounded-lg text-sm bg-muted/40 border border-border focus:outline-none focus:ring-1 focus:ring-primary"
@@ -1434,7 +1434,7 @@ const TaskMaster: React.FC = () => {
                 {assigneeOptions.map((u) => (
                   <option key={u.value} value={u.value}>{u.label}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
           </div>
           <DialogFooter>

@@ -33,13 +33,16 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Legend,
 } from "recharts";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { formatCompactINR } from "@/utils/formatCurrency";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import {
   FinanceShell,
   FinanceGlassCard,
@@ -136,6 +139,7 @@ const DonutCard: React.FC<{
   glassStyle: React.CSSProperties;
   formatValue?: (n: number) => string;
 }> = ({ title, icon: Icon, accentColor, data, isDark, glassStyle, formatValue = fmt }) => {
+  const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <div className="rounded-xl overflow-hidden" style={glassStyle}>
@@ -179,7 +183,7 @@ const DonutCard: React.FC<{
                   strokeWidth={0}
                 >
                   {data.map((d, i) => (
-                    <Cell key={i} fill={d.color} />
+                    <Cell key={i} fill={bwChartColor(theme, i, d.color)} />
                   ))}
                 </Pie>
                 <Tooltip
@@ -201,11 +205,11 @@ const DonutCard: React.FC<{
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d) => (
+              {data.map((d, i) => (
                 <div key={d.name} className="flex items-center gap-2">
                   <div
                     className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ background: d.color }}
+                    style={{ background: bwChartColor(theme, i, d.color) }}
                   />
                   <span className="text-xs text-foreground whitespace-nowrap">
                     {d.name}
@@ -238,6 +242,7 @@ const TrendCard: React.FC<{
   isDark: boolean;
   glassStyle: React.CSSProperties;
 }> = ({ title, icon: Icon, accentColor, data, series, isDark, glassStyle }) => {
+  const { theme } = useTheme();
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
     <div className="rounded-xl overflow-hidden" style={glassStyle}>
@@ -286,7 +291,7 @@ const TrendCard: React.FC<{
                 axisLine={false}
                 tickLine={false}
                 width={40}
-                tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
+                tickFormatter={formatCompactINR}
               />
               <Tooltip
                 labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
@@ -299,13 +304,13 @@ const TrendCard: React.FC<{
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              {series.map((s) => (
+              {series.map((s, i) => (
                 <Line
                   key={s.key}
                   type="monotone"
                   dataKey={s.key}
                   name={s.name}
-                  stroke={s.color}
+                  stroke={bwChartColor(theme, i, s.color)}
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 4 }}
@@ -313,6 +318,148 @@ const TrendCard: React.FC<{
               ))}
             </LineChart>
           </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Monthly Income Growth (Trial Balance-derived) ────────────────────────────
+interface MonthlyIncomePoint {
+  key: string;
+  month: string;
+  year: number;
+  income: number;
+  trend: "growth" | "degrowth" | "neutral";
+}
+
+const INCOME_TREND_COLOR: Record<MonthlyIncomePoint["trend"], string> = {
+  growth: "#10b981",
+  degrowth: "#f43f5e",
+  neutral: "#6366f1",
+};
+// BW theme swaps the module-accent trend colours for the fixed maroon/green/orange
+// chart palette, keeping "growth" mapped to the palette's green for legibility.
+const BW_INCOME_TREND_COLOR: Record<MonthlyIncomePoint["trend"], string> = {
+  growth: "#008000",
+  degrowth: "#800000",
+  neutral: "#FFA500",
+};
+
+const MonthlyIncomeCard: React.FC<{
+  data: MonthlyIncomePoint[];
+  isDark: boolean;
+  glassStyle: React.CSSProperties;
+  isLoading: boolean;
+}> = ({ data, isDark, glassStyle, isLoading }) => {
+  const { theme } = useTheme();
+  const trendColor = theme === "bw" ? BW_INCOME_TREND_COLOR : INCOME_TREND_COLOR;
+  const hasData = data.some((d) => Math.abs(d.income) > 0.005);
+  return (
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+      <div
+        className="flex items-center gap-2 px-4 py-3 border-b"
+        style={{
+          borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)",
+        }}
+      >
+        <div
+          className="w-5 h-5 rounded-md flex items-center justify-center"
+          style={{ background: "rgba(16,185,129,0.15)" }}
+        >
+          <TrendingUp size={11} style={{ color: "#10b981" }} />
+        </div>
+        <span
+          className="text-xs font-heading font-semibold"
+          style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
+        >
+          Monthly Income Growth
+        </span>
+        <span className="text-[0.625rem] text-muted-foreground ml-auto">
+          From Trial Balance · current FY
+        </span>
+      </div>
+      <div className="p-4">
+        {isLoading ? (
+          <Skeleton className="h-[260px] w-full" />
+        ) : !hasData ? (
+          <div className="text-center text-muted-foreground py-10 text-sm">
+            No income posted to the Trial Balance this financial year
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-4 mb-3 flex-wrap">
+              {[
+                { label: "Growth", color: trendColor.growth },
+                { label: "Degrowth", color: trendColor.degrowth },
+                { label: "No change", color: trendColor.neutral },
+              ].map((l) => (
+                <div key={l.label} className="flex items-center gap-1.5">
+                  <div
+                    className="w-2.5 h-2.5 rounded-sm"
+                    style={{ background: l.color }}
+                  />
+                  <span className="text-[0.625rem] text-muted-foreground">{l.label}</span>
+                </div>
+              ))}
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"}
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={48}
+                  tickFormatter={(v) =>
+                    Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)
+                  }
+                />
+                <Tooltip
+                  cursor={{ fill: isDark ? "rgba(148,163,184,0.08)" : "rgba(100,116,139,0.08)" }}
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0].payload as MonthlyIncomePoint;
+                    const trendLabel =
+                      d.trend === "growth"
+                        ? "Growth"
+                        : d.trend === "degrowth"
+                          ? "Degrowth"
+                          : "No change";
+                    return (
+                      <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
+                        <p className="text-xs font-heading font-semibold text-foreground">
+                          {d.month} {d.year}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{fmt(d.income)}</p>
+                        <p
+                          className="text-[0.6875rem] font-medium mt-0.5"
+                          style={{ color: trendColor[d.trend] }}
+                        >
+                          {trendLabel}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="income" radius={[3, 3, 0, 0]} maxBarSize={40}>
+                  {data.map((d) => (
+                    <Cell key={d.key} fill={trendColor[d.trend]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </>
         )}
       </div>
     </div>
@@ -383,7 +530,7 @@ const FinanceDashboard = () => {
   usePageRights("finance-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const {
     data: rawData,
@@ -404,6 +551,21 @@ const FinanceDashboard = () => {
   });
 
   const data = rawData ? normalise(rawData) : undefined;
+
+  const { data: monthlyIncome, isLoading: monthlyIncomeLoading } = useQuery<
+    MonthlyIncomePoint[]
+  >({
+    queryKey: ["financeMonthlyIncome"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/financial-statements/monthly-income");
+      if (!res.ok) throw new Error("Failed to fetch monthly income");
+      const json = await res.json().catch(() => ({}));
+      return Array.isArray(json?.months) ? json.months : [];
+    },
+    staleTime: 60_000,
+    refetchInterval: 2 * 60_000,
+    refetchOnWindowFocus: true,
+  });
 
   const tableGlass = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
@@ -577,6 +739,20 @@ const FinanceDashboard = () => {
           </div>
         </GlassSection>
 
+        {/* ── Monthly Income Growth (Trial Balance) ─────────────────────────── */}
+        <GlassSection
+          title="Monthly Income Growth"
+          icon={TrendingUp}
+          accentColor="#10b981"
+        >
+          <MonthlyIncomeCard
+            data={monthlyIncome ?? []}
+            isDark={isDark}
+            glassStyle={tableGlass}
+            isLoading={monthlyIncomeLoading}
+          />
+        </GlassSection>
+
         {/* ── Recent tables ─────────────────────────────────────────────────── */}
         <GlassSection
           title="Recent Activity"
@@ -610,7 +786,7 @@ const FinanceDashboard = () => {
                 </div>
                 <button
                   onClick={() => navigate("/payments")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#f43f5e" }}
                 >
                   View all →
@@ -658,7 +834,7 @@ const FinanceDashboard = () => {
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className="text-[10px] border-rose-500/30 text-rose-500"
+                              className="text-[0.625rem] border-rose-500/30 text-rose-500"
                             >
                               {p.PMode || "—"}
                             </Badge>
@@ -706,7 +882,7 @@ const FinanceDashboard = () => {
                 </div>
                 <button
                   onClick={() => navigate("/received-payments")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#10b981" }}
                 >
                   View all →
@@ -754,7 +930,7 @@ const FinanceDashboard = () => {
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className="text-[10px] border-emerald-500/30 text-emerald-500"
+                              className="text-[0.625rem] border-emerald-500/30 text-emerald-500"
                             >
                               {r.RPMode || "—"}
                             </Badge>
@@ -767,7 +943,7 @@ const FinanceDashboard = () => {
                           </TableCell>
                           <TableCell>
                             <span
-                              className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                              className={`text-[0.625rem] px-2 py-0.5 rounded-full font-medium ${
                                 r.RPStatus === "Approved"
                                   ? "bg-emerald-500/15 text-emerald-500"
                                   : r.RPStatus === "Draft" || !r.RPStatus

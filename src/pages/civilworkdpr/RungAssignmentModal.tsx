@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Flag, Trash2, Check, Timer } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, ShieldCheck, Plus, Trash2, Users } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
@@ -15,12 +15,14 @@ import {
   type AssignmentCheckpoint,
   type SourceType,
   type Engineer,
+  type ApprovalLevel,
 } from "@/api/dependencyActivityAssignmentApi";
-import { getActivityCheckpoints } from "@/api/activityCheckpointApi";
 import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
+import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -28,11 +30,14 @@ const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking
 
 // Native <select multiple> renders as a raw OS listbox no amount of CSS can
 // soften — this pairs a styled trigger with a checkbox list in a Radix
-// popover instead, matching the rest of the app's input styling.
-function EngineerMultiSelect({
-  engineers, selected, onChange,
+// popover instead, matching the rest of the app's input styling. Shared by
+// the Engineers dropdown, the QC dropdown, and each Approval Level's own
+// picker below — same look everywhere a "pick some people" control appears
+// in this modal.
+function UserMultiSelect({
+  users, selected, onChange, placeholder = "Select…", noneLabel = "No one available.",
 }: {
-  engineers: Engineer[]; selected: number[]; onChange: (ids: number[]) => void;
+  users: Engineer[]; selected: number[]; onChange: (ids: number[]) => void; placeholder?: string; noneLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const toggle = (id: number) =>
@@ -40,10 +45,10 @@ function EngineerMultiSelect({
 
   const label =
     selected.length === 0
-      ? "Select engineers…"
+      ? placeholder
       : selected.length === 1
-        ? engineers.find((e) => e.id === selected[0])?.name || "1 engineer selected"
-        : `${selected.length} engineers selected`;
+        ? users.find((e) => e.id === selected[0])?.name || "1 selected"
+        : `${selected.length} selected`;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -57,21 +62,116 @@ function EngineerMultiSelect({
         align="start"
         className="w-[var(--radix-popover-trigger-width)] max-h-72 overflow-y-auto p-1.5"
       >
-        {engineers.length === 0 ? (
-          <p className="text-xs text-muted-foreground italic px-2 py-1.5">No engineers available.</p>
+        {users.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic px-2 py-1.5">{noneLabel}</p>
         ) : (
-          engineers.map((eng) => (
+          users.map((u) => (
             <label
-              key={eng.id}
+              key={u.id}
               className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm text-foreground hover:bg-muted cursor-pointer transition-colors"
             >
-              <Checkbox checked={selected.includes(eng.id)} onCheckedChange={() => toggle(eng.id)} />
-              {eng.name}
+              <Checkbox checked={selected.includes(u.id)} onCheckedChange={() => toggle(u.id)} />
+              {u.name}
             </label>
           ))
         )}
       </PopoverContent>
     </Popover>
+  );
+}
+
+let levelKeySeq = 0;
+const newLevel = (index: number): ApprovalLevel => ({
+  id: `level-${Date.now()}-${++levelKeySeq}`,
+  label: `Level ${index + 1}`,
+  userIds: [],
+  mode: "all",
+});
+
+// Mini Approval Setup, scoped to just THIS activity assignment — not a
+// module-wide workflow like the admin Approval Setup page. Add one level per
+// approver for a strict one-by-one sequence; on the LAST level, pick more
+// than one person and switch its mode to "any one of them" for a
+// "one-by-one, then either" chain. Whoever ends up named here (plus
+// super_admin, always) gets the right to approve this activity's finished
+// work — enforced where that approval action itself lives (Work Reporting).
+function ApprovalLevelsEditor({
+  levels, onChange, users,
+}: {
+  levels: ApprovalLevel[]; onChange: (levels: ApprovalLevel[]) => void; users: Engineer[];
+}) {
+  const updateLevel = (id: string, patch: Partial<ApprovalLevel>) =>
+    onChange(levels.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  const removeLevel = (id: string) => onChange(levels.filter((l) => l.id !== id));
+  const addLevel = () => onChange([...levels, newLevel(levels.length)]);
+
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-3.5 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <label className={`${labelCls} mb-0`}>
+          <ShieldCheck size={11} /> Approval Setup
+        </label>
+        <button
+          type="button"
+          onClick={addLevel}
+          className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 transition-colors"
+        >
+          <Plus size={11} /> Add Approver Level
+        </button>
+      </div>
+
+      {levels.length === 0 ? (
+        <p className="text-[0.6875rem] text-muted-foreground italic">
+          No approvers set — only super_admin can approve this activity's work. Add a level to name who else can.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {levels.map((level, i) => {
+            const isLast = i === levels.length - 1;
+            return (
+              <div key={level.id} className="flex items-center gap-2">
+                <span className="shrink-0 w-16 text-[0.625rem] font-heading font-bold uppercase tracking-wide text-muted-foreground">
+                  {isLast ? "Final" : `Step ${i + 1}`}
+                </span>
+                <div className="flex-1">
+                  <UserMultiSelect
+                    users={users}
+                    selected={level.userIds}
+                    onChange={(ids) => updateLevel(level.id, { userIds: ids })}
+                    placeholder="Select approver(s)…"
+                  />
+                </div>
+                {level.userIds.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => updateLevel(level.id, { mode: level.mode === "any" ? "all" : "any" })}
+                    title={level.mode === "any" ? "Any one of them can approve — click to require all" : "All must approve — click to allow any one of them"}
+                    className={`shrink-0 inline-flex items-center gap-1 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full transition-colors ${
+                      level.mode === "any"
+                        ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    <Users size={10} /> {level.mode === "any" ? "Any one" : "All"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeLevel(level.id)}
+                  className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  title="Remove level"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            );
+          })}
+          <p className="text-[0.625rem] text-muted-foreground/70 pt-0.5">
+            Steps approve one after another. If the final step has more than one person, toggle "Any one" so just one of them clears it.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -107,7 +207,7 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
         </div>
       ) : !blueprint ? (
         <p className="text-xs text-muted-foreground italic py-1.5">
-          No blueprint uploaded for this room yet — upload one from Setup &gt; Room Master.
+          No blueprint uploaded for this room yet — upload one from Setup &gt; Flat Master.
         </p>
       ) : (
         <button
@@ -123,11 +223,11 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
             </div>
           )}
           {annotation && (
-            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/90 text-white">
+            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold bg-emerald-500/90 text-white">
               Marked
             </span>
           )}
-          <span className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[10px] px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <span className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[0.625rem] px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
             Click to mark up
           </span>
         </button>
@@ -193,6 +293,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const rungId = rung.rungId!;
 
   const [engineerIds, setEngineerIds] = useState<number[]>([]);
+  const [qcUserIds, setQcUserIds] = useState<number[]>([]);
+  const [approvalLevels, setApprovalLevels] = useState<ApprovalLevel[]>([]);
   const [startDate, setStartDate] = useState<string>("");
   const [days, setDays] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
@@ -204,8 +306,9 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const [descriptionTouched, setDescriptionTouched] = useState(false);
   const [remarks, setRemarks] = useState<string>("");
   const [quantities, setQuantities] = useState<Record<string, string>>({});
+  // Read-only here — see the render block below. Tagged in Activity Master,
+  // toggled in Reporting.
   const [checkpoints, setCheckpoints] = useState<AssignmentCheckpoint[]>([]);
-  const [loadingCheckpoints, setLoadingCheckpoints] = useState(false);
 
   const { data: engineers = [] } = useQuery({
     queryKey: ["dependency-activity-assignment-engineers"],
@@ -232,10 +335,14 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   useEffect(() => {
     if (!detail?.assignment) {
       setDescription(defaultDescription);
+      setQcUserIds([]);
+      setApprovalLevels([]);
       return;
     }
     const a = detail.assignment;
     setEngineerIds(a.engineerIds);
+    setQcUserIds(a.qcUserIds || []);
+    setApprovalLevels(a.approvalLevels || []);
     setStartDate(a.startDate ? a.startDate.slice(0, 10) : "");
     setDays(a.days != null ? String(a.days) : "");
     setEndDate(a.endDate ? a.endDate.slice(0, 10) : "");
@@ -251,76 +358,6 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     setCheckpoints(a.checkpoints || []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
-
-  // Pulls the activity's checkpoint template from Work Checkpoint Master
-  // and appends any not already attached here (matched by checkpointId, or
-  // by name for ones added before a checkpointId existed) — never
-  // duplicates, never clobbers checked state already on the list.
-  const handleAddCheckpoints = async () => {
-    setLoadingCheckpoints(true);
-    try {
-      const template = await getActivityCheckpoints(rung.activityId);
-      if (!template.length) {
-        toast.error("No checkpoints configured for this activity in Work Checkpoint Master.");
-        return;
-      }
-      setCheckpoints((prev) => {
-        const existingIds = new Set(prev.map((c) => c.checkpointId).filter((id): id is number => id != null));
-        const existingNames = new Set(prev.map((c) => c.fieldName.toLowerCase()));
-        const additions = template
-          .filter((t) => !existingIds.has(t.id) && !existingNames.has(t.fieldName.toLowerCase()))
-          .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false, minWaitDays: t.minWaitDays }));
-        if (!additions.length) {
-          toast("All of this activity's checkpoints are already on the list.");
-          return prev;
-        }
-        return [...prev, ...additions];
-      });
-    } catch (e: any) {
-      toast.error(e.message ?? "Couldn't load checkpoints");
-    } finally {
-      setLoadingCheckpoints(false);
-    }
-  };
-
-  // Checking OFF is always allowed; checking ON is blocked until
-  // minWaitDays have passed since Start Date — the same rule the server
-  // enforces on save (see dependencyActivityAssignment.js POST /:rungId),
-  // caught here first so the user gets an immediate, specific reason
-  // instead of a save-time rejection.
-  const toggleCheckpoint = (index: number) => {
-    const cp = checkpoints[index];
-    if (!cp.isChecked && cp.minWaitDays != null && cp.minWaitDays > 0) {
-      if (!startDate) {
-        toast.error(`"${cp.fieldName}" needs a Start Date set before it can be checked off.`);
-        return;
-      }
-      const eligibleDate = addDays(startDate, cp.minWaitDays);
-      const todayStr = new Date().toISOString().slice(0, 10);
-      if (todayStr < eligibleDate) {
-        const daysLeft = diffDays(todayStr, eligibleDate);
-        toast.error(
-          `"${cp.fieldName}" needs ${cp.minWaitDays} day(s) after the start date — ${daysLeft ?? cp.minWaitDays} day(s) left.`,
-        );
-        return;
-      }
-    }
-    setCheckpoints((prev) => prev.map((c, i) => (i === index ? { ...c, isChecked: !c.isChecked } : c)));
-  };
-  const removeCheckpoint = (index: number) =>
-    setCheckpoints((prev) => prev.filter((_, i) => i !== index));
-
-  // Same rule toggleCheckpoint enforces, exposed here so the row can show
-  // *why* a checkpoint can't be checked yet instead of just silently
-  // refusing the click.
-  const checkpointGate = (cp: AssignmentCheckpoint): { locked: boolean; daysLeft: number | null } => {
-    if (cp.isChecked || cp.minWaitDays == null || cp.minWaitDays <= 0) return { locked: false, daysLeft: null };
-    if (!startDate) return { locked: true, daysLeft: null };
-    const eligibleDate = addDays(startDate, cp.minWaitDays);
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (todayStr >= eligibleDate) return { locked: false, daysLeft: null };
-    return { locked: true, daysLeft: diffDays(todayStr, eligibleDate) };
-  };
 
   // Days drives End Date whenever Start Date is known; editing End Date
   // directly recomputes Days the other way — whichever field the user last
@@ -350,6 +387,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
         .filter((m) => Number.isFinite(m.quantity) && m.quantity > 0);
       return saveRungAssignment(rungId, {
         engineerIds,
+        qcUserIds,
+        approvalLevels,
         startDate: startDate || null,
         days: days ? parseInt(days, 10) : null,
         endDate: endDate || null,
@@ -406,12 +445,25 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
           </div>
         ) : (
           <div className="px-6 py-5 space-y-5 overflow-y-auto">
-            {/* Engineers — styled multi-select dropdown */}
-            <div>
-              <label className={labelCls}>
-                <UserRound size={11} /> Engineers
-              </label>
-              <EngineerMultiSelect engineers={engineers} selected={engineerIds} onChange={setEngineerIds} />
+            {/* Mini Approval Setup — who is allowed to approve THIS activity's
+                finished work, scoped to just this assignment. Sits above the
+                Engineers/QC pickers since it governs both of them. */}
+            <ApprovalLevelsEditor levels={approvalLevels} onChange={setApprovalLevels} users={engineers} />
+
+            {/* Engineers & QC — styled multi-select dropdowns, side by side */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls}>
+                  <UserRound size={11} /> Engineers
+                </label>
+                <UserMultiSelect users={engineers} selected={engineerIds} onChange={setEngineerIds} placeholder="Select engineers…" noneLabel="No engineers available." />
+              </div>
+              <div>
+                <label className={labelCls}>
+                  <ShieldCheck size={11} /> Quality Check
+                </label>
+                <UserMultiSelect users={engineers} selected={qcUserIds} onChange={setQcUserIds} placeholder="Select QC…" noneLabel="No one available." />
+              </div>
             </div>
 
             {/* Start / Duration / End */}
@@ -420,8 +472,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                 <label className={labelCls}>
                   <CalendarDays size={11} /> Start Date
                 </label>
-                <input
-                  type="date"
+                <DateInput
                   value={startDate}
                   onChange={(e) => handleStartDateChange(e.target.value)}
                   className={inputCls}
@@ -440,8 +491,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
               </div>
               <div>
                 <label className={labelCls}>End Date</label>
-                <input
-                  type="date"
+                <DateInput
                   value={endDate}
                   onChange={(e) => handleEndDateChange(e.target.value)}
                   className={inputCls}
@@ -456,7 +506,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   <HardHat size={11} /> Labour Given By
                 </label>
                 <div className="flex items-center gap-2">
-                  <select
+                  <SearchableNativeSelect
                     value={givenByValue(labourSource, labourContractorId)}
                     onChange={(e) => {
                       const { source, contractorId } = parseGivenBy(e.target.value);
@@ -472,10 +522,10 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                   {labourSource && (
                     <span
-                      className={`shrink-0 text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[labourSource].className}`}
+                      className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[labourSource].className}`}
                     >
                       {SOURCE_META[labourSource].label}
                     </span>
@@ -487,7 +537,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   <Package size={11} /> Material Given By
                 </label>
                 <div className="flex items-center gap-2">
-                  <select
+                  <SearchableNativeSelect
                     value={givenByValue(materialSource, materialContractorId)}
                     onChange={(e) => {
                       const { source, contractorId } = parseGivenBy(e.target.value);
@@ -503,10 +553,10 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                   {materialSource && (
                     <span
-                      className={`shrink-0 text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[materialSource].className}`}
+                      className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[materialSource].className}`}
                     >
                       {SOURCE_META[materialSource].label}
                     </span>
@@ -530,7 +580,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                 className={`${inputCls} resize-none`}
               />
               {!descriptionTouched && (
-                <p className="text-[10px] text-muted-foreground mt-1">Auto-filled from location — edit freely.</p>
+                <p className="text-[0.625rem] text-muted-foreground mt-1">Auto-filled from location — edit freely.</p>
               )}
             </div>
 
@@ -562,7 +612,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-foreground truncate">{item.itemName}</p>
                         {item.itemCode && (
-                          <p className="text-[10px] text-muted-foreground">{item.itemCode}</p>
+                          <p className="text-[0.625rem] text-muted-foreground">{item.itemCode}</p>
                         )}
                       </div>
                       <input
@@ -576,81 +626,52 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         }
                         className="w-20 px-2 py-1.5 rounded-md text-xs bg-background border border-border text-foreground text-right focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
                       />
-                      {item.uom && <span className="text-[10px] text-muted-foreground w-8 shrink-0">{item.uom}</span>}
+                      {item.uom && <span className="text-[0.625rem] text-muted-foreground w-8 shrink-0">{item.uom}</span>}
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Checkpoints — pulled from Work Checkpoint Master, tracked
-                milestone-style per rung. */}
+            {/* Checkpoints — read-only preview here. These are tagged onto the
+                Activity itself in Activity Master (not picked per-rung
+                anymore) and auto-seed onto this rung the first time it's
+                viewed; checking them off happens in Reporting, not here. */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className={`${labelCls} mb-0`}>
-                  <ListChecks size={11} /> Checkpoints
-                </label>
-                <button
-                  type="button"
-                  onClick={handleAddCheckpoints}
-                  disabled={loadingCheckpoints}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg border border-dashed border-border text-muted-foreground hover:text-cyan-600 dark:hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-500/5 disabled:opacity-50 transition-all"
-                >
-                  {loadingCheckpoints ? <Loader2 size={12} className="animate-spin" /> : <Flag size={12} />}
-                  Add Checkpoints
-                </button>
-              </div>
+              <label className={`${labelCls} mb-1.5`}>
+                <ListChecks size={11} /> Checkpoints
+              </label>
               {checkpoints.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic py-1.5">
-                  No checkpoints on this rung yet — click "Add Checkpoints" to pull them from Work Checkpoint Master.
+                  No checkpoints tagged to this activity — add them in Activity Master.
                 </p>
               ) : (
-                <div className="space-y-0">
-                  {checkpoints.map((cp, i) => {
-                    const gate = checkpointGate(cp);
-                    return (
-                    <div key={`${cp.checkpointId ?? "custom"}-${i}`} className="flex items-start gap-3">
-                      {/* Milestone rail — filled circle + connecting line */}
-                      <div className="flex flex-col items-center shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => toggleCheckpoint(i)}
-                          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                            cp.isChecked
-                              ? "bg-emerald-500 border-emerald-500 text-white"
-                              : gate.locked
-                                ? "bg-background border-amber-500/40 text-transparent"
-                                : "bg-background border-border text-transparent hover:border-cyan-500/50"
-                          }`}
-                          title={cp.isChecked ? "Mark incomplete" : gate.locked ? "Not eligible yet" : "Mark complete"}
-                        >
-                          <Check size={11} strokeWidth={3} />
-                        </button>
-                        {i < checkpoints.length - 1 && (
-                          <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-emerald-500/40" : "bg-border"}`} />
-                        )}
+                <div className="space-y-1.5">
+                  {checkpoints.map((cp, i) => (
+                    <div
+                      key={`${cp.checkpointId ?? "custom"}-${i}`}
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
+                    >
+                      <div
+                        className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                          cp.isChecked ? "bg-emerald-500 border-emerald-500 text-white" : "bg-background border-border text-transparent"
+                        }`}
+                      >
+                        <Check size={9} strokeWidth={3} />
                       </div>
-                      <div className="flex-1 flex items-center justify-between gap-2 pb-3 pt-0.5">
-                        <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
-                          {cp.fieldName}
-                          {gate.locked && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
-                              <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
-                            </span>
-                          )}
+                      <span className="text-sm text-foreground flex-1 truncate">{cp.fieldName}</span>
+                      {cp.isDaily && (
+                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full shrink-0">
+                          <CalendarDays size={9} /> Daily
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => removeCheckpoint(i)}
-                          className="p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                          title="Remove"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
+                      )}
+                      {cp.minWaitDays != null && cp.minWaitDays > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full shrink-0">
+                          <Timer size={9} /> {cp.minWaitDays}d wait
+                        </span>
+                      )}
                     </div>
-                    );
-                  })}
+                  ))}
                 </div>
               )}
             </div>
@@ -683,7 +704,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
             type="button"
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending || isLoading}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-600 hover:to-teal-500 transition-all disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50"
           >
             {saveMutation.isPending && <Loader2 size={12} className="animate-spin" />}
             Save

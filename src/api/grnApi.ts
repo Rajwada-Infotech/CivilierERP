@@ -5,7 +5,7 @@ const BASE = "/api/grns";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
 });
 
 export interface Supplier {
@@ -93,6 +93,10 @@ export interface GRNItemLine {
   quantity: number;
   /** Computed: rate Ã— quantity. Stored for audit trail. */
   totalAmount: number;
+  // Inherited from the linked PO line's own Cost Centre (which was itself
+  // auto-filled from Item Master) — not re-resolved here, since every GRN
+  // is raised against a PO.
+  costCenterId?: string | null;
 }
 
 export interface GRNFormDataPayload {
@@ -256,7 +260,7 @@ export const uploadGRNAttachments = async (
   const res = await fetch(`${BASE}/upload`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+      Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
       // NOTE: do NOT set Content-Type -- the browser sets the multipart boundary
     },
     body: form,
@@ -291,7 +295,7 @@ export const getGRNAttachments = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to fetch attachments");
   }
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const previewNextGRNNumber = async (
@@ -310,7 +314,8 @@ export const previewNextGRNNumber = async (
 // â"€â"€ Dropdown fetches â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
-  const res = await fetch("/api/account-head?type=S", {
+  // Vendors and Suppliers, not Landlords — see purchaseOrdersApi.ts's getSuppliers.
+  const res = await fetch("/api/account-head?type=S,V&excludeCategory=Landlord", {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch suppliers");
@@ -323,7 +328,7 @@ export const getPurchaseOrders = async (
 ): Promise<PurchaseOrder[]> => {
   const params: Record<string, string> = { limit: "500" };
   if (fyId) params.fyId = String(fyId);
-  const res = await fetch(buildUrl("/api/purchase-orders", params), {
+  const res = await fetch(buildUrl("/api/grns/po-list", params), {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch Purchase Orders");
@@ -333,7 +338,7 @@ export const getPurchaseOrders = async (
 export const getPurchaseOrderById = async (
   id: number | string,
 ): Promise<PurchaseOrder> => {
-  const res = await fetch(`/api/purchase-orders/${id}`, {
+  const res = await fetch(`/api/grns/po/${id}`, {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch PO details");

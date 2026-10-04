@@ -7,6 +7,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
+const { MODULE_MAP: DOC_MODULE_MAP } = require("../services/approvalService");
 
 const CACHE_NS = "approval-workflows";
 
@@ -194,47 +195,56 @@ router.delete("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"),
 
 module.exports = router;
 
-// GET /api/approval-workflows/trail?module=GoodsReceiptNotes&id=123
-// Returns the active workflow levels + audit log for a specific record.
-// Only returns the LATEST entry per level (handles resubmissions).
-router.get("/trail", authMiddleware, async (req, res) => {
-  const { module, id } = req.query;
-  if (!module || !id) {
-    return res.status(400).json({ error: "module and id are required" });
-  }
+// Map frontend module slug → { tableName, workflowModuleId }
+// tableName matches what approvalService writes to ApprovalAuditLog
+// workflowModuleId matches what ApprovalWorkflows.modules JSON array contains
+const MODULE_TABLE_MAP = {
+  GoodsReceiptNotes: { workflowId: "GRN" },
+  PurchaseOrders: { workflowId: "PurchaseOrders" },
+  WorkOrderHeader: { workflowId: "WorkOrderHeader" },
+  ExpenseBooking: { workflowId: "Expenses" },
+  NewPayment: { workflowId: "NewPayment" },
+  MaterialIssues: { workflowId: "MaterialIssues" },
+  MaterialIssueReturn: { workflowId: "MaterialIssueReturn" },
+  MaterialRequests: { workflowId: "MaterialRequests" },
+  StockTransfers: { workflowId: "StockTransfer" },
+  BOQ: { workflowId: "BOQ" },
+  WorkDone: { workflowId: "WorkDone" },
+  SaleOrders: { workflowId: "SaleOrder" },
+  VehicleInOut: { workflowId: "VehicleInOut" },
+  Contract: { workflowId: "Contract" },
+};
 
-  // Map frontend module slug → { tableName, workflowModuleId }
-  // tableName matches what approvalService writes to ApprovalAuditLog
-  // workflowModuleId matches what ApprovalWorkflows.modules JSON array contains
-  const MODULE_TABLE_MAP = {
-    GoodsReceiptNotes: { workflowId: "GRN" },
-    PurchaseOrders: { workflowId: "PurchaseOrders" },
-    WorkOrderHeader: { workflowId: "WorkOrderHeader" },
-    ExpenseBooking: { workflowId: "Expenses" },
-    NewPayment: { workflowId: "NewPayment" },
-    MaterialIssues: { workflowId: "MaterialIssues" },
-    MaterialRequests: { workflowId: "MaterialRequests" },
-    StockTransfers: { workflowId: "StockTransfer" },
-    BOQ: { workflowId: "BOQ" },
-    WorkDone: { workflowId: "WorkDone" },
-    SaleOrders: { workflowId: "SaleOrder" },
-    VehicleInOut: { workflowId: "VehicleInOut" },
-    Contract: { workflowId: "Contract" },
-  };
-
+// Builds one record's trail payload — shared by the single-record GET
+// /trail and the bulk GET /trail/bulk below, which a list page (dozens of
+// rows, each previously firing its own GET /trail on every render) uses to
+// fetch every visible row's trail in ONE request instead of one-per-row.
+// That N+1 pattern was tripping the per-user API rate limit outright on
+// pages like Material Request (~36 rows => 36 concurrent requests, replayed
+// on every refetch) — ApprovalStatusChain's fallback prop masked it as a
+// plain "Pending"/"Approved" badge instead of an error, which is why it
+// looked like the richer badge was silently "reverting" on its own.
+async function buildApprovalTrail(pool, module, recordId) {
   const entry = MODULE_TABLE_MAP[module];
-  if (!entry) {
-    return res.status(400).json({ error: `Unknown module table: ${module}` });
-  }
+  if (!entry) return { error: `Unknown module table: ${module}` };
 
-  try {
-    const pool = getPool();
-    const recordId = parseInt(id, 10);
+    // A CRM Refund's payout voucher is a NewPayment row routed through its
+    // own single-level "CrmRefundPayment" workflow (see approvalService.js),
+    // not the multi-module "NewPayment" bundle every other Payment shares —
+    // this endpoint only receives the table name, not which workflow
+    // actually governed the approve/reject click, so it has to look the
+    // row up itself to show the chain that's actually in effect.
+    let workflowId = entry.workflowId;
+    if (module === "NewPayment") {
+      const srcCheck = await pool.request().input("id", sql.Int, recordId)
+        .query("SELECT SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @id");
+      if (srcCheck.recordset[0]?.SourceCrmRefundId) workflowId = "CrmRefundPayment";
+    }
 
     // 1. Fetch workflow config (levels + type)
     const wfResult = await pool
       .request()
-      .input("WorkflowId", sql.NVarChar(100), entry.workflowId).query(`
+      .input("WorkflowId", sql.NVarChar(100), workflowId).query(`
         SELECT TOP 1 Id, Name, type, LevelsData AS LevelsJson, active
         FROM dbo.ApprovalWorkflows
         WHERE active = 1
@@ -261,11 +271,12 @@ router.get("/trail", authMiddleware, async (req, res) => {
         ORDER BY Level ASC, ActionAt ASC
       `);
 
-    // 2b. Level 0 rows separately — submission ('Pending') and rejection
-    // ('Rejected') markers. transition() (services/approvalService.js)
-    // always writes a rejection at Level 0, never at the level it actually
-    // happened, so without these a rejected record's trail would show no
-    // rejection at all — every step above would just read "Pending".
+    // 2b. Level 0 rows separately — submission ('Pending') markers, plus
+    // rejection markers from records rejected before transition() was
+    // fixed to log the real level it happened at (see approvalService.js
+    // resolveCurrentLevel/writeAuditLog). New rejections land at their real
+    // level and are picked up by the numbered-level merge above; this
+    // Level 0 fallback only still matters for that older historical data.
     const level0Result = await pool
       .request()
       .input("TableName", sql.NVarChar(100), module)
@@ -278,29 +289,21 @@ router.get("/trail", authMiddleware, async (req, res) => {
 
     const allAuditRows = auditResult.recordset;
     const workflowType = wfRow?.type || "sequential";
+    // Kept raw (not collapsed to one row per level) — a level whose own
+    // `mode` is "all" can have several distinct approvers, and the per-level
+    // branch below (not a global workflow-wide type) decides how to
+    // summarize each level's rows.
+    const auditRows = allAuditRows;
 
-    // For sequential/any: collapse to latest entry per level
-    const auditRows =
-      workflowType === "parallel"
-        ? allAuditRows
-        : Object.values(
-            allAuditRows.reduce((acc, row) => {
-              if (
-                !acc[row.Level] ||
-                new Date(row.ActionAt) > new Date(acc[row.Level].ActionAt)
-              ) {
-                acc[row.Level] = row;
-              }
-              return acc;
-            }, {}),
-          ).sort((a, b) => a.Level - b.Level);
-
-    // 3. Merge workflow levels with audit entries
+    // 3. Merge workflow levels with audit entries. Each level's own `mode`
+    // ("all" = everyone assigned must approve, anything else = the first
+    // approval settles it) drives how its rows are summarized — this is a
+    // per-step setting (ApprovalLevel.mode), not the old workflow-wide type.
     const steps = workflowLevels.map((lvl, idx) => {
       const levelNum = idx + 1;
       const levelRows = auditRows.filter((a) => a.Level === levelNum);
 
-      if (workflowType === "parallel") {
+      if (lvl.mode === "all") {
         const approvers = levelRows.map((r) => ({
           email: r.ApproverEmail,
           name: r.ApproverEmail?.split("@")[0] || null,
@@ -321,6 +324,7 @@ router.get("/trail", authMiddleware, async (req, res) => {
           level: levelNum,
           label: lvl.label || `Level ${levelNum}`,
           userIds: lvl.userIds || [],
+          mode: "all",
           status: anyRejected
             ? "Rejected"
             : allApproved
@@ -330,41 +334,20 @@ router.get("/trail", authMiddleware, async (req, res) => {
           approverName: latestActor?.name || null,
           role: latestActor?.role || null,
           actionAt: latestActor?.actionAt || null,
-          note: null,
+          note: latestActor?.status === "Rejected" ? (levelRows.find((r) => r.ActionStatus === "Rejected")?.Note ?? null) : null,
           approvers,
           workflowType,
         };
       }
 
-      if (workflowType === "any") {
-        // First to act wins
-        const actor =
-          levelRows.find(
-            (r) =>
-              r.ActionStatus === "Approved" || r.ActionStatus === "Rejected",
-          ) ||
-          levelRows[0] ||
-          null;
-        return {
-          level: levelNum,
-          label: lvl.label || `Level ${levelNum}`,
-          userIds: lvl.userIds || [],
-          status: actor?.ActionStatus || "Pending",
-          approverEmail: actor?.ApproverEmail || null,
-          approverName: actor?.ApproverEmail?.split("@")[0] || null,
-          role: actor?.Role || null,
-          actionAt: actor?.ActionAt || null,
-          note: actor?.Note || null,
-          workflowType,
-        };
-      }
-
-      // sequential — latest entry at this level
+      // Default ("any"/unset) — a level completes on its first approval, so
+      // there is ever at most one meaningful row here.
       const audit = levelRows[levelRows.length - 1] || null;
       return {
         level: levelNum,
         label: lvl.label || `Level ${levelNum}`,
         userIds: lvl.userIds || [],
+        mode: "any",
         status: audit?.ActionStatus || "Pending",
         approverEmail: audit?.ApproverEmail || null,
         approverName: audit?.ApproverEmail?.split("@")[0] || null,
@@ -428,15 +411,57 @@ router.get("/trail", authMiddleware, async (req, res) => {
         isTerminal: true,
       }));
 
+    // The record's own Status column is the actual source of truth for a
+    // terminal outcome — the walk above only re-derives "fully approved" by
+    // matching audit history against the workflow's CURRENT level list. If a
+    // level is added to an already-active workflow after a record was fully
+    // approved under the old (shorter) shape, that record suddenly has no
+    // audit row for the new level and every consumer of `steps` — including
+    // ApprovalStatusChain on the frontend, which recomputes fullyApproved
+    // itself from each step's own `status` rather than trusting the
+    // `fullyApproved` field below — would show it as stuck on that new level,
+    // even though nothing about the record itself changed. Backfilling every
+    // step to "Approved" here (not just the summary flags) is what actually
+    // fixes the badge, since the frontend never reads the flags directly.
+    // Only in-progress (Pending) records are still evaluated against the
+    // current workflow shape.
+    const docEntry = Object.values(DOC_MODULE_MAP).find(
+      (m) => m.table.replace("dbo.", "") === module,
+    );
+    let actualStatus = null;
+    if (docEntry) {
+      try {
+        const docResult = await pool
+          .request()
+          .input("id", sql.Int, recordId)
+          .query(`SELECT ${docEntry.status} AS Status FROM ${docEntry.table} WHERE ${docEntry.pk} = @id`);
+        actualStatus = docResult.recordset[0]?.Status ?? null;
+      } catch {
+        // Best-effort — if the lookup fails for any reason, fall back to
+        // the step-derived computation below rather than erroring the badge.
+      }
+    }
+    if (actualStatus === "Approved") {
+      for (const s of steps) {
+        if (s.status !== "Approved") {
+          s.status = "Approved";
+          s.note = s.note ?? "Approved under an earlier version of this workflow";
+        }
+      }
+    }
+
     const fullSteps = [...submittedMarkers, ...steps, ...rejectedMarkers];
 
     const currentLevel =
       steps.findIndex((s) => s.status !== "Approved") + 1 || steps.length;
     const fullyApproved =
-      steps.length > 0 && steps.every((s) => s.status === "Approved");
-    const hasRejection = rejectedMarkers.length > 0 || steps.some((s) => s.status === "Rejected");
+      actualStatus === "Approved" ||
+      (steps.length > 0 && steps.every((s) => s.status === "Approved"));
+    const hasRejection =
+      actualStatus !== "Approved" &&
+      (actualStatus === "Rejected" || rejectedMarkers.length > 0 || steps.some((s) => s.status === "Rejected"));
 
-    res.json({
+    return {
       workflowName: wfRow?.Name || null,
       workflowType: wfRow?.type || "sequential",
       // Includes the Level 0 Submitted/Rejected markers alongside the
@@ -448,7 +473,60 @@ router.get("/trail", authMiddleware, async (req, res) => {
       fullyApproved,
       hasRejection,
       totalLevels: steps.length,
-    });
+    };
+}
+
+// GET /api/approval-workflows/trail?module=GoodsReceiptNotes&id=123
+// Returns the active workflow levels + audit log for a specific record.
+// Only returns the LATEST entry per level (handles resubmissions).
+router.get("/trail", authMiddleware, async (req, res) => {
+  const { module, id } = req.query;
+  if (!module || !id) {
+    return res.status(400).json({ error: "module and id are required" });
+  }
+  try {
+    const pool = getPool();
+    const recordId = parseInt(id, 10);
+    const result = await buildApprovalTrail(pool, module, recordId);
+    if (result?.error) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/approval-workflows/trail/bulk?module=MaterialRequests&ids=1,2,3
+// Same payload as GET /trail, but for every id in one request — a list page
+// with N rows previously fired N concurrent GET /trail calls (one per
+// ApprovalStatusChain), which on a page like Material Request (~36 rows)
+// was enough on its own to trip the per-user API rate limit; see
+// buildApprovalTrail's comment above. Capped at 200 ids per call — well
+// above any real page size, just a sanity ceiling.
+router.get("/trail/bulk", authMiddleware, async (req, res) => {
+  const { module, ids } = req.query;
+  if (!module || !ids) {
+    return res.status(400).json({ error: "module and ids are required" });
+  }
+  const idList = String(ids)
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n))
+    .slice(0, 200);
+  if (!idList.length) {
+    return res.status(400).json({ error: "ids must contain at least one valid integer" });
+  }
+
+  try {
+    const pool = getPool();
+    const out = {};
+    // Sequential, not Promise.all — this already replaces N concurrent HTTP
+    // requests (the actual rate-limit cost) with 1, so there's no pressure
+    // to also parallelize the DB round-trips, and sequential keeps this from
+    // adding its own burst of concurrent queries against the pool.
+    for (const recordId of idList) {
+      out[recordId] = await buildApprovalTrail(pool, module, recordId);
+    }
+    res.json(out);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

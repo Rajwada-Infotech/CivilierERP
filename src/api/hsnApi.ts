@@ -8,6 +8,27 @@ export const getHsn = async () => {
   return res.json().catch(() => ({}));
 };
 
+export interface HsnRow {
+  HId: number;
+  HCode: string;
+  HDescription: string | null;
+  HShortDescription: string | null;
+  HStatus: boolean;
+  HIsSAC: boolean;
+}
+
+/** Active SAC-code rows from the HSN master (Material → Setup → HSN, with the
+ *  "Is SAC Code" toggle on). Used by the Fixed Asset "Type of Repairs SAC
+ *  Code" picker. */
+export const getSacCodes = async (): Promise<HsnRow[]> => {
+  const res = await fetchWithAuth(BASE_URL);
+  if (!res.ok) throw new Error(`GET failed: ${res.status}`);
+  const rows = (await res.json().catch(() => [])) as HsnRow[];
+  return Array.isArray(rows)
+    ? rows.filter((r) => r.HIsSAC && r.HStatus !== false)
+    : [];
+};
+
 export const addHsn = async (data: Record<string, unknown>) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",

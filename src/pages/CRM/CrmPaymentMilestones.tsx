@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -8,11 +8,15 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle, AlertTriangle, MessageSquare } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle, AlertTriangle, MessageSquare, Hourglass, Landmark } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { BankNamePicker } from "@/components/finance/BankNamePicker";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -21,6 +25,16 @@ const CUSTOMER_BANK_API = "/api/crm/customer-bank-details";
 const PROJECT_BANK_API = "/api/crm/project-banks";
 
 const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
+// Modes where the money demonstrably came out of a bank account, so asking
+// which one is meaningful. Mirrors ReceivedPayment.tsx's `needsBankRef`.
+const MODES_WITH_BANK = ["Cheque", "NEFT", "RTGS", "UPI", "Home Loan"];
+// One control style for every field in the payment dialogs, so the form
+// reads as a single unit instead of a stack of differently-sized boxes.
+const FIELD =
+  "w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background " +
+  "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-shadow";
+const LABEL = "text-[0.6875rem] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5";
+const modeHasBank = (mode: string) => MODES_WITH_BANK.includes(mode);
 
 const statusColor: Record<string, string> = {
   Pending: "text-orange-600 bg-orange-50 border-orange-200",
@@ -59,13 +73,54 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 
 async function fetchMilestones(bookingId: string): Promise<any> {
   if (!bookingId) return null;
-  try {
-    const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
-    return r.ok ? r.json() : null;
-  } catch { return null; }
+  // Unlike the other fetch* helpers on this page (banks, on-account, money
+  // receipts — supporting data where a silent empty fallback is harmless),
+  // this one drives the page's main content. Swallowing a failure to null
+  // rendered exactly the same "No milestone data found" empty state as a
+  // booking that genuinely has none — a permissions regression or backend
+  // outage looked identical to "nothing here" on a money-tracking page.
+  // Throwing lets React Query's own isError state distinguish the two.
+  const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new Error(data.error || `Failed to load milestones (${r.status})`);
+  }
+  return r.json();
 }
-async function fetchBookings(): Promise<any[]> {
-  try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
+// The booking picker below is a native <select> — fetching every booking in
+// the system into it is fine for a small deployment but degrades badly as
+// the portfolio grows (huge payload, thousands of unscrollable <option>s).
+// Company/Project/Block + an optional booking-no search scope the fetch
+// server-side (all four params already supported by /api/crm/bookings — see
+// crmBookings.js) so the dropdown only ever renders a workable subset.
+interface BookingPickerScope { companyId: string; projectId: string; blockId: string; search: string }
+async function fetchBookings(scope?: BookingPickerScope): Promise<any[]> {
+  try {
+    const params = new URLSearchParams();
+    if (scope?.companyId) params.set("companyId", scope.companyId);
+    if (scope?.projectId) params.set("projectId", scope.projectId);
+    if (scope?.blockId) params.set("blockId", scope.blockId);
+    if (scope?.search) params.set("search", scope.search);
+    const qs = params.toString();
+    const r = await fetchWithAuth(`${BKG_API}${qs ? `?${qs}` : ""}`);
+    return r.ok ? r.json() : [];
+  } catch { return []; }
+}
+// Same call CrmBookingDetail.tsx's Payments tab already uses to drive its
+// token-payment transparency states — pulled in here too so a booking's
+// captured-but-not-yet-Finance-approved amount shows up on THIS page as
+// well, not just when staff happen to open the full Booking Details view.
+// Without this, a token entered at Application intake was invisible here
+// for the entire Data-Review-not-yet-complete window: Collected showed ₹0,
+// Pending Approval didn't exist yet (that only lights up once a Money
+// Receipt is APPROVED into a ReceivedPayment row), and Balance showed the
+// full amount in red as if nothing had been received at all.
+async function fetchMoneyReceipts(bookingId: string): Promise<any[]> {
+  if (!bookingId) return [];
+  try {
+    const r = await fetchWithAuth(`/api/crm/money-receipts?bookingId=${bookingId}`);
+    return r.ok ? r.json() : [];
+  } catch { return []; }
 }
 async function fetchOnAccount(bookingId: string): Promise<any> {
   if (!bookingId) return null;
@@ -78,7 +133,7 @@ async function fetchCompanyBanks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
-  if (!projectId) return [];
+  if (projectId == null) return [];
   try {
     const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`);
     return r.ok ? r.json() : [];
@@ -99,27 +154,52 @@ const CrmPaymentMilestones: React.FC = () => {
   const [sp, setSp] = useSearchParams();
   const selectedBookingId = sp.get("bookingId") || "";
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", TransactionRef: "", Remarks: "", DepositBankId: "" });
+  const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Remarks: "", DepositBankId: "" });
   const [saving, setSaving] = useState(false);
   const [addDialog, setAddDialog] = useState(false);
   const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
   const [onAccountDialog, setOnAccountDialog] = useState(false);
-  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
+  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Notes: "", DepositBankId: "" });
   const [applyDialog, setApplyDialog] = useState<{ payment: any; milestone: any | null; amount: string } | null>(null);
   const [applyMilestoneId, setApplyMilestoneId] = useState<string>("");
   const [waiveDialog, setWaiveDialog] = useState<{ milestone: any; reason: string } | null>(null);
   const [remarksDialog, setRemarksDialog] = useState<{ milestone: any } | null>(null);
 
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings-dropdown"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
-  const { data: milestoneData, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  // Scope for the booking picker (see fetchBookings above).
+  const [pickerCpb, setPickerCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [pickerSearchInput, setPickerSearchInput] = useState("");
+  const [pickerSearch, setPickerSearch] = useState("");
+  const pickerScope: BookingPickerScope = useMemo(
+    () => ({ companyId: pickerCpb.companyId, projectId: pickerCpb.projectId, blockId: pickerCpb.blockId, search: pickerSearch }),
+    [pickerCpb, pickerSearch],
+  );
+  const { data: bookings = [] } = useQuery({
+    queryKey: ["crm-bookings-dropdown", pickerScope],
+    queryFn: () => fetchBookings(pickerScope),
+    staleTime: 5 * 60_000,
+  });
+  // Open the first booking in scope by default (also after the company /
+  // project / search filter changes); the user can switch from the picker.
+  useEffect(() => {
+    const first = (bookings as any[])[0];
+    if (!selectedBookingId && first) setSp({ bookingId: String(first.Id) }, { replace: true });
+  }, [bookings, selectedBookingId, setSp]);
+  const { data: milestoneData, isLoading, isError, error: milestoneError, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-milestones", selectedBookingId],
     queryFn: () => fetchMilestones(selectedBookingId),
     enabled: !!selectedBookingId,
     staleTime: 30_000,
+    retry: 1,
   });
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-on-account", selectedBookingId],
     queryFn: () => fetchOnAccount(selectedBookingId),
+    enabled: !!selectedBookingId,
+    staleTime: 15_000,
+  });
+  const { data: moneyReceipts = [] } = useQuery({
+    queryKey: ["crm-money-receipts", selectedBookingId],
+    queryFn: () => fetchMoneyReceipts(selectedBookingId),
     enabled: !!selectedBookingId,
     staleTime: 15_000,
   });
@@ -135,6 +215,13 @@ const CrmPaymentMilestones: React.FC = () => {
   const summary = milestoneData?.summary || {};
   const booking = milestoneData?.booking || null;
   const onAccountBalance = onAccountData?.availableBalance || 0;
+  // On Account Adjustment is a full-booking hold — it won't sweep any
+  // milestone until the on-account pool covers the booking's ENTIRE
+  // GrandTotal (matches applyOnAccountToMilestone in crmPayments.js).
+  const bookingGrandTotal = Number(booking?.GrandTotal ?? booking?.TotalValue ?? 0);
+  const bookingOnAccountReceived = Number(booking?.OnAccountTotalReceived || 0);
+  const notFullyPaid = bookingGrandTotal > 0 && bookingOnAccountReceived < bookingGrandTotal;
+  const fullPaymentShortfall = Math.max(0, bookingGrandTotal - bookingOnAccountReceived);
 
   // Total pending finance approval across all milestones
   const totalPendingVerification = milestones.reduce(
@@ -144,14 +231,14 @@ const CrmPaymentMilestones: React.FC = () => {
   const { data: projectBanks = [] } = useQuery({
     queryKey: ["crm-project-banks-for", booking?.ProjectId],
     queryFn: () => fetchProjectBanks(booking?.ProjectId),
-    enabled: !!booking?.ProjectId,
+    enabled: booking?.ProjectId != null,
   });
   // /for-project already resolves the full exclusivity rule server-side
   // (tagged-only, or every untagged bank as the fallback pool) — falling
   // back further to the raw, unfiltered bank list here would silently
   // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
   // the raw list when this booking's Project isn't known yet.
-  const bankOptions = booking?.ProjectId ? projectBanks : companyBanks;
+  const bankOptions = booking?.ProjectId != null ? projectBanks : companyBanks;
 
   const milestone1 = milestones.find((m) => m.MilestoneNo === 1);
   const needsResync = !!(
@@ -178,6 +265,14 @@ const CrmPaymentMilestones: React.FC = () => {
       AmountPaid: m.AmountPaid != null && Number(m.AmountPaid) > 0 ? String(m.AmountPaid) : (remaining > 0 ? String(remaining) : ""),
       PaidDate: m.PaidDate ? String(m.PaidDate).slice(0, 10) : todayStr(),
       PaymentMode: m.PaymentMode || "",
+      // Deliberately NOT pre-filled from the KYC bank on file. The whole
+      // point of this field is that a customer can pay from any of their
+      // accounts — defaulting to the registered one would silently record
+      // the wrong bank whenever staff didn't notice it was pre-selected.
+      // The bank on file stays visible just below as reference. Matches
+      // Received Payment's own Customer Bank Name field, which also starts
+      // empty.
+      BankName: m.BankName || "",
       TransactionRef: m.TransactionRef || "",
       Remarks: m.Remarks || "",
       DepositBankId: m.DepositBankId != null ? String(m.DepositBankId)
@@ -218,7 +313,9 @@ const CrmPaymentMilestones: React.FC = () => {
   };
 
   const handleRecordPayment = async () => {
-    if (!editingId) return;
+    if (editingId == null) return;
+    // No deposit bank here — CRM records the cheque/cash received; Accounts
+    // assigns the bank on the Received Payment before approving it.
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${editingId}`, {
@@ -228,12 +325,9 @@ const CrmPaymentMilestones: React.FC = () => {
           AmountPaid:    payForm.AmountPaid    ? parseFloat(payForm.AmountPaid) : undefined,
           PaidDate:      payForm.PaidDate      || undefined,
           PaymentMode:   payForm.PaymentMode   || undefined,
+          BankName:      payForm.BankName      || undefined,
           TransactionRef:payForm.TransactionRef|| undefined,
           Remarks:       payForm.Remarks       || undefined,
-          DepositBankId: payForm.DepositBankId || undefined,
-          DepositBankName: payForm.DepositBankId
-            ? (bankOptions as any[]).find((b: any) => String(b.BId) === payForm.DepositBankId)?.BName
-            : undefined,
         }),
       });
       const data = await res.json();
@@ -298,11 +392,9 @@ const CrmPaymentMilestones: React.FC = () => {
 
   const handleDepositOnAccount = async () => {
     if (!selectedBookingId || !onAccountForm.Amount) return;
+    // No deposit bank here either — Accounts assigns it before approval.
     setSaving(true);
     try {
-      const bankName = onAccountForm.DepositBankId
-        ? (bankOptions as any[]).find((b: any) => String(b.BId) === onAccountForm.DepositBankId)?.BName
-        : undefined;
       const res = await fetchWithAuth(`${API}/booking/${selectedBookingId}/on-account`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -310,17 +402,16 @@ const CrmPaymentMilestones: React.FC = () => {
           Amount: parseFloat(onAccountForm.Amount),
           ReceivedDate: onAccountForm.ReceivedDate || null,
           PaymentMode: onAccountForm.PaymentMode || null,
+          BankName: onAccountForm.BankName || null,
           TransactionRef: onAccountForm.TransactionRef || null,
           Notes: onAccountForm.Notes || null,
-          DepositBankId: onAccountForm.DepositBankId || undefined,
-          DepositBankName: bankName,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       toast.success(`On-account deposit submitted for Finance approval${data.RPDocNo ? ` — ${data.RPDocNo}` : ""}. It won't appear until approved.`);
       setOnAccountDialog(false);
-      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
+      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Notes: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -340,7 +431,7 @@ const CrmPaymentMilestones: React.FC = () => {
   const handleConfirmApply = async () => {
     if (!applyDialog) return;
     const milId = applyDialog.milestone?.Id ?? parseInt(applyMilestoneId);
-    if (!milId) { toast.error("Select a milestone to apply to"); return; }
+    if (milId == null || Number.isNaN(milId)) { toast.error("Select a milestone to apply to"); return; }
     const amount = parseFloat(applyDialog.amount);
     if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
     setSaving(true);
@@ -377,16 +468,16 @@ const CrmPaymentMilestones: React.FC = () => {
             {m.MilestoneName}
             {m.DemandStatus && m.DemandStatus !== CrmStatus.PENDING && demandColor && (
               <div className="mt-0.5 flex items-center gap-1">
-                <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${demandColor}`}>
+                <span className={`text-[0.625rem] px-1.5 py-0.5 rounded border font-medium ${demandColor}`}>
                   {m.DemandStatus === "Demanded" ? `Demand Raised${m.DemandNo ? ` · ${m.DemandNo}` : ""}` : `Demand ${m.DemandStatus}`}
                 </span>
                 {m.DemandRaisedOn && (
-                  <span className="text-[10px] text-muted-foreground">{fmtDate(m.DemandRaisedOn)}</span>
+                  <span className="text-[0.625rem] text-muted-foreground">{fmtDate(m.DemandRaisedOn)}</span>
                 )}
               </div>
             )}
             {m.RequiredDocuments && (
-              <div className="text-[10px] text-muted-foreground font-normal mt-0.5 truncate max-w-[180px]" title={m.RequiredDocuments}>
+              <div className="text-[0.625rem] text-muted-foreground font-normal mt-0.5 truncate max-w-[180px]" title={m.RequiredDocuments}>
                 Docs: {m.RequiredDocuments}
               </div>
             )}
@@ -410,7 +501,7 @@ const CrmPaymentMilestones: React.FC = () => {
         <span className="font-semibold text-sm">
           {fmt(i.row.original.AmountDue)}
           {i.row.original.Percent != null && (
-            <span className="ml-1 text-[10px] font-normal text-muted-foreground">({Number(i.row.original.Percent)}%)</span>
+            <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">({Number(i.row.original.Percent)}%)</span>
           )}
         </span>
       ) },
@@ -421,7 +512,7 @@ const CrmPaymentMilestones: React.FC = () => {
           <span className="text-green-600 font-semibold text-sm">
             {fmt(m.AmountPaid)}
             {Number(m.PendingVerificationAmount) > 0 && (
-              <div className="text-[10px] text-amber-700 font-normal">
+              <div className="text-[0.625rem] text-sky-700 font-normal">
                 +{fmt(m.PendingVerificationAmount)} pending
               </div>
             )}
@@ -439,6 +530,14 @@ const CrmPaymentMilestones: React.FC = () => {
         const m = i.row.original;
         const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
         if (m.Status === "Waived") return <span className="text-xs text-muted-foreground">—</span>;
+        // Real ledger balance is unaffected until the automatic full-booking
+        // sweep runs — but showing a red "amount due" next to a status chip
+        // that says "Paid (on-account)" reads as contradictory, so once the
+        // money has genuinely arrived, show that instead of a due figure.
+        const virtuallyCovered = m.Status !== CrmStatus.PAID && m.VirtuallyCovered;
+        if (virtuallyCovered) {
+          return <span className="text-blue-600 font-semibold text-sm flex items-center gap-1"><Wallet size={12} className="shrink-0" />Covered</span>;
+        }
         return balance > 0
           ? <span className="text-red-600 font-semibold text-sm flex items-center gap-1"><ArrowDownCircle size={12} className="shrink-0" />{fmt(balance)}</span>
           : <span className="text-emerald-600 font-semibold text-sm flex items-center gap-1"><CheckCircle2 size={12} className="shrink-0" />Settled</span>;
@@ -446,6 +545,19 @@ const CrmPaymentMilestones: React.FC = () => {
     { id: "status", header: "Status", size: 110, enableSorting: false,
       cell: (i) => {
         const m = i.row.original;
+        // The real ledger sweep only fires automatically once the whole
+        // booking is funded, but the customer's money has genuinely arrived
+        // the moment on-account covers this milestone — show ONE clear
+        // status ("Paid (on-account)"), never alongside "Overdue"/"Pending",
+        // which would read as directly contradictory.
+        const virtuallyCovered = m.Status !== CrmStatus.PAID && m.Status !== "Waived" && m.VirtuallyCovered;
+        if (virtuallyCovered) {
+          return (
+            <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit border-border text-blue-600 dark:text-blue-400" title="Money is on-account for this milestone; it will settle automatically once the full booking amount is received">
+              <Wallet size={12} />Paid (on-account)
+            </span>
+          );
+        }
         const isOverdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date();
         const displayStatus = isOverdue ? "Overdue" : m.Status;
         return (
@@ -461,7 +573,7 @@ const CrmPaymentMilestones: React.FC = () => {
           <span className="text-xs">
             {m.PaymentMode || "—"}
             {m.DepositBankName && (
-              <div className="text-[10px] text-muted-foreground font-normal mt-0.5 truncate max-w-[110px]" title={m.DepositBankName}>{m.DepositBankName}</div>
+              <div className="text-[0.625rem] text-muted-foreground font-normal mt-0.5 truncate max-w-[110px]" title={m.DepositBankName}>{m.DepositBankName}</div>
             )}
           </span>
         );
@@ -484,30 +596,48 @@ const CrmPaymentMilestones: React.FC = () => {
           </span>
         );
       } },
-    { id: "actions", header: "", size: 150, enableSorting: false,
+    { id: "actions", header: "", size: 190, enableSorting: false,
       cell: (i) => {
         const m = i.row.original;
+        // Money already virtually covers this milestone — offering "Pay"
+        // (implies still owed) or "Waive" (implies forgiving unpaid money)
+        // both contradict what the status column just said.
+        const virtuallyCovered = m.Status !== CrmStatus.PAID && m.Status !== "Waived" && m.VirtuallyCovered;
         return (
-          <div className="flex items-center gap-1.5 whitespace-nowrap">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {rights.canEdit && m.Status !== CrmStatus.PAID && m.Status !== "Waived" && !virtuallyCovered && (
+              <button onClick={() => handleOpenPayment(m)}
+                className="text-xs px-2 py-1 border border-primary text-primary rounded-md hover:bg-primary hover:text-primary-foreground transition-colors font-medium whitespace-nowrap">
+                Pay
+              </button>
+            )}
             {rights.canEdit && m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (
               <>
-                <button onClick={() => handleOpenPayment(m)}
-                  className="text-xs px-2 py-1 border border-primary text-primary rounded-md hover:bg-primary hover:text-primary-foreground transition-colors font-medium">
-                  Pay
-                </button>
                 {onAccountBalance > 0 && (() => {
                   const pmt = onAccountData?.payments?.find((p: any) => Number(p.Amount) - Number(p.AppliedAmount || 0) > 0);
-                  return pmt ? (
+                  if (!pmt) return null;
+                  if (notFullyPaid) {
+                    return (
+                      <span title={`Auto-settles once fully funded — ₹${fullPaymentShortfall.toLocaleString("en-IN")} more coming in on-account will trigger this automatically, no manual action needed`}
+                        className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md font-medium cursor-not-allowed select-none whitespace-nowrap">
+                        Auto
+                      </span>
+                    );
+                  }
+                  return (
                     <button onClick={() => openApplyDialog(pmt, m)}
-                      className="text-xs px-2 py-1 border border-blue-400 text-blue-600 rounded-md hover:bg-blue-50 transition-colors font-medium">
-                      Adjust On A/c
+                      title="The full booking amount is on-account and this milestone should auto-settle shortly — use this only if it hasn't (e.g. a demand still needs to be raised first)"
+                      className="text-xs px-2 py-1 border border-blue-400 text-blue-600 rounded-md hover:bg-blue-50 transition-colors font-medium whitespace-nowrap">
+                      Apply
                     </button>
-                  ) : null;
+                  );
                 })()}
-                <button onClick={() => handleWaive(m)}
-                  className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md hover:bg-muted transition-colors font-medium">
-                  Waive
-                </button>
+                {!virtuallyCovered && (
+                  <button onClick={() => handleWaive(m)}
+                    className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md hover:bg-muted transition-colors font-medium whitespace-nowrap">
+                    Waive
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -528,11 +658,29 @@ const CrmPaymentMilestones: React.FC = () => {
         subtitle="Milestone-wise payment tracking for bookings"
         action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
       >
-        {/* Booking selector */}
+        {/* Booking selector — scoped so the dropdown stays workable as the
+            portfolio grows (see fetchBookings). */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <CrmCompanyProjectBlockFilter
+              value={pickerCpb}
+              onChange={(v) => { setPickerCpb(v); setSp({}, { replace: true }); }}
+            />
+            <input
+              value={pickerSearchInput}
+              onChange={(e) => setPickerSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { setPickerSearch(pickerSearchInput.trim()); setSp({}, { replace: true }); } }}
+              placeholder="Booking no / customer… (Enter)"
+              className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background w-56"
+            />
+          </div>
+        </div>
         <div className="flex gap-3 items-end flex-wrap">
           <div className="flex-1 min-w-64">
-            <label className="text-xs text-muted-foreground block mb-1">Select Booking</label>
-            <select value={selectedBookingId} onChange={(e) => setSp(e.target.value ? { bookingId: e.target.value } : {}, { replace: true })}
+            <label className="text-xs text-muted-foreground block mb-1">
+              Select Booking <span className="text-muted-foreground/60">({(bookings as any[]).length} in scope)</span>
+            </label>
+            <SearchableNativeSelect value={selectedBookingId} onChange={(e) => setSp(e.target.value ? { bookingId: e.target.value } : {}, { replace: true })}
               className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
               <option value="">— Choose a booking —</option>
               {(bookings as any[]).map((b: any) => (
@@ -540,7 +688,7 @@ const CrmPaymentMilestones: React.FC = () => {
                   {b.BookingNo} — {b.ApplicantName} · {b.UnitNo} {b.ProjectName ? `(${b.ProjectName})` : ""}
                 </option>
               ))}
-            </select>
+            </SearchableNativeSelect>
           </div>
           {selectedBookingId && (
             <>
@@ -561,7 +709,7 @@ const CrmPaymentMilestones: React.FC = () => {
               )}
               {rights.canEdit && needsResync && (
                 <button onClick={handleResyncSchedule} disabled={resyncing}
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm border border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm border border-sky-300 bg-sky-50 text-sky-700 rounded-lg hover:bg-sky-100 transition-colors disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-400">
                   <RefreshCw size={14} className={resyncing ? "animate-spin" : ""} /> {resyncing ? "Resyncing..." : "Resync Schedule"}
                 </button>
               )}
@@ -570,7 +718,7 @@ const CrmPaymentMilestones: React.FC = () => {
         </div>
 
         {needsResync && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm px-4 py-2.5 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400">
+          <div className="rounded-lg border border-sky-300 bg-sky-50 text-sky-800 text-sm px-4 py-2.5 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-400">
             Milestone 1's amount (₹{Number(milestone1.AmountDue).toLocaleString("en-IN")}) doesn't match this booking's actual booking amount (₹{Number(booking.BookingAmount).toLocaleString("en-IN")}) — click "Resync Schedule" to fix it and redistribute the remaining milestones.
           </div>
         )}
@@ -581,6 +729,10 @@ const CrmPaymentMilestones: React.FC = () => {
           <div className="py-16 text-center text-muted-foreground text-sm flex items-center justify-center gap-2">
             <RefreshCw size={14} className="animate-spin" /> Loading milestones...
           </div>
+        ) : isError ? (
+          <div className="py-16 text-center text-red-600 text-sm">
+            Failed to load milestones{milestoneError instanceof Error ? `: ${milestoneError.message}` : ""}
+          </div>
         ) : !milestoneData ? (
           <div className="py-16 text-center text-muted-foreground text-sm">No milestone data found</div>
         ) : (
@@ -588,9 +740,10 @@ const CrmPaymentMilestones: React.FC = () => {
             {/* Booking summary card */}
             {booking && (() => {
               const grandTotal = Number(booking.GrandTotal ?? booking.TotalValue ?? 0);
+              const unitGstAmount = Number(booking.UnitGstAmount || 0);
               const parkingTotal = Number(booking.ParkingTotal || 0);
               const extraTotal = Number(booking.ExtraChargesTotal || 0);
-              const hasExtras = parkingTotal > 0 || extraTotal > 0;
+              const hasExtras = unitGstAmount > 0 || parkingTotal > 0 || extraTotal > 0;
               const bkgStatus = booking.BookingStatus;
               return (
                 <div className="rounded-xl border border-border p-4 space-y-4">
@@ -617,12 +770,18 @@ const CrmPaymentMilestones: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Price breakdown */}
                     <div className="rounded-lg border border-border bg-muted/20 p-3">
-                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Price Breakdown</div>
+                      <div className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Price Breakdown</div>
                       <div className="space-y-1.5 text-sm">
                         <div className="flex items-baseline justify-between">
-                          <span className="text-muted-foreground">Unit Value</span>
+                          <span className="text-muted-foreground">{booking.IsPlotSale ? "Land Value (no GST)" : "Unit Value"}</span>
                           <span className="font-medium tabular-nums">{fmt(booking.TotalValue)}</span>
                         </div>
+                        {unitGstAmount > 0 && (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-muted-foreground">+ Unit GST</span>
+                            <span className="font-medium tabular-nums">{fmt(unitGstAmount)}</span>
+                          </div>
+                        )}
                         {parkingTotal > 0 && (
                           <div className="flex items-baseline justify-between">
                             <span className="text-muted-foreground">+ Parking</span>
@@ -650,7 +809,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
                     {/* Collection summary */}
                     <div className="rounded-lg border border-border bg-muted/20 p-3">
-                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Collection Summary</div>
+                      <div className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Collection Summary</div>
                       <div className="space-y-1.5 text-sm">
                         <div className="flex items-baseline justify-between">
                           <span className="text-muted-foreground">Total Due</span>
@@ -660,6 +819,12 @@ const CrmPaymentMilestones: React.FC = () => {
                           <span className="text-muted-foreground">Collected</span>
                           <span className="font-medium text-green-600 tabular-nums">{fmt(summary.totalPaid)}</span>
                         </div>
+                        {bookingOnAccountReceived > 0 && (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-blue-600 flex items-center gap-1"><Wallet size={11} /> Held On-Account (not yet applied)</span>
+                            <span className="text-blue-600 font-medium tabular-nums">{fmt(bookingOnAccountReceived)}</span>
+                          </div>
+                        )}
                         {totalPendingVerification > 0 && (
                           <div className="flex items-baseline justify-between">
                             <span className="text-amber-700 flex items-center gap-1"><Clock size={11} /> Pending Approval</span>
@@ -681,7 +846,7 @@ const CrmPaymentMilestones: React.FC = () => {
                       </div>
                       {/* Segmented progress bar: green = collected, amber = pending approval */}
                       <div className="mt-3">
-                        <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+                        <div className="flex justify-between text-[0.6875rem] text-muted-foreground mb-1">
                           <span>Collection Progress</span>
                           <span>{collectionPct}%{pendingPct > 0 ? ` (+${pendingPct}% pending)` : ""}</span>
                         </div>
@@ -694,13 +859,90 @@ const CrmPaymentMilestones: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Token payment transparency — mirrors CrmBookingDetail.tsx's
+                      Payments tab exactly (same four states, same copy) so a
+                      booking's payment status reads identically wherever staff
+                      look at it. Covers the window this page previously had no
+                      visibility into at all: a token captured at Application
+                      intake, before Data Review even creates the first Money
+                      Receipt — Collected showed ₹0 and Balance showed the full
+                      amount in red, as if nothing had been received. */}
+                  {Number(booking?.TokenValue) > 0 && (() => {
+                    const receipt = (moneyReceipts as any[])[0];
+                    const tokenAmt = Number(booking.TokenValue);
+                    const pmode = booking.PaymentMode || "—";
+
+                    if (receipt?.Status === "Bounced") {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30 px-3 py-2.5 text-xs">
+                          <AlertTriangle size={13} className="shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
+                          <div>
+                            <p className="font-semibold text-red-700 dark:text-red-300">Token Payment Bounced — {fmt(tokenAmt)}</p>
+                            <p className="text-red-600 dark:text-red-400 mt-0.5">
+                              {receipt.BouncedReason ? `Reason: ${receipt.BouncedReason}. ` : ""}
+                              A new Money Receipt must be submitted.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (receipt?.Status === CrmStatus.PENDING && receipt?.RPStatus === CrmStatus.PENDING) {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 px-3 py-2.5 text-xs">
+                          <Hourglass size={13} className="shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-sky-800 dark:text-sky-300">
+                              {fmt(receipt.Amount || tokenAmt)} held — awaiting Finance approval
+                            </p>
+                            <p className="text-sky-700 dark:text-sky-400">
+                              Receipt {receipt.ReceiptNo} · {pmode} · submitted to Finance (Account's Head / Admin).
+                              This amount will count as paid once approved.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (receipt?.Status === CrmStatus.PENDING && !receipt?.RPStatus) {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 px-3 py-2.5 text-xs">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-sky-800 dark:text-sky-300">
+                              {fmt(receipt.Amount || tokenAmt)} on hold — Money Receipt pending Finance submission
+                            </p>
+                            <p className="text-sky-700 dark:text-sky-400">
+                              Receipt {receipt.ReceiptNo} · {pmode} · created but not yet sent to Finance for approval.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (!receipt) {
+                      return (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 px-3 py-2.5 text-xs">
+                          <Clock size={13} className="shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-sky-800 dark:text-sky-300">
+                              Token Received &amp; On Hold — {fmt(tokenAmt)} via {pmode}
+                            </p>
+                            <p className="text-sky-700 dark:text-sky-400">
+                              Payment recorded but not yet processed. A Money Receipt is auto-generated when this booking is submitted for approval
+                              ("Verify &amp; Send for Approval"). Finance approves it — only then does it count as paid.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null; // Approved — already reflected in Collected above.
+                  })()}
                 </div>
               );
             })()}
 
             {/* On-Account balance */}
             {onAccountData && (onAccountData.payments?.length > 0) && (
-              <div className={`rounded-xl border p-4 ${onAccountBalance > 0 ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-800 dark:bg-emerald-950/20" : "border-border"}`}>
+              <div className="rounded-xl border border-border bg-card p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5">
                     <Wallet size={14} className={onAccountBalance > 0 ? "text-emerald-600" : "text-muted-foreground"} />
@@ -710,10 +952,32 @@ const CrmPaymentMilestones: React.FC = () => {
                     {onAccountBalance > 0 && <ArrowUpCircle size={16} className="shrink-0" />}{fmt(onAccountBalance)}
                   </span>
                 </div>
+                {notFullyPaid ? (
+                  <div className="mb-3 rounded-lg border border-border bg-muted/10 px-3 py-2.5">
+                    <div className="flex items-center justify-between text-[0.6875rem] mb-1.5">
+                      <span className="font-semibold text-foreground flex items-center gap-1.5">
+                        <Wallet size={12} className="text-blue-600 dark:text-blue-400" /> Held on-account — will auto-settle once fully funded
+                      </span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {fmt(bookingOnAccountReceived)} of {fmt(bookingGrandTotal)} ({Math.round((bookingOnAccountReceived / bookingGrandTotal) * 100)}%)
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (bookingOnAccountReceived / bookingGrandTotal) * 100)}%` }} />
+                    </div>
+                    <div className="text-[0.6875rem] text-muted-foreground mt-1.5">
+                      No action needed — {fmt(fullPaymentShortfall)} more coming in on-account will automatically settle every eligible milestone, in order. Milestones already covered by money on hand show "Paid (on-account)" above.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-3 rounded-lg border border-border bg-muted/10 px-3 py-2 text-[0.6875rem] text-foreground flex items-center gap-1.5">
+                    <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" /> Full booking amount is on-account — every eligible milestone auto-settles automatically, in order.
+                  </div>
+                )}
                 <div className="space-y-2">
                   {onAccountData.payments.map((p: any) => {
                     const remaining = Number(p.Amount) - Number(p.AppliedAmount || 0);
-                    const canApply = remaining > 0 && p.Status !== "Applied";
+                    const canApply = remaining > 0 && p.Status !== "Applied" && !notFullyPaid;
                     return (
                       <div key={p.Id} className="flex items-center justify-between gap-3 text-xs">
                         <span className="text-muted-foreground min-w-0">
@@ -729,14 +993,15 @@ const CrmPaymentMilestones: React.FC = () => {
                           <span className={`px-1.5 py-0.5 rounded-full border font-medium ${
                             p.Status === "Applied" ? "text-green-600 bg-green-50 border-green-200"
                             : p.Status === "PartiallyApplied" ? "text-blue-600 bg-blue-50 border-blue-200"
-                            : "text-orange-600 bg-orange-50 border-orange-200"
+                            : "text-sky-600 bg-sky-50 border-sky-200"
                           }`}>
                             {p.Status === "PartiallyApplied" ? "Partial" : p.Status}
                           </span>
                           {canApply && (
                             <button onClick={() => openApplyDialog(p, null)}
+                              title="This deposit should auto-apply once its milestone is eligible — use this only as a manual fallback"
                               className="px-2 py-0.5 rounded border border-blue-400 text-blue-600 bg-white dark:bg-transparent hover:bg-blue-50 font-medium transition-colors">
-                              Apply →
+                              Apply Manually
                             </button>
                           )}
                         </div>
@@ -763,94 +1028,121 @@ const CrmPaymentMilestones: React.FC = () => {
         )}
 
         {/* Record Payment Dialog */}
-        <Dialog open={!!editingId} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
-          <DialogContent className="max-w-md">
+        <Dialog open={editingId != null} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
+          <DialogContent accent="crm" className="max-w-2xl">
             <DialogHeader>
               <DialogTitle className="font-heading">Submit Payment for Approval</DialogTitle>
-              {editingMilestone && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  <span className="font-medium text-foreground">{editingMilestone.MilestoneName}</span>
-                  {" — "}{fmt(editingMilestone.AmountDue)}
-                  {editingBalance > 0 && <span className="text-muted-foreground"> · Balance: {fmt(editingBalance)}</span>}
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.
+              </p>
             </DialogHeader>
-            <p className="text-[11px] text-muted-foreground -mt-2">Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.</p>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Amount Paid (₹)</label>
-                  <input type="number" value={payForm.AmountPaid}
-                    onChange={(e) => setPayForm((f) => ({ ...f, AmountPaid: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+
+            {/* What's being paid — the one thing worth reading before typing */}
+            {editingMilestone && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+                <div className="min-w-0">
+                  <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-primary/80">Milestone</p>
+                  <p className="text-sm font-semibold text-foreground truncate">{editingMilestone.MilestoneName}</p>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Payment Date</label>
-                  <input type="date" value={payForm.PaidDate}
-                    onChange={(e) => setPayForm((f) => ({ ...f, PaidDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
-                {previewOverflow > 0 && (
-                  <div className="col-span-2 -mt-1">
-                    <p className="text-[11px] text-blue-600 font-medium flex items-center gap-1">
-                      <Wallet size={11} /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's due — will be parked to On Account if still true when approved.
+                <div className="flex items-center gap-6 shrink-0">
+                  <div className="text-right">
+                    <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">Amount Due</p>
+                    <p className="text-sm font-semibold tabular-nums text-foreground">{fmt(editingMilestone.AmountDue)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">Balance</p>
+                    <p className={`text-lg font-bold tabular-nums ${editingBalance > 0 ? "text-primary" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      {fmt(editingBalance)}
                     </p>
                   </div>
-                )}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-                  <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <label className={LABEL}>Amount Paid (₹)</label>
+                  <input type="number" value={payForm.AmountPaid}
+                    onChange={(e) => setPayForm((f) => ({ ...f, AmountPaid: e.target.value }))}
+                    className={`${FIELD} font-semibold tabular-nums`} />
+                </div>
+                <div>
+                  <label className={LABEL}>Payment Date</label>
+                  <DateInput value={payForm.PaidDate}
+                    onChange={(e) => setPayForm((f) => ({ ...f, PaidDate: e.target.value }))}
+                    className={FIELD} />
+                </div>
+                <div>
+                  <label className={LABEL}>Payment Mode</label>
+                  <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value, BankName: modeHasBank(e.target.value) ? f.BankName : "" }))}
+                    className={FIELD}>
                     <option value="">Select mode</option>
                     {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
-                  <input type="text" value={payForm.TransactionRef}
+                {previewOverflow > 0 && (
+                  <div className="col-span-2 sm:col-span-3">
+                    <p className="text-[0.6875rem] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5 rounded-lg bg-blue-500/10 px-2.5 py-1.5">
+                      <Wallet size={12} className="shrink-0" /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's due — will be parked to On Account if still true when approved.
+                    </p>
+                  </div>
+                )}
+                {modeHasBank(payForm.PaymentMode) && (
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className={LABEL}>Customer Bank Name</label>
+                    <BankNamePicker
+                      value={payForm.BankName}
+                      onChange={(v) => setPayForm((f) => ({ ...f, BankName: v }))}
+                      placeholder="Select customer's bank…"
+                      otherPlaceholder="Bank of customer"
+                    />
+                  </div>
+                )}
+                <div className={modeHasBank(payForm.PaymentMode) ? "col-span-2" : "col-span-2 sm:col-span-3"}>
+                  <label className={LABEL}>Transaction Ref</label>
+                  <input type="text" value={payForm.TransactionRef} placeholder="UTR / cheque / reference no."
                     onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    className={FIELD} />
                 </div>
-                <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""} <span className="text-muted-foreground/60">(optional)</span>
-                  </label>
-                  <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="">Select company bank</option>
-                    {(bankOptions as any[]).map((b: any) => (
-                      <option key={b.BId} value={String(b.BId)}>{b.BName}{b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
+                <div className="col-span-2 sm:col-span-3">
+                  <label className={LABEL}>Remarks</label>
                   <textarea value={payForm.Remarks} onChange={(e) => setPayForm((f) => ({ ...f, Remarks: e.target.value }))}
-                    rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                    rows={2} placeholder="Optional note for Finance…"
+                    className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-shadow" />
                 </div>
               </div>
 
-              {customerBank && (customerBank.BankName || customerBank.AccountNo) && (
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Customer's Bank (reference only)</p>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                    <span className="text-muted-foreground">Bank</span>
-                    <span className="font-medium text-right">{customerBank.BankName || "—"}</span>
-                    <span className="text-muted-foreground">A/C No.</span>
-                    <span className="font-medium text-right font-mono">{customerBank.AccountNo || "—"}</span>
-                    <span className="text-muted-foreground">IFSC</span>
-                    <span className="font-medium text-right font-mono">{customerBank.IfscCode || "—"}</span>
-                  </div>
+              {/* Context Finance will need, kept visually subordinate to the form */}
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2">
+                  <Landmark size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                    <span className="font-medium text-foreground">Deposit bank</span> — assigned by Accounts on the Received Payment before approval.
+                  </p>
                 </div>
-              )}
+                {customerBank && (customerBank.BankName || customerBank.AccountNo) ? (
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                    <p className="text-[0.6875rem] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Bank on file (KYC) — reference only</p>
+                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[0.6875rem]">
+                      <span className="text-muted-foreground">Bank</span>
+                      <span className="font-medium text-right truncate">{customerBank.BankName || "—"}</span>
+                      <span className="text-muted-foreground">A/C No.</span>
+                      <span className="font-medium text-right font-mono">{customerBank.AccountNo || "—"}</span>
+                      <span className="text-muted-foreground">IFSC</span>
+                      <span className="font-medium text-right font-mono">{customerBank.IfscCode || "—"}</span>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-3 border-t border-border">
               <button onClick={() => setEditingId(null)}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                className="px-4 h-9 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
               <button onClick={handleRecordPayment}
                 disabled={saving}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                {saving ? "Submitting..." : "Submit for Approval"}
+                className="px-5 h-9 text-sm btn-module text-white rounded-lg font-semibold hover:shadow-lg disabled:opacity-40 transition-colors">
+                {saving ? "Submitting…" : "Submit for Approval"}
               </button>
             </div>
           </DialogContent>
@@ -858,7 +1150,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Add Milestone Dialog */}
         <Dialog open={addDialog} onOpenChange={(o) => { if (!o) setAddDialog(false); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading">Add Custom Milestone</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <div>
@@ -868,10 +1160,10 @@ const CrmPaymentMilestones: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
                   placeholder="e.g. PLC Charges" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Due Date</label>
-                  <input type="date" value={addForm.DueDate}
+                  <DateInput value={addForm.DueDate}
                     onChange={(e) => setAddForm((f) => ({ ...f, DueDate: e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
@@ -901,7 +1193,7 @@ const CrmPaymentMilestones: React.FC = () => {
               <button onClick={() => setAddDialog(false)}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleAddMilestone} disabled={saving || !addForm.MilestoneName.trim()}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {saving ? "Adding..." : "Add Milestone"}
               </button>
             </div>
@@ -910,54 +1202,64 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Deposit On Account Dialog */}
         <Dialog open={onAccountDialog} onOpenChange={(o) => { if (!o) setOnAccountDialog(false); }}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Submit On-Account Deposit</DialogTitle></DialogHeader>
-            <p className="text-xs text-muted-foreground -mt-2">Goes to Finance's Received Payment queue for approval. Once approved, it's held as a credit and auto-applied to the next due milestone in sequence.</p>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
-                <input type="number" value={onAccountForm.Amount}
-                  onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+          <DialogContent accent="crm" className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Submit On-Account Deposit</DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Goes to Finance's Received Payment queue for approval. Once approved, it's held as a credit and auto-applied to the next due milestone in sequence.
+              </p>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Received Date</label>
-                  <input type="date" value={onAccountForm.ReceivedDate}
-                    onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  <label className={LABEL}>Amount (₹) *</label>
+                  <input type="number" value={onAccountForm.Amount}
+                    onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
+                    className={`${FIELD} font-semibold tabular-nums`} />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-                  <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <label className={LABEL}>Received Date</label>
+                  <DateInput value={onAccountForm.ReceivedDate}
+                    onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
+                    className={FIELD} />
+                </div>
+                <div>
+                  <label className={LABEL}>Payment Mode</label>
+                  <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value, BankName: modeHasBank(e.target.value) ? f.BankName : "" }))}
+                    className={FIELD}>
                     <option value="">Select mode</option>
                     {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
                   </select>
                 </div>
+                {modeHasBank(onAccountForm.PaymentMode) && (
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className={LABEL}>Customer Bank Name</label>
+                    <BankNamePicker
+                      value={onAccountForm.BankName}
+                      onChange={(v) => setOnAccountForm((f) => ({ ...f, BankName: v }))}
+                      placeholder="Select customer's bank…"
+                      otherPlaceholder="Bank of customer"
+                    />
+                  </div>
+                )}
+                <div className={modeHasBank(onAccountForm.PaymentMode) ? "col-span-2" : "col-span-2 sm:col-span-3"}>
+                  <label className={LABEL}>Transaction Ref</label>
+                  <input type="text" value={onAccountForm.TransactionRef} placeholder="UTR / cheque / reference no."
+                    onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                    className={FIELD} />
+                </div>
+                <div className="col-span-2 sm:col-span-3">
+                  <label className={LABEL}>Notes</label>
+                  <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))}
+                    rows={2} placeholder="Optional note for Finance…"
+                    className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-shadow" />
+                </div>
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
-                <input type="text" value={onAccountForm.TransactionRef}
-                  onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""}
-                </label>
-                <select value={onAccountForm.DepositBankId} onChange={(e) => setOnAccountForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select company bank</option>
-                  {(bankOptions as any[]).map((b: any) => (
-                    <option key={b.BId} value={String(b.BId)}>{b.BName}{b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-                <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))}
-                  rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2">
+                <Landmark size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  <span className="font-medium text-foreground">Deposit bank</span> — assigned by Accounts on the Received Payment before approval.
+                </p>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-3 border-t border-border">
@@ -965,7 +1267,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleDepositOnAccount}
                 disabled={saving || !onAccountForm.Amount}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {saving ? "Submitting..." : "Submit for Approval"}
               </button>
             </div>
@@ -974,7 +1276,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Apply On Account Dialog */}
         <Dialog open={!!applyDialog} onOpenChange={(o) => { if (!o) setApplyDialog(null); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-1.5">
                 <Wallet size={16} className="text-blue-600" /> Apply On-Account to Milestone
@@ -1062,9 +1364,9 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Waive Dialog */}
         <Dialog open={!!waiveDialog} onOpenChange={(o) => { if (!o) setWaiveDialog(null); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
-              <DialogTitle className="font-heading flex items-center gap-1.5 text-amber-700">
+              <DialogTitle className="font-heading flex items-center gap-1.5 text-sky-700">
                 <AlertTriangle size={16} /> Waive Milestone
               </DialogTitle>
             </DialogHeader>
@@ -1089,7 +1391,7 @@ const CrmPaymentMilestones: React.FC = () => {
                     className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                   <button onClick={handleWaiveConfirm}
                     disabled={waiving || !waiveDialog.reason.trim()}
-                    className="px-4 py-1.5 text-sm bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:opacity-40">
+                    className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                     {waiving ? "Waiving..." : "Confirm Waive"}
                   </button>
                 </div>
@@ -1100,7 +1402,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Remarks Dialog */}
         <Dialog open={!!remarksDialog} onOpenChange={(o) => { if (!o) setRemarksDialog(null); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-1.5">
                 <MessageSquare size={15} /> Payment Remarks

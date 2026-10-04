@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -12,6 +13,9 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API         = "/api/crm/service-tickets";
 const BKG_API     = "/api/crm/bookings";
@@ -23,12 +27,12 @@ const STATUSES   = ["Open", "Assigned", "InProgress", "Resolved", "Closed", "Reo
 
 const priorityColor: Record<string, string> = {
   Urgent: "text-red-600 bg-red-50 border-red-200",
-  High:   "text-orange-600 bg-orange-50 border-orange-200",
+  High:   "text-sky-600 bg-sky-50 border-sky-200",
   Normal: "text-blue-600 bg-blue-50 border-blue-200",
   Low:    "text-muted-foreground bg-muted/50 border-border",
 };
 const statusColor: Record<string, string> = {
-  Open:       "text-orange-600 bg-orange-50 border-orange-200",
+  Open:       "text-sky-600 bg-sky-50 border-sky-200",
   Assigned:   "text-blue-600 bg-blue-50 border-blue-200",
   InProgress: "text-purple-600 bg-purple-50 border-purple-200",
   Resolved:   "text-green-600 bg-green-50 border-green-200",
@@ -38,8 +42,27 @@ const statusColor: Record<string, string> = {
 
 const EMPTY_FORM = { BookingId: "", Category: "Complaint", Priority: "Normal", Subject: "", Description: "", AssignedTo: "" };
 
-async function fetchTickets(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+const PAGE_SIZE = 20;
+interface TicketListFilters {
+  search: string;
+  status: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchTicketsList(filters: TicketListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.status !== "All") params.set("status", filters.status);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -55,8 +78,11 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 
 const CrmServiceTickets: React.FC = () => {
   const qc = useQueryClient();
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch]           = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen]   = useState(false);
   const [form, setForm]               = useState({ ...EMPTY_FORM });
   const [saving, setSaving]           = useState(false);
@@ -71,17 +97,24 @@ const CrmServiceTickets: React.FC = () => {
   const [reopenTicketId, setReopenTicketId] = useState<number | null>(null);
   const [reopenReason, setReopenReason]   = useState("");
 
-  const { data: tickets = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-service-tickets"], queryFn: fetchTickets, staleTime: 30_000 });
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+  const listFilters: TicketListFilters = useMemo(
+    () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, statusFilter, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-service-tickets", listFilters, page],
+    queryFn: () => fetchTicketsList(listFilters, page),
+    staleTime: 30_000,
+  });
+  const tickets = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: bookings = [] }           = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: users = [] }             = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
 
-  const filtered = useMemo(() =>
-    (tickets as any[]).filter((t: any) => {
-      const s = !search || t.ApplicantName?.toLowerCase().includes(search.toLowerCase())
-        || t.TicketNo?.includes(search) || t.Subject?.toLowerCase().includes(search.toLowerCase());
-      const st = statusFilter === "All" || t.Status === statusFilter;
-      return s && st;
-    }), [tickets, search, statusFilter]);
+  const filtered = tickets;
 
   const handleCreate = async () => {
     if (!form.BookingId || !form.Subject.trim()) { toast.error("Booking and Subject are required"); return; }
@@ -196,7 +229,7 @@ const CrmServiceTickets: React.FC = () => {
         <div className="max-w-xs truncate">
           {i.row.original.Subject}
           {i.row.original.RaisedByCustomer && (
-            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-600 font-medium">Customer</span>
+            <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-600 font-medium">Customer</span>
           )}
         </div>
       ) },
@@ -210,7 +243,7 @@ const CrmServiceTickets: React.FC = () => {
         const overdue = isOverdue(t);
         return (
           <span className={`text-xs ${overdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
-            {t.SlaDueDate ? String(t.SlaDueDate).slice(0, 16).replace("T", " ") : "—"}
+            {t.SlaDueDate ? fmtIstIso(t.SlaDueDate) : "—"}
             {overdue && " (OVERDUE)"}
           </span>
         );
@@ -230,7 +263,7 @@ const CrmServiceTickets: React.FC = () => {
           <div className="flex items-center gap-2 flex-wrap">
             {/* Open: Assign dropdown */}
             {t.Status === CrmStatus.OPEN && (
-              <select
+              <SearchableNativeSelect
                 defaultValue=""
                 onChange={(e) => handleAssign(t.Id, e.target.value)}
                 className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
@@ -239,13 +272,13 @@ const CrmServiceTickets: React.FC = () => {
                 {(users as any[]).map((u: any) => (
                   <option key={u.value} value={u.value}>{u.label}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             )}
             {/* Assigned: Start work + Reassign */}
             {t.Status === "Assigned" && (
               <>
                 <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-primary hover:underline">Start</button>
-                <select
+                <SearchableNativeSelect
                   defaultValue=""
                   onChange={(e) => handleAssign(t.Id, e.target.value)}
                   className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
@@ -254,12 +287,12 @@ const CrmServiceTickets: React.FC = () => {
                   {(users as any[]).map((u: any) => (
                     <option key={u.value} value={u.value}>{u.label}</option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
               </>
             )}
             {/* InProgress: Reassign available */}
             {t.Status === CrmStatus.IN_PROGRESS && (
-              <select
+              <SearchableNativeSelect
                 defaultValue=""
                 onChange={(e) => handleAssign(t.Id, e.target.value)}
                 className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none"
@@ -268,7 +301,7 @@ const CrmServiceTickets: React.FC = () => {
                 {(users as any[]).map((u: any) => (
                   <option key={u.value} value={u.value}>{u.label}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             )}
             {/* Assigned/InProgress/Reopened: Resolve */}
             {["Assigned", "InProgress", "Reopened"].includes(t.Status) && (
@@ -306,7 +339,7 @@ const CrmServiceTickets: React.FC = () => {
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
           <Plus size={14} /> Raise Ticket
         </button>
         </div>
@@ -315,15 +348,17 @@ const CrmServiceTickets: React.FC = () => {
       <div className="flex gap-3 flex-wrap">
         <div className="relative flex-1 min-w-48">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search ticket, customer, subject..."
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search ticket, customer, subject... (Enter to search)"
             className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+        <select value={statusFilter} onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
           className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
           <option value="All">All Statuses</option>
           {STATUSES.map((s) => <option key={s}>{s}</option>)}
         </select>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
       <DataTable
@@ -335,23 +370,24 @@ const CrmServiceTickets: React.FC = () => {
         rowClassName={(row) => isOverdue(row.original) ? "bg-red-50/30" : ""}
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* ── Raise Ticket dialog ───────────────────────────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent accent="crm" className="max-w-lg">
           <DialogHeader><DialogTitle className="font-heading">Raise Service Ticket</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(bookings as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} ({b.UnitNo})</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Category</label>
                 <select value={form.Category} onChange={(e) => setForm((f) => ({ ...f, Category: e.target.value }))}
@@ -379,18 +415,18 @@ const CrmServiceTickets: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Assign To</label>
-              <select value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
+              <SearchableNativeSelect value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">— Unassigned —</option>
                 {(users as any[]).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
-              </select>
+              </SearchableNativeSelect>
             </div>
           </div>
           <DialogFooter>
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleCreate} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Raising..." : "Raise Ticket"}
             </button>
           </DialogFooter>
@@ -399,7 +435,7 @@ const CrmServiceTickets: React.FC = () => {
 
       {/* ── Resolve dialog (replaces window.prompt) ───────────────────────── */}
       <Dialog open={resolveDialog} onOpenChange={(o) => { if (!o) setResolveDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Resolve Ticket</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground -mt-1">Describe what was done to resolve the issue. This is stored permanently on the ticket.</p>
           <Textarea
@@ -413,7 +449,7 @@ const CrmServiceTickets: React.FC = () => {
             <button onClick={() => setResolveDialog(false)}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleResolveConfirm} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Resolving..." : "Mark Resolved"}
             </button>
           </DialogFooter>
@@ -422,7 +458,7 @@ const CrmServiceTickets: React.FC = () => {
 
       {/* ── Reopen dialog (replaces window.prompt) ────────────────────────── */}
       <Dialog open={reopenDialog} onOpenChange={(o) => { if (!o) setReopenDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Reopen Ticket</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground -mt-1">Explain why this ticket needs to be reopened. Required for audit trail.</p>
           <Textarea

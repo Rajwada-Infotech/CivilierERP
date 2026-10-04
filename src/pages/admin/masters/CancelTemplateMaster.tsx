@@ -71,36 +71,32 @@ const CancelTemplateMaster: React.FC = () => {
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to add cancel template");
-        toast.success("Cancel template added!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to update cancel template");
-        toast.success("Cancel template updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to delete cancel template");
-        toast.success("Cancel template deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["cancel-template-master"] });
-      // The Cancel Task dialog reads from this same active-templates list.
-      await queryClient.invalidateQueries({ queryKey: ["cancel-template-active"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to add cancel template");
+      toast.success("Cancel template added!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to update cancel template");
+      toast.success("Cancel template updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to delete cancel template");
+      toast.success("Cancel template deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["cancel-template-master"] });
+    // The Cancel Task dialog reads from this same active-templates list.
+    await queryClient.invalidateQueries({ queryKey: ["cancel-template-active"] });
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading cancel templates...</div>;

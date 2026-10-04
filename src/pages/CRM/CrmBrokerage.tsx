@@ -6,7 +6,7 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, ShieldAlert, IndianRupee, Lock, Unlock } from "lucide-react";
+import { Plus, ShieldAlert, IndianRupee, Lock, Unlock, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -14,6 +14,9 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTds } from "@/contexts/TdsContext";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
@@ -30,6 +33,27 @@ const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Per
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
 }
+
+const PAGE_SIZE = 20;
+interface BrokerageListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchBrokerageList(filters: BrokerageListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
+}
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
@@ -41,7 +65,7 @@ async function fetchBrokers(): Promise<any[]> {
 // Customize dialog. The backend re-checks independently — this only affects rendering.
 function getUserRole(): string | null {
   try {
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     if (!token) return null;
     return JSON.parse(atob(token.split(".")[1])).role ?? null;
   } catch { return null; }
@@ -61,8 +85,25 @@ const CrmBrokerage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const isApprover = CRM_APPROVER_ROLES.includes(getUserRole() ?? "") || hasApprovalInboxEdit;
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
-  const { data: records = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-brokerage"], queryFn: fetchAll, staleTime: 30_000 });
+  const listFilters: BrokerageListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-brokerage", listFilters, page],
+    queryFn: () => fetchBrokerageList(listFilters, page),
+    staleTime: 30_000,
+  });
+  const records = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["broker-master"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { tdsRecords } = useTds();
@@ -115,10 +156,10 @@ const CrmBrokerage: React.FC = () => {
   }, [searchParams, records]);
 
   const handleApprove = async () => {
-    if (!editingId) return;
+    if (editingId == null) return;
     setApproving(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       const res = await fetch(`${API}/${editingId}/approve`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -143,12 +184,12 @@ const CrmBrokerage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!editingId && (!form.BookingId || !form.BrokerId || !form.RateValue)) { toast.error("Booking, broker and rate are required"); return; }
-    if (editingId && (!form.RateValue || !form.ComputedAmount)) { toast.error("Rate and approved amount are required"); return; }
+    if (editingId == null && (!form.BookingId || !form.BrokerId || !form.RateValue)) { toast.error("Booking, broker and rate are required"); return; }
+    if (editingId != null && (!form.RateValue || !form.ComputedAmount)) { toast.error("Rate and approved amount are required"); return; }
     setSaving(true);
     try {
-      const res = await fetchWithAuth(editingId ? `${API}/${editingId}` : API, {
-        method: editingId ? "PUT" : "POST",
+      const res = await fetchWithAuth(editingId != null ? `${API}/${editingId}` : API, {
+        method: editingId != null ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
@@ -160,7 +201,7 @@ const CrmBrokerage: React.FC = () => {
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      toast.success(editingId ? "Brokerage updated" : "Brokerage recorded");
+      toast.success(editingId != null ? "Brokerage updated" : "Brokerage recorded");
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM });
       setEditingId(null);
@@ -216,7 +257,7 @@ const CrmBrokerage: React.FC = () => {
           <div className="text-xs space-y-0.5">
             <div className="font-semibold text-foreground">₹{gross.toLocaleString("en-IN")}</div>
             {tds > 0 && (
-              <div className="text-orange-600">− TDS {r.TDSPercentage}%: ₹{tds.toLocaleString("en-IN")}</div>
+              <div className="text-sky-600">− TDS {r.TDSPercentage}%: ₹{tds.toLocaleString("en-IN")}</div>
             )}
             <div className={`font-bold ${tds > 0 ? "text-green-600" : "text-foreground"}`}>
               Net: ₹{net.toLocaleString("en-IN")}
@@ -250,7 +291,7 @@ const CrmBrokerage: React.FC = () => {
               <button onClick={() => openEdit(r)} className="text-xs text-primary hover:underline">Customize amount</button>
             )}
             {r.Status === CrmStatus.APPROVED && (
-              <button onClick={() => navigate(r.FinancePaymentId ? `/payments?id=${r.FinancePaymentId}` : "/payments")} className="text-xs text-primary hover:underline">
+              <button onClick={() => navigate(r.FinancePaymentId != null ? `/payments?id=${r.FinancePaymentId}` : "/payments")} className="text-xs text-primary hover:underline">
                 {r.FinancePaymentDocNo ? `Finance: ${r.FinancePaymentDocNo}` : "Sent to Finance"}
               </button>
             )}
@@ -271,7 +312,7 @@ const CrmBrokerage: React.FC = () => {
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           {rights.canCreate && (
             <button onClick={openCreate}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg hover:shadow-lg ">
             <Plus size={14} /> Add Broker
           </button>
           )}
@@ -279,13 +320,24 @@ const CrmBrokerage: React.FC = () => {
       }
     >
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-sky-600 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
           <ShieldAlert size={14} /> This data is internal-only and is excluded from the customer portal by design.
         </div>
         <button onClick={() => navigate("/crm/broker-payments")}
           className="flex items-center gap-1.5 text-xs px-3 py-2 border border-border rounded-lg hover:bg-muted transition-colors">
           <IndianRupee size={14} /> Go to Broker Payment
         </button>
+      </div>
+
+      <div className="flex gap-3 flex-wrap items-center mt-3 mb-3">
+        <div className="relative flex-1 min-w-48">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search customer, booking, broker... (Enter to search)"
+            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
       <DataTable
@@ -295,24 +347,25 @@ const CrmBrokerage: React.FC = () => {
         emptyMessage="No brokerage records"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="font-heading">{editingId ? "Customize Brokerage" : "Add Broker Involvement"}</DialogTitle></DialogHeader>
+        <DialogContent accent="crm" className="max-w-md">
+          <DialogHeader><DialogTitle className="font-heading">{editingId != null ? "Customize Brokerage" : "Add Broker Involvement"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={form.BookingId} disabled={!!editingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <SearchableNativeSelect value={form.BookingId} disabled={editingId != null} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(bookings as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} (₹{Number(b.TotalValue || 0).toLocaleString("en-IN")})</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Broker * (from Broker Master)</label>
-              <select value={form.BrokerId} disabled={!!editingId} onChange={(e) => {
+              <SearchableNativeSelect value={form.BrokerId} disabled={editingId != null} onChange={(e) => {
                   const brokerId = e.target.value;
                   const broker = (brokers as any[]).find((b: any) => String(b.LHeadId) === brokerId);
                   setForm((f) => ({
@@ -327,23 +380,23 @@ const CrmBrokerage: React.FC = () => {
                 {(brokers as any[]).map((b: any) => (
                   <option key={b.LHeadId} value={String(b.LHeadId)}>{b.LHeadName}{b.LHeadPhone ? ` — ${b.LHeadPhone}` : ""}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
               {!brokers.length && (
                 <p className="text-xs text-muted-foreground mt-1">No brokers found — add one in Broker Master first.</p>
               )}
             </div>
 
             {selectedBroker && (
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg bg-muted/20 border border-border p-2.5 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg bg-muted/20 border border-border p-2.5 text-xs">
                 {selectedBroker.LHeadPhone && <div><span className="text-muted-foreground">Phone: </span><span className="font-medium">{selectedBroker.LHeadPhone}</span></div>}
                 {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN: </span><span className="font-mono font-medium">{selectedBroker.LHeadPan}</span></div>}
                 {selectedBroker.LHeadRera && <div><span className="text-muted-foreground">RERA: </span><span className="font-mono font-medium">{selectedBroker.LHeadRera}</span></div>}
                 {selectedBroker.LHeadPaymentTerms && <div><span className="text-muted-foreground">Terms: </span><span className="font-medium">{selectedBroker.LHeadPaymentTerms}</span></div>}
-                <div><span className="text-muted-foreground">TDS: </span><span className={`font-medium ${selectedBroker.IsTdsApplicable !== false ? "text-amber-600" : "text-muted-foreground"}`}>{selectedBroker.IsTdsApplicable !== false ? "Applicable (Sec. 194H)" : "Not Applicable"}</span></div>
+                <div><span className="text-muted-foreground">TDS: </span><span className={`font-medium ${selectedBroker.IsTdsApplicable !== false ? "text-sky-600" : "text-muted-foreground"}`}>{selectedBroker.IsTdsApplicable !== false ? "Applicable (Sec. 194H)" : "Not Applicable"}</span></div>
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Firm (optional, for this deal)</label>
                 <input type="text" value={form.BrokerFirm} onChange={(e) => setForm((f) => ({ ...f, BrokerFirm: e.target.value }))}
@@ -358,7 +411,7 @@ const CrmBrokerage: React.FC = () => {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Rate Value * ({form.RateType === "Percentage" ? "%" : "₹"})</label>
                 <input type="number" value={form.RateValue} onChange={(e) => setForm((f) => ({ ...f, RateValue: e.target.value }))}
@@ -368,7 +421,7 @@ const CrmBrokerage: React.FC = () => {
                 <label className="text-xs text-muted-foreground block mb-1">
                   TDS (Sec. 194H)
                   {selectedBroker && selectedBroker.IsTdsApplicable === false && (
-                    <span className="ml-1.5 text-[10px] text-muted-foreground">· Not applicable per Broker Master</span>
+                    <span className="ml-1.5 text-[0.625rem] text-muted-foreground">· Not applicable per Broker Master</span>
                   )}
                 </label>
                 <select value={form.TDSId} onChange={(e) => setForm((f) => ({ ...f, TDSId: e.target.value }))}
@@ -381,7 +434,7 @@ const CrmBrokerage: React.FC = () => {
                 </select>
               </div>
             </div>
-            {editingId && (
+            {editingId != null && (
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Approved Amount *</label>
                 <input type="number" value={form.ComputedAmount} onChange={(e) => setForm((f) => ({ ...f, ComputedAmount: e.target.value }))}
@@ -397,10 +450,10 @@ const CrmBrokerage: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSave} disabled={saving || approving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : editingId ? "Save Changes" : "Add"}
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
+              {saving ? "Saving..." : editingId != null ? "Save Changes" : "Add"}
             </button>
-            {editingId && editingStatus === CrmStatus.PENDING && isApprover && (
+            {editingId != null && editingStatus === CrmStatus.PENDING && isApprover && (
               <button onClick={handleApprove} disabled={saving || approving}
                 className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40">
                 {approving ? "Approving..." : "Approve & Send to Finance"}

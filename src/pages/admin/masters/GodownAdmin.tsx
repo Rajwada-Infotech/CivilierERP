@@ -210,7 +210,7 @@ export default function GodownAdmin() {
       label: "Project Defaults",
       value: projectDefaultCount,
       icon: Star,
-      tint: "bg-amber-500/10 text-amber-600",
+      tint: "bg-[#ffe2021a] text-amber-600",
     },
     {
       label: "Companies",
@@ -373,7 +373,7 @@ export default function GodownAdmin() {
           rights.canCreate && (
             <button
               onClick={openAdd}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
             >
               <Plus className="h-3.5 w-3.5" />
               Add Godown
@@ -480,14 +480,14 @@ export default function GodownAdmin() {
                             <p className="font-medium text-sm truncate">
                               {g.GodownName}
                             </p>
-                            <p className="font-mono text-[11px] text-muted-foreground">
+                            <p className="font-mono text-[0.6875rem] text-muted-foreground">
                               {g.GodownCode ?? "—"}
                             </p>
                           </div>
                         </div>
                         <Badge
                           variant={g.IsActive ? "default" : "secondary"}
-                          className="text-[10px] shrink-0"
+                          className="text-[0.625rem] shrink-0"
                         >
                           {g.IsActive ? "Active" : "Inactive"}
                         </Badge>
@@ -496,17 +496,17 @@ export default function GodownAdmin() {
                       <div className="flex flex-wrap gap-1.5">
                         <Badge
                           variant={g.IsProjectDefault ? "default" : "outline"}
-                          className="text-[10px]"
+                          className="text-[0.625rem]"
                         >
                           {g.IsProjectDefault ? "Project Default" : "Storage"}
                         </Badge>
                         {g.EnterpriseName && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-[11px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-[0.6875rem] text-muted-foreground">
                             <Building2 className="h-3 w-3" /> {g.EnterpriseName}
                           </span>
                         )}
                         {g.ProjectName && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-[11px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-[0.6875rem] text-muted-foreground">
                             <FolderKanban className="h-3 w-3" /> {g.ProjectName}
                           </span>
                         )}
@@ -541,7 +541,7 @@ export default function GodownAdmin() {
                                 : ""
                             }
                           />
-                          <span className="text-[11px] text-muted-foreground">
+                          <span className="text-[0.6875rem] text-muted-foreground">
                             {g.IsActive ? "Live" : "Paused"}
                           </span>
                         </div>
@@ -592,7 +592,7 @@ export default function GodownAdmin() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="gd-code">Code</Label>
                 <Input
@@ -618,7 +618,7 @@ export default function GodownAdmin() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="gd-company">Company</Label>
                 <Select
@@ -674,7 +674,7 @@ export default function GodownAdmin() {
                   type="button"
                   onClick={handleUseCompanyLocation}
                   disabled={!form.EnterpriseID}
-                  className="text-[11px] font-medium text-primary hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:no-underline"
+                  className="text-[0.6875rem] font-medium text-primary hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:no-underline"
                 >
                   Use company location
                 </button>
@@ -697,7 +697,7 @@ export default function GodownAdmin() {
                 maxLength={255}
               />
               {form.LocationAuto && selectedCompanyName && (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   Synced with {selectedCompanyName}'s address.
                 </p>
               )}
@@ -760,7 +760,7 @@ export default function GodownAdmin() {
             <Button
               onClick={handleSubmit}
               disabled={isSaving}
-              className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
             >
               {isSaving ? "Saving…" : editing ? "Update" : "Create"}
             </Button>

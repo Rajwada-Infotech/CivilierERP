@@ -33,6 +33,7 @@ import {
   Phone,
   Camera,
 } from "lucide-react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -309,7 +310,7 @@ const priorityConfig: Record<
     bar: "bg-orange-500",
   },
   Medium: {
-    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
     dot: "bg-amber-400",
     bar: "bg-amber-400",
   },
@@ -325,7 +326,7 @@ const statusConfig: Record<
   { cls: string; label: string; icon: React.ElementType }
 > = {
   Pending: {
-    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
     label: "Pending",
     icon: Clock,
   },
@@ -353,7 +354,7 @@ function PriorityBadge({ priority }: { priority: string }) {
   };
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cfg.cls}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
       {priority}
@@ -370,7 +371,7 @@ function StatusBadge({ status }: { status: string }) {
   const Icon = cfg.icon;
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cfg.cls}`}
     >
       <Icon size={10} />
       {cfg.label}
@@ -452,7 +453,7 @@ function AuthenticatedAttachmentImage({
       <button
         type="button"
         onClick={onClick}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[0.6875rem] text-primary hover:bg-muted transition-colors"
       >
         <Paperclip size={10} /> {filename.length > 20 ? "File" : filename}
       </button>
@@ -464,7 +465,7 @@ function AuthenticatedAttachmentImage({
       <button
         type="button"
         onClick={onClick}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground hover:bg-muted/80 transition-colors"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[0.6875rem] text-muted-foreground hover:bg-muted/80 transition-colors"
       >
         <Paperclip size={10} /> {filename.length > 20 ? "Attachment" : filename}
       </button>
@@ -541,7 +542,7 @@ function DbAttachmentList({ attachments }: { attachments: TicketAttachment[] }) 
             <button
               key={a.id}
               onClick={() => openAttachmentViewer(a.url, a.filename)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[0.6875rem] text-primary hover:bg-muted transition-colors"
             >
               <Paperclip size={10} />{" "}
               {a.filename.length > 20 ? `PDF` : a.filename}
@@ -564,7 +565,7 @@ function DbAttachmentList({ attachments }: { attachments: TicketAttachment[] }) 
           <button
             key={a.id}
             onClick={() => openAttachmentViewer(a.url, a.filename)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[0.6875rem] text-primary hover:bg-muted transition-colors"
           >
             <Paperclip size={10} />{" "}
             {a.filename.length > 24 ? a.filename.slice(0, 24) + "…" : a.filename}
@@ -603,7 +604,7 @@ function TicketListCard({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] text-muted-foreground/50">
+                <span className="font-mono text-[0.625rem] text-muted-foreground/50">
                   #{ticket.id}
                 </span>
                 <h3 className="text-sm font-semibold text-foreground leading-snug truncate">
@@ -611,24 +612,24 @@ function TicketListCard({
                 </h3>
               </div>
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                   <User size={10} />
                   <span>{ticket.customer_name || "—"}</span>
                 </div>
                 {ticket.customer_phone && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <Phone size={10} />
                     <span>{ticket.customer_phone}</span>
                   </div>
                 )}
                 {fmtDate(ticket.created_at) && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <CalendarDays size={10} />
                     <span>{fmtDate(ticket.created_at)}</span>
                   </div>
                 )}
                 {(ticket.comment_count ?? 0) > 0 && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <MessageCircle size={10} />
                     <span>{ticket.comment_count}</span>
                   </div>
@@ -707,7 +708,7 @@ function TicketDetailView({
   const uploadFiles = async (files: File[]): Promise<number[]> => {
     if (files.length === 0) return [];
     const token =
-      localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+      sessionStorage.getItem("token") || "";
     const allIds: number[] = [];
     for (const file of files) {
       const formData = new FormData();
@@ -933,7 +934,7 @@ function TicketDetailView({
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[11px] text-muted-foreground/50">
+                <span className="font-mono text-[0.6875rem] text-muted-foreground/50">
                   #{ticket.id}
                 </span>
                 <h1 className="text-lg font-bold text-foreground leading-tight">
@@ -941,24 +942,24 @@ function TicketDetailView({
                 </h1>
               </div>
               <div className="flex items-center gap-3 mt-1 flex-wrap">
-                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                   <User size={10} />
                   <span>{ticket.customer_name}</span>
                 </div>
                 {ticket.customer_phone && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <Phone size={10} />
                     <span>{ticket.customer_phone}</span>
                   </div>
                 )}
                 {ticket.created_at && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <CalendarDays size={10} />
                     <span>{fmtDateTime(ticket.created_at)}</span>
                   </div>
                 )}
                 {ticket.assigned_to && (
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-[0.6875rem] text-muted-foreground">
                     → {ticket.assigned_to}
                   </span>
                 )}
@@ -985,7 +986,7 @@ function TicketDetailView({
             </p>
             {ticketAttachments.length > 0 && (
               <div className="mt-3">
-                <p className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1.5">
+                <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1 mb-1.5">
                   <Paperclip size={10} />
                   {ticketAttachments.length > 1
                     ? `${ticketAttachments.length} Attachments`
@@ -1088,7 +1089,7 @@ function TicketDetailView({
                       <p className="text-xs text-emerald-600 font-medium">
                         {textOnly || c.comment}
                       </p>
-                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                      <p className="text-[0.625rem] text-muted-foreground/60 mt-0.5">
                         {c.author_name} · {fmtDateTime(c.created_at)}
                       </p>
                     </div>
@@ -1107,13 +1108,13 @@ function TicketDetailView({
                     className={`max-w-[75%] flex flex-col gap-0.5 ${isMe ? "items-end" : "items-start"}`}
                   >
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-muted-foreground font-medium">
+                      <span className="text-[0.625rem] text-muted-foreground font-medium">
                         {c.author_name}
                       </span>
-                      <span className="text-[9px] text-muted-foreground/50 capitalize">
+                      <span className="text-[0.5625rem] text-muted-foreground/50 capitalize">
                         {c.author_role}
                       </span>
-                      <span className="text-[10px] text-muted-foreground/40">
+                      <span className="text-[0.625rem] text-muted-foreground/40">
                         {fmtDateTime(c.created_at)}
                       </span>
                     </div>
@@ -1156,7 +1157,7 @@ function TicketDetailView({
                           className="h-14 w-auto rounded-lg border border-border object-cover"
                         />
                       ) : (
-                        <div className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground ${isPdf ? "text-primary border-primary/30 bg-primary/5" : ""}`}>
+                        <div className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-border bg-muted text-[0.6875rem] text-muted-foreground ${isPdf ? "text-primary border-primary/30 bg-primary/5" : ""}`}>
                           <Paperclip size={10} />
                           {f.name.length > 18 ? f.name.slice(0, 18) + "…" : f.name}
                         </div>
@@ -1228,7 +1229,7 @@ function TicketDetailView({
                   isSending ||
                   (!commentText.trim() && adminAttachFiles.length === 0)
                 }
-                className="w-9 h-9 flex items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
+                className="w-9 h-9 flex items-center justify-center rounded-xl btn-module text-white hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
               >
                 {isSending ? (
                   <Loader2 size={14} className="animate-spin" />
@@ -1347,7 +1348,7 @@ function TicketDetailView({
                 }`}
               >
                 <s.Icon active={sentiment === s.value} />
-                <span className="text-[10px] font-medium">{s.label}</span>
+                <span className="text-[0.625rem] font-medium">{s.label}</span>
               </button>
             ))}
           </div>
@@ -1366,7 +1367,7 @@ function TicketDetailView({
             <button
               onClick={submitReview}
               disabled={reviewSubmitting}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium btn-module text-white hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {reviewSubmitting ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -1399,7 +1400,7 @@ function TicketDetailView({
 
       {/* Camera modal — same as CreateTicket */}
       {showCamera && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <BodyPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
@@ -1462,7 +1463,7 @@ function TicketDetailView({
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </div>
   );
@@ -1613,14 +1614,14 @@ const MyTickets: React.FC = () => {
               onClick={() => setStatusFilter(tab)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 statusFilter === tab
-                  ? "bg-primary text-primary-foreground"
+                  ? "btn-module text-white"
                   : "border border-border text-muted-foreground hover:bg-muted"
               }`}
             >
               {STATUS_LABELS[tab]}
               {!isLoading && (
                 <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                  className={`text-[0.625rem] px-1.5 py-0.5 rounded-full font-mono ${
                     statusFilter === tab
                       ? "bg-white/20 text-white"
                       : "bg-muted text-muted-foreground"
@@ -1656,16 +1657,16 @@ const MyTickets: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[11px] text-muted-foreground font-medium">
+            <span className="text-[0.6875rem] text-muted-foreground font-medium">
               Priority:
             </span>
             {(["all", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPriorityFilter(p)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                className={`px-2.5 py-1 rounded-lg text-[0.6875rem] font-medium transition-all ${
                   priorityFilter === p
-                    ? "bg-primary text-primary-foreground"
+                    ? "btn-module text-white"
                     : "border border-border text-muted-foreground hover:bg-muted"
                 }`}
               >
@@ -1704,7 +1705,7 @@ const MyTickets: React.FC = () => {
             {!isFiltered && (
               <button
                 onClick={() => navigate("/ticket/create")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity mt-1"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg btn-module text-white hover:opacity-90 transition-opacity mt-1"
               >
                 <Plus size={12} /> Create first ticket
               </button>

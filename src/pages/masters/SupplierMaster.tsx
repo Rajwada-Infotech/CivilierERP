@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useCallback } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -41,6 +41,7 @@ import {
   Upload,
   Loader2,
   Copy,
+  Landmark,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
 import {
@@ -54,11 +55,48 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
+const VENDOR_TYPE = "V";
+// The Vendor Master list/queries fetch both LHeadTypes together — Landlord
+// entries are still stored as LHeadType='S' (only Vendor gets its own 'V'),
+// see lheadTypeForVendorType below.
+const LIST_TYPES = `${SUPPLIER_TYPE},${VENDOR_TYPE}`;
 
 const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both"] as const;
+
+// Vendor Type — a layer above Category: Category (Goods/Services/Both) is
+// only ever meaningful for a Supplier, so a Landlord or a generic Vendor
+// picks a Type here instead and never sees the Category field at all.
+// There's no dedicated DB column for this — it's derived from/written
+// straight into the existing supplierCategory (LHeadCategory) value:
+// Goods/Services/Both implies Type="Supplier" (with that as the
+// sub-category); the literal values "Vendor"/"Landlord" ARE the Type,
+// stored the same column, with no sub-category underneath them.
+const VENDOR_TYPES = ["Vendor", "Supplier", "Landlord"] as const;
+type VendorType = (typeof VENDOR_TYPES)[number] | "";
+
+function vendorTypeFromCategory(category: string): VendorType {
+  if ((SUPPLIER_CATEGORIES as readonly string[]).includes(category)) return "Supplier";
+  // "Supplier" itself is stored as a placeholder when Type=Supplier has been
+  // picked but no Goods/Services/Both sub-category has been chosen yet —
+  // without this, the derived Type would snap back to "" on every render
+  // and the Type dropdown would appear to do nothing.
+  if (category === "Supplier" || category === "Vendor" || category === "Landlord") return category;
+  return "";
+}
+// Every value the shared category/type column can actually hold — used for
+// CSV import validation, which doesn't otherwise know about the Type/
+// Category split.
+const ALL_CATEGORY_VALUES = [...SUPPLIER_CATEGORIES, "Vendor", "Landlord"] as const;
+
+// LHeadType to persist on save: Vendor gets its own 'V'; Supplier and
+// Landlord both remain 'S' (Landlord is only distinguished via LHeadCategory).
+function lheadTypeForVendorType(type: VendorType): string {
+  return type === "Vendor" ? VENDOR_TYPE : SUPPLIER_TYPE;
+}
 const GST_TYPES = ["Registered", "Unregistered"] as const;
 const GST_STATES = [
   "Andaman and Nicobar Islands",
@@ -121,6 +159,11 @@ interface Supplier {
   // supplier's login username for the Supplier Portal, distinct from
   // LHeadEmail (their own business contact address).
   SupplierLoginEmail: string | null;
+  // Bank Details — all optional
+  bankAccountNo: string | null;
+  bankIfscCode: string | null;
+  bankName: string | null;
+  bankBranchCode: string | null;
 }
 
 interface AccountGroup {
@@ -149,6 +192,11 @@ interface SupplierForm {
   tdsLimitApplicable: boolean;
   // Mandatory on create; optional on edit (blank = keep existing password).
   SupplierPassword: string;
+  // Bank Details — all optional
+  bankAccountNo: string;
+  bankIfscCode: string;
+  bankName: string;
+  bankBranchCode: string;
 }
 
 const EMPTY_FORM: SupplierForm = {
@@ -167,11 +215,19 @@ const EMPTY_FORM: SupplierForm = {
   isTdsApplicable: false,
   tdsLimitApplicable: true,
   SupplierPassword: "",
+  bankAccountNo: "",
+  bankIfscCode: "",
+  bankName: "",
+  bankBranchCode: "",
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
 const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "Supplier Name", accessor: "LHeadName" },
+  { header: "Vendor Name", accessor: "LHeadName" },
+  {
+    header: "Type",
+    accessor: (r) => vendorTypeFromCategory((r.supplierCategory as string) || "") || "—",
+  },
   { header: "Contact Person", accessor: "LHeadContactPerson" },
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },
@@ -182,10 +238,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Category", accessor: "supplierCategory" },
   {
     header: "Group",
-    accessor: (r) => {
-      // resolved in display — raw value is AGId
-      return r.LBelongsTo != null ? String(r.LBelongsTo) : "—";
-    },
+    accessor: (r) => (r.GroupName as string) || "—",
   },
   { header: "Address", accessor: "LHeadAddress" },
   {
@@ -200,19 +253,23 @@ const EXPORT_COLUMNS: ExportColumn[] = [
     header: "TDS Limit",
     accessor: (r) => (r.TdsLimitApplicable ? "Applied" : "Deduct on every bill"),
   },
+  { header: "Bank Account No", accessor: "bankAccountNo" },
+  { header: "Bank Name", accessor: "bankName" },
+  { header: "Bank Branch Location", accessor: "bankBranchCode" },
+  { header: "IFSC Code", accessor: "bankIfscCode" },
 ];
 
 // ─── CSV template / import column mapping ─────────────────────────────────────
 // Single source of truth for both the downloadable template and the importer,
 // so the headers a user downloads are exactly the headers the importer reads.
 const CSV_HEADERS = {
-  name: "Supplier Name",
+  name: "Vendor Name",
   contactPerson: "Contact Person",
   phone: "Phone",
   email: "Email",
   gst: "GST Number",
   pan: "PAN Number",
-  category: "Category (Goods/Services/Both)",
+  category: "Category/Type (Goods/Services/Both/Vendor/Landlord)",
   gstType: "GST Type (Registered/Unregistered)",
   gstState: "GST State",
   group: "Group Name",
@@ -267,7 +324,7 @@ function buildSupplierColumns(
   return [
     {
       accessorKey: "LHeadName",
-      header: "Supplier Name",
+      header: "Vendor Name",
       cell: ({ getValue }) => (
         <span className="font-medium text-foreground">
           {getValue() as string}
@@ -301,7 +358,7 @@ function buildSupplierColumns(
         const badgeCls = gstType === "Registered"
           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
           : gstType === "Unregistered"
-            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+            ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20"
             : "bg-muted text-muted-foreground border-border";
         const badgeLabel = gstType === "Registered"
           ? "GST"
@@ -313,7 +370,7 @@ function buildSupplierColumns(
             <span className="font-mono text-xs font-semibold text-primary">
               {gst || "—"}
             </span>
-            <span className={`inline-flex w-fit items-center text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>
+            <span className={`inline-flex w-fit items-center text-[0.5625rem] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>
               {badgeLabel}
             </span>
           </div>
@@ -340,7 +397,7 @@ function buildSupplierColumns(
       cell: ({ getValue }) => {
         const tds = getValue() as boolean;
         return tds ? (
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600">
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[#ffe2021a] text-amber-600">
             TDS
           </span>
         ) : (
@@ -358,7 +415,7 @@ function buildSupplierColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-start">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -379,7 +436,7 @@ function buildSupplierColumns(
         const hasPhone = !!(row.original.LHeadPhone?.replace(/\D/g, ""));
         return (
           <div className="flex items-center justify-start gap-2 w-full min-w-[120px]">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
@@ -389,7 +446,7 @@ function buildSupplierColumns(
             {canPrint && (
               <button
                 onClick={() => onPrint(row.original)}
-                className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                className="p-1 rounded text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                 title="Print"
               >
                 <Printer size={15} />
@@ -432,7 +489,7 @@ function buildSupplierColumns(
 const SupplierMaster: React.FC = () => {
   const qc = useQueryClient();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const rights = usePageRights("supplier-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -444,6 +501,32 @@ const SupplierMaster: React.FC = () => {
   >({});
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [viewRecord, setViewRecord] = useState<Supplier | null>(null);
+
+  // Vendor Type — derived from (and written back into) supplierCategory;
+  // see vendorTypeFromCategory's comment. Drives the form's dynamic
+  // heading and whether the Category sub-field is active.
+  const vendorType = vendorTypeFromCategory(form.supplierCategory);
+  const handleTypeChange = (next: VendorType) => {
+    setForm((p) => ({
+      ...p,
+      supplierCategory:
+        next === "Supplier"
+          ? // Switching TO Supplier keeps an already-valid Goods/Services/
+            // Both pick; otherwise stores the "Supplier" placeholder so
+            // vendorTypeFromCategory still resolves back to "Supplier" on
+            // the next render (an empty string would resolve to "" and the
+            // Type dropdown would appear to revert/do nothing).
+            ((SUPPLIER_CATEGORIES as readonly string[]).includes(p.supplierCategory)
+              ? p.supplierCategory
+              : "Supplier")
+          : next, // "Vendor" / "Landlord" — the Type IS the stored value
+      isTdsApplicable: next === "Supplier" ? p.isTdsApplicable : false,
+      // Switching away from Supplier hides the login-password field — clear
+      // any half-typed value so it can't linger in state and get submitted
+      // if the user switches back and forth before saving.
+      SupplierPassword: next === "Supplier" ? p.SupplierPassword : "",
+    }));
+  };
 
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
@@ -459,8 +542,8 @@ const SupplierMaster: React.FC = () => {
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ["account-head", SUPPLIER_TYPE],
-    queryFn: () => getList(SUPPLIER_TYPE),
+    queryKey: ["account-head", LIST_TYPES],
+    queryFn: () => getList(LIST_TYPES),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -502,16 +585,20 @@ const SupplierMaster: React.FC = () => {
       TdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
       GroupName: item.GroupName ?? null,
       SupplierLoginEmail: item.SupplierLoginEmail ?? null,
+      bankAccountNo: item.LAccountNo || null,
+      bankIfscCode: item.LIFSCCode || null,
+      bankName: item.LBankName || null,
+      bankBranchCode: item.LBranchCode || null,
     }));
   }, [rawData]);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ["account-head", SUPPLIER_TYPE] });
+    qc.invalidateQueries({ queryKey: ["account-head", LIST_TYPES] });
 
   const buildPayload = (f: SupplierForm) => ({
     LHeadName: f.LHeadName,
-    LHeadType: SUPPLIER_TYPE,
+    LHeadType: lheadTypeForVendorType(vendorTypeFromCategory(f.supplierCategory)),
     LHeadContactPerson: f.LHeadContactPerson || null,
     LHeadPhone: f.LHeadPhone || null,
     LHeadEmail: f.LHeadEmail || null,
@@ -532,10 +619,18 @@ const SupplierMaster: React.FC = () => {
     // backend defaults the login password to "123456"; on edit, blank
     // leaves the existing password untouched (see accountHeadMaster.js).
     ...(f.SupplierPassword ? { SupplierPassword: f.SupplierPassword } : {}),
+    LAccountNo: f.bankAccountNo || null,
+    LIFSCCode: f.bankIfscCode || null,
+    LBankName: f.bankName || null,
+    LBranchCode: f.bankBranchCode || null,
   });
 
   const createMut = useMutation({
-    mutationFn: (f: SupplierForm) => addRecord(buildPayload(f), SUPPLIER_TYPE),
+    mutationFn: (f: SupplierForm) =>
+      addRecord(
+        buildPayload(f),
+        lheadTypeForVendorType(vendorTypeFromCategory(f.supplierCategory)),
+      ),
     onSuccess: (res: {
       SupplierLoginEmail?: string;
       SupplierPasswordDefaulted?: boolean;
@@ -546,8 +641,8 @@ const SupplierMaster: React.FC = () => {
         : "";
       toast.success(
         res?.SupplierLoginEmail
-          ? `Supplier created — login email: ${res.SupplierLoginEmail}${passwordNote}`
-          : "Supplier created",
+          ? `Vendor created — login email: ${res.SupplierLoginEmail}${passwordNote}`
+          : "Vendor created",
       );
       invalidate();
       resetForm();
@@ -557,9 +652,13 @@ const SupplierMaster: React.FC = () => {
 
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: SupplierForm }) =>
-      updateRecord(id, buildPayload(data), SUPPLIER_TYPE),
+      updateRecord(
+        id,
+        buildPayload(data),
+        lheadTypeForVendorType(vendorTypeFromCategory(data.supplierCategory)),
+      ),
     onSuccess: () => {
-      toast.success("Supplier updated");
+      toast.success("Vendor updated");
       invalidate();
       resetForm();
     },
@@ -569,7 +668,7 @@ const SupplierMaster: React.FC = () => {
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteRecord(id),
     onSuccess: () => {
-      toast.success("Supplier deleted");
+      toast.success("Vendor deleted");
       invalidate();
       setDeleteConfirm(null);
     },
@@ -586,7 +685,7 @@ const SupplierMaster: React.FC = () => {
   );
 
   const handleDownloadTemplate = () => {
-    exportToCsv([], SUPPLIER_CSV_TEMPLATE_COLUMNS, "supplier-master-template");
+    exportToCsv([], SUPPLIER_CSV_TEMPLATE_COLUMNS, "vendor-master-template");
     toast.success("Template downloaded — fill it in and use Import.");
   };
 
@@ -645,7 +744,7 @@ const SupplierMaster: React.FC = () => {
             .trim()
             .toLowerCase();
 
-          if (!name) throw new Error("Supplier Name is required");
+          if (!name) throw new Error("Vendor Name is required");
           if (!pan) throw new Error("PAN Number is required");
           // Password is optional on import — left blank, the backend defaults
           // the login to "123456" (changeable later from the Edit form).
@@ -654,13 +753,13 @@ const SupplierMaster: React.FC = () => {
 
           // Category is optional — validate against the known list when given.
           const category = categoryRaw
-            ? SUPPLIER_CATEGORIES.find(
+            ? ALL_CATEGORY_VALUES.find(
                 (c) => c.toLowerCase() === categoryRaw.toLowerCase(),
               )
             : "";
           if (categoryRaw && !category)
             throw new Error(
-              `Category must be one of Goods, Services, Both (got "${categoryRaw}")`,
+              `Category must be one of ${ALL_CATEGORY_VALUES.join(", ")} (got "${categoryRaw}")`,
             );
 
           // GST Type is optional — when given must be Registered/Unregistered.
@@ -727,9 +826,17 @@ const SupplierMaster: React.FC = () => {
             isTdsApplicable: category === "Services",
             tdsLimitApplicable: true,
             SupplierPassword: password,
+            // CSV template has no bank-details columns — always blank on import.
+            bankAccountNo: "",
+            bankIfscCode: "",
+            bankName: "",
+            bankBranchCode: "",
           };
 
-          await addRecord(buildPayload(rowForm), SUPPLIER_TYPE);
+          await addRecord(
+            buildPayload(rowForm),
+            lheadTypeForVendorType(vendorTypeFromCategory(rowForm.supplierCategory)),
+          );
           results.push({ row: rowNum, name, status: "success" });
         } catch (err: any) {
           results.push({
@@ -750,7 +857,7 @@ const SupplierMaster: React.FC = () => {
       }
       if (errorCount === 0) {
         toast.success(
-          `Imported ${successCount} supplier${successCount === 1 ? "" : "s"} ✓`,
+          `Imported ${successCount} vendor${successCount === 1 ? "" : "s"} ✓`,
         );
       } else if (successCount === 0) {
         toast.error(
@@ -820,6 +927,10 @@ const SupplierMaster: React.FC = () => {
       // Never pre-filled from the existing (hashed) password — blank means
       // "keep current password" on save.
       SupplierPassword: "",
+      bankAccountNo: s.bankAccountNo ?? "",
+      bankIfscCode: s.bankIfscCode ?? "",
+      bankName: s.bankName ?? "",
+      bankBranchCode: s.bankBranchCode ?? "",
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -834,6 +945,12 @@ const SupplierMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof SupplierForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
+    if (!vendorType) e.supplierCategory = true;
+    if (
+      vendorType === "Supplier" &&
+      !(SUPPLIER_CATEGORIES as readonly string[]).includes(form.supplierCategory)
+    )
+      e.supplierCategory = true;
     if (!form.LHeadPan.trim() && form.LHeadPan !== "PANNOTAVBL") e.LHeadPan = true;
     if (!form.LGSTType) e.LGSTType = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
@@ -856,12 +973,12 @@ const SupplierMaster: React.FC = () => {
     const win = window.open("", "_blank", "width=700,height=600");
     if (!win) return;
     win.document.write(safeHtml`
-      <html><head><title>Supplier — ${s.LHeadName}</title>
+      <html><head><title>Vendor — ${s.LHeadName}</title>
       <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
       </head><body>
-      <h2>Supplier Card</h2>
+      <h2>Vendor Card</h2>
       <table>
-        <tr><td>Supplier Name</td><td>${s.LHeadName || "—"}</td></tr>
+        <tr><td>Vendor Name</td><td>${s.LHeadName || "—"}</td></tr>
         <tr><td>Contact Person</td><td>${s.LHeadContactPerson || "—"}</td></tr>
         <tr><td>Phone</td><td>${s.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${s.LHeadEmail || "—"}</td></tr>
@@ -873,6 +990,10 @@ const SupplierMaster: React.FC = () => {
         <tr><td>Group</td><td>${s.LBelongsTo != null ? (accountGroups.find((g) => g._id === String(s.LBelongsTo))?.name ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${s.LHeadAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${s.LHeadStatus ? "Active" : "Inactive"}</td></tr>
+        <tr><td>Bank Account Number</td><td>${s.bankAccountNo || "—"}</td></tr>
+        <tr><td>Bank Name</td><td>${s.bankName || "—"}</td></tr>
+        <tr><td>Bank Branch Location</td><td>${s.bankBranchCode || "—"}</td></tr>
+        <tr><td>IFSC Code</td><td>${s.bankIfscCode || "—"}</td></tr>
       </table>
       </body></html>
     `);
@@ -952,11 +1073,11 @@ const SupplierMaster: React.FC = () => {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
-      <Breadcrumbs items={["Masters", "Supplier Master"]} />
+      <Breadcrumbs items={["Masters", "Vendor Master"]} />
 
       <FinanceShell
-        title="Supplier Master"
-        subtitle="Manage supplier accounts with contact, GST and category details"
+        title="Vendor Master"
+        subtitle="Manage vendor accounts with contact, GST and category details"
         action={
           <div className="flex items-center gap-2">
             <span
@@ -967,7 +1088,7 @@ const SupplierMaster: React.FC = () => {
                 color: "#818cf8",
               }}
             >
-              {suppliers.length} Suppliers
+              {suppliers.length} Vendors
             </span>
             <input
               ref={importFileInputRef}
@@ -978,7 +1099,7 @@ const SupplierMaster: React.FC = () => {
             />
             <button
               onClick={handleDownloadTemplate}
-              title="Download a blank CSV with all supplier fields"
+              title="Download a blank CSV with all vendor fields"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
             >
               <Download size={13} />
@@ -987,8 +1108,8 @@ const SupplierMaster: React.FC = () => {
             <button
               onClick={handleImportClick}
               disabled={importing}
-              title="Import suppliers from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              title="Import vendors from a filled-in CSV"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {importing ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -1034,9 +1155,9 @@ const SupplierMaster: React.FC = () => {
           >
             <div>
               <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? "Edit Supplier" : "Add Supplier"}
+                {editingId ? `Edit ${vendorType || "Vendor"}` : `Add ${vendorType || "Vendor"}`}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are
                 required
               </p>
@@ -1050,15 +1171,15 @@ const SupplierMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Building2 size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Basic Information
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-                {/* Supplier Name */}
+                {/* Vendor Name */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Supplier Name <span className="text-destructive">*</span>
+                    Vendor Name <span className="text-destructive">*</span>
                   </label>
                   <input
                     value={form.LHeadName}
@@ -1100,33 +1221,65 @@ const SupplierMaster: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Supplier Category */}
+                {/* Type — Vendor / Supplier / Landlord. Only picking
+                    "Supplier" activates the Category field below;
+                    "Vendor"/"Landlord" have no sub-category. */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Supplier Category
+                    Type
                   </label>
                   <TreeDropdown
                     variant="flat"
-                    value={form.supplierCategory}
-                    onChange={(v) =>
-                      setForm((p) => ({
-                        ...p,
-                        supplierCategory: v,
-                        // TDS mainly attaches to service payments (194C/194J),
-                        // not straight goods purchases — auto-set the toggle
-                        // whenever the category changes to/from "Services".
-                        // "Both" is deliberately excluded (goods+services is
-                        // not auto-enabled). Still a normal toggle below, so
-                        // it can be corrected by hand for any exception.
-                        isTdsApplicable: v === "Services",
-                      }))
-                    }
-                    options={SUPPLIER_CATEGORIES.map((c) => ({
-                      value: c,
-                      label: c,
-                    }))}
-                    placeholder="Select category…"
+                    value={vendorType}
+                    onChange={(v) => {
+                      handleTypeChange(v as VendorType);
+                      setErrors((p) => ({ ...p, supplierCategory: false }));
+                    }}
+                    options={VENDOR_TYPES.map((t) => ({ value: t, label: t }))}
+                    placeholder="Select type…"
+                    error={errors.supplierCategory}
                   />
+                </div>
+
+                {/* Supplier Category — active only when Type = "Supplier" */}
+                <div className="space-y-1.5">
+                  <label
+                    className={`text-xs font-heading font-medium uppercase tracking-wider block ${
+                      vendorType === "Supplier" ? "text-muted-foreground" : "text-muted-foreground/40"
+                    }`}
+                  >
+                    Supplier Category
+                  </label>
+                  <div className={vendorType !== "Supplier" ? "opacity-40 pointer-events-none" : ""}>
+                    <TreeDropdown
+                      variant="flat"
+                      value={
+                        (SUPPLIER_CATEGORIES as readonly string[]).includes(form.supplierCategory)
+                          ? form.supplierCategory
+                          : ""
+                      }
+                      onChange={(v) => {
+                        setForm((p) => ({
+                          ...p,
+                          supplierCategory: v,
+                          // TDS mainly attaches to service payments (194C/194J),
+                          // not straight goods purchases — auto-set the toggle
+                          // whenever the category changes to/from "Services".
+                          // "Both" is deliberately excluded (goods+services is
+                          // not auto-enabled). Still a normal toggle below, so
+                          // it can be corrected by hand for any exception.
+                          isTdsApplicable: v === "Services",
+                        }));
+                        setErrors((p) => ({ ...p, supplierCategory: false }));
+                      }}
+                      options={SUPPLIER_CATEGORIES.map((c) => ({
+                        value: c,
+                        label: c,
+                      }))}
+                      placeholder={vendorType === "Supplier" ? "Select category…" : "Select Supplier type first"}
+                      error={vendorType === "Supplier" && errors.supplierCategory}
+                    />
+                  </div>
                 </div>
 
                 {/* Account Group — always Sundry Creditors for suppliers, never
@@ -1150,7 +1303,7 @@ const SupplierMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Phone size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Contact Details
                 </p>
               </div>
@@ -1237,7 +1390,7 @@ const SupplierMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <FileText size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   GST &amp; Tax Details
                 </p>
               </div>
@@ -1271,7 +1424,7 @@ const SupplierMaster: React.FC = () => {
                       }}
                       className="h-3 w-3 rounded accent-primary"
                     />
-                    <span className="text-[11px] text-muted-foreground">PAN not available</span>
+                    <span className="text-[0.6875rem] text-muted-foreground">PAN not available</span>
                   </label>
                   {errors.LHeadPan && (
                     <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
@@ -1353,13 +1506,87 @@ const SupplierMaster: React.FC = () => {
               </div>
             </div>
 
-            {/* ── Section: Supplier Portal Login ── */}
+            {/* ── Section: Bank Details — all fields optional ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <Landmark size={12} className="text-primary" />
+                </div>
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Bank Details
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Account Number
+                  </label>
+                  <input
+                    value={form.bankAccountNo}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, bankAccountNo: e.target.value }))
+                    }
+                    placeholder="e.g. 123456789012"
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Name
+                  </label>
+                  <input
+                    value={form.bankName}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, bankName: e.target.value }))
+                    }
+                    placeholder="e.g. State Bank of India"
+                    className={inputCls}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Branch Location
+                  </label>
+                  <input
+                    value={form.bankBranchCode}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, bankBranchCode: e.target.value }))
+                    }
+                    placeholder="e.g. Mumbai Main Branch"
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    IFSC Code
+                  </label>
+                  <input
+                    value={form.bankIfscCode}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        bankIfscCode: e.target.value.toUpperCase(),
+                      }))
+                    }
+                    placeholder="e.g. SBIN0001234"
+                    maxLength={11}
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section: Supplier Portal Login — Supplier only. A Vendor or
+                Landlord never gets portal credentials, so the whole section
+                (and everything it would submit) simply doesn't exist for
+                them, rather than being shown disabled/empty. ── */}
+            {vendorType === "Supplier" && (
             <div className="space-y-3">
               <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <User size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Supplier Portal Login
                 </p>
               </div>
@@ -1417,12 +1644,12 @@ const SupplierMaster: React.FC = () => {
               const loginUrl = `${window.location.origin}/supplier-login`;
               return (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-muted/40">
-                  <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 shrink-0">Portal</span>
+                  <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 shrink-0">Portal</span>
                   <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-0">{loginUrl}</span>
                   <button
                     type="button"
                     onClick={() => { navigator.clipboard.writeText(loginUrl); toast.success("Link copied"); }}
-                    className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-border bg-background hover:bg-muted transition-colors shrink-0 text-muted-foreground hover:text-foreground"
+                    className="flex items-center gap-1 px-2 py-1 text-[0.6875rem] font-medium rounded border border-border bg-background hover:bg-muted transition-colors shrink-0 text-muted-foreground hover:text-foreground"
                     title="Copy portal link"
                   >
                     <Copy size={11} />
@@ -1433,6 +1660,7 @@ const SupplierMaster: React.FC = () => {
             })()}
 
             </div>
+            )}
 
             {/* ── Toggles ── */}
             <div className="flex flex-wrap items-center gap-6 pt-1">
@@ -1520,7 +1748,7 @@ const SupplierMaster: React.FC = () => {
 
           {/* Card footer — actions */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">
                   Ready to save
@@ -1541,7 +1769,7 @@ const SupplierMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || !canSave}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {saving ? (
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1553,8 +1781,8 @@ const SupplierMaster: React.FC = () => {
                 {saving
                   ? "Saving…"
                   : editingId
-                    ? "Update Supplier"
-                    : "Save Supplier"}
+                    ? `Update ${vendorType || "Vendor"}`
+                    : `Save ${vendorType || "Vendor"}`}
               </button>
             </div>
           </div>
@@ -1581,7 +1809,7 @@ const SupplierMaster: React.FC = () => {
               variant="flat"
               value={filterCategory}
               onChange={(v) => setFilterCategory(v)}
-              options={SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: c }))}
+              options={ALL_CATEGORY_VALUES.map((c) => ({ value: c, label: c }))}
               placeholder="All Categories"
             />
 
@@ -1621,14 +1849,14 @@ const SupplierMaster: React.FC = () => {
               getRowId={(row) => String(row.LHeadId)}
               emptyMessage={
                 isError
-                  ? "Failed to load suppliers."
+                  ? "Failed to load vendors."
                   : suppliers.length === 0
-                    ? "No suppliers yet."
+                    ? "No vendors yet."
                     : "No results match your search."
               }
               exportConfig={{
-                title: "Supplier Master",
-                filename: "supplier-master",
+                title: "Vendor Master",
+                filename: "vendor-master",
                 columns: EXPORT_COLUMNS,
               }}
               rowClassName={(row) =>
@@ -1705,7 +1933,7 @@ const SupplierMaster: React.FC = () => {
           <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
             <button
               onClick={() => setImportResults(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
             >
               Close
             </button>
@@ -1715,7 +1943,7 @@ const SupplierMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -1725,7 +1953,7 @@ const SupplierMaster: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Building2 size={15} className="text-primary" />
                 <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Supplier Details
+                  Vendor Details
                 </h3>
               </div>
               <button
@@ -1737,7 +1965,7 @@ const SupplierMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               {[
-                { label: "Supplier Name", value: viewRecord.LHeadName },
+                { label: "Vendor Name", value: viewRecord.LHeadName },
                 {
                   label: "Contact Person",
                   value: viewRecord.LHeadContactPerson || "—",
@@ -1774,9 +2002,13 @@ const SupplierMaster: React.FC = () => {
                       : "—",
                 },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
+                { label: "Bank Account Number", value: viewRecord.bankAccountNo || "—", mono: true },
+                { label: "Bank Name", value: viewRecord.bankName || "—" },
+                { label: "Bank Branch Location", value: viewRecord.bankBranchCode || "—", mono: true },
+                { label: "IFSC Code", value: viewRecord.bankIfscCode || "—", mono: true },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     {label}
                   </p>
                   <p
@@ -1787,7 +2019,7 @@ const SupplierMaster: React.FC = () => {
                 </div>
               ))}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -1815,13 +2047,13 @@ const SupplierMaster: React.FC = () => {
                   startEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm flex items-center gap-1.5"
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white shadow-sm flex items-center gap-1.5"
               >
-                <Pencil size={13} /> Edit Supplier
+                <Pencil size={13} /> Edit Vendor
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

@@ -9,6 +9,10 @@ RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 FROM node:22-alpine
 WORKDIR /app
 RUN apk add --no-cache dumb-init
+# Pinned so builds stay reproducible; also silences the "new major version of
+# npm available" notice printed on every `npm run migrate` during deploys.
+# npm 12 needs Node ^22.22.2, which node:22-alpine already satisfies.
+RUN npm install -g npm@12.1.0 && npm cache clean --force
 # Copy deps from builder
 COPY --from=builder /app/node_modules ./node_modules
 # Copy app source (migrations excluded via .dockerignore)

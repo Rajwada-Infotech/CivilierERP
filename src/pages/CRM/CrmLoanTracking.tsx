@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { AutoInput } from "@/components/ui/date-input";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -17,6 +18,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const BKG_API = "/api/crm/bookings";
 const WC_API  = "/api/crm/welcome-calls";
@@ -45,9 +47,18 @@ const EMPTY_FORM = {
 const fmt = (n: number | null | undefined) =>
   n != null && n !== 0 ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 
-async function fetchLoanSummary(): Promise<any[]> {
+interface LoanCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — status-tab counts and disbursed
+// totals are computed client-side from the whole set (see `stats` below),
+// same as CrmDemands. Company/Project/Block narrows the set server-side.
+async function fetchLoanSummary(cpb?: LoanCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
   try {
-    const r = await fetchWithAuth("/api/crm/loan-summary");
+    const r = await fetchWithAuth(`/api/crm/loan-summary${qs ? `?${qs}` : ""}`);
     return r.ok ? r.json() : [];
   } catch { return []; }
 }
@@ -82,7 +93,7 @@ function LoanStepper({ status }: { status: string }) {
               }`}>
                 <Icon size={13} />
               </div>
-              <span className={`text-[10px] mt-1 text-center leading-tight ${
+              <span className={`text-[0.625rem] mt-1 text-center leading-tight ${
                 done ? "text-emerald-600 dark:text-emerald-400 font-medium" :
                 curr ? "text-blue-600 dark:text-blue-400 font-medium" : "text-muted-foreground"
               }`}>{meta.label}</span>
@@ -100,7 +111,7 @@ function LoanStepper({ status }: { status: string }) {
           <div className="flex items-center justify-center w-7 h-7 rounded-full border-2 border-red-400 bg-red-50 dark:bg-red-950/40 text-red-500">
             <XCircle size={13} />
           </div>
-          <span className="text-[10px] mt-1 text-red-500 font-medium">Rejected</span>
+          <span className="text-[0.625rem] mt-1 text-red-500 font-medium">Rejected</span>
         </div>
       )}
     </div>
@@ -111,7 +122,7 @@ function LoanStepper({ status }: { status: string }) {
 function StatusPill({ status }: { status: string }) {
   const m = STATUS_META[status] ?? STATUS_META.NotApplied;
   return (
-    <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${m.pill}`}>
+    <span className={`inline-flex items-center gap-1 text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${m.pill}`}>
       {status === "NotApplied" ? "Not Applied" : status}
     </span>
   );
@@ -121,7 +132,7 @@ function StatusPill({ status }: { status: string }) {
 const CrmLoanTracking: React.FC = () => {
   const qc = useQueryClient();
   const rights = usePageRights("crm-loan-details");
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
 
   const [activeTab, setActiveTab] = useState<string>("All");
@@ -129,6 +140,7 @@ const CrmLoanTracking: React.FC = () => {
   const [form, setForm]     = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [locked, setLocked] = useState(false);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   const inputCls = `w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 ${
     locked ? "opacity-60 cursor-not-allowed bg-muted/20" : ""
@@ -136,8 +148,8 @@ const CrmLoanTracking: React.FC = () => {
 
   // ── Data ────────────────────────────────────────────────────────────────────
   const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-loan-summary"],
-    queryFn: fetchLoanSummary,
+    queryKey: ["crm-loan-summary", cpb],
+    queryFn: () => fetchLoanSummary(cpb),
     staleTime: 30_000,
   });
 
@@ -177,7 +189,7 @@ const CrmLoanTracking: React.FC = () => {
   // ── Dialog helpers ──────────────────────────────────────────────────────────
   const openRow = (row: any) => {
     setEditingRow(row);
-    setForm(row.LoanId ? {
+    setForm(row.LoanId != null ? {
       BankName:      row.BankName      || "",
       BranchName:    row.BranchName    || "",
       LoanAmount:    row.LoanAmount    != null ? String(row.LoanAmount) : "",
@@ -188,7 +200,7 @@ const CrmLoanTracking: React.FC = () => {
       RmContact:     row.RmContact     || "",
       Notes:         row.Notes         || "",
     } : { ...EMPTY_FORM });
-    setLocked(!!row.LoanId);
+    setLocked(row.LoanId != null);
   };
 
   const closeDialog = () => {
@@ -313,6 +325,9 @@ const CrmLoanTracking: React.FC = () => {
       )}
 
       {/* ── Status filter tabs ── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
+      </div>
       <div className="flex items-center gap-1 overflow-x-auto pb-1 thin-scroll">
         {TABS.map((tab) => (
           <button
@@ -320,12 +335,12 @@ const CrmLoanTracking: React.FC = () => {
             onClick={() => setActiveTab(tab.key)}
             className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
               activeTab === tab.key
-                ? "bg-primary text-primary-foreground border-primary"
+                ? "btn-module text-white border-primary"
                 : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
             {tab.label}
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full ${
               activeTab === tab.key ? "bg-primary-foreground/20" : "bg-muted"
             }`}>{tab.count}</span>
           </button>
@@ -345,11 +360,11 @@ const CrmLoanTracking: React.FC = () => {
 
       {/* ── Edit / View Dialog ── */}
       <Dialog open={!!editingRow} onOpenChange={(o) => { if (!o) closeDialog(); }}>
-        <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto thin-scroll">
+        <DialogContent accent="crm" className="max-w-xl max-h-[92vh] overflow-y-auto thin-scroll">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
               <span className="flex items-center gap-2"><Landmark size={16} /> Home Loan Details</span>
-              {editingRow?.LoanId && locked && rights.canEdit && (
+              {editingRow?.LoanId != null && locked && rights.canEdit && (
                 <button
                   onClick={() => setLocked(false)}
                   className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0"
@@ -382,25 +397,25 @@ const CrmLoanTracking: React.FC = () => {
 
               {/* Loan progress stepper */}
               <div className="px-2 py-3 rounded-xl border border-border bg-card">
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest mb-3 px-1">Loan Progress</p>
+                <p className="text-[0.625rem] text-muted-foreground font-medium uppercase tracking-widest mb-3 px-1">Loan Progress</p>
                 <LoanStepper status={editingRow.SanctionStatus} />
               </div>
 
               {/* Disbursement comparison (only when a loan record exists) */}
-              {editingRow.LoanId && (
+              {editingRow.LoanId != null && (
                 <div className={`rounded-xl border px-4 py-3 text-sm ${
                   editingRow.SanctionStatus === "Disbursed" && editingRow.LoanAmount > 0 &&
                   Math.abs((editingRow.DisbursedAmount || 0) - editingRow.LoanAmount) > 1
-                    ? "border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700"
+                    ? "border-sky-300 bg-sky-50 dark:bg-sky-950/20 dark:border-sky-700"
                     : "border-border bg-muted/20"
                 }`}>
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Sanctioned Amount</p>
+                      <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">Sanctioned Amount</p>
                       <p className="font-semibold">{fmt(editingRow.LoanAmount)}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">Disbursed via Receipts</p>
+                      <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">Disbursed via Receipts</p>
                       <p className={`font-semibold ${editingRow.DisbursedAmount > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
                         {fmt(editingRow.DisbursedAmount)}
                       </p>
@@ -408,7 +423,7 @@ const CrmLoanTracking: React.FC = () => {
                   </div>
                   {editingRow.SanctionStatus === "Disbursed" && editingRow.LoanAmount > 0 &&
                    Math.abs((editingRow.DisbursedAmount || 0) - editingRow.LoanAmount) > 1 && (
-                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-2">
+                    <p className="text-xs text-sky-700 dark:text-sky-400 mt-2">
                       Sanctioned and disbursed amounts don't match — check with Accounts.
                     </p>
                   )}
@@ -425,7 +440,7 @@ const CrmLoanTracking: React.FC = () => {
               {/* Welcome Call bank suggestions (edit mode only) */}
               {!locked && (bankPreferences as any[]).length > 0 && (
                 <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 px-4 py-3">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-700 dark:text-blue-400 mb-2">
+                  <div className="flex items-center gap-1.5 text-[0.6875rem] font-semibold text-blue-700 dark:text-blue-400 mb-2">
                     <Sparkles size={11} /> Bank preferences from Welcome Call
                   </div>
                   <div className="flex flex-wrap gap-1.5">
@@ -443,7 +458,7 @@ const CrmLoanTracking: React.FC = () => {
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-blue-500 mt-1.5">Tap a bank to auto-fill the Bank Name below.</p>
+                  <p className="text-[0.625rem] text-blue-500 mt-1.5">Tap a bank to auto-fill the Bank Name below.</p>
                 </div>
               )}
 
@@ -464,7 +479,7 @@ const CrmLoanTracking: React.FC = () => {
               )}
 
               {/* Bank details */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   { key: "BankName",     label: "Bank Name",        type: "text", span: 1 },
                   { key: "BranchName",   label: "Branch",           type: "text", span: 1 },
@@ -479,7 +494,7 @@ const CrmLoanTracking: React.FC = () => {
                         {(form as any)[key] || <span className="text-muted-foreground">—</span>}
                       </p>
                     ) : (
-                      <input
+                      <AutoInput
                         type={type}
                         value={(form as any)[key]}
                         onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
@@ -491,7 +506,7 @@ const CrmLoanTracking: React.FC = () => {
               </div>
 
               {/* RM details */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   { key: "RmName",    label: "RM Name",    type: "text" },
                   { key: "RmContact", label: "RM Contact", type: "text" },
@@ -503,7 +518,7 @@ const CrmLoanTracking: React.FC = () => {
                         {(form as any)[key] || <span className="text-muted-foreground">—</span>}
                       </p>
                     ) : (
-                      <input
+                      <AutoInput
                         type={type}
                         value={(form as any)[key]}
                         onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
@@ -533,7 +548,7 @@ const CrmLoanTracking: React.FC = () => {
 
               {/* Metadata */}
               {editingRow.LoanCreatedAt && (
-                <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-muted-foreground">
+                <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[0.6875rem] text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <CalendarDays size={10} />
                     Added {new Date(editingRow.LoanCreatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
@@ -558,9 +573,9 @@ const CrmLoanTracking: React.FC = () => {
                     <button
                       onClick={handleSave}
                       disabled={saving}
-                      className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                      className="px-5 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40 transition-colors"
                     >
-                      {saving ? "Saving…" : editingRow.LoanId ? "Update" : "Save"}
+                      {saving ? "Saving…" : editingRow.LoanId != null ? "Update" : "Save"}
                     </button>
                   </>
                 )}

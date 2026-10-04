@@ -103,6 +103,7 @@ export interface ExpenseRecord {
    *  financialYear changes on an existing booking; not sent on save. */
   docTypeId?: number | null;
   bookingDate: string;
+  createdByName?: string;
   dueDate: string;
   financialYear: string;
   companyId: number | null;
@@ -118,6 +119,10 @@ export interface ExpenseRecord {
   projectSite: string;
   materialCategory: string;
   invoiceReference: string;
+  /** GL head (AccountHeadMaster.LHeadName via EGLAccountId) this expense is
+   *  booked against, e.g. "Repairs & Maintenance" — shown as "Expense Head"
+   *  on the invoice export. */
+  expenseHeadName: string;
   basicAmount: number;
   cgstRate: number;
   sgstRate: number;
@@ -302,6 +307,7 @@ export interface ProjectOption {
   id: number;
   label: string;
   company_id?: number | null;
+  tagged_company_ids?: string | null;
 }
 export interface GSTConfig {
   applicable: boolean;

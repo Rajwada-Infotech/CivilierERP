@@ -133,7 +133,7 @@ const CrmBrokerageRateTiers: React.FC = () => {
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => { resetForm(); setDialogOpen(true); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
           <Plus size={14} /> New Tier
         </button>
         </div>
@@ -148,7 +148,7 @@ const CrmBrokerageRateTiers: React.FC = () => {
       />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetForm(); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
               <span>{editingId != null ? "Edit Tier" : "New Tier"}</span>
@@ -181,7 +181,7 @@ const CrmBrokerageRateTiers: React.FC = () => {
             <div className={`flex items-center justify-between rounded-lg border border-border px-3 py-2 ${locked ? "opacity-70" : ""}`}>
               <div>
                 <div className="text-xs font-medium text-foreground">Status</div>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   {isActive ? "Active — used by the fallback rate lookup." : "Inactive — skipped, kept for history."}
                 </p>
               </div>
@@ -204,7 +204,7 @@ const CrmBrokerageRateTiers: React.FC = () => {
               <>
                 <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                 <button onClick={handleSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                  className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                   {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
                 </button>
               </>

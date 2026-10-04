@@ -24,6 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DateInput } from "@/components/ui/date-input";
 
 export interface FieldDef {
   name: string;
@@ -145,6 +146,17 @@ interface MasterPageProps {
   externalFormPatch?: Record<string, unknown> | null;
   externalFormPatchKey?: string | number | null;
   /**
+   * Opens the form pre-filled for the row with this _id, exactly as if its
+   * Edit button had been clicked — for pages that render `hideTable` and
+   * drive their own custom list view (e.g. a grouped tree), which has
+   * nowhere else to trigger MasterPage's own edit mode from. Only fires
+   * once per `requestEditKey` change (same one-shot pattern as
+   * externalFormPatch/externalFormPatchKey), so the caller bumps the key
+   * (e.g. `${id}-${Date.now()}`) on every click, even re-clicking the same row.
+   */
+  requestEditId?: string | null;
+  requestEditKey?: string | number | null;
+  /**
    * When provided, an Export button appears in the table toolbar.
    * Pass ExportColumn[] — plain { header, accessor } descriptors.
    *
@@ -211,6 +223,14 @@ interface MasterPageProps {
   isDeleteLocked?: (row: RecordWithId) => string | null | undefined;
   /** Form field grid columns at the md breakpoint. Defaults to 2. */
   gridCols?: 2 | 3;
+  /**
+   * When true, the Add form starts collapsed behind a "+ New Entry" button
+   * instead of always being expanded -- useful for forms with many fields
+   * where the record list would otherwise sit far below the fold. Editing
+   * an existing row still opens the form automatically. Defaults to false
+   * (existing always-open behavior, unchanged for every other page).
+   */
+  collapsibleAddForm?: boolean;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -245,6 +265,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   saveButtonClass,
   externalFormPatch,
   externalFormPatchKey,
+  requestEditId,
+  requestEditKey,
   exportConfig,
   hideTable,
   viewConfig,
@@ -257,6 +279,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   gridCols = 2,
   isRowLocked,
   isDeleteLocked,
+  collapsibleAddForm = false,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -278,6 +301,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   });
   const [viewRow, setViewRow] = useState<RecordWithId | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(!collapsibleAddForm);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -438,6 +462,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         setEditingId(null);
         toast.success("Record updated successfully ✓");
         setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
+        if (collapsibleAddForm) setFormOpen(false);
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : "Failed to save. Please try again.",
@@ -467,6 +492,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             ? result
             : {}),
         });
+        if (collapsibleAddForm) setFormOpen(false);
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : "Failed to save. Please try again.",
@@ -488,8 +514,18 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     // as soon as Edit was clicked.
     setForm({ ...row, ...(externalFormPatch ?? {}) });
     setEditingId(id);
+    setFormOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const prevRequestEditKeyRef = React.useRef<string | number | null>(null);
+  React.useEffect(() => {
+    if (requestEditKey === null || requestEditKey === undefined) return;
+    if (prevRequestEditKeyRef.current === requestEditKey) return;
+    prevRequestEditKeyRef.current = requestEditKey;
+    if (requestEditId) handleEdit(requestEditId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestEditId, requestEditKey]);
 
   const handleDelete = async (id: string) => {
     // Compute next state first so we can pass records to onDataEvent
@@ -518,6 +554,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
     setEditingId(null);
     setErrors({});
+    if (collapsibleAddForm) setFormOpen(false);
   };
 
   const defaults = { ...getDefaults(fields), ...(externalFormPatch ?? {}) };
@@ -589,22 +626,34 @@ export const MasterPage: React.FC<MasterPageProps> = ({
           e.preventDefault();
         }}
       >
-        {/* Header — title only */}
-        <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
+        {/* Header — title, plus a New Entry toggle for collapsible forms */}
+        <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
           <div>
             <h2 className="font-heading font-semibold text-foreground text-sm">
               {editingId !== null ? `Edit ${title}` : `Add ${title}`}
             </h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
+            <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
               {editingId !== null
                 ? "Modify the details below and save."
-                : fields.some((f) => f.required)
-                  ? <>Fields marked <span className="text-destructive">*</span> are required</>
-                  : "Fill in the details to create a new record."}
+                : !formOpen
+                  ? 'Click "New Entry" to add a record.'
+                  : fields.some((f) => f.required)
+                    ? <>Fields marked <span className="text-destructive">*</span> are required</>
+                    : "Fill in the details to create a new record."}
             </p>
           </div>
+          {collapsibleAddForm && editingId === null && (
+            <button
+              onClick={() => setFormOpen((v) => !v)}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm transition-opacity"
+            >
+              <Plus size={12} />
+              {formOpen ? "Close" : "New Entry"}
+            </button>
+          )}
         </div>
 
+        {(formOpen || editingId !== null) && (<>
         <div className="p-5">
           <div className={`grid grid-cols-1 gap-4 ${gridCols === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
             {fields.map((field) => {
@@ -616,7 +665,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   className={isFullWidth ? (gridCols === 3 ? "md:col-span-3" : "md:col-span-2") : ""}
                 >
                   {field.type !== "toggle" && field.type !== "section" && field.label && (
-                    <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                       {field.label}
                       {field.required && (
                         <span className="text-destructive ml-0.5">*</span>
@@ -626,7 +675,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
                   {field.type === "section" ? (
                     <div className={fields[0] === field ? "" : "pt-1 -mb-1"}>
-                      <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-foreground/80 pb-1.5 border-b border-border/70">
+                      <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-foreground/80 pb-1.5 border-b border-border/70">
                         {field.label}
                       </p>
                     </div>
@@ -664,8 +713,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         size={14}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70"
                       />
-                      <input
-                        type="date"
+                      <DateInput
                         value={(form[field.name] as string) || ""}
                         onChange={(e) =>
                           updateField(field.name, e.target.value, field)
@@ -769,7 +817,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 : [...current, o];
                               updateField(field.name, next, field);
                             }}
-                            className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${selected ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
+                            className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${selected ? "btn-module text-white border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
                           >
                             {o}
                           </button>
@@ -779,7 +827,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   ) : null}
 
                   {errors[field.name] && (
-                    <p className="text-[11px] text-destructive mt-1">
+                    <p className="text-[0.6875rem] text-destructive mt-1">
                       {field.label} is required
                     </p>
                   )}
@@ -792,7 +840,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
         {/* Footer — actions */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-          <p className="text-[11px] text-muted-foreground hidden sm:block">
+          <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
             {canSave
               ? <span className="text-emerald-500 font-medium">Ready to save</span>
               : fields.some((f) => f.required)
@@ -818,6 +866,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </button>
           </div>
         </div>
+        </>)}
       </div>}
 
       {/* ── TABLE CARD ── */}
@@ -828,7 +877,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               <h3 className="font-heading font-semibold text-foreground text-sm">
                 {title} Records
               </h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 {filtered.length} record{filtered.length !== 1 ? "s" : ""}
               </p>
             </div>
@@ -870,7 +919,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       <th
                         key={col.key}
                         onClick={canSort ? () => toggleSort(col.key) : undefined}
-                        className={`px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none${col.hideOnMobile ? " hidden sm:table-cell" : ""}${canSort ? " cursor-pointer hover:text-foreground transition-colors" : ""}`}
+                        className={`px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none${col.hideOnMobile ? " hidden sm:table-cell" : ""}${canSort ? " cursor-pointer hover:text-foreground transition-colors" : ""}`}
                       >
                         <span className="inline-flex items-center gap-1">
                           {col.label}
@@ -889,7 +938,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       </th>
                     );
                   })}
-                  <th className="px-4 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                  <th className="px-4 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
                     Actions
                   </th>
                 </tr>
@@ -936,7 +985,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                             columnRenderers[col.key](row[col.key], row, data)
                           ) : col.key === "status" ? (
                             <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
                                 row[col.key]
                                   ? "bg-primary/10 text-primary border-primary/20"
                                   : "bg-destructive/10 text-destructive border-destructive/20"
@@ -958,7 +1007,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         <div className="flex items-center justify-end gap-1">
                           {deleteConfirmId === row._id ? (
                             <>
-                              <span className="text-[11px] text-muted-foreground mr-1">
+                              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                                 Confirm?
                               </span>
                               <button
@@ -979,7 +1028,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                           ) : (
                             <>
                               {viewConfig && (
-                                <button
+                                <button data-row-view
                                   onClick={() => setViewRow(row)}
                                   className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
                                   title="View details"
@@ -990,7 +1039,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                               {onPrint && (
                                 <button
                                   onClick={() => onPrint(row)}
-                                  className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                                  className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                                   title="Print"
                                 >
                                   <Printer size={13} />
@@ -1075,7 +1124,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         : "—";
                   return (
                     <div key={key}>
-                      <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                      <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
                         {label}
                       </p>
                       {render ? (
@@ -1106,7 +1155,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               )}
               <button
                 onClick={() => setViewRow(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
               >
                 Close
               </button>

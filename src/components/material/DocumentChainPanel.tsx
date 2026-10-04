@@ -20,7 +20,7 @@ const DOC_ICON: Record<ChainDocType, React.ElementType> = {
 const DOC_COLOR: Record<ChainDocType, string> = {
   mr: "bg-indigo-500/10 border-indigo-500/20 text-indigo-700 dark:text-indigo-400",
   po: "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400",
-  vio: "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400",
+  vio: "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400",
   grn: "bg-teal-500/10 border-teal-500/20 text-teal-700 dark:text-teal-400",
   expense: "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400",
 };
@@ -57,7 +57,7 @@ export const DocumentChainPanel: React.FC<{
         type="button"
         onClick={() => !current && goTo(node)}
         disabled={current}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-opacity ${DOC_COLOR[node.docType]} ${
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[0.6875rem] font-semibold transition-opacity ${DOC_COLOR[node.docType]} ${
           current ? "opacity-100 cursor-default ring-1 ring-inset ring-current" : "hover:opacity-75 cursor-pointer"
         }`}
         title={current ? undefined : `Open ${node.label} ${node.docNo ?? ""}`}
@@ -70,13 +70,13 @@ export const DocumentChainPanel: React.FC<{
 
   return (
     <div className="border-t border-border/60 pt-4">
-      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
         <ArrowRight size={10} className="text-emerald-600 dark:text-emerald-400" /> Linked Documents
       </p>
       {isLoading ? (
-        <p className="text-[11px] text-muted-foreground">Loading chain...</p>
+        <p className="text-[0.6875rem] text-muted-foreground">Loading chain...</p>
       ) : !data ? (
-        <p className="text-[11px] text-muted-foreground italic">No chain data yet</p>
+        <p className="text-[0.6875rem] text-muted-foreground italic">No chain data yet</p>
       ) : (
         <div className="flex flex-wrap items-center gap-1.5">
           {data.upstream.map((node, i) => (

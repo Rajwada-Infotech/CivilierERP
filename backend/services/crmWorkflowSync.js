@@ -39,10 +39,6 @@ function mergeCustomerDefaults(detail, customer) {
     Occupation: detail?.Occupation || customer.Occupation || null,
     AnnualIncome: detail?.AnnualIncome ?? customer.AnnualIncome ?? null,
     AccountHolderName: detail?.AccountHolderName || customer.CustomerName || null,
-    NomineeName: detail?.NomineeName || customer.CoApplicantName || null,
-    NomineeRelation: detail?.NomineeRelation || customer.CoApplicantRelation || null,
-    NomineeContact: detail?.NomineeContact || customer.CoApplicantMobile || null,
-    NomineeAddress: detail?.NomineeAddress || customer.Address || null,
     CustomerAddress: customer.Address ?? null,
     CustomerCity: customer.City ?? null,
     CustomerState: customer.State ?? null,
@@ -91,8 +87,8 @@ async function getBookingCustomerContext(pool, bookingId) {
 
 async function getBankDetailByWorkflow(pool, { bookingId, applicationId }) {
   const result = await pool.request()
-    .input("bid", sql.Int, bookingId || null)
-    .input("aid", sql.Int, applicationId || null)
+    .input("bid", sql.Int, bookingId != null ? bookingId : null)
+    .input("aid", sql.Int, applicationId != null ? applicationId : null)
     .query(`
       SELECT TOP 1 *
       FROM dbo.CrmCustomerBankDetail
@@ -106,11 +102,11 @@ async function getBankDetailByWorkflow(pool, { bookingId, applicationId }) {
 }
 
 async function linkBankDetailWorkflowKeys(pool, detailId, { bookingId, applicationId }) {
-  if (!detailId) return;
+  if (detailId == null) return;
   await pool.request()
     .input("id", sql.Int, detailId)
-    .input("bid", sql.Int, bookingId || null)
-    .input("aid", sql.Int, applicationId || null)
+    .input("bid", sql.Int, bookingId != null ? bookingId : null)
+    .input("aid", sql.Int, applicationId != null ? applicationId : null)
     .query(`
       UPDATE dbo.CrmCustomerBankDetail SET
         BookingId = COALESCE(BookingId, @bid),
@@ -174,9 +170,6 @@ async function materializeBankDetailFromCustomer(pool, context, actorUserId = nu
       .input("aadh", sql.NVarChar(20), context.AadhaarNo || null)
       .input("occ", sql.NVarChar(100), context.Occupation || null)
       .input("inc", sql.Decimal(18, 2), context.AnnualIncome != null ? Number(context.AnnualIncome) : null)
-      .input("nname", sql.NVarChar(200), context.CoApplicantName || null)
-      .input("nrel", sql.NVarChar(50), context.CoApplicantRelation || null)
-      .input("ncon", sql.NVarChar(20), context.CoApplicantMobile || null)
       .query(`
         UPDATE dbo.CrmCustomerBankDetail SET
           AccountHolderName = COALESCE(NULLIF(LTRIM(RTRIM(AccountHolderName)), ''), @holder),
@@ -184,9 +177,6 @@ async function materializeBankDetailFromCustomer(pool, context, actorUserId = nu
           AadhaarNo = COALESCE(NULLIF(LTRIM(RTRIM(AadhaarNo)), ''), @aadh),
           Occupation = COALESCE(NULLIF(LTRIM(RTRIM(Occupation)), ''), @occ),
           AnnualIncome = COALESCE(AnnualIncome, @inc),
-          NomineeName = COALESCE(NULLIF(LTRIM(RTRIM(NomineeName)), ''), @nname),
-          NomineeRelation = COALESCE(NULLIF(LTRIM(RTRIM(NomineeRelation)), ''), @nrel),
-          NomineeContact = COALESCE(NULLIF(LTRIM(RTRIM(NomineeContact)), ''), @ncon),
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -195,13 +185,9 @@ async function materializeBankDetailFromCustomer(pool, context, actorUserId = nu
   }
 
   const result = await pool.request()
-    .input("bid", sql.Int, context.BookingId || null)
-    .input("aid", sql.Int, context.ApplicationId || null)
+    .input("bid", sql.Int, context.BookingId != null ? context.BookingId : null)
+    .input("aid", sql.Int, context.ApplicationId != null ? context.ApplicationId : null)
     .input("holder", sql.NVarChar(200), context.CustomerName || null)
-    .input("nname", sql.NVarChar(200), context.CoApplicantName || null)
-    .input("nrel", sql.NVarChar(50), context.CoApplicantRelation || null)
-    .input("ncon", sql.NVarChar(20), context.CoApplicantMobile || null)
-    .input("naddr", sql.NVarChar(500), context.Address || null)
     .input("pan", sql.NVarChar(20), context.PanNo || null)
     .input("aadh", sql.NVarChar(20), context.AadhaarNo || null)
     .input("occ", sql.NVarChar(100), context.Occupation || null)
@@ -209,10 +195,10 @@ async function materializeBankDetailFromCustomer(pool, context, actorUserId = nu
     .input("cb", sql.Int, actorUserId)
     .query(`
       INSERT INTO dbo.CrmCustomerBankDetail
-        (BookingId, ApplicationId, AccountHolderName, NomineeName, NomineeRelation, NomineeContact, NomineeAddress,
+        (BookingId, ApplicationId, AccountHolderName,
          PanNo, AadhaarNo, Occupation, AnnualIncome, CreatedBy, CreatedAt)
       OUTPUT INSERTED.*
-      VALUES (@bid, @aid, @holder, @nname, @nrel, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cb, SYSDATETIME())
+      VALUES (@bid, @aid, @holder, @pan, @aadh, @occ, @inc, @cb, SYSDATETIME())
     `);
   return result.recordset[0] || null;
 }

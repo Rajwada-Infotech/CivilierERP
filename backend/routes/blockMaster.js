@@ -8,6 +8,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { getBlockLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
+const { resolveLayoutType, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
 
 // A Block can be tagged with 1+ Payment Plans (dbo.CrmBlockPaymentPlan,
 // many-to-many) — the middle tier of the Project -> Block -> Unit cascade
@@ -193,6 +194,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
         `);
       if (Array.isArray(PaymentPlanIds)) await syncBlockPaymentPlanTags(pool, existing.Id, validPlanIds);
       await bumpCacheVersion("block-master");
+      await bumpFlatMasterCaches();
       return res.json({ message: "Block reactivated successfully" });
     }
 
@@ -209,6 +211,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       `);
     if (validPlanIds.length) await syncBlockPaymentPlanTags(pool, inserted.recordset[0].Id, validPlanIds);
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     res.json({ message: "Block added successfully" });
   } catch (err) {
     // Backstop for the race-condition case the pre-check above can't catch
@@ -289,6 +292,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     if (validPlanIds) await syncBlockPaymentPlanTags(pool, parseInt(id), validPlanIds);
 
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     res.json({ message: "Block updated successfully" });
   } catch (err) {
     if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
@@ -343,12 +347,21 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
       });
     }
 
-    await pool
-      .request()
-      .input("Id", sql.Int, id)
-      .query("DELETE FROM dbo.BlockMaster WHERE Id = @Id");
+    // The block's layout overrides (settings of this block) go with it, in
+    // the same transaction as the delete.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await removeOverridesFor(tx, { blockId: id });
+      await tx.request().input("Id", sql.Int, id).query("DELETE FROM dbo.BlockMaster WHERE Id = @Id");
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw e;
+    }
 
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     res.json({ message: `Block "${BlockName}" deleted` });
   } catch (err) {
     console.error("[block-master] DELETE error:", err.message);
@@ -410,6 +423,30 @@ router.get("/:id/unit-type-specs", async (req, res) => {
   }
 });
 
+// GET /api/block-master/:id/floors — distinct floor numbers already in use
+// under this block's units. There's no standalone Floor Master table —
+// FloorNo only ever exists as a plain value on UnitMaster rows, so this is
+// the closest thing to a "floor list" for this block (used by Material
+// Issue's Block -> Floor dropdown pair).
+router.get("/:id/floors", async (req, res) => {
+  const blockId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(blockId)) return res.status(400).json({ error: "Invalid block id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request()
+      .input("bid", sql.Int, blockId)
+      .query(`
+        SELECT DISTINCT FloorNo FROM dbo.UnitMaster
+        WHERE BlockId = @bid AND IsActive = 1 AND FloorNo IS NOT NULL
+        ORDER BY FloorNo
+      `);
+    res.json(result.recordset.map((r) => r.FloorNo));
+  } catch (err) {
+    console.error("[block-master] GET floors error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PUT /api/block-master/:id/unit-type-specs — full replace for this block
 // Receives an array of {UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt,
 // SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt}.
@@ -431,10 +468,14 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
       const sbu      = toDb(s.SuperBuiltUpAreaSqFt);
       const openTerr = toDb(s.OpenTerraceAreaSqFt);
       const rate     = toDb(s.BaseRatePerSqFt);
+      // Keep the FK to the Unit Composition layout (migration 477) — this
+      // full replace would otherwise drop it.
+      const layout = await resolveLayoutType(pool, { unitType: s.UnitType });
 
       await pool.request()
         .input("blockId",    sql.Int, blockId)
         .input("unitType",   sql.NVarChar(50),   s.UnitType.trim())
+        .input("layoutTypeId", sql.Int,          layout?.id ?? null)
         .input("carpet",     sql.Decimal(18, 2), carpet)
         .input("builtUp",    sql.Decimal(18, 2), builtUp)
         .input("sbu",        sql.Decimal(18, 2), sbu)
@@ -442,10 +483,10 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
         .input("rate",       sql.Decimal(18, 2), rate)
         .query(`
           INSERT INTO dbo.BlockUnitTypeSpec
-            (BlockId, UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt,
+            (BlockId, UnitType, LayoutTypeId, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt,
              OpenTerraceAreaSqFt, BaseRatePerSqFt, UpdatedAt)
           VALUES
-            (@blockId, @unitType, @carpet, @builtUp, @sbu, @openTerr, @rate, SYSDATETIME())
+            (@blockId, @unitType, @layoutTypeId, @carpet, @builtUp, @sbu, @openTerr, @rate, SYSDATETIME())
         `);
 
       // Cascade spec changes to every unit in this block that shares the
@@ -473,6 +514,7 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
         `);
     }
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     await bumpCacheVersion("unit-master");
     res.json({ message: "Unit type specs saved" });
   } catch (err) {

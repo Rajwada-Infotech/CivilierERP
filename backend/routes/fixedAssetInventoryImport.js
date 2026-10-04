@@ -183,15 +183,16 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
         .input("SourceId",          sql.Int, importId)
         .input("SourceItemId",      sql.NVarChar(100), itemIdVal)
         .input("GodownId",          sql.Int, godownIdVal)
+        .input("FinYear",           sql.NVarChar(20), finYearForDoc || null)
         .input("CreatedBy",         sql.NVarChar(200), email)
         .query(`
           INSERT INTO dbo.FixedAssetRecord
-            (DocDate, CompanyId, ProjectId, AssetName, AssetCategory,
+            (DocDate, CompanyId, ProjectId, FinYear, AssetName, AssetCategory,
              PurchaseDate, PurchaseInvoiceRef, PurchaseCost, Quantity,
              AssetStatus, Remarks, SourceType, SourceId, SourceItemId, GodownID, CreatedBy)
           OUTPUT INSERTED.AssetId
           VALUES
-            (@DocDate, @CompanyId, @ProjectId, @AssetName, @AssetCategory,
+            (@DocDate, @CompanyId, @ProjectId, @FinYear, @AssetName, @AssetCategory,
              @PurchaseDate, @PurchaseInvoiceRef, @PurchaseCost, @Quantity,
              @AssetStatus, @Remarks, @SourceType, @SourceId, @SourceItemId, @GodownId, @CreatedBy)
         `);
@@ -268,7 +269,7 @@ router.delete("/:id", requirePageRight("fixed-asset-inventory-import", "delete")
     const importRow = importRes.recordset[0];
     if (!importRow) return res.status(404).json({ error: "Not found" });
     if (importRow.Status === "Reversed") return res.json({ ok: true });
-    if (!importRow.AssetId) return res.status(400).json({ error: "This import has no linked asset to reverse" });
+    if (importRow.AssetId === null || importRow.AssetId === undefined) return res.status(400).json({ error: "This import has no linked asset to reverse" });
 
     const result = await executeReversal(pool, importRow.AssetId, email);
     res.json({ ok: true, ...result });

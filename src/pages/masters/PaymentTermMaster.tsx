@@ -74,7 +74,7 @@ const PaymentTermMaster: React.FC = () => {
     ),
     IsActive: (value: unknown) => (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
           value
             ? "bg-primary/10 text-primary border-primary/20"
             : "bg-destructive/10 text-destructive border-destructive/20"
@@ -91,32 +91,28 @@ const PaymentTermMaster: React.FC = () => {
   };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const record = event.record as Record<string, unknown>;
-        await addVendorPaymentTerm({
-          Description: String(record.Description ?? "").trim(),
-          Days: Number(record.Days) || 0,
-          IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
-        });
-        toast.success("Payment term added!");
-        await refetch();
-      } else if (event.action === "update") {
-        const record = event.record as Record<string, unknown>;
-        await updateVendorPaymentTerm(Number(event.id), {
-          Description: String(record.Description ?? "").trim(),
-          Days: Number(record.Days) || 0,
-          IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
-        });
-        toast.success("Payment term updated!");
-        await refetch();
-      } else if (event.action === "delete") {
-        await deleteVendorPaymentTerm(Number(event.id));
-        toast.success("Payment term deleted!");
-        await refetch();
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Something went wrong");
+    if (event.action === "add") {
+      const record = event.record as Record<string, unknown>;
+      await addVendorPaymentTerm({
+        Description: String(record.Description ?? "").trim(),
+        Days: Number(record.Days) || 0,
+        IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
+      });
+      toast.success("Payment term added!");
+      await refetch();
+    } else if (event.action === "update") {
+      const record = event.record as Record<string, unknown>;
+      await updateVendorPaymentTerm(Number(event.id), {
+        Description: String(record.Description ?? "").trim(),
+        Days: Number(record.Days) || 0,
+        IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
+      });
+      toast.success("Payment term updated!");
+      await refetch();
+    } else if (event.action === "delete") {
+      await deleteVendorPaymentTerm(Number(event.id));
+      toast.success("Payment term deleted!");
+      await refetch();
     }
   };
 

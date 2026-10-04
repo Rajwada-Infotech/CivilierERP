@@ -26,12 +26,12 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+        <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
           Approval Levels
         </p>
         <span
           className={
-            "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-heading " +
+            "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.625rem] font-heading " +
             (currentStatus === "Approved"
               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
               : currentStatus === "Rejected"
@@ -106,23 +106,23 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
                     Level {step.level} — {step.role}
                   </p>
                   {isActive && (
-                    <span className="text-[10px] rounded-full bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 font-heading">
+                    <span className="text-[0.625rem] rounded-full bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 font-heading">
                       Current
                     </span>
                   )}
                 </div>
                 {step.approverEmail && (
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                     {step.approverEmail}
                   </p>
                 )}
                 {step.actionAt && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                  <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-mono">
                     {new Date(step.actionAt).toLocaleString("en-IN")}
                   </p>
                 )}
                 {step.note && (
-                  <p className="text-[11px] text-muted-foreground mt-0.5 italic border-l-2 border-muted pl-2">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5 italic border-l-2 border-muted pl-2">
                     "{step.note}"
                   </p>
                 )}

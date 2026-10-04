@@ -27,6 +27,8 @@ import {
 } from "@/api/enterpriseApi";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -35,6 +37,7 @@ import { friendlyErrorMessage } from "@/lib/friendlyError";
 const GST_TYPES = ["Registered", "Unregistered"];
 
 import { INDIA_STATE_CITIES, INDIA_STATES } from "@/lib/indiaStateCities";
+import { AutoInput, DateInput } from "@/components/ui/date-input";
 
 const empty: Partial<Enterprise> = {
   name: "",
@@ -75,7 +78,7 @@ type Tab = "general" | "address" | "legal";
 const ENTITY_COLORS: Record<string, string> = {
   Enterprise: "bg-purple-500/10 text-purple-600",
   Company: "bg-blue-500/10 text-blue-600",
-  "Business Unit": "bg-amber-500/10 text-amber-600",
+  "Business Unit": "bg-[#ffe2021a] text-amber-600",
 };
 
 function LogoAvatar({
@@ -116,7 +119,7 @@ function EnterpriseViewModal({
 }) {
   const Row = ({ label, value }: { label: string; value?: string | null }) => (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       <span className="text-sm text-foreground break-words">
@@ -426,7 +429,7 @@ function buildEnterpriseColumns(
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-1">
-          <button
+          <button data-row-view
             onClick={() => openView(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
             title="View details"
@@ -543,6 +546,19 @@ export default function EnterpriseMaster() {
     [rights],
   );
 
+  const exportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Name", accessor: "name" },
+      { header: "Short Name", accessor: "short_name" },
+      { header: "Type", accessor: "entity_type" },
+      { header: "PAN", accessor: "pan" },
+      { header: "GST Type", accessor: "gst_type" },
+      { header: "Phone", accessor: "phone_number" },
+      { header: "Status", accessor: "status" },
+    ],
+    [],
+  );
+
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -572,7 +588,7 @@ export default function EnterpriseMaster() {
     }
     setSaving(true);
     try {
-      if (editId) {
+      if (editId != null) {
         await updateEnterprise(editId, form);
         toast.success("Enterprise updated");
       } else {
@@ -626,15 +642,14 @@ export default function EnterpriseMaster() {
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
           />
-          <input
-            type="date"
+          <DateInput
             value={(form[key] as string) ?? ""}
             onChange={(e) => set(key, e.target.value)}
             className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
           />
         </div>
       ) : (
-        <input
+        <AutoInput
           type={type}
           value={(form[key] as string) ?? ""}
           onChange={(e) => set(key, e.target.value)}
@@ -687,7 +702,7 @@ export default function EnterpriseMaster() {
           rights.canCreate && (
             <button
               onClick={openNew}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
             >
               <Plus size={13} /> Add Enterprise
             </button>
@@ -713,6 +728,13 @@ export default function EnterpriseMaster() {
               <span className="text-xs text-muted-foreground">
                 {filtered.length} record{filtered.length !== 1 ? "s" : ""}
               </span>
+              <ExportMenu
+                data={filtered as unknown as Record<string, unknown>[]}
+                columns={exportColumns}
+                title="Enterprise Master"
+                filename="enterprise-master"
+                disabled={!rights.canExport || filtered.length === 0}
+              />
             </div>
             {isLoading ? (
               <div className="p-10 text-center text-muted-foreground text-sm">
@@ -744,7 +766,7 @@ export default function EnterpriseMaster() {
                   size="md"
                 />
                 <h2 className="font-heading font-semibold text-foreground">
-                  {editId
+                  {editId != null
                     ? `Edit — ${form.name || "Enterprise"}`
                     : "New Enterprise"}
                 </h2>
@@ -763,7 +785,7 @@ export default function EnterpriseMaster() {
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${tab === t ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${tab === t ? "btn-module text-white shadow-sm" : "text-muted-foreground hover:bg-muted"}`}
                 >
                   {t === "legal" ? "Legal / Compliance" : t}
                 </button>
@@ -964,9 +986,9 @@ export default function EnterpriseMaster() {
               <button
                 onClick={handleSave}
                 disabled={saving || !form.name?.trim()}
-                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg btn-module shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
-                {saving ? "Saving…" : editId ? "Update" : "Save"}
+                {saving ? "Saving…" : editId != null ? "Update" : "Save"}
               </button>
             </div>
           </div>

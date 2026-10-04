@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as spApi from "@/api/supplierPortalApi";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import {
@@ -14,6 +14,7 @@ import {
   CalendarDays, Hash, ClipboardList, MapPin,
 } from "lucide-react";
 import { OrderChat } from "@/components/orders/OrderChat";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 const fmtDate = (d?: string | null) =>
@@ -34,7 +35,7 @@ function WelcomeHero({ name, total, pending, submitted, loading }: {
   name: string; total: number; pending: number; submitted: number; loading: boolean;
 }) {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
@@ -62,7 +63,7 @@ function WelcomeHero({ name, total, pending, submitted, loading }: {
         <motion.div className="flex items-center gap-5 sm:gap-7 shrink-0" {...fade(0.18)}>
           {[
             { icon: FileText, label: "Total RFQs", val: loading ? "…" : String(total), col: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/10" },
-            { icon: Clock, label: "Pending", val: loading ? "…" : String(pending), col: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10" },
+            { icon: Clock, label: "Pending", val: loading ? "…" : String(pending), col: "text-amber-600 dark:text-amber-400", bg: "bg-[#ffe2021a]" },
             { icon: CheckCircle, label: "Submitted", val: loading ? "…" : String(submitted), col: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/10" },
           ].map((s) => (
             <div key={s.label} className="flex flex-col items-center text-center min-w-[56px]">
@@ -70,7 +71,7 @@ function WelcomeHero({ name, total, pending, submitted, loading }: {
                 <s.icon size={17} className={s.col} />
               </div>
               <span className="text-xl font-heading font-bold text-foreground">{s.val}</span>
-              <span className="text-[10px] text-muted-foreground mt-0.5">{s.label}</span>
+              <span className="text-[0.625rem] text-muted-foreground mt-0.5">{s.label}</span>
             </div>
           ))}
         </motion.div>
@@ -84,18 +85,18 @@ function StatusBadge({ status, due }: { status: string; due?: string | null }) {
   const overdue = isOverdue(due);
   const soon = isDueSoon(due);
   if (status === "Submitted") return (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 w-fit">Submitted</span>
+    <span className="text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 w-fit">Submitted</span>
   );
   if (overdue) return (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 flex items-center gap-1 w-fit">
+    <span className="text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 flex items-center gap-1 w-fit">
       <AlertCircle size={10} /> Overdue
     </span>
   );
   if (soon) return (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 w-fit">Due Soon</span>
+    <span className="text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-[#ffe2021a] text-amber-600 dark:text-amber-400 w-fit">Due Soon</span>
   );
   return (
-    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 w-fit">Open</span>
+    <span className="text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 w-fit">Open</span>
   );
 }
 
@@ -147,7 +148,7 @@ function QuotationsSection({ quotations, loading }: {
               </div>
 
               {/* Header */}
-              <div className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
+              <div className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1fr] gap-4 px-5 py-2.5 text-[0.625rem] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
                 <span>RFQ No.</span>
                 <span>Description / Project</span>
                 <span>Company</span>
@@ -167,7 +168,7 @@ function QuotationsSection({ quotations, loading }: {
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs text-foreground font-medium truncate">{q.ProjectName ?? q.Remarks ?? "—"}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">{q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}</p>
+                    <p className="text-[0.625rem] text-muted-foreground truncate">{q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}</p>
                   </div>
                   <span className="text-xs text-muted-foreground truncate">{q.CompanyName ?? "—"}</span>
                   <span className={`text-xs ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
@@ -198,10 +199,10 @@ function QuotationsSection({ quotations, loading }: {
                     <StatusBadge status={q.MySubmissionStatus} due={q.DueDate} />
                   </div>
                   <p className="text-xs text-foreground font-medium truncate">{q.ProjectName ?? q.Remarks ?? "—"}</p>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[0.625rem] text-muted-foreground">
                     {q.CompanyName ?? "—"} · {q.ItemCount} item{q.ItemCount !== 1 ? "s" : ""}
                   </p>
-                  <p className={`text-[11px] ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                  <p className={`text-[0.6875rem] ${isOverdue(q.DueDate) ? "text-red-500 font-semibold" : isDueSoon(q.DueDate) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
                     Due {fmtDate(q.DueDate)}
                   </p>
                 </motion.div>
@@ -231,9 +232,9 @@ function deliveryDeltaDays(expected?: string | null, supplied?: string | null): 
 function DeliveryBadge({ expected, supplied }: { expected?: string | null; supplied?: string | null }) {
   const delta = deliveryDeltaDays(expected, supplied);
   if (delta == null) return null;
-  if (delta === 0) return <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Delivered on time</span>;
-  if (delta > 0) return <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Delivered {delta}d early</span>;
-  return <span className="text-[10px] text-amber-600 dark:text-amber-400">Delivered {Math.abs(delta)}d late</span>;
+  if (delta === 0) return <span className="text-[0.625rem] text-emerald-600 dark:text-emerald-400">Delivered on time</span>;
+  if (delta > 0) return <span className="text-[0.625rem] text-emerald-600 dark:text-emerald-400">Delivered {delta}d early</span>;
+  return <span className="text-[0.625rem] text-amber-600 dark:text-amber-400">Delivered {Math.abs(delta)}d late</span>;
 }
 
 // ── Mark-as-supplied confirm popup (optional challan number) ───────────────────
@@ -245,13 +246,13 @@ function MarkSuppliedDialog({ order, onClose, onConfirm, submitting }: {
 }) {
   const [challan, setChallan] = useState("");
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15 }}
         className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border">
           <p className="text-sm font-heading font-bold text-foreground">Mark as supplied</p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">{order.DocNo || order.PurchaseOrderNo} — {order.ItemDescription}</p>
+          <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{order.DocNo || order.PurchaseOrderNo} — {order.ItemDescription}</p>
         </div>
         <div className="p-5 space-y-3">
           <label className="block text-xs font-medium text-muted-foreground">Challan / DC Number <span className="text-muted-foreground/60">(optional)</span></label>
@@ -262,7 +263,7 @@ function MarkSuppliedDialog({ order, onClose, onConfirm, submitting }: {
             placeholder="e.g. DC-2026-0042"
             className="w-full h-10 px-3 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-400"
           />
-          <p className="text-[11px] text-muted-foreground">Today's date will be recorded as the supplied date.</p>
+          <p className="text-[0.6875rem] text-muted-foreground">Today's date will be recorded as the supplied date.</p>
         </div>
         <div className="px-5 py-4 border-t border-border flex justify-end gap-2">
           <button onClick={onClose} className="h-9 px-4 rounded-lg border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
@@ -275,7 +276,7 @@ function MarkSuppliedDialog({ order, onClose, onConfirm, submitting }: {
           </button>
         </div>
       </motion.div>
-    </div>
+    </div></BodyPortal>
   );
 }
 
@@ -303,14 +304,14 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
   const grnOrder = grnOrders.find((o) => o.purchaseOrderId === orderId);
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15 }}
         className="w-full max-w-2xl rounded-2xl border border-border bg-card shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border flex items-center justify-between shrink-0">
           <div className="min-w-0">
             <p className="text-sm font-heading font-bold text-foreground truncate">{detail?.DocNo || detail?.PurchaseOrderNo || "Order"}</p>
-            <p className="text-[11px] text-muted-foreground">Order details</p>
+            <p className="text-[0.6875rem] text-muted-foreground">Order details</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors shrink-0">
             <X size={16} />
@@ -325,10 +326,10 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">{detail.SourceLabel}</span>
-                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400">{detail.Status}</span>
+                <span className="inline-flex px-2 py-0.5 rounded-full text-[0.625rem] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">{detail.SourceLabel}</span>
+                <span className="inline-flex px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400">{detail.Status}</span>
                 {detail.SupplierAcknowledged && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                     <CheckCircle size={10} /> Supplied
                   </span>
                 )}
@@ -346,10 +347,10 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
                   <div className="rounded-xl border border-border overflow-hidden">
                     {/* Table header */}
                     <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-3 py-2 bg-muted/50 border-b border-border">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Item</p>
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-right w-20">Qty</p>
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-right w-24">Rate</p>
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-right w-28">Total</p>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">Item</p>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground text-right w-20">Qty</p>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground text-right w-24">Rate</p>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground text-right w-28">Total</p>
                     </div>
                     {/* Rows */}
                     {items.map((it: any, idx: number) => {
@@ -367,7 +368,7 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
                         >
                           <p className="text-foreground font-medium truncate pr-2" title={name}>{name}</p>
                           <p className="text-muted-foreground text-right w-20 font-mono tabular-nums">
-                            {qty.toLocaleString("en-IN")} <span className="text-[10px]">{uom}</span>
+                            {qty.toLocaleString("en-IN")} <span className="text-[0.625rem]">{uom}</span>
                           </p>
                           <p className="text-muted-foreground text-right w-24 font-mono tabular-nums">
                             {rate > 0 ? `₹${rate.toLocaleString("en-IN")}` : "—"}
@@ -432,7 +433,7 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
                   <div key={label} className="flex items-start gap-2.5">
                     <Icon size={13} className="text-muted-foreground mt-0.5 shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-[10px] text-muted-foreground">{label}</p>
+                      <p className="text-[0.625rem] text-muted-foreground">{label}</p>
                       <p className="text-foreground">{value}</p>
                     </div>
                   </div>
@@ -441,14 +442,14 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
 
               {detail.Remarks && (
                 <div className="rounded-lg border border-border bg-muted/20 p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Remarks</p>
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mb-1">Remarks</p>
                   <p className="text-sm text-foreground whitespace-pre-wrap">{detail.Remarks}</p>
                 </div>
               )}
 
               {detail.SupplierAcknowledged && (
                 <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-1">
-                  <p className="text-[10px] text-emerald-700 dark:text-emerald-400 uppercase tracking-wide font-semibold">Supplied</p>
+                  <p className="text-[0.625rem] text-emerald-700 dark:text-emerald-400 uppercase tracking-wide font-semibold">Supplied</p>
                   <p className="text-sm text-foreground">{fmtDate(detail.SuppliedDate)}</p>
                   <DeliveryBadge expected={detail.ExpectedDeliveryDate} supplied={detail.SuppliedDate} />
                   {detail.ChallanNumber && <p className="text-xs text-muted-foreground">Challan: <span className="font-mono text-foreground">{detail.ChallanNumber}</span></p>}
@@ -465,7 +466,7 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
                 >
                   <div className="flex items-center justify-between">
                     <p
-                      className={`text-[10px] uppercase tracking-wide font-semibold ${
+                      className={`text-[0.625rem] uppercase tracking-wide font-semibold ${
                         grnOrder.isFullyReceived
                           ? "text-emerald-700 dark:text-emerald-400"
                           : "text-amber-700 dark:text-amber-400"
@@ -474,11 +475,11 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
                       Received by Customer
                     </p>
                     {grnOrder.isFullyReceived ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400">
                         <CheckCircle size={11} /> Complete
                       </span>
                     ) : (
-                      <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                      <span className="text-[0.625rem] font-semibold text-amber-600 dark:text-amber-400">
                         {grnOrder.totalRemaining} remaining
                       </span>
                     )}
@@ -504,7 +505,7 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
           )}
         </div>
       </motion.div>
-    </div>
+    </div></BodyPortal>
   );
 }
 
@@ -556,7 +557,7 @@ function OrdersSection({ orders, loading, initialOrderId }: {
             {/* Desktop / tablet table */}
             <motion.div className="hidden sm:block rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
               {/* Header */}
-              <div className="grid grid-cols-[1.4fr_2fr_1.2fr_1fr_1.2fr_auto] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
+              <div className="grid grid-cols-[1.4fr_2fr_1.2fr_1fr_1.2fr_auto] gap-4 px-5 py-2.5 text-[0.625rem] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
                 <span>PO No.</span>
                 <span>Description / Project</span>
                 <span>Amount</span>
@@ -580,11 +581,11 @@ function OrdersSection({ orders, loading, initialOrderId }: {
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <p className="text-xs text-foreground font-medium truncate">{o.ItemDescription || "—"}</p>
-                        <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
+                        <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[0.5625rem] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
                           {o.SourceLabel}
                         </span>
                       </div>
-                      <p className="text-[10px] text-muted-foreground truncate">
+                      <p className="text-[0.625rem] text-muted-foreground truncate">
                         {[o.CompanyName, o.ProjectName].filter(Boolean).join(" · ") || "—"}
                       </p>
                     </div>
@@ -631,7 +632,7 @@ function OrdersSection({ orders, loading, initialOrderId }: {
                     >
                       <MessageCircle size={15} />
                       {o.CommentCount > 0 && (
-                        <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                        <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[0.5625rem] font-bold">
                           {o.CommentCount}
                         </span>
                       )}
@@ -664,16 +665,16 @@ function OrdersSection({ orders, loading, initialOrderId }: {
 
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <p className="text-xs text-foreground font-medium">{o.ItemDescription || "—"}</p>
-                        <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
+                        <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[0.5625rem] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
                           {o.SourceLabel}
                         </span>
                       </div>
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-[0.625rem] text-muted-foreground">
                         {[o.CompanyName, o.ProjectName].filter(Boolean).join(" · ") || "—"}
                       </p>
 
                       <div className="flex items-center justify-between pt-1">
-                        <span className={`text-[11px] ${overdue ? "text-red-500 font-semibold" : isDueSoon(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                        <span className={`text-[0.6875rem] ${overdue ? "text-red-500 font-semibold" : isDueSoon(o.ExpectedDeliveryDate) && !o.SupplierAcknowledged ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
                           Expected {fmtDate(o.ExpectedDeliveryDate)}
                         </span>
                       </div>
@@ -709,7 +710,7 @@ function OrdersSection({ orders, loading, initialOrderId }: {
                       >
                         <MessageCircle size={15} />
                         {o.CommentCount > 0 && (
-                          <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                          <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[0.5625rem] font-bold">
                             {o.CommentCount}
                           </span>
                         )}
@@ -740,13 +741,13 @@ function OrdersSection({ orders, loading, initialOrderId }: {
 
       {/* Chat slide-over */}
       {chatOrder && currentUser && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-50 flex justify-end">
           <div className="flex-1 bg-black/40" onClick={() => setChatOrderId(null)} />
           <div className="w-full max-w-md shrink-0 bg-background border-l border-border flex flex-col shadow-2xl">
             <div className="px-5 py-4 border-b border-border flex items-center justify-between">
               <div>
                 <p className="text-sm font-heading font-bold text-foreground">{chatOrder.DocNo || chatOrder.PurchaseOrderNo}</p>
-                <p className="text-[11px] text-muted-foreground">{chatOrder.ItemDescription}</p>
+                <p className="text-[0.6875rem] text-muted-foreground">{chatOrder.ItemDescription}</p>
               </div>
               <button onClick={() => setChatOrderId(null)} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
                 <X size={16} />
@@ -759,7 +760,7 @@ function OrdersSection({ orders, loading, initialOrderId }: {
               className="flex-1 rounded-none border-0"
             />
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </section>
   );
@@ -773,7 +774,7 @@ function ReceivedItemProgress({ items }: { items: spApi.SupplierGrnItem[] }) {
         const pct = it.orderedQty > 0 ? Math.min(100, (it.receivedQty / it.orderedQty) * 100) : 100;
         return (
           <div key={it.itemId}>
-            <div className="flex items-center justify-between text-[10px] mb-0.5 gap-2">
+            <div className="flex items-center justify-between text-[0.625rem] mb-0.5 gap-2">
               <span className="text-foreground truncate">{it.itemName}</span>
               <span className="font-mono text-muted-foreground shrink-0">
                 {it.receivedQty}/{it.orderedQty} {it.uom ?? ""}
@@ -838,7 +839,7 @@ function ReceivedByCustomerSection() {
           <>
             {/* Desktop / tablet table — matches Orders/Active Quotations */}
             <motion.div className="hidden sm:block rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
-              <div className="grid grid-cols-[1.4fr_2.4fr_1.2fr_1fr_auto] gap-4 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
+              <div className="grid grid-cols-[1.4fr_2.4fr_1.2fr_1fr_auto] gap-4 px-5 py-2.5 text-[0.625rem] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
                 <span>PO No.</span>
                 <span>Items / Project</span>
                 <span>PO Date</span>
@@ -858,15 +859,15 @@ function ReceivedByCustomerSection() {
                   </div>
                   <div className="min-w-0">
                     <ReceivedItemProgress items={o.items} />
-                    <p className="text-[10px] text-muted-foreground truncate mt-1">
+                    <p className="text-[0.625rem] text-muted-foreground truncate mt-1">
                       {[o.companyName, o.projectName].filter(Boolean).join(" · ") || "—"}
                     </p>
                   </div>
                   <span className="text-xs text-muted-foreground">{fmtDate(o.poDate)}</span>
                   {o.isFullyReceived ? (
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 w-fit">Complete</span>
+                    <span className="text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 w-fit">Complete</span>
                   ) : (
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 w-fit">{o.totalRemaining} remaining</span>
+                    <span className="text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-[#ffe2021a] text-amber-600 dark:text-amber-400 w-fit">{o.totalRemaining} remaining</span>
                   )}
 
                   {/* Chat icon — same PO-scoped chat as Orders, so a supplier can
@@ -879,7 +880,7 @@ function ReceivedByCustomerSection() {
                   >
                     <MessageCircle size={15} />
                     {o.commentCount > 0 && (
-                      <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                      <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[0.5625rem] font-bold">
                         {o.commentCount}
                       </span>
                     )}
@@ -903,12 +904,12 @@ function ReceivedByCustomerSection() {
                         <span className="text-xs font-mono font-semibold text-foreground truncate">{o.docNo}</span>
                       </div>
                       {o.isFullyReceived ? (
-                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 w-fit shrink-0">Complete</span>
+                        <span className="text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 w-fit shrink-0">Complete</span>
                       ) : (
-                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 w-fit shrink-0">{o.totalRemaining} remaining</span>
+                        <span className="text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-[#ffe2021a] text-amber-600 dark:text-amber-400 w-fit shrink-0">{o.totalRemaining} remaining</span>
                       )}
                     </div>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[0.625rem] text-muted-foreground">
                       {[o.companyName, o.projectName].filter(Boolean).join(" · ") || "—"} · {fmtDate(o.poDate)}
                     </p>
                     <ReceivedItemProgress items={o.items} />
@@ -921,7 +922,7 @@ function ReceivedByCustomerSection() {
                     >
                       <MessageCircle size={15} />
                       {o.commentCount > 0 && (
-                        <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                        <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[0.5625rem] font-bold">
                           {o.commentCount}
                         </span>
                       )}
@@ -936,13 +937,13 @@ function ReceivedByCustomerSection() {
 
       {/* Chat slide-over — same PO-scoped OrderChat component/backend as Orders */}
       {chatOrder && currentUser && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-50 flex justify-end">
           <div className="flex-1 bg-black/40" onClick={() => setChatOrderId(null)} />
           <div className="w-full max-w-md shrink-0 bg-background border-l border-border flex flex-col shadow-2xl">
             <div className="px-5 py-4 border-b border-border flex items-center justify-between">
               <div>
                 <p className="text-sm font-heading font-bold text-foreground">{chatOrder.docNo}</p>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   {[chatOrder.companyName, chatOrder.projectName].filter(Boolean).join(" · ") || "—"}
                 </p>
               </div>
@@ -957,7 +958,7 @@ function ReceivedByCustomerSection() {
               className="flex-1 rounded-none border-0"
             />
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </section>
   );
@@ -1053,7 +1054,7 @@ function PriceCatalogSection({ catalog, loading }: {
         ) : (
           <motion.div className="rounded-2xl border border-border overflow-hidden shadow-sm bg-card" {...fade(0.1)}>
             {/* Header */}
-            <div className="grid grid-cols-[3fr_1fr_2fr_1.2fr] gap-4 px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
+            <div className="grid grid-cols-[3fr_1fr_2fr_1.2fr] gap-4 px-4 py-2.5 text-[0.625rem] font-bold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-border">
               <span>Item Name</span>
               <span>UOM</span>
               <span>Your Rate (₹)</span>
@@ -1100,7 +1101,7 @@ function PriceCatalogSection({ catalog, loading }: {
                       ) : (
                         <button
                           onClick={() => { setEditingId(item.ItemId); setEdits((p) => ({ ...p, [item.ItemId]: item.Rate !== null ? String(item.Rate) : "" })); }}
-                          className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg transition-colors ${hasRate ? "text-foreground hover:bg-muted" : "text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/15 font-semibold"}`}>
+                          className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg transition-colors ${hasRate ? "text-foreground hover:bg-muted" : "text-amber-600 dark:text-amber-400 bg-[#ffe2021a] hover:bg-amber-500/15 font-semibold"}`}>
                           {hasRate ? (
                             <><IndianRupee size={10} className="text-muted-foreground" />{Number(item.Rate).toLocaleString("en-IN", { minimumFractionDigits: 2 })}<Edit3 size={10} className="text-muted-foreground/50 ml-1" /></>
                           ) : (
@@ -1109,7 +1110,7 @@ function PriceCatalogSection({ catalog, loading }: {
                         </button>
                       )}
                     </div>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[0.625rem] text-muted-foreground">
                       {item.UpdatedAt ? fmtDate(item.UpdatedAt) : "—"}
                     </span>
                   </div>
@@ -1161,7 +1162,7 @@ function QuickActions() {
     },
     {
       icon: Bell, label: "Notifications", desc: "Alerts & reminders",
-      col: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/10",
+      col: "text-amber-600 dark:text-amber-400", bg: "bg-[#ffe2021a]",
       onClick: () => navigate("/supplier/notifications"),
     },
   ];
@@ -1177,7 +1178,7 @@ function QuickActions() {
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.05 + i * 0.06, duration: 0.4 }}>
               {a.badge && (
-                <span className="absolute top-3 right-3 text-[9px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+                <span className="absolute top-3 right-3 text-[0.5625rem] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
                   {a.badge}
                 </span>
               )}
@@ -1185,7 +1186,7 @@ function QuickActions() {
                 <a.icon size={16} className={a.col} />
               </div>
               <p className="text-sm font-heading font-semibold text-foreground">{a.label}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">{a.desc}</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{a.desc}</p>
             </motion.button>
           ))}
         </div>

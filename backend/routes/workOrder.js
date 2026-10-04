@@ -1,3 +1,6 @@
+// Reads dbo.EngineeringActivityMaster, not dbo.ActivityMaster — Engineering
+// was moved onto its own split-out activity master (migration 463); Civil
+// Work DPR keeps the original table.
 const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
@@ -10,13 +13,23 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a Work Order whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.WorkOrderHeader WHERE Id = @id"));
 const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
 
-router.use(checkPermissionForMethod("Engineering", "WorkOrders"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Engineering", "WorkOrders")(req, res, next);
+});
 
 const requireUserName = (req, res) => {
   const userName = req.user?.name;
@@ -68,7 +81,7 @@ router.get(
     try {
       const pool = getPool();
       const result = await pool.request().query(`
-      SELECT id, name FROM dbo.enterprise WHERE business_type = 'P' ORDER BY name
+      SELECT id, name FROM dbo.enterprise WHERE business_type = 'P'${projectPredicate(req.projectScope, "id")} ORDER BY name
     `);
       res.json(
         (result.recordset || []).map((r) => ({ id: r.id, name: r.name })),
@@ -108,7 +121,7 @@ router.get(
       const pool = getPool();
       const result = await pool.request().query(`
       SELECT id, activity_name AS name
-      FROM dbo.ActivityMaster
+      FROM dbo.EngineeringActivityMaster
       WHERE activity_type = 0 AND ISNULL(is_active, 1) = 1
       ORDER BY activity_name
     `);
@@ -136,14 +149,14 @@ router.get(
       if (groupId && Number.isFinite(groupId)) {
         result = await pool.request().input("GroupId", sql.Int, groupId).query(`
           SELECT id, activity_name AS name, group_id AS groupId
-          FROM dbo.ActivityMaster
+          FROM dbo.EngineeringActivityMaster
           WHERE activity_type = 1 AND group_id = @GroupId AND ISNULL(is_active, 1) = 1
           ORDER BY activity_name
         `);
       } else {
         result = await pool.request().query(`
         SELECT id, activity_name AS name, group_id AS groupId
-        FROM dbo.ActivityMaster
+        FROM dbo.EngineeringActivityMaster
         WHERE activity_type = 1 AND ISNULL(is_active, 1) = 1
         ORDER BY activity_name
       `);
@@ -272,7 +285,7 @@ router.get(
         LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
         LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
-        ${companyId ? "WHERE h.CompanyId = @companyId" : ""}
+        ${companyId ? "WHERE h.CompanyId = @companyId" : "WHERE 1=1"}${projectPredicate(req.projectScope, "h.ProjectId")}
         GROUP BY h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
           h.ContractorId, h.SupplierId, h.Remarks, h.TermsAndConditions,
@@ -334,8 +347,8 @@ router.get(
         SELECT a.*, ag.activity_name AS ActivityGroupName,
           act.activity_name AS ActivityName, uom.UOMName
         FROM dbo.WorkOrderActivities a
-        LEFT JOIN dbo.ActivityMaster ag  ON ag.id  = a.ActivityGroupId
-        LEFT JOIN dbo.ActivityMaster act ON act.id = a.ActivityId
+        LEFT JOIN dbo.EngineeringActivityMaster ag  ON ag.id  = a.ActivityGroupId
+        LEFT JOIN dbo.EngineeringActivityMaster act ON act.id = a.ActivityId
         LEFT JOIN dbo.UOMMaster      uom ON uom.Id = a.UOMId
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId ORDER BY a.Id
       `);
@@ -407,6 +420,7 @@ router.post("/", requirePageRight("engineering-work-order", "create"), async (re
   if (!ProjectId) {
     return res.status(400).json({ error: "ProjectId is required." });
   }
+  if (!assertProjectAllowed(req, res, ProjectId)) return;
   if (!DocumentDate) {
     return res.status(400).json({ error: "DocumentDate is required." });
   }
@@ -525,12 +539,14 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
   if (!id) return;
 
   let wasApproved = false;
+  let wasRejected = false;
   let beforeSnapshot = null;
   try {
     const currentStatus = await getRecordStatus("work-orders", id);
     const allowPostApproval = await resolveAllowPostApproval(req, "work-order");
     await guardEdit("work-orders", id, { allowPostApproval });
     wasApproved = currentStatus === "Approved";
+    wasRejected = currentStatus === "Rejected";
     if (wasApproved) {
       beforeSnapshot = await snapshotRow(getPool(), "dbo.WorkOrderHeader", "Id", id);
     }
@@ -564,6 +580,7 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
   if (!ProjectId) {
     return res.status(400).json({ error: "ProjectId is required." });
   }
+  if (!assertProjectAllowed(req, res, ProjectId)) return;
   if (!DocumentNumber) {
     // Unlike POST /, this UPDATE binds DocumentNumber straight from the
     // request body with no DocNo fallback — so DocNo alone does not save it.
@@ -625,6 +642,7 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
       .input("GST", sql.NVarChar(sql.MAX), gstJson)
       .input("BoqID", sql.Int, BoqID ? parseInt(BoqID, 10) : null).query(`
         UPDATE dbo.WorkOrderHeader SET
+          ${wasApproved ? "Status='Pending'," : ""}
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
           ContractorId=@ContractorId, SupplierId=@SupplierId, TotalAmount=@TotalAmount,
@@ -654,7 +672,34 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
       }
     }
 
-    res.json({ message: "Work order updated" });
+    // A corrected, previously-Rejected work order goes straight back into
+    // the approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("work-orders", id, "Pending", req.user?.email, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[work-orders] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Work order updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: wasApproved
+        ? "Work order updated — sent back for approval"
+        : resubmitted
+          ? "Work order updated and re-submitted for approval"
+          : "Work order updated",
+      reopenedForApproval: wasApproved,
+      resubmitted,
+    });
   } catch (err) {
     console.error("[PUT /work-orders/:id]", err.message);
     res.status(500).json({ error: err.message });
@@ -769,8 +814,8 @@ router.get("/:id/activities", async (req, res) => {
           COUNT(m.Id) AS MaterialCount,
           ISNULL(SUM(m.Quantity * m.Rate), 0) AS MaterialTotal
         FROM dbo.WorkOrderActivities a
-        LEFT JOIN dbo.ActivityMaster             ag  ON ag.id  = a.ActivityGroupId
-        LEFT JOIN dbo.ActivityMaster             act ON act.id = a.ActivityId
+        LEFT JOIN dbo.EngineeringActivityMaster             ag  ON ag.id  = a.ActivityGroupId
+        LEFT JOIN dbo.EngineeringActivityMaster             act ON act.id = a.ActivityId
         LEFT JOIN dbo.UOMMaster                  uom ON uom.Id = a.UOMId
         LEFT JOIN dbo.WorkOrderActivityMaterials m   ON m.WorkOrderActivityId = a.Id
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
@@ -1077,6 +1122,7 @@ router.post("/:id/save-full", requirePageRight("engineering-work-order", "edit")
   const headerId = requireValidId(req, res);
   if (!headerId) return;
   const { header, activities } = req.body;
+  if (!assertProjectAllowed(req, res, header?.ProjectId)) return;
 
   if (!Array.isArray(activities))
     return res.status(400).json({ error: "activities must be an array" });
@@ -1642,6 +1688,8 @@ router.put("/:id/approve", async (req, res) => {
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order approved", ...result });
@@ -1666,6 +1714,7 @@ router.put("/:id/reject", async (req, res) => {
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order rejected", ...result });

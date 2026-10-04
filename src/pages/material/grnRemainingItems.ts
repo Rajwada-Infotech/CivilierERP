@@ -35,6 +35,10 @@ export interface RemainingPOItem {
   uom: string;
   rate: number;
   gstPct: number;
+  // The PO line's own Cost Centre (auto-filled there from Item Master when
+  // the PO was raised) — carried through to the GRN line rather than
+  // re-resolved, so GRN/Invoice inherit the same tag the PO already has.
+  costCenterId: string | null;
 }
 
 /** Minimal shape of a GRN line item, structurally compatible with GRN.tsx's GRNItemLine. */
@@ -50,6 +54,7 @@ export interface RemainingGRNLineItem {
   totalAmount: number;
   gstPct: number;
   gstAmount: number;
+  costCenterId: string | null;
 }
 
 /**
@@ -74,6 +79,7 @@ export function computeRemainingPOItems(po: any): RemainingPOItem[] {
         uom: li.UomName ?? li.UomId ?? "",
         rate: Number(li.Rate ?? 0),
         gstPct: Number(li.TaxPct ?? 0),
+        costCenterId: li.CostCenterId != null ? String(li.CostCenterId) : null,
       };
     })
     .filter((it) => it.orderedQty > 0);
@@ -114,6 +120,7 @@ export function buildGRNLineItemsFromRemaining(
         totalAmount,
         gstPct: it.gstPct,
         gstAmount: totalAmount * (it.gstPct / 100),
+        costCenterId: it.costCenterId,
       };
     });
 }

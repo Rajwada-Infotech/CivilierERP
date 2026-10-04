@@ -22,6 +22,7 @@ const GL_POSTERS = {
   grn: postGRNApproval,
   "expense-booking": postExpenseBookingApproval,
   payments: postPaymentApproval,
+  "crm-refund-payment": postPaymentApproval,
   "journal-voucher": postJournalVoucherApproval,
   "fund-transfer": postFundTransferApproval,
   "debit-note": postDebitNoteApproval,
@@ -49,6 +50,13 @@ const MODULE_MAP = {
     status: "Status",
   },
   payments: { table: "dbo.NewPayment", pk: "PPaymentID", status: "Status" },
+  // Same table/pk/status as "payments" — a CRM Refund's payout voucher IS a
+  // NewPayment row, just routed through its own single-level workflow (see
+  // WORKFLOW_ID_MAP below) instead of the multi-module bundle regular
+  // Payments (PO/GRN/Expense-sourced) share. newPayment.js's approve/reject
+  // routes pick this module string instead of "payments" when the row's
+  // SourceCrmRefundId is set.
+  "crm-refund-payment": { table: "dbo.NewPayment", pk: "PPaymentID", status: "Status" },
   "material-requests": {
     table: "dbo.MaterialRequests",
     pk: "MRId",
@@ -59,6 +67,11 @@ const MODULE_MAP = {
     pk: "IssueId",
     status: "Status",
   },
+  "material-issue-return": {
+    table: "dbo.MaterialIssueReturn",
+    pk: "ReturnId",
+    status: "Status",
+  },
   "sale-orders": {
     table: "dbo.SaleOrders",
     pk: "SaleOrderID",
@@ -67,6 +80,11 @@ const MODULE_MAP = {
   "vehicle-in-out": {
     table: "dbo.VehicleInOut",
     pk: "VehicleInOutID",
+    status: "Status",
+  },
+  "stock-transfers": {
+    table: "dbo.StockTransfers",
+    pk: "TransferID",
     status: "Status",
   },
   "journal-voucher": {
@@ -111,12 +129,22 @@ const MODULE_MAP = {
   "crm-agreement-date": { table: "dbo.CrmAgreement", pk: "Id", status: "DateApprovalStatus" },
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
+  "crm-refunds": { table: "dbo.CrmRefund", pk: "Id", status: "Status" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
   contracts: { table: "dbo.Contract", pk: "ContractId", status: "Status" },
   // Same ApprovalAuditLog caveat as crm-agreement-date above: no Module
   // column, so this shares level-count history with any other gate on
   // CrmSalesDeed — harmless since this is single-level too.
   "crm-sales-deed-director": { table: "dbo.CrmSalesDeed", pk: "Id", status: "DirectorApprovalStatus" },
+  // Sale Deed's equivalent of crm-agreements' Senior Approval gate, same
+  // table as crm-sales-deed-director above (a different column, same
+  // single-level caveat applies). This entry was missing entirely — the
+  // ApprovalWorkflows config row for it (module "crm-sales-deed-senior")
+  // already existed, but transition()/getApprovalStatus() only ever consult
+  // this hardcoded map, so every PUT /:id/approve call 400'd with "Unknown
+  // module" and the entire Senior Approval step was unreachable regardless
+  // of who tried it.
+  "crm-sales-deed-senior": { table: "dbo.CrmSalesDeed", pk: "Id", status: "SeniorApprovalStatus" },
 };
 
 const MODULE_DOC_LINKS = {
@@ -128,6 +156,7 @@ const MODULE_DOC_LINKS = {
   grn: "GRN",
   "goods-receipt": "GRN",
   payments: "Payment",
+  "crm-refund-payment": "Payment",
   "journal-voucher": "Journal Voucher",
   "inter-company-transfer": "Inter-Company Transfer",
   "fund-transfer": "Fund Transfer",
@@ -171,7 +200,30 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "crm-sales-deed-director": ["super_admin"],
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,
+  "crm-refunds": CRM_APPROVER_ROLES,
   "crm-noc": CRM_APPROVER_ROLES,
+  // Same default CRM approver set as crm-brokerage/crm-cancellations/crm-noc
+  // — no legal_head carve-out here, that's specific to crm-agreements (see
+  // its comment above).
+  "crm-sales-deed-senior": CRM_APPROVER_ROLES,
+  // Registry Complete is a permanent legal act — restricted to legal_head and
+  // above by default; configurable via ApprovalWorkflows LevelDefs in Setup.
+  "crm-registry-complete": [...CRM_APPROVER_ROLES, "legal_head"],
+  // Registry Cancel is serious but less permanent — marketing_head and above.
+  "crm-registry-cancel": CRM_APPROVER_ROLES,
+  // Mutation Approve records that the municipal authority granted Khata transfer
+  // — legal title consequence, same default set as Registry Complete.
+  "crm-mutation-approve": [...CRM_APPROVER_ROLES, "legal_head"],
+  // Query Payment Confirm records government fee payment — marketing_head and
+  // above; legal_head included since they coordinate the registry visit.
+  "crm-query-payment-confirm": [...CRM_APPROVER_ROLES, "legal_head"],
+  // A CRM Refund's payout voucher gets its own single-level workflow (see
+  // WORKFLOW_ID_MAP) instead of the multi-module Payments bundle — matching
+  // Received Payments' own approver set exactly (receivedPayment.js's
+  // APPROVER_ROLES), per explicit instruction that this should follow the
+  // same pattern Payments/Received Payments already use elsewhere, not a
+  // CRM-only carve-out with different people.
+  "crm-refund-payment": ["admin", "super_admin", "dba", "accounts_head"],
 };
 
 async function validateApprovalModuleMap(log = console) {
@@ -227,10 +279,13 @@ const WORKFLOW_ID_MAP = {
   grn: "GRN",
   "goods-receipt": "GRN",
   payments: "NewPayment",
+  "crm-refund-payment": "CrmRefundPayment",
   "material-requests": "MaterialRequests",
   "material-issues": "MaterialIssues",
+  "material-issue-return": "MaterialIssueReturn",
   "sale-orders": "SaleOrder",
   "vehicle-in-out": "VehicleInOut",
+  "stock-transfers": "StockTransfer",
   "journal-voucher": "JournalVoucher",
   "inter-company-transfer": "InterCompanyTransfer",
   "fund-transfer": "FundTransfer",
@@ -333,6 +388,7 @@ async function writeAuditLog(
   actionStatus,
   note,
   executor = null,
+  userId = null,
 ) {
   const exec = executor || getPool();
   await exec
@@ -343,16 +399,22 @@ async function writeAuditLog(
     .input("Role", sql.NVarChar(100), role || null)
     .input("ApproverEmail", sql.NVarChar(200), approverEmail || null)
     .input("ActionStatus", sql.NVarChar(50), actionStatus)
-    .input("Note", sql.NVarChar(500), note || null).query(`
+    .input("Note", sql.NVarChar(500), note || null)
+    .input("UserId", sql.Int, userId ?? null).query(`
       INSERT INTO dbo.ApprovalAuditLog
-        (TableName, RecordId, Level, Role, ApproverEmail, ActionStatus, Note, ActionAt)
+        (TableName, RecordId, Level, Role, ApproverEmail, ActionStatus, Note, ActionAt, UserId)
       VALUES
-        (@TableName, @RecordId, @Level, @Role, @ApproverEmail, @ActionStatus, @Note, SYSDATETIME())
+        (@TableName, @RecordId, @Level, @Role, @ApproverEmail, @ActionStatus, @Note, SYSDATETIME(), @UserId)
     `);
 }
 
 /**
  * Fetch how many levels have been approved so far for a record.
+ * NOTE: for a level whose mode is "all", this can return a level as soon as
+ * ONE of its required approvers has acted — it's a simple MAX(Level), not
+ * mode-aware. Fine for its current use (an advisory "are we near the final
+ * level" pre-check in saleOrders.js); transition()'s own approve logic
+ * uses the mode-aware resolveCurrentLevel() below instead, never this.
  */
 async function getApprovedLevelCount(tableName, recordId, executor = null) {
   const exec = executor || getPool();
@@ -365,6 +427,102 @@ async function getApprovedLevelCount(tableName, recordId, executor = null) {
       WHERE TableName = @TableName AND RecordId = @RecordId AND ActionStatus = 'Approved'
     `);
   return result.recordset[0]?.maxApprovedLevel ?? 0;
+}
+
+/**
+ * Every level-satisfaction check below is scoped to the CURRENT submission
+ * cycle only — rows at or after the most recent Level=0 'Pending' marker for
+ * this record. Without this, resubmitting a Rejected document (edit → save →
+ * re-submit) would have old approvals from BEFORE the rejection still count:
+ * a document rejected at level 2 after level 1 was already approved would,
+ * on resubmission, skip straight back to level 2 instead of genuinely
+ * restarting at level 1 — the edited version was never re-reviewed by level
+ * 1's approvers at all. transition()'s "Pending" branch always writes a
+ * fresh Level=0 marker on every Draft/Rejected → Pending submit, so this
+ * cutoff exists for every record that's ever gone through this engine; a
+ * record with no marker at all (pre-dates it) falls back to no cutoff so
+ * old history still counts, matching prior behavior.
+ */
+function currentCycleCutoffSql(tableName, recordId) {
+  return `ISNULL((
+    SELECT MAX(ActionAt) FROM dbo.ApprovalAuditLog
+    WHERE TableName = @TableName AND RecordId = @RecordId AND Level = 0 AND ActionStatus = 'Pending'
+  ), '1900-01-01')`;
+}
+
+/**
+ * Whether a single level is fully satisfied, given its mode:
+ *  - "all": every userId in levelDef.userIds has its own distinct Approved
+ *    entry at this level. Requires at least one userId to mean anything —
+ *    a level with no assigned people can't collect per-person approvals,
+ *    so it falls back to "any" (matches pre-existing behavior for such
+ *    role-only levels).
+ *  - anything else (undefined, "any"): today's original behavior — a
+ *    single Approved entry at this level is enough.
+ */
+async function isLevelSatisfied(tableName, recordId, level, levelDef, executor = null) {
+  const exec = executor || getPool();
+  const cutoff = currentCycleCutoffSql(tableName, recordId);
+  if (levelDef?.mode === "all" && Array.isArray(levelDef.userIds) && levelDef.userIds.length > 0) {
+    const result = await exec
+      .request()
+      .input("TableName", sql.NVarChar(100), tableName)
+      .input("RecordId", sql.Int, recordId)
+      .input("Level", sql.Int, level).query(`
+        SELECT DISTINCT UserId FROM dbo.ApprovalAuditLog
+        WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level
+          AND ActionStatus = 'Approved' AND UserId IS NOT NULL
+          AND ActionAt >= ${cutoff}
+      `);
+    const approvedUserIds = new Set(result.recordset.map((r) => r.UserId));
+    return levelDef.userIds.every((uid) => approvedUserIds.has(uid));
+  }
+  const result = await exec
+    .request()
+    .input("TableName", sql.NVarChar(100), tableName)
+    .input("RecordId", sql.Int, recordId)
+    .input("Level", sql.Int, level).query(`
+      SELECT TOP 1 1 AS found FROM dbo.ApprovalAuditLog
+      WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level AND ActionStatus = 'Approved'
+        AND ActionAt >= ${cutoff}
+    `);
+  return result.recordset.length > 0;
+}
+
+/**
+ * Walk levels in order from 1 and return the first one not yet satisfied —
+ * the level the next approval action should apply to. Returns
+ * totalLevels + 1 once every level is satisfied. This is what makes a
+ * "everyone must approve" level actually wait for every assigned person
+ * instead of completing on the first approval, the way getApprovedLevelCount
+ * alone would.
+ */
+async function resolveCurrentLevel(tableName, recordId, totalLevels, levelDefs, executor = null, opts = {}) {
+  for (let level = 1; level <= totalLevels; level++) {
+    const satisfied = await isLevelSatisfied(tableName, recordId, level, levelDefs[level - 1], executor);
+    if (!satisfied) return level;
+  }
+  // Every level reads as approved. For a record that is still Pending this
+  // means it was amended after approval: the edit routes flip Status back to
+  // Pending directly (no transition()), so no Level=0 'Pending' cycle marker
+  // was written and the OLD cycle's approvals still count. Start a fresh cycle
+  // now so the amended document restarts at level 1 and can actually be
+  // approved or rejected, in every module, instead of erroring "already
+  // completed every approval level". Only when the caller says which module.
+  if (opts.module && totalLevels > 0) {
+    let status = null;
+    try {
+      status = await getRecordStatus(opts.module, recordId, executor);
+    } catch (_) { /* unknown module / row: leave as-is */ }
+    if (status === "Pending") {
+      await writeAuditLog(
+        tableName, recordId, 0, opts.role || null, opts.email || null,
+        "Pending", "Amended after approval — sent back for approval", executor, opts.userId ?? null,
+      );
+      return 1;
+    }
+  }
+  return totalLevels + 1;
 }
 
 /**
@@ -499,11 +657,13 @@ async function transition(
   const tableName = map.table.replace("dbo.", "");
 
   // ── Authorisation gate (cheap check before opening a transaction) ─────────
-  // Two independent ways in: the hardcoded per-module role whitelist (the
-  // original design), OR holding "edit" on the "approval-inbox" page via
-  // Menu Rights — added because granting someone that page's rights (the
-  // obvious, discoverable way to give approve/reject access) silently did
-  // nothing; only the fixed role list was ever actually checked.
+  // Three independent ways in: the hardcoded per-module role whitelist (the
+  // original design), holding "edit" on the "approval-inbox" page via Menu
+  // Rights (added because granting someone that page's rights — the
+  // obvious, discoverable way to give approve/reject access — silently did
+  // nothing; only the fixed role list was ever actually checked), or being
+  // named by userId on this record's CURRENT workflow level in Approval
+  // Setup.
   //
   // The page-right fallback only applies to modules on the *default*
   // APPROVER_ROLES list. Modules with an explicit, deliberately narrow
@@ -512,6 +672,18 @@ async function transition(
   // hardcoded to super_admin "per explicit instruction") stay locked to
   // that role list regardless of page rights, since those overrides exist
   // specifically to be stricter than a page permission can express.
+  //
+  // The Approval Setup userId path DOES apply to those restricted modules
+  // though — Approval Setup's own UI lets an admin name a specific person
+  // (e.g. Prashant) as a Journal Voucher approver alongside the hardcoded
+  // super_admin baseline, and approvalInbox.js's isVisibleToViewer already
+  // shows that person the record as theirs to act on (_canAct: true). Before
+  // this, transition() never consulted the workflow for restricted modules
+  // at all, so that same click 403'd — the inbox row looked actionable but
+  // wasn't. Mirrors isVisibleToViewer's per-level userId match (found via
+  // production report: Approval Setup named Prashant alongside Super Admin
+  // for Journal Voucher, but only Super Admin ever saw a working
+  // Approve/Reject).
   const isApproveOrReject =
     targetStatus === "Approved" || targetStatus === "Rejected";
   if (isApproveOrReject) {
@@ -523,7 +695,18 @@ async function transition(
     // narrower ones — the common case (an actual admin/dba) never pays
     // for it.
     const pageRightAllowed = !roleAllowed && !hasOverride && (await hasApprovalInboxEditRight(userId));
-    if (!roleAllowed && !pageRightAllowed) {
+    let workflowUserAllowed = false;
+    if (!roleAllowed && !pageRightAllowed && userId != null) {
+      const workflow = await getWorkflow(module);
+      if (workflow?.LevelDefs?.length) {
+        const totalLevels = workflow.Levels || workflow.LevelDefs.length;
+        const currentLevel = await resolveCurrentLevel(tableName, id, totalLevels, workflow.LevelDefs, null, { module, role: userRole, email: userEmail, userId });
+        const levelDef = workflow.LevelDefs[currentLevel - 1];
+        const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
+        workflowUserAllowed = hasUsers && levelDef.userIds.includes(userId);
+      }
+    }
+    if (!roleAllowed && !pageRightAllowed && !workflowUserAllowed) {
       const authErr = new Error("You are not authorized to approve or reject records.");
       authErr.status = 403;
       throw authErr;
@@ -563,26 +746,43 @@ async function transition(
       if (currentStatus !== "Pending") {
         throw new Error(`Cannot reject from status "${currentStatus}"`);
       }
+      // Log the rejection at the level it actually happened, not a fixed 0 —
+      // this is what lets a badge like ApprovalStatusChain show "who
+      // rejected, at which step" without any changes on its side: it
+      // already reads per-level ActionStatus, it just never received a
+      // Rejected row at a real level before this.
+      const workflow = await getWorkflow(module);
+      const totalLevels = workflow?.Levels ?? 1;
+      const levelDefs = workflow?.LevelDefs ?? [];
+      const rejectedAtLevel = await resolveCurrentLevel(tableName, id, totalLevels, levelDefs, tx, { module, role: userRole, email: userEmail, userId });
       await setRecordStatus(module, id, "Rejected", tx);
       await writeAuditLog(
         tableName,
         id,
-        0,
+        rejectedAtLevel > totalLevels ? 0 : rejectedAtLevel,
         userRole,
         userEmail,
         "Rejected",
         note,
         tx,
+        userId,
       );
-      result = { newStatus: "Rejected" };
+      result = { newStatus: "Rejected", level: rejectedAtLevel > totalLevels ? null : rejectedAtLevel };
     } else if (targetStatus === "Approved") {
       if (currentStatus !== "Pending") {
         throw new Error(`Cannot approve from status "${currentStatus}"`);
       }
       const workflow = await getWorkflow(module);
       const totalLevels = workflow?.Levels ?? 1;
-      const approvedSoFar = await getApprovedLevelCount(tableName, id, tx);
-      const nextLevel = approvedSoFar + 1;
+      const levelDefs = workflow?.LevelDefs ?? [];
+      // Mode-aware: an "everyone must approve" level stays the current level
+      // across multiple approvals until every assigned person has acted —
+      // unlike the old approvedSoFar+1, which advanced past a level the
+      // instant any single approval landed on it.
+      const nextLevel = await resolveCurrentLevel(tableName, id, totalLevels, levelDefs, tx, { module, role: userRole, email: userEmail, userId });
+      if (nextLevel > totalLevels) {
+        throw new Error("This record has already completed every approval level.");
+      }
 
       // -- Per-level gate --
       // The coarse role check above only confirms the user is *some* kind of
@@ -593,7 +793,7 @@ async function transition(
       // A level with neither `roles` nor `userIds` set falls through to the
       // module-wide coarse check only (today's existing behaviour), so this
       // is fully backward compatible with workflows that don't use it yet.
-      const levelDef = workflow?.LevelDefs?.[nextLevel - 1];
+      const levelDef = levelDefs[nextLevel - 1];
       if (levelDef) {
         const roleOk =
           !Array.isArray(levelDef.roles) || levelDef.roles.length === 0 ||
@@ -611,6 +811,19 @@ async function transition(
           levelErr.status = 403;
           throw levelErr;
         }
+        // On an "everyone must approve" level, one person can't satisfy the
+        // requirement twice — without this, the same director re-approving
+        // would look like a second, distinct sign-off.
+        if (levelDef.mode === "all" && userId != null) {
+          const alreadyApproved = await isLevelSatisfied(
+            tableName, id, nextLevel, { mode: "all", userIds: [userId] }, tx,
+          );
+          if (alreadyApproved) {
+            const dupErr = new Error("You have already approved this step.");
+            dupErr.status = 409;
+            throw dupErr;
+          }
+        }
       }
 
       await writeAuditLog(
@@ -622,9 +835,21 @@ async function transition(
         "Approved",
         note,
         tx,
+        userId,
       );
 
-      if (nextLevel >= totalLevels) {
+      // Re-check: on an "everyone must approve" level, this single approval
+      // may not be enough yet — stay Pending at the SAME level until every
+      // assigned person has signed off.
+      const levelNowSatisfied = await isLevelSatisfied(tableName, id, nextLevel, levelDef, tx);
+      if (!levelNowSatisfied) {
+        result = {
+          newStatus: "Pending",
+          level: nextLevel,
+          totalLevels,
+          waitingOnLevel: true,
+        };
+      } else if (nextLevel >= totalLevels) {
         await setRecordStatus(module, id, "Approved", tx);
         fullyApproved = true;
         result = { newStatus: "Approved", level: nextLevel, totalLevels };
@@ -646,6 +871,17 @@ async function transition(
       await tx.rollback();
     } catch {
       /* rollback best-effort — original error is what propagates */
+    }
+    // UQ_CrmBooking_UnitId_Approved (migration 389) is the DB-level backstop
+    // for two Pending bookings on the same Unit both reaching Approved —
+    // the same race crmHoldService.placeHold() already guards for holds.
+    // Translate the raw constraint violation into the same clean, expected
+    // message a caller would get from the hold path, instead of a bare SQL
+    // "Cannot insert duplicate key" surfacing to the approver.
+    if (module === "crm-bookings" && /UQ_CrmBooking_UnitId_Approved/i.test(err.message || "")) {
+      const conflictErr = new Error("This unit was just approved on another booking — refresh and re-check availability.");
+      conflictErr.status = 409;
+      throw conflictErr;
     }
     throw err;
   }
@@ -682,6 +918,70 @@ async function transition(
   return result;
 }
 
+/**
+ * Generic gate for CRM gated actions that do not use the full Pending→Approved
+ * transition cycle (e.g. Registry Complete, Mutation Approve). Logic mirrors
+ * transition()'s two-path auth:
+ *   1. Role is in MODULE_APPROVER_ROLE_OVERRIDES[module], OR
+ *   2. User holds "edit" on approval-inbox page AND the active workflow for
+ *      the module (if one exists) permits their role/userId.
+ *
+ * Default role sets live in MODULE_APPROVER_ROLE_OVERRIDES above and are the
+ * configurable baseline — admins can further restrict or expand per-level via
+ * the Approval Setup UI (ApprovalWorkflows.LevelsData) without any code change.
+ */
+async function canPerformCrmGatedAction(module, userId, userRole) {
+  const role = (userRole || "").toLowerCase();
+
+  // DB-configured workflow always takes precedence over code defaults — this
+  // is the "dynamic from approval setup" path. An admin who sets up a workflow
+  // for this module in the Approval Setup UI completely overrides the role list
+  // below, without any code change.
+  const workflow = await getWorkflow(module);
+  if (workflow && workflow.LevelDefs?.length) {
+    if (!(await hasApprovalInboxEditRight(userId))) return false;
+    const levelDef = workflow.LevelDefs[0];
+    const roleOk = !Array.isArray(levelDef?.roles) || !levelDef.roles.length ||
+      levelDef.roles.map(r => String(r).toLowerCase()).includes(role);
+    const userOk = !Array.isArray(levelDef?.userIds) || !levelDef.userIds.length ||
+      userId == null || levelDef.userIds.includes(userId);
+    return roleOk && userOk;
+  }
+
+  // No DB workflow configured — fall back to the code-level defaults.
+  // MODULE_APPROVER_ROLE_OVERRIDES provides per-module defaults; CRM_APPROVER_ROLES
+  // is the system-wide baseline for any module not listed there.
+  const allowedRoles = MODULE_APPROVER_ROLE_OVERRIDES[module] || CRM_APPROVER_ROLES;
+  if (allowedRoles.includes(role)) return true;
+  // For modules without a code-level role override, also honour the approval-inbox
+  // page-right as a fallback (these users can configure a DB workflow to tighten it).
+  if (!Object.prototype.hasOwnProperty.call(MODULE_APPROVER_ROLE_OVERRIDES, module)) {
+    return hasApprovalInboxEditRight(userId);
+  }
+  return false;
+}
+
+/**
+ * Check whether a user may approve/reject a booking amendment.
+ * Mirrors the same two-path logic transition() uses for CRM modules:
+ *   1. Role is in CRM_APPROVER_ROLES, OR
+ *   2. User holds "edit" on approval-inbox page AND the active workflow
+ *      for "crm-booking-amendment" (if one exists) permits their role/userId.
+ */
+async function canApproveBookingAmendment(userId, userRole) {
+  const role = (userRole || "").toLowerCase();
+  if (CRM_APPROVER_ROLES.includes(role)) return true;
+  if (!(await hasApprovalInboxEditRight(userId))) return false;
+  const workflow = await getWorkflow("crm-booking-amendment");
+  if (!workflow || !workflow.LevelDefs?.length) return true;
+  const levelDef = workflow.LevelDefs[0];
+  const roleOk = !Array.isArray(levelDef?.roles) || !levelDef.roles.length ||
+    levelDef.roles.map(r => String(r).toLowerCase()).includes(role);
+  const userOk = !Array.isArray(levelDef?.userIds) || !levelDef.userIds.length ||
+    userId == null || levelDef.userIds.includes(userId);
+  return roleOk && userOk;
+}
+
 module.exports = {
   transition,
   guardEdit,
@@ -692,8 +992,19 @@ module.exports = {
   recordGLPosting,
   writeAuditLog,
   CRM_APPROVER_ROLES,
+  canApproveBookingAmendment,
+  canPerformCrmGatedAction,
+  hasApprovalInboxEditRight,
   // Canonical module → {table, pk, status} / GL poster maps — the single
   // source of truth for what each module's identity/status column is.
   MODULE_MAP,
   GL_POSTERS,
+  // Exported for approvalInbox.js's per-record visibility filter — it needs
+  // the exact same "which level, who's allowed" resolution transition()
+  // itself uses, not a second, potentially drifting reimplementation.
+  WORKFLOW_ID_MAP,
+  MODULE_APPROVER_ROLE_OVERRIDES,
+  APPROVER_ROLES,
+  resolveCurrentLevel,
+  isLevelSatisfied,
 };

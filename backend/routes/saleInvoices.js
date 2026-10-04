@@ -4,6 +4,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard } = require("../services/projectScope");
+
+// Any :id route — refuse an invoice whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.SaleInvoices WHERE SaleInvoiceID = @id"));
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requireValidId } = require("../utils/routeHelpers");
@@ -65,6 +69,7 @@ const SI_SELECT = `
     fy.FName                          AS FinYearName,
     si.Remarks,
     si.CreatedBy,
+    COALESCE(cu.name, si.CreatedBy) AS CreatedByName,
     si.CreatedAt,
     si.UpdatedBy,
     si.UpdatedAt,
@@ -94,6 +99,7 @@ const SI_SELECT = `
   LEFT JOIN dbo.enterprise          pr ON pr.id           = si.ProjectId
   LEFT JOIN dbo.FinYear             fy ON fy.FId          = si.fy_id
   LEFT JOIN dbo.TypeOfDoc           td ON td.TypeOfDocId  = si.DocTypeId
+  LEFT JOIN dbo.users               cu ON LOWER(cu.email) = LOWER(si.CreatedBy)
   WHERE si.IsDeleted = 0
 `;
 
@@ -127,6 +133,7 @@ router.get(
       if (saleOrderId) where.push("si.SaleOrderID = @saleOrderId");
       if (customerId) where.push("si.CustomerID = @customerId");
       if (companyId) where.push("si.CompanyId = @companyId");
+      if (req.projectScope) where.push(projectPredicate(req.projectScope, "si.ProjectId", "").trim());
       const extraWhere = where.length ? `AND ${where.join(" AND ")}` : "";
 
       const result = await pool
@@ -358,6 +365,27 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
       fy_id: null,
       GLItems: Array.isArray(glItems) ? glItems : [],
     };
+  }
+
+  // ── Guard: the billed party is set to Non-Invoice ────────────────────────
+  // Migration 420 — AccountHeadMaster.InvoiceMode (default 'NonInvoice').
+  // A CrmCustomer-linked ledger head (LHeadCode 'CRMCUST-<id>') has this kept
+  // in sync from the CRM Customer record itself (see crmLedger.js's
+  // syncCrmCustomerLedgerHead); a manually-entered Accounts customer sets it
+  // directly on this same row via CustomerMaster.tsx. Either way, this is
+  // the single check that makes "no invoice for this customer" hold from
+  // both invoicing systems in this codebase.
+  if (so.CustomerID) {
+    const modeRes = await pool.request().input("id", sql.Int, so.CustomerID)
+      .query("SELECT LHeadName, InvoiceMode FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+    const modeRow = modeRes.recordset[0];
+    if (modeRow?.InvoiceMode === "NonInvoice") {
+      const err = new Error(
+        `${modeRow.LHeadName || "This customer"} is set to Non-Invoice — no invoice can be generated for them. Change it on the Customer Master record if this is incorrect.`,
+      );
+      err.status = 400;
+      throw err;
+    }
   }
 
   // ── Guard: no existing active invoice for this SO ────────────────────────

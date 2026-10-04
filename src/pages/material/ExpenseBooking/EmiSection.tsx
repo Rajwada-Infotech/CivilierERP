@@ -17,6 +17,8 @@ import {
 import { Field } from "./FormPrimitives";
 import { fmt, generateEmiSchedule } from "./helpers";
 import type { EmiConfig, EmiScheduleRow } from "./types";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 interface Props {
   emi: EmiConfig;
@@ -59,7 +61,7 @@ function DisableDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-card border border-border rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
@@ -70,7 +72,7 @@ function DisableDialog({
               <p className="text-sm font-heading font-semibold text-foreground">
                 Disable EMI?
               </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 This cannot be undone easily
               </p>
             </div>
@@ -151,7 +153,7 @@ function DisableDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div></BodyPortal>
   );
 }
 
@@ -238,7 +240,7 @@ export function EmiSection({
               <p className="text-sm font-heading font-semibold text-foreground">
                 EMI / Installment Payment
               </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 {emi.enabled
                   ? emi.installmentCount > 0
                     ? `${emi.installmentCount} installments · ₹${fmt(emi.emiAmount)}/mo`
@@ -282,7 +284,7 @@ export function EmiSection({
             {displaySchedule.length > 0 && (
               <div className="grid grid-cols-4 divide-x divide-border border-b border-border">
                 <div className="px-4 py-3 flex flex-col gap-0.5">
-                  <span className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+                  <span className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                     Total
                   </span>
                   <span className="text-sm font-bold font-mono text-foreground">
@@ -290,20 +292,20 @@ export function EmiSection({
                   </span>
                 </div>
                 <div className="px-4 py-3 flex flex-col gap-0.5">
-                  <span className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+                  <span className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                     Paid
                   </span>
                   <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
                     {paidCount}/{displaySchedule.length}
                     {paidAmount > 0 && (
-                      <span className="font-mono text-[11px] ml-1">
+                      <span className="font-mono text-[0.6875rem] ml-1">
                         (₹{fmt(paidAmount)})
                       </span>
                     )}
                   </span>
                 </div>
                 <div className="px-4 py-3 flex flex-col gap-0.5">
-                  <span className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+                  <span className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                     Remaining
                   </span>
                   <span
@@ -313,7 +315,7 @@ export function EmiSection({
                   </span>
                 </div>
                 <div className="px-4 py-3 flex flex-col gap-0.5">
-                  <span className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+                  <span className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                     Next Due
                   </span>
                   <span className="text-sm font-bold text-amber-600 dark:text-amber-400">
@@ -357,8 +359,7 @@ export function EmiSection({
                     </div>
                   </Field>
                   <Field label="First Due Date" required>
-                    <Input
-                      type="date"
+                    <DateInput
                       value={emi.startDate}
                       onChange={(e) =>
                         onChange({ ...emi, startDate: e.target.value })
@@ -427,11 +428,11 @@ export function EmiSection({
               ) : displaySchedule.length > 0 ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                    <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
                       Installment Schedule
                     </p>
                     {baseDocNo && (
-                      <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                      <span className="text-[0.625rem] text-muted-foreground flex items-center gap-1">
                         <Hash size={9} />
                         Refs linked to{" "}
                         <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
@@ -445,28 +446,28 @@ export function EmiSection({
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-muted/50 border-b border-border">
-                          <th className="px-3 py-2.5 text-left font-heading text-[10px] uppercase tracking-wider text-muted-foreground w-8">
+                          <th className="px-3 py-2.5 text-left font-heading text-[0.625rem] uppercase tracking-wider text-muted-foreground w-8">
                             #
                           </th>
-                          <th className="px-3 py-2.5 text-left font-heading text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <th className="px-3 py-2.5 text-left font-heading text-[0.625rem] uppercase tracking-wider text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <Hash size={9} />
                               Reference
                             </span>
                           </th>
-                          <th className="px-3 py-2.5 text-left font-heading text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <th className="px-3 py-2.5 text-left font-heading text-[0.625rem] uppercase tracking-wider text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <CalendarDays size={9} />
                               Due Date
                             </span>
                           </th>
-                          <th className="px-3 py-2.5 text-right font-heading text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <th className="px-3 py-2.5 text-right font-heading text-[0.625rem] uppercase tracking-wider text-muted-foreground">
                             <span className="flex items-center gap-1 justify-end">
                               <Banknote size={9} />
                               Amount
                             </span>
                           </th>
-                          <th className="px-3 py-2.5 text-left font-heading text-[10px] uppercase tracking-wider text-muted-foreground hidden sm:table-cell">
+                          <th className="px-3 py-2.5 text-left font-heading text-[0.625rem] uppercase tracking-wider text-muted-foreground hidden sm:table-cell">
                             Status
                           </th>
                         </tr>
@@ -491,7 +492,7 @@ export function EmiSection({
                                 {row.installmentNo}
                               </td>
                               <td className="px-3 py-2.5">
-                                <span className="font-mono text-[11px] bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-800 px-2 py-0.5 rounded-md">
+                                <span className="font-mono text-[0.6875rem] bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-800 px-2 py-0.5 rounded-md">
                                   {row.refNumber ||
                                     `EMI-${String(row.installmentNo).padStart(2, "0")}`}
                                 </span>
@@ -504,17 +505,17 @@ export function EmiSection({
                               </td>
                               <td className="px-3 py-2.5 hidden sm:table-cell">
                                 {isPaid ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-heading font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-700">
+                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-heading font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-700">
                                     <CheckCircle2 size={9} />
                                     Paid
                                   </span>
                                 ) : isNext ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-heading font-semibold bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700">
+                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-heading font-semibold bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700">
                                     <Clock3 size={9} />
                                     Next Due
                                   </span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-heading bg-muted text-muted-foreground border border-border">
+                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-heading bg-muted text-muted-foreground border border-border">
                                     <Clock3 size={9} />
                                     Pending
                                   </span>
@@ -527,7 +528,7 @@ export function EmiSection({
                     </table>
 
                     <div className="bg-muted/40 border-t border-border px-4 py-2.5 flex items-center justify-between">
-                      <span className="text-[11px] text-muted-foreground font-heading">
+                      <span className="text-[0.6875rem] text-muted-foreground font-heading">
                         {displaySchedule.length} installments · {paidCount} paid
                         {remainingAmount > 0 && !allPaid && (
                           <span className="ml-2 text-rose-500">

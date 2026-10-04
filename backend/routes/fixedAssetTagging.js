@@ -9,6 +9,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { generateFAItemCodes } = require("../services/faItemCodeGenerator");
+const { listUntaggedBatches } = require("../services/fixedAssetAutoAlloc");
 
 router.use(authenticateToken);
 
@@ -83,6 +84,51 @@ router.get("/eligible-items", requirePageRight("fixed-asset-tagging", "view"), a
   }
 });
 
+// ── GET /pending-batches — received Fixed Asset stock (GRN / Inventory Import)
+// that has no tags yet, and why (e.g. its project has no ID Template) ─────────
+router.get("/pending-batches", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
+  try {
+    res.json(await listUntaggedBatches(getPool()));
+  } catch (err) {
+    console.error("[fixedAssetTagging] GET /pending-batches:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /pending-batches/:assetId — removes an untagged received-stock row
+// from FA Inventory (hard delete). Only for GRN batches nobody has tagged yet;
+// the GRN itself and its stock receipt are not touched. Inventory Import
+// batches are reversed from Inventory Import instead. ─────────────────────────
+router.delete("/pending-batches/:assetId", requirePageRight("fixed-asset-tagging", "delete"), async (req, res) => {
+  const assetId = toInt(req.params.assetId);
+  if (!assetId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const r = await tx.request().input("AssetId", sql.Int, assetId).query(`
+        SELECT AssetId, SourceType, AssetStatus,
+               (SELECT COUNT(*) FROM dbo.FixedAssetTagging t WHERE t.AssetId = fa.AssetId) AS TagCount
+        FROM dbo.FixedAssetRecord fa WITH (UPDLOCK, HOLDLOCK)
+        WHERE fa.AssetId = @AssetId AND fa.AssetCode IS NULL AND fa.Status <> 'Deleted'
+      `);
+      const b = r.recordset[0];
+      if (!b) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+      if (b.SourceType !== "GRN") { await tx.rollback(); return res.status(409).json({ error: "This stock came from Inventory Import — reverse it from Inventory Import instead." }); }
+      if (b.TagCount > 0 || b.AssetStatus !== "Pending") { await tx.rollback(); return res.status(409).json({ error: "This stock already has FA Item Codes — delete those tagging entries instead." }); }
+      await tx.request().input("AssetId", sql.Int, assetId).query(`DELETE FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`);
+      await tx.commit();
+    } catch (e) { await tx.rollback(); throw e; }
+    await bumpCacheVersion("fixed-assets");
+    await bumpCacheVersion("fixed-asset-tagging");
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[fixedAssetTagging] DELETE /pending-batches/:assetId:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /unassigned-codes — generated FA Item Codes not yet linked to a
 // Fixed Asset Record (used by Fixed Asset Record's "Fixed Asset Name" picker) ─
 router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), async (req, res) => {
@@ -111,12 +157,72 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
   }
 });
 
+// ── GET /tagged-codes — FA Item Codes whose Fixed Asset Depreciation Tag
+// (Asset Register) process is COMPLETE, for the sticker-print page. Hard
+// rule: the tag is Status='Tagged', carries an FAItemCode, AND a live
+// Fixed Asset Record has been created from it (fr.SourceTagId = t.TagId).
+// Codes stay listed forever once that record exists, so stickers can be
+// reprinted. Filters: company, financial year, tagging-date range,
+// FA-Item-Code search, Item-Name search. ───────────────────────────────────
+router.get("/tagged-codes", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    const where = [
+      "t.Status = 'Tagged'",
+      "t.FAItemCode IS NOT NULL AND LTRIM(RTRIM(t.FAItemCode)) <> ''",
+      // Asset Register process done: a non-deleted Fixed Asset Record links back to this tag.
+      "fr.AssetId IS NOT NULL",
+    ];
+
+    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("ISNULL(fr.CompanyId, t.CompanyId) = @CompanyId"); }
+    if (req.query.finYear)   { request.input("FinYear",   sql.NVarChar(20), req.query.finYear);        where.push("t.FinYear = @FinYear"); }
+    if (req.query.fromDate)  { request.input("FromDate",  sql.Date, req.query.fromDate);                where.push("t.DocDate >= @FromDate"); }
+    if (req.query.toDate)    { request.input("ToDate",    sql.Date, req.query.toDate);                  where.push("t.DocDate <= @ToDate"); }
+    if (req.query.faCode)    { request.input("FaCode",    sql.NVarChar(200), `%${String(req.query.faCode).trim()}%`);   where.push("t.FAItemCode LIKE @FaCode"); }
+    if (req.query.itemName)  { request.input("ItemName",  sql.NVarChar(200), `%${String(req.query.itemName).trim()}%`); where.push("ISNULL(fr.AssetName, im.M_Name) LIKE @ItemName"); }
+    if (req.query.search) {
+      request.input("Search", sql.NVarChar(200), `%${String(req.query.search).trim()}%`);
+      where.push("(t.FAItemCode LIKE @Search OR ISNULL(fr.AssetName, im.M_Name) LIKE @Search)");
+    }
+
+    const result = await request.query(`
+      SELECT
+        t.TagId, t.FAItemCode,
+        ISNULL(fr.AssetName, im.M_Name) AS ItemName,
+        fr.AssetId, fr.AssetCode,
+        t.DocNo, t.DocDate, t.FinYear, t.Status,
+        ISNULL(fr.CompanyId, t.CompanyId) AS CompanyId,
+        ISNULL(frco.name, co.name) AS CompanyName,
+        ISNULL(fr.ProjectId, t.ProjectId) AS ProjectId,
+        ISNULL(frpr.name, pr.name) AS ProjectName,
+        1 AS HasRecord
+      FROM dbo.FixedAssetTagging t
+      INNER JOIN dbo.FixedAssetRecord fr
+        ON fr.SourceTagId = t.TagId AND fr.Status <> 'Deleted' AND fr.AssetCode IS NOT NULL
+      LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
+      LEFT JOIN dbo.enterprise co   ON co.id   = t.CompanyId
+      LEFT JOIN dbo.enterprise pr   ON pr.id   = t.ProjectId
+      LEFT JOIN dbo.enterprise frco ON frco.id = fr.CompanyId
+      LEFT JOIN dbo.enterprise frpr ON frpr.id = fr.ProjectId
+      WHERE ${where.join(" AND ")}
+      ORDER BY t.FAItemCode
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[fixedAssetTagging] GET /tagged-codes:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET / — list tagging transactions (audit trail) ──────────────────────────
 router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
-    let where = [];
+    // Cancelled tags are soft-kept in the DB for FA Item Code / stock audit,
+    // but never surface in the Tagging Transaction History list on any client.
+    let where = ["t.Status <> 'Cancelled'"];
 
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("t.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("t.ProjectId = @ProjectId"); }
@@ -380,7 +486,10 @@ router.put("/:id", requirePageRight("fixed-asset-tagging", "edit"), async (req, 
   }
 });
 
-// ── DELETE /:id — soft-cancel, frees the tagged qty back to the batch ────────
+// ── DELETE /:id — permanently removes the tag, frees the tagged qty back to
+// the batch. Blocked if a Fixed Asset Record was already cut from this tag —
+// that record must be deleted first (chain order: Assignment/Transfer ->
+// Record -> Tagging, reverse of how they're created).
 router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
@@ -401,16 +510,15 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
       `);
       const tag = tagRes.recordset[0];
       if (!tag) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
-      if (tag.Status === "Cancelled") { await tx.rollback(); return res.json({ ok: true }); }
 
       // A tag that's already been completed into a Fixed Asset Record
-      // can't be cancelled out from under it — that would leave a live
-      // asset record referencing a "Cancelled" tag in its own history.
+      // can't be removed out from under it — that would leave a live
+      // asset record referencing a tag that no longer exists.
       // Delete the Fixed Asset Record first (frees the FA Item Code back
-      // to "unassigned"), then the tag can be cancelled.
+      // to "unassigned"), then the tag can be deleted.
       const recordRes = await tx.request().input("TagId", sql.Int, id).query(`
         SELECT AssetId FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK)
-        WHERE SourceTagId = @TagId AND Status <> 'Deleted'
+        WHERE SourceTagId = @TagId
       `);
       if (recordRes.recordset.length > 0) {
         await tx.rollback();
@@ -418,13 +526,8 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
       }
 
       await tx.request()
-        .input("TagId",     sql.Int, id)
-        .input("UpdatedBy", sql.NVarChar(200), email)
-        .query(`
-          UPDATE dbo.FixedAssetTagging
-          SET Status = 'Cancelled', UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
-          WHERE TagId = @TagId
-        `);
+        .input("TagId", sql.Int, id)
+        .query(`DELETE FROM dbo.FixedAssetTagging WHERE TagId = @TagId`);
 
       // Freeing this qty means the batch can no longer be fully tagged —
       // revert it to Pending if it had been auto-flipped to Active.

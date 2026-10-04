@@ -80,6 +80,7 @@ export interface FundTransferSummary {
   IsPostDated: boolean;
   DigitalRefNumber: string | null;
   CreatedBy: string | null;
+  CreatedByName?: string | null;
   CreatedAt: string;
 }
 
@@ -161,6 +162,21 @@ export const rejectFundTransfer = async (id: number, note?: string) => {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ note }),
+  });
+  return handleResponse(res);
+};
+
+/** Edit only the narration/remarks. Allowed until the transfer is Approved;
+ *  after approval (post-approval right required) the change is logged in
+ *  Finance → Amendment, and `amendmentId` is returned. */
+export const updateFundTransferRemarks = async (
+  id: number,
+  narration: string,
+): Promise<{ message: string; amendmentId: number | null }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/remarks`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ Narration: narration }),
   });
   return handleResponse(res);
 };

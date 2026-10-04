@@ -130,7 +130,7 @@ const SpecPanel: React.FC<{ blocks: RecordWithId[] }> = ({ blocks }) => {
         <select
           value={blockId}
           onChange={(e) => { setBlockId(e.target.value); setDirty(false); }}
-          className="border border-border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary min-w-[220px]"
+          className="border border-border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary min-w-0 sm:min-w-[220px]"
         >
           <option value="">— choose a block —</option>
           {activeBlocks.map((b) => (
@@ -195,7 +195,7 @@ const SpecPanel: React.FC<{ blocks: RecordWithId[] }> = ({ blocks }) => {
                     type="button"
                     disabled={!dirty || saveMutation.isPending}
                     onClick={() => saveMutation.mutate()}
-                    className="px-4 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors"
+                    className="px-4 py-1.5 rounded-md btn-module text-white text-sm font-medium disabled:opacity-40 transition-colors"
                   >
                     {saveMutation.isPending ? "Saving…" : "Save Specs"}
                   </button>
@@ -282,15 +282,15 @@ const fields: FieldDef[] = [
       const plans = taggedForProject.length ? taggedForProject : allPlans;
       const selected: string[] = (value as string[]) || [];
       if (!projectId) {
-        return <p className="text-[11px] text-muted-foreground">Select a Project first.</p>;
+        return <p className="text-[0.6875rem] text-muted-foreground">Select a Project first.</p>;
       }
       if (!plans.length) {
-        return <p className="text-[11px] text-muted-foreground">No active payment plans exist yet — create one in Payment Plan Master first.</p>;
+        return <p className="text-[0.6875rem] text-muted-foreground">No active payment plans exist yet — create one in Payment Plan Master first.</p>;
       }
       return (
         <div>
           {taggedForProject.length > 0 && (
-            <p className="text-[11px] text-muted-foreground mb-1.5">Showing this Project's tagged plans.</p>
+            <p className="text-[0.6875rem] text-muted-foreground mb-1.5">Showing this Project's tagged plans.</p>
           )}
           <div className="flex flex-wrap gap-2">
             {plans.map((p) => {
@@ -303,7 +303,7 @@ const fields: FieldDef[] = [
                   onClick={() =>
                     onChange(isSelected ? selected.filter((x) => x !== id) : [...selected, id])
                   }
-                  className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${isSelected ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
+                  className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${isSelected ? "btn-module text-white border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
                 >
                   {p.PlanName}
                 </button>
@@ -492,7 +492,7 @@ const BlockMaster: React.FC = () => {
         isDeleteLocked={(row) =>
           row.lockBookingNo
             ? `Has a Unit booked (${row.lockBookingNo as string})`
-            : row.lockHoldId
+            : row.lockHoldId != null
               ? "Has a Unit on hold"
               : null
         }
@@ -516,11 +516,11 @@ const BlockMaster: React.FC = () => {
           win.document.write(safeHtml`
             <html><head><title>Block — ${row.blockName}</title>
             <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-            </head><body><h2>Block Card</h2><table>
+            </head><body><h2>Block Card</h2><div className="overflow-x-auto thin-scroll"><table>
               <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
               <tr><td>Block Name</td><td>${row.blockName || "—"}</td></tr>
               <tr><td>Status</td><td>${row.status ? "Active" : "Inactive"}</td></tr>
-            </table></body></html>
+            </table></div></body></html>
           `);
           win.document.close();
           win.print();

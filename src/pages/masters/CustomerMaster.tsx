@@ -50,6 +50,8 @@ import {
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import { getAccountGroups } from "@/api/accountApi";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -121,6 +123,7 @@ interface Customer {
   LHeadStatus: boolean;
   LBelongsTo: number | null;
   GroupName: string | null;
+  InvoiceMode: "Invoice" | "NonInvoice" | null;
 }
 
 interface CustomerForm {
@@ -136,6 +139,7 @@ interface CustomerForm {
   LHeadAddress: string;
   LHeadStatus: boolean;
   LBelongsTo: string; // string id; converted to Number on save
+  InvoiceMode: "Invoice" | "NonInvoice";
 }
 
 const EMPTY_FORM: CustomerForm = {
@@ -151,6 +155,7 @@ const EMPTY_FORM: CustomerForm = {
   LHeadAddress: "",
   LHeadStatus: true,
   LBelongsTo: "",
+  InvoiceMode: "NonInvoice",
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
@@ -261,7 +266,7 @@ function buildCustomerColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-start">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -281,7 +286,7 @@ function buildCustomerColumns(
         }
         return (
           <div className="flex items-center justify-start gap-2 w-full min-w-[120px]">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
@@ -291,7 +296,7 @@ function buildCustomerColumns(
             {canPrint && (
               <button
                 onClick={() => onPrint(row.original)}
-                className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                className="p-1 rounded text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                 title="Print"
               >
                 <Printer size={15} />
@@ -341,12 +346,6 @@ const CustomerMaster: React.FC = () => {
 
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const LIMIT = 10;
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, filterStatus]);
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const {
@@ -358,6 +357,44 @@ const CustomerMaster: React.FC = () => {
     queryFn: () => getList(CUSTOMER_TYPE),
     staleTime: 5 * 60 * 1000,
   });
+
+  // Account Group — used to be force-locked server-side to Sundry Debtors,
+  // never shown as more than a static "Sundry Debtors" label; briefly
+  // defaulted to Sundry Creditors instead when the lock was first opened,
+  // then reverted — customers are Sundry Debtors, full stop (see migration
+  // 423, which also moved every existing Customer Master head back). Still
+  // a normal editable picker (same TreeDropdown pattern this file already
+  // uses for Payment Terms/GST Type) — this only sets the DEFAULT for a
+  // brand-new customer, an accountant can still pick a different group by
+  // hand. Resolved by Code, not a hardcoded AGId, since AGId is not stable
+  // across environments.
+  const { data: accountGroupsData } = useQuery({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 5 * 60 * 1000,
+  });
+  const accountGroupOptions = useMemo(() => {
+    if (!Array.isArray(accountGroupsData)) return [];
+    return (accountGroupsData as any[])
+      .filter((g) => g.AGId != null && g.Name)
+      .map((g) => ({ value: String(g.AGId), label: g.Name as string }));
+  }, [accountGroupsData]);
+  const defaultAccountGroupId = useMemo(() => {
+    if (!Array.isArray(accountGroupsData)) return "";
+    const sds = (accountGroupsData as any[]).find((g) => g.Code === "SDS");
+    return sds ? String(sds.AGId) : "";
+  }, [accountGroupsData]);
+  // Groups load asynchronously — if the Add form is already open (or
+  // restored from a draft) before they resolve, backfill the default the
+  // moment it's known. Only when not editing and nothing's been picked yet,
+  // so this never clobbers an existing record's real group or a choice the
+  // user already made.
+  useEffect(() => {
+    if (editingId === null && !form.LBelongsTo && defaultAccountGroupId) {
+      setForm((p) => ({ ...p, LBelongsTo: defaultAccountGroupId }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultAccountGroupId]);
 
   const customers: Customer[] = useMemo(() => {
     if (!Array.isArray(rawData)) return [];
@@ -376,6 +413,7 @@ const CustomerMaster: React.FC = () => {
       LHeadStatus: Boolean(item.LHeadStatus),
       LBelongsTo: item.LBelongsTo ?? null,
       GroupName: item.GroupName ?? null,
+      InvoiceMode: item.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice",
     }));
   }, [rawData]);
 
@@ -400,6 +438,7 @@ const CustomerMaster: React.FC = () => {
     LCountry: "India",
     LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
+    InvoiceMode: f.InvoiceMode,
   });
 
   const createMut = useMutation({
@@ -451,6 +490,7 @@ const CustomerMaster: React.FC = () => {
       LHeadAddress: c.LHeadAddress ?? "",
       LHeadStatus: c.LHeadStatus,
       LBelongsTo: c.LBelongsTo != null ? String(c.LBelongsTo) : "",
+      InvoiceMode: c.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice",
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -458,7 +498,7 @@ const CustomerMaster: React.FC = () => {
 
   const resetForm = () => {
     setEditingId(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM, LBelongsTo: defaultAccountGroupId });
     setErrors({});
   };
 
@@ -540,9 +580,6 @@ const CustomerMaster: React.FC = () => {
     });
   }, [customers, search, filterStatus]);
 
-  const totalPages = Math.max(Math.ceil(filtered.length / LIMIT), 1);
-  const paginated = filtered.slice((page - 1) * LIMIT, page * LIMIT);
-
   // ── Shared CSS ─────────────────────────────────────────────────────────────
   const inputCls =
     "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
@@ -620,7 +657,7 @@ const CustomerMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Building2 size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Basic Information
                 </p>
               </div>
@@ -670,17 +707,20 @@ const CustomerMaster: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Account Group — always Sundry Debtors for customers,
-                    never picked manually (see accountHeadMaster.js's
-                    getSundryDebtorsGroupId, applied server-side on every
-                    create/update regardless of what's sent here). */}
+                {/* Account Group — editable (defaults to Sundry Debtors
+                    for a new customer); see accountHeadMaster.js, which
+                    only fills this in server-side when nothing is sent. */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Group
                   </label>
-                  <div className="h-9 px-3 flex items-center rounded-lg border border-border/60 bg-muted/30 text-sm text-muted-foreground">
-                    Sundry Debtors
-                  </div>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.LBelongsTo}
+                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
+                    options={accountGroupOptions}
+                    placeholder="Select account group…"
+                  />
                 </div>
               </div>
             </div>
@@ -691,7 +731,7 @@ const CustomerMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Phone size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Contact Details
                 </p>
               </div>
@@ -787,7 +827,7 @@ const CustomerMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <FileText size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   GST &amp; Tax Details
                 </p>
               </div>
@@ -888,6 +928,24 @@ const CustomerMaster: React.FC = () => {
                 </span>
               </span>
             </div>
+
+            {/* ── Invoice / Non-Invoice ── */}
+            <div className="flex items-center gap-4 pt-1">
+              <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                Billing —
+              </span>
+              {(["NonInvoice", "Invoice"] as const).map((mode) => (
+                <label key={mode} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="customerInvoiceMode"
+                    checked={form.InvoiceMode === mode}
+                    onChange={() => setForm((p) => ({ ...p, InvoiceMode: mode }))}
+                  />
+                  {mode === "NonInvoice" ? "Non-Invoice (default — no invoice ever generated)" : "Invoice"}
+                </label>
+              ))}
+            </div>
           </div>
         </div>
         )}
@@ -936,10 +994,12 @@ const CustomerMaster: React.FC = () => {
           {/* Table */}
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden [&_th:last-child]:text-left [&_td:last-child]:text-left">
             <DataTable
-              data={paginated}
+              data={filtered}
               columns={columns}
               loading={isLoading}
-              searchPlaceholder="Search customers..."
+              searchable={false}
+              paginated={true}
+              defaultPageSize={10}
               getRowId={(row) => String(row.LHeadId)}
               emptyMessage={
                 isError
@@ -958,36 +1018,13 @@ const CustomerMaster: React.FC = () => {
               }
             />
           </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-            <span className="text-xs text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          </div>
         </div>
       </div>
       </FollowupShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -1043,7 +1080,7 @@ const CustomerMaster: React.FC = () => {
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     {label}
                   </p>
                   <p
@@ -1056,7 +1093,7 @@ const CustomerMaster: React.FC = () => {
                 </div>
               ))}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -1094,7 +1131,7 @@ const CustomerMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

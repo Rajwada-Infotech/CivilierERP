@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -8,6 +9,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -33,7 +35,7 @@ const CUSTOMER_SELECT = `
     c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome,
     c.Address AS PermanentAddress, c.City AS PermanentCity, c.State AS PermanentState, c.Pincode AS PermanentPincode,
     c.CurrentAddress, c.CurrentCity, c.CurrentState, c.CurrentPincode, c.IsCurrentSameAsPermanent,
-    c.DateOfBirth,
+    c.DateOfBirth, c.InvoiceMode,
     c.Notes, c.IsActive, c.CreatedAt, c.UpdatedAt,
     cu.name AS CreatedByName,
     l.LeadUid, l.Classification AS LeadClassification,
@@ -76,14 +78,51 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = ["c.IsActive = 1"];
     if (search) {
       req0.input("srch", sql.NVarChar(200), `%${search}%`);
       conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch OR c.PanNo LIKE @srch)");
     }
-    const result = await req0.query(`${CUSTOMER_SELECT} WHERE ${conds.join(" AND ")} ORDER BY c.CreatedAt DESC`);
-    res.json(result.recordset);
+    // A customer isn't itself scoped to one Company/Project/Block — it can
+    // have applications/bookings across several. Filtering here means "has
+    // at least one application matching this scope", via EXISTS against
+    // CrmApplication (which always carries CompanyId/ProjectId; BlockId only
+    // resolves once a unit is picked, via UnitMaster).
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
+    const where = `WHERE ${conds.join(" AND ")}`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmCustomer c
+          WHERE c.IsActive = 1
+            AND (@srch2 IS NULL OR (c.CustomerName LIKE @srch2 OR c.Mobile LIKE @srch2 OR c.CustomerNo LIKE @srch2 OR c.PanNo LIKE @srch2))
+            AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId2))
+            AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId2))
+            AND (@blockId2 IS NULL OR (EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId2) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId2)))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-customers] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -103,11 +142,16 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
   try {
     const pool = getPool();
     const { mobile, pan, email, name, excludeId } = req.query;
-    const excl = excludeId ? "AND c.Id <> @excl" : "";
     const req0 = pool.request();
     if (excludeId) req0.input("excl", sql.Int, parseInt(excludeId));
 
-    const conds = ["c.IsActive = 1", excl];
+    // Plain predicates only — joined with " AND " below. A stray pre-baked
+    // "AND c.Id <> @excl" fragment here used to produce a doubled "AND AND"
+    // (or, with no excludeId, an empty predicate between two ANDs) — this
+    // endpoint threw a SQL syntax error on every single call, regardless of
+    // excludeId, and had apparently never actually been exercised live.
+    const conds = ["c.IsActive = 1"];
+    if (excludeId) conds.push("c.Id <> @excl");
     const orClauses = [];
 
     if (mobile?.toString().trim()) {
@@ -122,9 +166,18 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
       req0.input("email", sql.NVarChar(200), email.toString().trim().toLowerCase());
       orClauses.push("LOWER(c.Email) = @email");
     }
+    // Name is a REFINEMENT signal only, never an independent match trigger —
+    // it still feeds @name into scoreExpr below to rank an already-real
+    // (mobile/PAN/email) match higher when the name also lines up. Used to
+    // also push its own bare LIKE '%name%' into orClauses, which meant any
+    // two unrelated customers merely sharing a name substring (a common
+    // first name, "KUMAR", "DEVI", ...) got flagged as "possible duplicates"
+    // even with completely different mobile numbers and PANs — the frontend
+    // always sends the current name alongside mobile/PAN on every check
+    // (CrmCustomers.tsx checkDuplicates), so this fired constantly on
+    // ordinary, unrelated registrations.
     if (name?.toString().trim()) {
       req0.input("name", sql.NVarChar(200), `%${name.toString().trim()}%`);
-      orClauses.push("c.CustomerName LIKE @name");
     }
 
     if (!orClauses.length) return res.json([]);
@@ -166,7 +219,8 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
 router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [custRes, appsRes, outstandingRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${CUSTOMER_SELECT} WHERE c.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -237,20 +291,26 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
   try {
     const pool = getPool();
     const b = req.body;
-    const missing = [];
-    if (!b.CustomerName?.trim()) missing.push("Customer Name");
-    if (!b.Mobile?.trim()) missing.push("Mobile");
-    if (!b.PanNo?.trim()) missing.push("PAN Number");
-    if (!b.PermanentAddress?.trim()) missing.push("Permanent Address");
-    if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
 
-    const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
-      .query("SELECT Id, CustomerNo, CustomerName FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
-    if (existing.recordset.length) {
-      return res.status(409).json({
-        error: `A customer with this mobile number already exists — ${existing.recordset[0].CustomerNo} (${existing.recordset[0].CustomerName})`,
-        existingCustomerId: existing.recordset[0].Id,
-      });
+    // Server-side requiredness for Customer Name — the frontend already
+    // enforces this, but relying on that alone left this endpoint creating
+    // nameless customers whenever it was hit directly, which then crashed
+    // Application creation downstream with a raw SQL NOT NULL error (see
+    // createCrmApplicationRecord in crmEntityCreation.js). Mobile is
+    // deliberately NOT required — that's an intentional business decision,
+    // and CrmCustomer.Mobile / CrmApplication.Mobile are both nullable to
+    // match (migrations 425 and 445).
+    if (!b.CustomerName?.trim()) return res.status(400).json({ error: "Customer Name is required" });
+
+    if (b.Mobile?.trim()) {
+      const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
+        .query("SELECT Id, CustomerNo, CustomerName FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
+      if (existing.recordset.length) {
+        return res.status(409).json({
+          error: `A customer with this mobile number already exists — ${existing.recordset[0].CustomerNo} (${existing.recordset[0].CustomerName})`,
+          existingCustomerId: existing.recordset[0].Id,
+        });
+      }
     }
 
     // This is the actual "only a converted lead may enter the CRM module"
@@ -277,20 +337,26 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email);
 
+    // Invoice / Non-Invoice — defaults to NonInvoice (matches the column's
+    // own DB default) when omitted or an unrecognised value is sent, rather
+    // than trusting an arbitrary client string straight into a CHECK-
+    // constrained column.
+    const invoiceMode = b.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice";
+
     const cur = resolveCurrentAddress(b);
     const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
     const result = await pool.request()
       .input("no",       sql.NVarChar(30),  customerNo)
-      .input("lid",       sql.Int,           b.LeadId ? parseInt(b.LeadId) : null)
-      .input("name",      sql.NVarChar(200), b.CustomerName.trim())
-      .input("mob",       sql.NVarChar(20),  b.Mobile.trim())
+      .input("lid",       sql.Int,           b.LeadId !== undefined && b.LeadId !== null && b.LeadId !== "" ? parseInt(b.LeadId) : null)
+      .input("name",      sql.NVarChar(200), b.CustomerName?.trim() || null)
+      .input("mob",       sql.NVarChar(20),  b.Mobile?.trim() || null)
       .input("altmob",    sql.NVarChar(20),  b.AltMobile || null)
       .input("email",     sql.NVarChar(200), email)
-      .input("pan",       sql.NVarChar(20),  b.PanNo.trim())
+      .input("pan",       sql.NVarChar(20),  b.PanNo?.trim() || null)
       .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo || null)
       .input("occ",       sql.NVarChar(100), b.Occupation || null)
       .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
-      .input("addr",      sql.NVarChar(500), b.PermanentAddress.trim())
+      .input("addr",      sql.NVarChar(500), b.PermanentAddress?.trim() || null)
       .input("city",      sql.NVarChar(100), b.PermanentCity || null)
       .input("state",     sql.NVarChar(100), b.PermanentState || null)
       .input("pin",       sql.NVarChar(10),  b.PermanentPincode || null)
@@ -300,6 +366,7 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
       .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
       .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
       .input("dob",       sql.Date,          b.DateOfBirth || null)
+      .input("invmode",   sql.NVarChar(20),  invoiceMode)
       .input("notes",     sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",        sql.Int,           actorId(req))
       .query(`
@@ -307,13 +374,13 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
           (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, PanNo, AadhaarNo, Occupation, AnnualIncome,
            Address, City, State, Pincode,
            CurrentAddress, CurrentCity, CurrentState, CurrentPincode, IsCurrentSameAsPermanent,
-           DateOfBirth, Notes,
+           DateOfBirth, InvoiceMode, Notes,
            CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
         VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @aadhaar, @occ, @income,
                 @addr, @city, @state, @pin,
                 @curaddr, @curcity, @curstate, @curpin, @cursame,
-                @dob, @notes, @cb, SYSDATETIME())
+                @dob, @invmode, @notes, @cb, SYSDATETIME())
       `);
     const newId = result.recordset[0].Id;
 
@@ -345,76 +412,104 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
 router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email, id);
+    if (!email) {
+      // The portal login is keyed on this email (CrmCustomerPortalUser.Email
+      // is NOT NULL), so it can't be cleared while a login exists.
+      const portal = await pool.request().input("id", sql.Int, id)
+        .query("SELECT TOP 1 1 AS x FROM dbo.CrmCustomerPortalUser WHERE CustomerId = @id");
+      if (portal.recordset.length) {
+        return res.status(400).json({ error: "This customer has a portal login, which signs in with their email — enter an email address." });
+      }
+    }
 
     const cur = resolveCurrentAddress(b);
-    await pool.request()
-      .input("id",       sql.Int,           id)
-      .input("name",      sql.NVarChar(200), b.CustomerName || null)
-      .input("mob",       sql.NVarChar(20),  b.Mobile || null)
-      .input("altmob",    sql.NVarChar(20),  b.AltMobile ?? null)
-      .input("email",     sql.NVarChar(200), email)
-      .input("pan",       sql.NVarChar(20),  b.PanNo || null)
-      .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo ?? null)
-      .input("occ",       sql.NVarChar(100), b.Occupation ?? null)
-      .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
-      .input("addr",      sql.NVarChar(500), b.PermanentAddress || null)
-      .input("city",      sql.NVarChar(100), b.PermanentCity ?? null)
-      .input("state",     sql.NVarChar(100), b.PermanentState ?? null)
-      .input("pin",       sql.NVarChar(10),  b.PermanentPincode ?? null)
-      .input("curaddr",   sql.NVarChar(500), cur.currentAddress)
-      .input("curcity",   sql.NVarChar(100), cur.currentCity)
-      .input("curstate",  sql.NVarChar(100), cur.currentState)
-      .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
-      .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
-      .input("dob",       sql.Date,          b.DateOfBirth || null)
-      .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
-      .input("ub",        sql.Int,           actorId(req))
-      .query(`
-        UPDATE dbo.CrmCustomer SET
-          CustomerName = ISNULL(@name, CustomerName), Mobile = ISNULL(@mob, Mobile),
-          AltMobile = @altmob, Email = @email,
-          PanNo = ISNULL(@pan, PanNo), AadhaarNo = @aadhaar, Occupation = @occ, AnnualIncome = @income,
-          Address = ISNULL(@addr, Address), City = @city, State = @state, Pincode = @pin,
-          CurrentAddress = @curaddr, CurrentCity = @curcity, CurrentState = @curstate, CurrentPincode = @curpin,
-          IsCurrentSameAsPermanent = @cursame,
-          DateOfBirth = ISNULL(@dob, DateOfBirth),
-          Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
 
-    // CrmApplication.Email/Mobile/AltMobile were originally seeded FROM the
-    // customer at application-creation time but are separate copies — left
-    // unsynced, an edit here (e.g. correcting a typo) would silently leave
-    // every linked application, and therefore that application's already-
-    // provisioned portal login lookup, pointing at the stale value. Keep
-    // them in lockstep since CrmCustomer is the canonical identity record.
-    await pool.request()
-      .input("id",     sql.Int,          id)
-      .input("name",   sql.NVarChar(200), b.CustomerName || null)
-      .input("mob",    sql.NVarChar(20), b.Mobile || null)
-      .input("altmob", sql.NVarChar(20), b.AltMobile ?? null)
-      .input("email",  sql.NVarChar(200), email)
-      .query(`
-        UPDATE dbo.CrmApplication SET
-          ApplicantName = ISNULL(@name, ApplicantName),
-          Mobile = ISNULL(@mob, Mobile),
-          AltMobile = @altmob,
-          Email = @email
-        WHERE CustomerId = @id
-      `);
+    // The canonical Customer record and its two denormalized copies
+    // (CrmApplication's ApplicantName/Mobile/Email, CrmCustomerPortalUser's
+    // Email) must stay in lockstep — see the comment below on why. Wrapped
+    // so a failure partway through can't leave the canonical record edited
+    // while a linked application or the portal login still point at the
+    // stale value.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",       sql.Int,           id)
+        .input("name",      sql.NVarChar(200), b.CustomerName || null)
+        .input("mob",       sql.NVarChar(20),  b.Mobile || null)
+        .input("altmob",    sql.NVarChar(20),  b.AltMobile ?? null)
+        .input("email",     sql.NVarChar(200), email)
+        .input("pan",       sql.NVarChar(20),  b.PanNo || null)
+        .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo ?? null)
+        .input("occ",       sql.NVarChar(100), b.Occupation ?? null)
+        .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
+        .input("addr",      sql.NVarChar(500), b.PermanentAddress || null)
+        .input("city",      sql.NVarChar(100), b.PermanentCity ?? null)
+        .input("state",     sql.NVarChar(100), b.PermanentState ?? null)
+        .input("pin",       sql.NVarChar(10),  b.PermanentPincode ?? null)
+        .input("curaddr",   sql.NVarChar(500), cur.currentAddress)
+        .input("curcity",   sql.NVarChar(100), cur.currentCity)
+        .input("curstate",  sql.NVarChar(100), cur.currentState)
+        .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
+        .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
+        .input("dob",       sql.Date,          b.DateOfBirth || null)
+        .input("invmode",   sql.NVarChar(20),  b.InvoiceMode === "Invoice" || b.InvoiceMode === "NonInvoice" ? b.InvoiceMode : null)
+        .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
+        .input("ub",        sql.Int,           actorId(req))
+        .query(`
+          UPDATE dbo.CrmCustomer SET
+            CustomerName = ISNULL(@name, CustomerName), Mobile = ISNULL(@mob, Mobile),
+            AltMobile = @altmob, Email = @email,
+            PanNo = ISNULL(@pan, PanNo), AadhaarNo = @aadhaar, Occupation = @occ, AnnualIncome = @income,
+            Address = ISNULL(@addr, Address), City = @city, State = @state, Pincode = @pin,
+            CurrentAddress = @curaddr, CurrentCity = @curcity, CurrentState = @curstate, CurrentPincode = @curpin,
+            IsCurrentSameAsPermanent = @cursame,
+            DateOfBirth = ISNULL(@dob, DateOfBirth),
+            InvoiceMode = ISNULL(@invmode, InvoiceMode),
+            Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("email", sql.NVarChar(200), email)
-      .query(`
-        UPDATE dbo.CrmCustomerPortalUser
-        SET Email = @email
-        WHERE CustomerId = @id
-      `);
+      // CrmApplication.Email/Mobile/AltMobile were originally seeded FROM the
+      // customer at application-creation time but are separate copies — left
+      // unsynced, an edit here (e.g. correcting a typo) would silently leave
+      // every linked application, and therefore that application's already-
+      // provisioned portal login lookup, pointing at the stale value. Keep
+      // them in lockstep since CrmCustomer is the canonical identity record.
+      await tx.request()
+        .input("id",     sql.Int,          id)
+        .input("name",   sql.NVarChar(200), b.CustomerName || null)
+        .input("mob",    sql.NVarChar(20), b.Mobile || null)
+        .input("altmob", sql.NVarChar(20), b.AltMobile ?? null)
+        .input("email",  sql.NVarChar(200), email)
+        .query(`
+          UPDATE dbo.CrmApplication SET
+            ApplicantName = ISNULL(@name, ApplicantName),
+            Mobile = ISNULL(@mob, Mobile),
+            AltMobile = @altmob,
+            Email = @email
+          WHERE CustomerId = @id
+        `);
+
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("email", sql.NVarChar(200), email)
+        .query(`
+          UPDATE dbo.CrmCustomerPortalUser
+          SET Email = @email
+          WHERE CustomerId = @id
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     // Same lockstep guarantee, extended to the "Customer Master" ledger head
     // (dbo.AccountHeadMaster, LHeadType='C') that the Sales module's Customer
@@ -423,8 +518,15 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     // payment, so an edit here previously left that master record stale
     // forever. No-op if the customer has no ledger head yet.
     try {
+      // Re-read the row's now-current InvoiceMode rather than trusting
+      // whatever the client did or didn't send — the UPDATE above already
+      // applied ISNULL(@invmode, InvoiceMode), so this is the real final
+      // value regardless of whether this PUT touched it at all.
+      const finalMode = await pool.request().input("id", sql.Int, id)
+        .query("SELECT InvoiceMode FROM dbo.CrmCustomer WHERE Id = @id");
       await syncCrmCustomerLedgerHead(pool, id, {
         CustomerName: b.CustomerName, Mobile: b.Mobile, Email: email, Address: b.PermanentAddress, PanNo: b.PanNo,
+        InvoiceMode: finalMode.recordset[0]?.InvoiceMode,
       });
     } catch (ledgerErr) {
       console.error("[crm-customers] ledger head sync failed:", ledgerErr.message);
@@ -438,6 +540,71 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     }
     console.error("[crm-customers] PUT error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id — soft-delete a customer (IsActive = 0). CrmCustomer records are
+// never hard-deleted (they anchor Applications/Bookings/ledger history); this
+// just removes them from every customer list/picker, all of which filter
+// IsActive = 1.
+//
+// Guard: only allowed when the customer has NO live booking. A booking counts
+// as live unless its Status is a terminal one (Cancelled / Rejected / Expired)
+// — so an Approved booking, or one still Pending/in approval, blocks the
+// delete. Staff must cancel the booking through the Cancellation flow first.
+// Applications with no booking do not block (they carry no money/allotment on
+// their own); they simply become inactive-customer history.
+router.delete("/:id", requirePageRight("crm-customers", "delete"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid customer id" });
+
+    const cust = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Id, CustomerNo, CustomerName, IsActive FROM dbo.CrmCustomer WHERE Id = @id");
+    if (!cust.recordset.length) return res.status(404).json({ error: "Customer not found" });
+    if (!cust.recordset[0].IsActive) {
+      return res.status(409).json({ error: "This customer has already been deleted" });
+    }
+
+    // Any booking that isn't in a terminal state blocks the delete.
+    const liveBookings = await pool.request().input("id", sql.Int, id).query(`
+      SELECT b.BookingNo, b.Status
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE a.CustomerId = @id
+        AND b.IsActive = 1
+        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired')
+      ORDER BY b.BookingNo
+    `);
+    if (liveBookings.recordset.length) {
+      const list = liveBookings.recordset
+        .map((r) => `${r.BookingNo} (${r.Status})`)
+        .join(", ");
+      return res.status(400).json({
+        error: `Cannot delete ${cust.recordset[0].CustomerNo} — it has ${liveBookings.recordset.length} active or approved booking${liveBookings.recordset.length === 1 ? "" : "s"}: ${list}. Cancel the booking(s) through the Cancellation flow first.`,
+      });
+    }
+
+    // Soft-delete the customer and disable any portal login tied to it, in one
+    // transaction so a deleted customer can never still sign in to the portal.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req))
+        .query("UPDATE dbo.CrmCustomer SET IsActive = 0, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      await tx.request().input("id", sql.Int, id)
+        .query("UPDATE dbo.CrmCustomerPortalUser SET IsActive = 0 WHERE CustomerId = @id");
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
+    }
+
+    res.json({ success: true, message: `Customer ${cust.recordset[0].CustomerNo} deleted` });
+  } catch (e) {
+    console.error("[crm-customers] DELETE error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 

@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { AutoInput } from "@/components/ui/date-input";
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -8,12 +9,13 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  Save, CheckCircle2, Circle, AlertTriangle, ChevronRight, Landmark, Users,
+  Save, CheckCircle2, Circle, AlertTriangle, ChevronRight, Landmark,
   IdCard, Briefcase, Phone, Building2, Search, Lock, Pencil, CreditCard,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/customer-bank-details";
 const CHECKLIST_API = "/api/crm/welcome-calls";
@@ -29,7 +31,6 @@ const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const EMPTY_FORM = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
-  NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
   PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", Notes: "",
   FinancingType: "",
 };
@@ -40,21 +41,19 @@ const EMPTY_FORM = {
 // before the record is even saved.
 const REQUIRED_KEYS: (keyof typeof EMPTY_FORM)[] = [
   "BankName", "AccountNo", "IfscCode", "AccountHolderName",
-  "NomineeName", "NomineeRelation", "PanNo", "AadhaarNo", "Occupation",
+  "PanNo", "AadhaarNo", "Occupation",
   "FinancingType",
 ];
 
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const AADHAAR_RE = /^\d{12}$/;
-const MOBILE_RE = /^\d{10}$/;
 
 function validate(form: typeof EMPTY_FORM) {
   const errors: Partial<Record<keyof typeof EMPTY_FORM, string>> = {};
   if (form.IfscCode && !IFSC_RE.test(form.IfscCode.toUpperCase())) errors.IfscCode = "Invalid IFSC format (e.g. HDFC0001234)";
   if (form.PanNo && !PAN_RE.test(form.PanNo.toUpperCase())) errors.PanNo = "Invalid PAN format (e.g. ABCDE1234F)";
   if (form.AadhaarNo && !AADHAAR_RE.test(form.AadhaarNo)) errors.AadhaarNo = "Aadhaar must be exactly 12 digits";
-  if (form.NomineeContact && !MOBILE_RE.test(form.NomineeContact)) errors.NomineeContact = "Must be a 10-digit mobile number";
   if (form.AccountNo && !/^\d{6,20}$/.test(form.AccountNo)) errors.AccountNo = "Account number should be 6-20 digits";
   return errors;
 }
@@ -64,8 +63,17 @@ function initials(name: string | null | undefined) {
   return name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-async function fetchList(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+interface BankDetailsCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — Pending/Complete counts are
+// computed client-side from the whole set (see `counts` below), same as
+// CrmDemands. Company/Project/Block narrows the set server-side instead.
+async function fetchList(cpb?: BankDetailsCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  try { const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchBankDetail(bookingId: number): Promise<any> {
   try { const r = await fetchWithAuth(`${API}/booking/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
@@ -112,28 +120,15 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   // gate above: someone without canEdit never sees an Edit button at all.
   const [uiLocked, setUiLocked] = useState(true);
   const locked = !canEdit || uiLocked;
-  // Booking Amount (Milestone 1) must actually be paid before this form —
-  // and the Financing Type declaration on it — can be completed. Mirrors the
-  // same hard gate the backend now enforces in
-  // validateAgreementPreparationPrerequisites (crmWorkflowGuards.js), so
-  // staff see the reason up front instead of a save that silently never
-  // unlocks Agreement prep.
-  const [milestone1Status, setMilestone1Status] = useState<string | null>(null);
-  const [milestone1PendingApproval, setMilestone1PendingApproval] = useState(false);
-  const bookingAmountPaid = milestone1Status === CrmStatus.PAID;
 
   useQuery({
     queryKey: ["crm-bank-detail", row.BookingId],
     queryFn: async () => {
       const d = await fetchBankDetail(row.BookingId);
-      setMilestone1Status(d?.Milestone1Status ?? null);
-      setMilestone1PendingApproval(!!d?.Milestone1PendingApproval);
       setForm(d ? {
         BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
         IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
-        NomineeName: d.NomineeName || "", NomineeRelation: d.NomineeRelation || "",
-        NomineeDob: d.NomineeDob ? String(d.NomineeDob).slice(0,10) : "", NomineeContact: d.NomineeContact || "",
-        NomineeAddress: d.NomineeAddress || "", PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
+        PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
         Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
         Notes: d.Notes || "", FinancingType: d.FinancingType || "",
       } : { ...EMPTY_FORM });
@@ -162,7 +157,6 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
   const handleSave = async () => {
     if (locked) { toast.error("This record is locked — only the assigned salesperson or an admin can edit it"); return; }
-    if (!bookingAmountPaid) { toast.error("Booking Amount (Milestone 1) must be paid before this form can be completed"); return; }
     setTouched(true);
     if (hasErrors) { toast.error("Fix the highlighted fields before saving"); return; }
     setSaving(true);
@@ -175,7 +169,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success(isComplete
         ? (checklist?.welcomeCall?.done ? "KYC complete — agreement prep will proceed automatically" : "KYC complete — waiting on the welcome call to proceed")
-        : "Bank & nominee details saved");
+        : "Bank details saved");
       setUiLocked(true);
       qc.invalidateQueries({ queryKey: ["crm-bank-detail", row.BookingId] });
       qc.invalidateQueries({ queryKey: ["crm-welcome-checklist", row.BookingId] });
@@ -189,10 +183,10 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
   const UPPERCASE_FIELDS: (keyof typeof EMPTY_FORM)[] = ["PanNo", "IfscCode"];
 
-  const field = (key: keyof typeof form, label: string, type = "text", required = false) => (
+  const field = (key: keyof typeof form, label: string, type = "text") => (
     <div>
-      <label className="text-xs text-muted-foreground block mb-1">{label}{required && " *"}</label>
-      <input type={type} value={form[key]} readOnly={locked}
+      <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+      <AutoInput type={type} value={form[key]} readOnly={locked}
         onChange={(e) => {
           if (locked) return;
           const val = UPPERCASE_FIELDS.includes(key) ? e.target.value.toUpperCase() : e.target.value;
@@ -200,19 +194,19 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         }}
         onBlur={() => setTouched(true)}
         className={`w-full text-sm border rounded-lg px-2.5 py-2 ${locked ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"} ${touched && errors[key] ? "border-rose-400" : "border-border"}`} />
-      {touched && errors[key] && <p className="text-[11px] text-rose-500 mt-0.5">{errors[key]}</p>}
+      {touched && errors[key] && <p className="text-[0.6875rem] text-rose-500 mt-0.5">{errors[key]}</p>}
     </div>
   );
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent accent="crm" className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
-              <Landmark size={16} className="text-primary" /> Bank & Nominee Details
+              <Landmark size={16} className="text-primary" /> Bank Details
             </span>
-            {canEdit && uiLocked && bookingAmountPaid && (
+            {canEdit && uiLocked && (
               <button onClick={() => setUiLocked(false)}
                 className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
                 <Pencil size={12} /> Edit
@@ -221,18 +215,8 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
           </DialogTitle>
         </DialogHeader>
 
-        {!bookingAmountPaid ? (
-          milestone1PendingApproval ? (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              <Lock size={13} /> Booking Amount submitted — awaiting Finance approval. This form unlocks automatically once Account's Head approves it.
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              <AlertTriangle size={13} /> Booking Amount (Milestone 1) must be paid before Bank & Nominee / Financing details can be completed.
-            </div>
-          )
-        ) : !canEdit ? (
-          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+        {!canEdit ? (
+          <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
             <Lock size={13} /> This record is locked — only the assigned salesperson or an admin can edit it.
           </div>
         ) : uiLocked ? (
@@ -260,14 +244,14 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
                 </div>
               </div>
             </div>
-            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium shrink-0 ${isComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-amber-600 bg-amber-50 border-amber-200"}`}>
+            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium shrink-0 ${isComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
               {isComplete ? "KYC Complete" : `${progressPct}% Complete`}
             </span>
           </div>
 
           <div className="space-y-1">
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>{filledCount} of {REQUIRED_KEYS.length} required fields captured</span>
+            <div className="flex items-center justify-between text-[0.6875rem] text-muted-foreground">
+              <span>{filledCount} of {REQUIRED_KEYS.length} fields captured (none mandatory)</span>
               <span className="font-medium text-foreground">{progressPct}%</span>
             </div>
             <div className="h-1.5 rounded-full bg-muted overflow-hidden">
@@ -288,7 +272,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
                 Agreement: {checklist.agreement.Status} <ChevronRight size={11} />
               </button>
             ) : isComplete && !checklist?.welcomeCall?.done ? (
-              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border border-amber-200 text-amber-600 bg-amber-50 ml-auto">
+              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border border-sky-200 text-sky-600 bg-sky-50 ml-auto">
                 <AlertTriangle size={12} /> Welcome call needed to trigger agreement prep
               </span>
             ) : null}
@@ -297,45 +281,30 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
         {/* ── Form sections ── */}
         <SectionCard icon={Landmark} iconClass="bg-sky-500/10 text-sky-600" title="Bank Details">
-          <div className="grid grid-cols-2 gap-3">
-            {field("BankName", "Bank Name", "text", true)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {field("BankName", "Bank Name")}
             {field("BranchName", "Branch Name")}
-            {field("AccountNo", "Account Number", "text", true)}
-            {field("IfscCode", "IFSC Code", "text", true)}
-            <div className="col-span-2">{field("AccountHolderName", "Account Holder Name", "text", true)}</div>
+            {field("AccountNo", "Account Number")}
+            {field("IfscCode", "IFSC Code")}
+            <div className="col-span-2">{field("AccountHolderName", "Account Holder Name")}</div>
           </div>
         </SectionCard>
 
-        <SectionCard icon={Users} iconClass="bg-violet-500/10 text-violet-600" title="Nominee Details">
-          <div className="grid grid-cols-2 gap-3">
-            {field("NomineeName", "Nominee Name", "text", true)}
-            {field("NomineeRelation", "Relation", "text", true)}
-            {field("NomineeDob", "Date of Birth", "date")}
-            {field("NomineeContact", "Contact Number")}
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Nominee Address</label>
-            <textarea value={form.NomineeAddress} readOnly={locked}
-              onChange={(e) => !locked && setForm((f) => ({ ...f, NomineeAddress: e.target.value }))}
-              rows={2} className={`w-full text-sm border border-border rounded-lg px-2.5 py-2 resize-none ${locked ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
-          </div>
-        </SectionCard>
-
-        <div className="grid grid-cols-2 gap-4">
-          <SectionCard icon={IdCard} iconClass="bg-amber-500/10 text-amber-600" title="Identity">
-            {field("PanNo", "PAN Number", "text", true)}
-            {field("AadhaarNo", "Aadhaar Number", "text", true)}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <SectionCard icon={IdCard} iconClass="bg-sky-500/10 text-sky-600" title="Identity">
+            {field("PanNo", "PAN Number")}
+            {field("AadhaarNo", "Aadhaar Number")}
           </SectionCard>
           <SectionCard icon={Briefcase} iconClass="bg-emerald-500/10 text-emerald-600" title="Occupation & Income">
-            {field("Occupation", "Occupation", "text", true)}
+            {field("Occupation", "Occupation")}
             {field("AnnualIncome", "Annual Income (₹)", "number")}
           </SectionCard>
         </div>
 
         <SectionCard icon={CreditCard} iconClass="bg-cyan-500/10 text-cyan-600" title="Financing">
           <div>
-            <label className="text-xs text-muted-foreground block mb-1">How is this purchase being financed? *</label>
-            <div className="grid grid-cols-2 gap-2">
+            <label className="text-xs text-muted-foreground block mb-1">How is this purchase being financed?</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {(["SelfFunded", "LoanFinanced"] as const).map((opt) => (
                 <button key={opt} type="button" disabled={locked}
                   onClick={() => !locked && setForm((f) => ({ ...f, FinancingType: opt }))}
@@ -346,12 +315,9 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
                 </button>
               ))}
             </div>
-            {touched && !form.FinancingType && (
-              <p className="text-[11px] text-rose-500 mt-1">Financing type must be declared</p>
-            )}
           </div>
           {form.FinancingType === "LoanFinanced" && !loanDetail?.HasLoanRecord && (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
               <AlertTriangle size={13} /> No loan record on file yet — capture it on Home Loan Tracking once the customer's bank/sanction details are known.
             </div>
           )}
@@ -359,7 +325,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
         <div className="flex justify-between items-center pt-3 border-t border-border">
           <span className="text-xs text-muted-foreground">
-            {!canEdit ? "Locked — assigned salesperson or admin only" : uiLocked ? "Locked for viewing" : hasErrors ? "Fix highlighted errors before saving" : missingRequired.length > 0 ? `${missingRequired.length} required field(s) remaining` : "All required fields captured"}
+            {!canEdit ? "Locked — assigned salesperson or admin only" : uiLocked ? "Locked for viewing" : hasErrors ? "Fix highlighted errors before saving" : "No fields are mandatory — save anytime"}
           </span>
           <div className="flex gap-2">
             {locked ? (
@@ -368,7 +334,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
               <>
                 <button onClick={() => { setUiLocked(true); onClose(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                 <button onClick={handleSave} disabled={saving}
-                  className="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-40">
+                  className="flex items-center gap-1.5 px-4 py-1.5 btn-module text-white text-sm font-medium rounded-lg hover:shadow-lg disabled:opacity-40">
                   <Save size={14} /> {saving ? "Saving..." : "Save Details"}
                 </button>
               </>
@@ -391,8 +357,9 @@ const CrmCustomerBankDetails: React.FC = () => {
   const [search, setSearch] = useState("");
   const [activeRow, setActiveRow] = useState<any | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
-  const { data: list = [], isLoading } = useQuery({ queryKey: ["crm-bank-details-list"], queryFn: fetchList, staleTime: 30_000 });
+  const { data: list = [], isLoading } = useQuery({ queryKey: ["crm-bank-details-list", cpb], queryFn: () => fetchList(cpb), staleTime: 30_000 });
 
   // Deep-link support: /crm/customer-bank-details?bookingId=X opens the
   // dialog for that booking directly (e.g. from the Bookings list action).
@@ -428,7 +395,7 @@ const CrmCustomerBankDetails: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Bank Details"]} />
-      <CrmShell title="CRM — Customer Bank & Nominee Details" subtitle="KYC captured before agreement preparation">
+      <CrmShell title="CRM — Customer Bank Details" subtitle="KYC captured before agreement preparation">
       <div className="space-y-4">
         <div className="flex gap-3 items-center flex-wrap">
           <div className="relative flex-1 min-w-48">
@@ -437,6 +404,7 @@ const CrmCustomerBankDetails: React.FC = () => {
               placeholder="Search by customer, booking, project..."
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
           </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
           <div className="flex rounded-lg border border-border overflow-hidden">
             {([
               ["All", counts.all],
@@ -444,7 +412,7 @@ const CrmCustomerBankDetails: React.FC = () => {
               ["Complete", counts.complete],
             ] as [StatusFilter, number][]).map(([key, count]) => (
               <button key={key} onClick={() => setStatusFilter(key)}
-                className={`px-3 py-2 text-xs font-medium ${statusFilter === key ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
+                className={`px-3 py-2 text-xs font-medium ${statusFilter === key ? "btn-module text-white" : "bg-background hover:bg-muted"}`}>
                 {key} ({count})
               </button>
             ))}
@@ -474,10 +442,10 @@ const CrmCustomerBankDetails: React.FC = () => {
                   {r.Mobile} · {r.ProjectName || "—"}{r.UnitNo ? ` · Unit ${r.UnitNo}` : ""}
                 </div>
               </div>
-              <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.LastCallOutcome === "Welcomed" ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
+              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.LastCallOutcome === "Welcomed" ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
                 {r.LastCallOutcome === "Welcomed" ? "Called" : "Not Called"}
               </span>
-              <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.IsComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-amber-600 bg-amber-50 border-amber-200"}`}>
+              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.IsComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
                 {r.IsComplete ? "KYC Complete" : "KYC Pending"}
               </span>
               <ChevronRight size={14} className="text-muted-foreground shrink-0" />

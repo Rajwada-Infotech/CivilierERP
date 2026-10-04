@@ -3,7 +3,7 @@ import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useAuth } from "@/contexts/AuthContext";
 import { LogoFull } from "@/components/Logo";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FileSpreadsheet, ListChecks, Building2, Bell, ReceiptText } from "lucide-react";
 import { Logout } from "iconsax-react";
@@ -57,7 +57,7 @@ function UserDropdown({ open, onClose, onToggle, handleLogout }: {
             </div>
           </div>
           <div className="relative mt-2">
-            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <span className="inline-flex items-center gap-1 text-[0.625rem] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
               <Building2 size={9} /> Supplier Portal
             </span>
           </div>
@@ -111,7 +111,7 @@ function SupplierBell() {
     >
       <Bell size={16} />
       {urgentCount > 0 && (
-        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-[9px] font-bold text-white flex items-center justify-center leading-none">
+        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-[0.5625rem] font-bold text-white flex items-center justify-center leading-none">
           {urgentCount > 9 ? "9+" : urgentCount}
         </span>
       )}
@@ -124,7 +124,7 @@ export function SupplierLayout({ children }: { children: React.ReactNode }) {
   const { handleLogout, overlay } = useGracefulLogout();
   const location = useLocation();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 

@@ -205,6 +205,17 @@ function escapeXml(v: string): string {
     .replace(/'/g, "&apos;");
 }
 
+// Excel's default column width (~8.43 chars) is what makes a freshly
+// exported sheet look like it's "cutting" columns — the data is all there,
+// it's just hidden behind a narrow column until someone manually widens it
+// or double-clicks the border. Sizing each column off its own content (same
+// idea as exportToPdf's columnMaxLen below) means the sheet opens already
+// readable instead of relying on Excel's "auto-fitted" behavior that this
+// component's own UI copy (see ExportMenu.tsx's "auto-fitted columns"
+// description) promises but a bare <sheetData>-only worksheet never did.
+const XLSX_MIN_WIDTH = 10;
+const XLSX_MAX_WIDTH = 60;
+
 export async function exportToXlsx(
   rows: Record<string, unknown>[],
   columns: ExportColumn[],
@@ -229,8 +240,23 @@ export async function exportToXlsx(
     })
     .join("");
 
+  const colWidths = columns.map((c, ci) =>
+    Math.min(
+      XLSX_MAX_WIDTH,
+      Math.max(
+        XLSX_MIN_WIDTH,
+        c.header.length,
+        ...rows.map((row) => getCell(row, c).length),
+      ) + 2,
+    ),
+  );
+  const colsXml = `<cols>${colWidths
+    .map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`)
+    .join("")}</cols>`;
+
   const wsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  ${colsXml}
   <sheetData>${rowsXml}</sheetData>
 </worksheet>`;
   const wbXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

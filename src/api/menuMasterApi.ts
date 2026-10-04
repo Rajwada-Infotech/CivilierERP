@@ -1,4 +1,4 @@
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+﻿import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE_URL = "/api/menu-master";
 
@@ -15,7 +15,7 @@ export interface MenuMaster {
 export const getMenuMasters = async (): Promise<MenuMaster[]> => {
   const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const addMenuMaster = async (data: {

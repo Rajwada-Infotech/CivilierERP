@@ -9,6 +9,7 @@ interface Props {
   onDragStart?: (index: number) => void;
   onDragOver?: (index: number) => void;
   onDrop?: () => void;
+  onDragEnd?: () => void;
   isDragging?: boolean;
   isDropTarget?: boolean;
   /** Inline list-row preview — no drag handle, no delete button. */
@@ -27,6 +28,7 @@ export function ActivityRung({
   onDragStart,
   onDragOver,
   onDrop,
+  onDragEnd,
   isDragging,
   isDropTarget,
   readOnly,
@@ -34,7 +36,7 @@ export function ActivityRung({
   return (
     <div className="relative pl-9">
       {/* Rail node */}
-      <div className="absolute left-0 top-3 w-7 h-7 rounded-full bg-primary text-white text-[11px] font-heading font-bold flex items-center justify-center shadow-sm z-10">
+      <div className="absolute left-0 top-3 w-7 h-7 rounded-full bg-primary text-white text-[0.6875rem] font-heading font-bold flex items-center justify-center shadow-sm z-10">
         {rung.sequenceNo}
       </div>
       {/* Rail line down to the next node */}
@@ -55,6 +57,16 @@ export function ActivityRung({
           e.preventDefault();
           onDrop?.();
         }}
+        // Fires on release regardless of whether a drop landed on a valid
+        // target — dropping outside the list (or pressing Escape mid-drag)
+        // never fires onDrop, which used to leave this row stuck at 40%
+        // opacity forever (dragIndex never got reset). onDragEnd is the one
+        // event the HTML5 DnD spec guarantees always fires when the drag
+        // ends, so it's the right place to unconditionally clear the state.
+        onDragEnd={() => {
+          if (readOnly) return;
+          onDragEnd?.();
+        }}
         className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 bg-card transition-all ${
           isDragging ? "opacity-40" : ""
         } ${isDropTarget ? "border-primary ring-2 ring-primary/20" : "border-border"}`}
@@ -66,7 +78,7 @@ export function ActivityRung({
           {rung.activityName}
         </span>
         <span
-          className={`text-[9px] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 ${
+          className={`text-[0.5625rem] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 ${
             rung.workType === "INTERNAL"
               ? "bg-orange-500/10 text-orange-500"
               : "bg-sky-500/10 text-sky-500"

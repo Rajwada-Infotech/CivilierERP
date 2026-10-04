@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { autoTagPendingBatchesForProject } = require("../services/fixedAssetAutoAlloc");
 
 router.use(authMiddleware);
 
@@ -77,7 +78,15 @@ router.post("/", requirePageRight("id-template-master", "create"), async (req, r
         OUTPUT INSERTED.Id AS id
         VALUES (@ProjectId, @ProjectAlias, @IsActive, @CreatedBy)
       `);
-    res.status(201).json({ success: true, id: result.recordset[0].id });
+    // Stock received before this project had an alias is waiting untagged --
+    // tag it now (non-fatal: the template itself is already saved).
+    let autoTagged = 0;
+    try {
+      if (isActive) autoTagged = (await autoTagPendingBatchesForProject(pool, pId, actor)).tagged;
+    } catch (tagErr) {
+      console.error("[id-template-master] retro-tagging failed:", tagErr.message);
+    }
+    res.status(201).json({ success: true, id: result.recordset[0].id, autoTagged });
   } catch (err) {
     if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
       return res.status(409).json({ error: "This project already has an ID template configured" });
@@ -118,7 +127,13 @@ router.put("/:id", requirePageRight("id-template-master", "edit"), async (req, r
           UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id
       `);
-    res.json({ success: true });
+    let autoTagged = 0;
+    try {
+      if (isActive !== false) autoTagged = (await autoTagPendingBatchesForProject(pool, pId, actor)).tagged;
+    } catch (tagErr) {
+      console.error("[id-template-master] retro-tagging failed:", tagErr.message);
+    }
+    res.json({ success: true, autoTagged });
   } catch (err) {
     if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
       return res.status(409).json({ error: "Another ID template already exists for this project" });
@@ -128,21 +143,18 @@ router.put("/:id", requirePageRight("id-template-master", "edit"), async (req, r
   }
 });
 
-// DELETE /:id — soft delete (IsActive = 0), never hard-remove — existing
-// generated FA Item Codes must keep referring to a stable project alias.
+// DELETE /:id — permanently removes the template. Generated FA Item Codes
+// are plain text (the project alias is baked in at generation time, never
+// looked up from this row again), so removing it never affects them.
 router.delete("/:id", requirePageRight("id-template-master", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
-  const actor = req.user?.email || req.user?.name || "system";
   try {
     const pool = getPool();
-    await pool.request()
-      .input("Id",        sql.Int,           id)
-      .input("UpdatedBy", sql.NVarChar(200), actor)
-      .query(`
-        UPDATE dbo.IDTemplateMaster SET IsActive = 0, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
-        WHERE Id = @Id
-      `);
+    const result = await pool.request()
+      .input("Id", sql.Int, id)
+      .query(`DELETE FROM dbo.IDTemplateMaster WHERE Id = @Id`);
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("[id-template-master] DELETE error:", err.message);

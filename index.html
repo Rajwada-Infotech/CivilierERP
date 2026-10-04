@@ -57,7 +57,7 @@
             // Synchronous theme initialization to prevent flash
             (function () {
                 var theme = localStorage.getItem("civilier-theme") || "dark";
-                var valid = ["dark", "light", "midnight", "sepia", "crimson"];
+                var valid = ["dark", "light", "midnight", "root", "glass", "bw"];
                 if (!valid.includes(theme)) theme = "dark";
                 document.documentElement.setAttribute("data-theme", theme);
             })();

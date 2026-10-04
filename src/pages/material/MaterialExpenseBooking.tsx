@@ -73,6 +73,7 @@ import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
 import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import {
   blankForm,
   calculateTdsPreview,
@@ -111,6 +112,7 @@ import { ExpenseBookingStatCards } from "./ExpenseBooking/ExpenseBookingStatCard
 import { BookingListToolbar } from "./ExpenseBooking/BookingListToolbar";
 import { BookingPagination } from "./ExpenseBooking/BookingPagination";
 import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
+import { PayablePartyCombobox, type PayablePartyGroup } from "./ExpenseBooking/PayablePartyCombobox";
 import { StatusBadge } from "@/components/StatusBadge";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
@@ -179,6 +181,7 @@ const INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Vendor", accessor: (r: any) => r.supplier || "—" },
   { header: "Company", accessor: (r: any) => r.companyName || "—" },
   { header: "Project", accessor: (r: any) => r.projectName || "—" },
+  { header: "Expense Head", accessor: (r: any) => r.expenseHeadName || "—" },
   { header: "Basic Amt", accessor: (r: any) => (r.status === "Draft" ? "—" : `Rs. ${fmt(r.basicAmount)}`) },
   { header: "GST %", accessor: (r: any) => (r.status === "Draft" ? "—" : (r.igstRate ?? 0) > 0 ? `${r.igstRate}%` : `${(r.cgstRate ?? 0) + (r.sgstRate ?? 0)}%`) },
   { header: "Net Amt", accessor: (r: any) => `Rs. ${fmt(computeEffectiveNet(r))}` },
@@ -275,12 +278,20 @@ export default function MaterialExpenseBooking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A project is available to a company if it's the project's primary
+  // (owning) company, or the company is tagged onto the project via
+  // Project Master's multi-company tagging (dbo.ProjectCompanies).
+  const isProjectVisibleToCompany = useCallback(
+    (p: ProjectOption, companyId: string | number) =>
+      Number(p.company_id) === Number(companyId) ||
+      (p.tagged_company_ids?.split(",") ?? []).includes(String(companyId)),
+    [],
+  );
+
   const filteredProjectOptions = useMemo(() => {
     if (!form.companyId) return projectOptions;
-    return projectOptions.filter(
-      (p) => Number(p.company_id) === Number(form.companyId),
-    );
-  }, [projectOptions, form.companyId]);
+    return projectOptions.filter((p) => isProjectVisibleToCompany(p, form.companyId));
+  }, [projectOptions, form.companyId, isProjectVisibleToCompany]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBlockInfo, setDeleteBlockInfo] =
     useState<DeleteBlockInfo | null>(null);
@@ -313,10 +324,8 @@ export default function MaterialExpenseBooking() {
   // filter panel (independent of the create/edit form's own company field).
   const filterProjectOptions = useMemo(() => {
     if (!companyFilter) return projectOptions;
-    return projectOptions.filter(
-      (p) => Number(p.company_id) === Number(companyFilter),
-    );
-  }, [projectOptions, companyFilter]);
+    return projectOptions.filter((p) => isProjectVisibleToCompany(p, companyFilter));
+  }, [projectOptions, companyFilter, isProjectVisibleToCompany]);
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
   const [liveEmiSchedule, setLiveEmiSchedule] = useState<
@@ -348,6 +357,9 @@ export default function MaterialExpenseBooking() {
   const [customerHeads, setCustomerHeads] = useState<
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
+  const [partnerHeads, setPartnerHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
   // "Vendor" spans every party type a booking can actually be billed
   // against — Supplier, Contractor, and Customer/Applicant (LHeadType
   // S/C/A) — not just supplierHeads alone.
@@ -370,8 +382,19 @@ export default function MaterialExpenseBooking() {
     if (contractorHeads.some((c) => c.id === id)) return `c:${id}`;
     if (brokerHeads.some((b) => b.id === id)) return `b:${id}`;
     if (customerHeads.some((cu) => cu.id === id)) return `a:${id}`;
+    if (partnerHeads.some((p) => p.id === id)) return `p:${id}`;
     return "";
-  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads]);
+  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads]);
+  const payablePartyGroups: PayablePartyGroup[] = useMemo(
+    () => [
+      { prefix: "s", label: "Suppliers", options: supplierHeads },
+      { prefix: "c", label: "Contractors", options: contractorHeads },
+      { prefix: "b", label: "Brokers", options: brokerHeads },
+      { prefix: "a", label: "Customers", options: customerHeads },
+      { prefix: "p", label: "Partners", options: partnerHeads },
+    ],
+    [supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads],
+  );
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
@@ -387,7 +410,7 @@ export default function MaterialExpenseBooking() {
     setCompanyFilter(val);
     if (projectFilter && val) {
       const stillValid = projectOptions.some(
-        (p) => p.label === projectFilter && Number(p.company_id) === Number(val),
+        (p) => p.label === projectFilter && isProjectVisibleToCompany(p, val),
       );
       if (!stillValid) setProjectFilter("");
     }
@@ -639,7 +662,10 @@ export default function MaterialExpenseBooking() {
           err instanceof Error ? err.message : "Something went wrong",
         );
       });
-    apiFetch("/api/account-head?type=S")
+    // Invoices/expense bookings can be Payable To a Vendor, Supplier, or
+    // Landlord (all stored as LHeadType 'S'/'V', Landlord distinguished only
+    // by LHeadCategory) — so no excludeCategory here, unlike PO/GRN.
+    apiFetch("/api/account-head?type=S,V")
       .then((list: any[]) => {
         const heads = (Array.isArray(list) ? list : []).map((h) => ({
           id: h.LHeadId,
@@ -689,6 +715,24 @@ export default function MaterialExpenseBooking() {
           paymentTerms: h.LHeadPaymentTerms ?? null,
         }));
         setCustomerHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    // Partners (LHeadType='P', Partner Master) — each Partner has TWO
+    // heads sharing one LHeadName (Capital + Current Account); this route
+    // already prefers ISNULL(DisplayName, LHeadName), which disambiguates
+    // them (e.g. "Rajesh Sharma (Current Account)").
+    apiFetch("/api/account-head?type=P")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setPartnerHeads(heads);
       })
       .catch((err) => {
         toast.error(
@@ -1098,6 +1142,14 @@ export default function MaterialExpenseBooking() {
       costCenter: "",
       materialCategory: "",
       workDoneRef: undefined,
+      // Must also clear the record's own persisted source link, not just
+      // selectedDoc (a picker-UI state) — effectiveSourceKind/effectiveSourceId
+      // fall back to these on save whenever selectedDoc is null, specifically
+      // so a GRN/PO/WORK_DONE edit that never re-opens the picker still keeps
+      // its link. Leaving them stale here would silently resurrect the just-
+      // cleared document's link on save.
+      eSourceType: null,
+      eSourceId: null,
     }));
   };
 
@@ -1229,6 +1281,29 @@ export default function MaterialExpenseBooking() {
     }
   };
 
+  // The record's own source-document kind, falling back to selectedDoc while
+  // a document is actively being picked. On edit-load, openEditForm only
+  // reconstructs selectedDoc for TOD bookings — a GRN/PO/WORK_DONE-linked
+  // booking leaves it null, so every check below that read selectedDoc?.kind
+  // directly silently misclassified it as "direct" the instant it had its
+  // own resolved supplierLHeadId (which every linked booking does), wrongly
+  // demanding an Expense Head Allocation, showing the EMI section, and
+  // skipping the GRN billing-terms breakdown on a plain edit-and-save.
+  const effectiveSourceKind: SourceKind | null =
+    selectedDoc?.kind ?? ((form as any).eSourceType as SourceKind | null) ?? null;
+  // Same fallback for the linked document's own id, so a save on a
+  // GRN/PO/WORK_DONE booking that was never re-picked in this edit session
+  // sends the record's existing ESourceId back instead of null.
+  const effectiveSourceId: number | null =
+    selectedDoc?.sourceId ?? ((form as any).eSourceId as number | null) ?? null;
+  // Locks the Payable Party field to the resolved supplier for a
+  // GRN/PO/WORK_DONE/WO_PO booking even when selectedDoc itself is null —
+  // otherwise this booking's already-resolved supplier looked editable via
+  // PayablePartyCombobox instead of the intended read-only
+  // "Auto-filled from linked order" field.
+  const effectiveVendorLabel: string | undefined =
+    selectedDoc?.vendorLabel ??
+    (effectiveSourceKind && effectiveSourceKind !== "TOD" ? form.supplier || undefined : undefined);
 
   const handleSave = async () => {
     if (saveInFlight.current) return;
@@ -1254,7 +1329,7 @@ export default function MaterialExpenseBooking() {
       return;
     }
     if (
-      selectedDoc?.kind !== "GRN" &&
+      effectiveSourceKind !== "GRN" &&
       (!form.basicAmount || form.basicAmount <= 0)
     ) {
       toast.error("Basic amount is required and must be greater than 0.");
@@ -1263,7 +1338,7 @@ export default function MaterialExpenseBooking() {
     // For GRN bookings: use the shared computeGrnBd() which handles active billing
     // terms split by pre/post-GST, producing correct net with real GST amounts.
     const bd =
-      selectedDoc?.kind === "GRN"
+      effectiveSourceKind === "GRN"
         ? computeGrnBd(form.basicAmount, form.billingTerms, gstBreakdown)
         : computeBreakdown(
             form.basicAmount,
@@ -1335,9 +1410,16 @@ export default function MaterialExpenseBooking() {
       // never sets selectedDoc (see the Select's onValueChange above, which
       // deliberately leaves it alone) — still a direct/"Other Expenses"
       // booking as far as the backend's own ESourceType='TOD' convention
-      // goes (see openEditForm's reverse mapping on load).
-      ESourceType: selectedDoc?.kind ?? (isDirectPartyMode ? "TOD" : null),
-      ESourceId: selectedDoc?.sourceId ?? null,
+      // goes (see openEditForm's reverse mapping on load). effectiveSourceKind/
+      // effectiveSourceId fall back to the record's own already-loaded
+      // ESourceType/ESourceId when selectedDoc is null (every GRN/PO/
+      // WORK_DONE edit, since openEditForm only reconstructs selectedDoc for
+      // TOD) — without this, saving such a booking without re-picking its
+      // document silently sent ESourceType/ESourceId as null, detaching it
+      // from its GRN/PO/Work Done link. clearDoc() nulls both on the form so
+      // intentionally detaching a document still falls through correctly.
+      ESourceType: effectiveSourceKind ?? (isDirectPartyMode ? "TOD" : null),
+      ESourceId: effectiveSourceId,
       // Present only when multiple GRNs (same PO) were combined into this
       // one invoice — see ExpenseBooking/invoiceLinking.ts.
       ...(selectedDoc?.linkedGrnIds && selectedDoc.linkedGrnIds.length > 1
@@ -1395,10 +1477,10 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  const isGRN = selectedDoc?.kind === "GRN";
+  const isGRN = effectiveSourceKind === "GRN";
 
   const bd =
-    selectedDoc?.kind === "GRN"
+    effectiveSourceKind === "GRN"
       ? computeGrnBd(form.basicAmount, form.billingTerms, gstBreakdown)
       : computeBreakdown(
           form.basicAmount,
@@ -1422,6 +1504,13 @@ export default function MaterialExpenseBooking() {
       return false;
     return true;
   });
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: expenseApprovalTrails, isLoading: expenseApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "ExpenseBooking",
+    filteredRecords.map((r) => r.id),
+  );
   const totalNet = records.reduce((sum, r) => {
     if (r.status === "Draft") return sum;
     // GRN-linked records: recompute from grnTotalAmount + billing terms with
@@ -1453,27 +1542,27 @@ export default function MaterialExpenseBooking() {
     statusCounts["Pending"] ??
     records.filter((r) => r.status === "Pending").length;
   const emiCount = records.filter((r) => r.emi?.enabled).length;
-  const vendorLabel = selectedDoc?.vendorLabel
-    ? selectedDoc.kind === "WORK_DONE"
+  const vendorLabel = effectiveVendorLabel
+    ? effectiveSourceKind === "WORK_DONE"
       ? "Contractor"
       : "Supplier / Vendor"
     : "Payable To";
   const isPOorWO =
-    selectedDoc?.kind === "PO" ||
-    selectedDoc?.kind === "WORK_DONE" ||
-    selectedDoc?.kind === "WO_PO";
+    effectiveSourceKind === "PO" ||
+    effectiveSourceKind === "WORK_DONE" ||
+    effectiveSourceKind === "WO_PO";
   /** True when the booking is a direct / Other-Expenses (TOD) entry with no linked source doc. */
   const isDirect = !isGRN && !isPOorWO;
   // True once a direct booking actually has a party picked — whether that
   // came from a formal "Other Expenses" template pick first (selectedDoc
   // already {kind:"TOD"}) or straight from the Payable Party field with no
   // document selected at all (selectedDoc still null). Gates TDS, the
-  // Direct Items table, and Expense Head Allocation — using selectedDoc's
-  // kind alone here would leave all three permanently hidden for a party
-  // picked without ever going through the template list, since nothing else
-  // sets selectedDoc to "TOD" for that flow.
+  // Direct Items table, and Expense Head Allocation. Uses effectiveSourceKind
+  // (not selectedDoc directly) so a GRN/PO/WORK_DONE booking loaded via
+  // openEditForm — which leaves selectedDoc null — is never misclassified as
+  // direct just because it already has a resolved supplierLHeadId.
   const isDirectPartyMode =
-    isDirect && (selectedDoc?.kind === "TOD" || (!selectedDoc && !!form.supplierLHeadId));
+    isDirect && (effectiveSourceKind === "TOD" || (!effectiveSourceKind && !!form.supplierLHeadId));
 
   // Re-preview the booking reference when Year is changed on an EXISTING
   // direct/TOD booking. The create-time effect below (keyed on selectedTod)
@@ -1683,7 +1772,7 @@ export default function MaterialExpenseBooking() {
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -1691,7 +1780,7 @@ export default function MaterialExpenseBooking() {
               {rights.canCreate && (
                 <Button
                   onClick={openNew}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 transition-all"
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
                 >
                   <Plus size={13} /> New Invoice
                 </Button>
@@ -1742,13 +1831,13 @@ export default function MaterialExpenseBooking() {
                     <div className="w-6 h-6 rounded-md bg-indigo-500/10 flex items-center justify-center shrink-0">
                       <SlidersHorizontal size={12} className="text-indigo-500" />
                     </div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground">
                       Party &amp; Project
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <Building2 size={11} className="shrink-0" />
                         Company
                         <span className="text-destructive">*</span>
@@ -1790,7 +1879,7 @@ export default function MaterialExpenseBooking() {
                       </Select>
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <FolderKanban size={11} className="shrink-0" />
                         Project
                       </p>
@@ -1832,13 +1921,13 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                       {selectedDoc?.projectId && (
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           Pre-filled from linked order
                         </p>
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <CalendarDays size={11} className="shrink-0" />
                         Year
                       </p>
@@ -1858,17 +1947,17 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                       {selectedTod && (
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           Changing year updates the booking reference number
                         </p>
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <User size={11} className="shrink-0" />
                         {vendorLabel}
                       </p>
-                      {selectedDoc?.vendorLabel ? (
+                      {effectiveVendorLabel ? (
                         <div className="relative">
                           <User size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground shrink-0" />
                           <Input
@@ -1880,17 +1969,10 @@ export default function MaterialExpenseBooking() {
                           />
                         </div>
                       ) : (
-                        <Select
+                        <PayablePartyCombobox
+                          groups={payablePartyGroups}
                           value={supplierSelectValue}
-                          onValueChange={(key) => {
-                            const [prefix, idStr] = key.split(":");
-                            const id = Number(idStr);
-                            const list =
-                              prefix === "s" ? supplierHeads
-                              : prefix === "c" ? contractorHeads
-                              : prefix === "a" ? customerHeads
-                              : brokerHeads;
-                            const head = list.find((h) => h.id === id);
+                          onChange={(key, head) => {
                             const name = head?.label ?? "";
                             set("supplier", name);
                             set("supplierLHeadId", head?.id ?? null);
@@ -1905,7 +1987,7 @@ export default function MaterialExpenseBooking() {
                             // before any document. isDirectPartyMode below
                             // covers this case for TDS/Direct Items/Expense
                             // Head Allocation without touching this state.
-                            if (name && (selectedDoc?.kind === "TOD" || !selectedDoc)) {
+                            if (name && (effectiveSourceKind === "TOD" || !effectiveSourceKind)) {
                               set("bookingName", `Payment for ${name}`);
                             }
                             if (!name) return;
@@ -1922,54 +2004,16 @@ export default function MaterialExpenseBooking() {
                               set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
                             }
                           }}
-                        >
-                          <SelectTrigger className={selectTriggerCls}>
-                            <SelectValue placeholder="Select Payable Party" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {supplierHeads.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Suppliers</SelectLabel>
-                                {supplierHeads.map((s) => (
-                                  <SelectItem key={`s-${s.id}`} value={`s:${s.id}`}>{s.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                            {contractorHeads.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Contractors</SelectLabel>
-                                {contractorHeads.map((c) => (
-                                  <SelectItem key={`c-${c.id}`} value={`c:${c.id}`}>{c.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                            {brokerHeads.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Brokers</SelectLabel>
-                                {brokerHeads.map((b) => (
-                                  <SelectItem key={`b-${b.id}`} value={`b:${b.id}`}>{b.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                            {customerHeads.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Customers</SelectLabel>
-                                {customerHeads.map((cu) => (
-                                  <SelectItem key={`a-${cu.id}`} value={`a:${cu.id}`}>{cu.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                          </SelectContent>
-                        </Select>
+                        />
                       )}
-                      {selectedDoc?.vendorLabel && (
-                        <p className="text-[10px] text-muted-foreground">
-                          {`Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : selectedDoc.kind === "GRN" ? "GRN (supplier)" : "Work Done (contractor)"}`}
+                      {effectiveVendorLabel && (
+                        <p className="text-[0.625rem] text-muted-foreground">
+                          {`Auto-filled from ${effectiveSourceKind === "PO" ? "Purchase Order (supplier)" : effectiveSourceKind === "GRN" ? "GRN (supplier)" : "Work Done (contractor)"}`}
                         </p>
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <ShoppingCart size={11} className="shrink-0" />
                         Filter by PO
                       </p>
@@ -2040,7 +2084,7 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                       {filterPOId != null && (
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           Showing this PO's GRNs in the GRN tab below
                         </p>
                       )}
@@ -2061,13 +2105,13 @@ export default function MaterialExpenseBooking() {
                             ? form.sourceDocNo || `${form.eSourceType}-${form.poId ?? ""}`
                             : "Direct Entry"}
                         </span>
-                        <span className="ml-auto text-[10px] text-muted-foreground italic">
+                        <span className="ml-auto text-[0.625rem] text-muted-foreground italic">
                           Locked — the source document can't be changed once a booking exists.
                         </span>
                       </div>
                     ) : (
                       <>
-                    <p className="text-[11px] text-muted-foreground -mt-1">
+                    <p className="text-[0.6875rem] text-muted-foreground -mt-1">
                       Pick a Purchase Order, confirmed Work Done entry, or GRN
                       to auto-fill booking details, or choose a document type
                       from Other Expenses for standalone expense entries.
@@ -2136,7 +2180,7 @@ export default function MaterialExpenseBooking() {
                               </>
                             )}
                           <span
-                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
                           >
                             {selectedDoc.kind === "WORK_DONE"
                               ? "Work Done"
@@ -2193,7 +2237,7 @@ export default function MaterialExpenseBooking() {
 
                 {/* ── Sub-section: Dates & Payment ── */}
                 <div className="space-y-2">
-                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Dates &amp; Payment</p>
+                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground/60">Dates &amp; Payment</p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <Field label="Booking Date" required>
                       <DateField value={form.bookingDate} onChange={(val) => set("bookingDate", val)} />
@@ -2235,7 +2279,7 @@ export default function MaterialExpenseBooking() {
 
                 {/* ── Sub-section: Vendor Invoice ── */}
                 <div className="space-y-2">
-                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Vendor Invoice</p>
+                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground/60">Vendor Invoice</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Field label="Vendor Invoice No">
                       <Input value={form.vendorInvoiceNo ?? ""} onChange={(e) => set("vendorInvoiceNo", e.target.value)} placeholder="Supplier invoice number" />
@@ -2248,7 +2292,7 @@ export default function MaterialExpenseBooking() {
 
                 {/* ── Sub-section: Accounting ── */}
                 <div className="space-y-2">
-                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Accounting</p>
+                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground/60">Accounting</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Field
                       label="Cost Center"
@@ -2546,7 +2590,7 @@ export default function MaterialExpenseBooking() {
                   form.bookingReference.trim() &&
                   form.bookingDate &&
                   form.companyId &&
-                  (selectedDoc?.kind === "GRN" ||
+                  (effectiveSourceKind === "GRN" ||
                     (form.basicAmount && form.basicAmount > 0))
                 );
                 const ebIsDirty = !!(
@@ -2559,7 +2603,7 @@ export default function MaterialExpenseBooking() {
                 );
                 return (
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-                    <p className="text-[11px] text-muted-foreground hidden sm:block">
+                    <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                       {saved ? (
                         <span className="text-emerald-500 font-medium">
                           Saved!
@@ -2584,7 +2628,7 @@ export default function MaterialExpenseBooking() {
                       <button
                         onClick={handleSave}
                         disabled={saving || saved || !ebCanSave}
-                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                       >
                         {saved ? (
                           <Check size={14} />
@@ -2678,6 +2722,8 @@ export default function MaterialExpenseBooking() {
                           onApprovalSuccess={fetchRecords}
                           canEdit={rights.canEdit}
                           canDelete={rights.canDelete}
+                          approvalTrail={expenseApprovalTrails.get(String(rec.id)) ?? null}
+                          approvalTrailLoading={expenseApprovalTrailsLoading}
                         />
                       ))}
                     </div>
@@ -2736,25 +2782,26 @@ export default function MaterialExpenseBooking() {
                                       ? `booking-row-${rec.id}`
                                       : `booking-row-${index}`
                                   }
-                                  className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 ${rec.status === "Draft" ? "opacity-70" : ""}`}
+                                  className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 cursor-pointer ${rec.status === "Draft" ? "opacity-70" : ""}`}
+                                  onClick={() => openPreview(rec)}
                                 >
                                   <TableCell className="py-3">
                                     {rec.status === "Draft" ? (
                                       <p
-                                        className="text-[11px] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
+                                        className="text-[0.6875rem] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
                                         title={rec.bookingReference || ""}
                                       >
                                         {rec.bookingReference || "—"}
                                       </p>
                                     ) : (
                                       <p
-                                        className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
+                                        className="font-mono text-[0.6875rem] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
                                         title={rec.bookingReference || ""}
                                       >
                                         {rec.bookingReference || "—"}
                                       </p>
                                     )}
-                                    <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
+                                    <p className="text-[0.625rem] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
                                       {rec.bookingDate && (
                                         <span>{rec.bookingDate}</span>
                                       )}
@@ -2764,7 +2811,7 @@ export default function MaterialExpenseBooking() {
                                         </span>
                                       ) : null}
                                       {rec.emi?.enabled ? (
-                                        <span className="inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
+                                        <span className="inline-flex items-center gap-0.5 text-[0.5625rem] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
                                           <CreditCard size={8} />
                                           {rec.emi.installmentCount}x
                                         </span>
@@ -2775,10 +2822,10 @@ export default function MaterialExpenseBooking() {
                                     <p className="truncate">{rec.supplier || "—"}</p>
                                     {rec.supplierGstRegistered !== undefined ? (
                                       <span
-                                        className={`inline-flex items-center mt-1 text-[9px] font-heading font-semibold px-1.5 py-0.5 rounded-full border ${
+                                        className={`inline-flex items-center mt-1 text-[0.5625rem] font-heading font-semibold px-1.5 py-0.5 rounded-full border ${
                                           rec.supplierGstRegistered
                                             ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                                            : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20"
                                         }`}
                                       >
                                         {rec.supplierGstRegistered ? "GST Bill" : "Non GST Bill"}
@@ -2789,7 +2836,7 @@ export default function MaterialExpenseBooking() {
                                     <p className="text-xs truncate max-w-[110px]">
                                       {rec.companyName || "—"}
                                     </p>
-                                    <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">
+                                    <p className="text-[0.625rem] text-muted-foreground truncate max-w-[110px]">
                                       {rec.projectName || "—"}
                                     </p>
                                   </TableCell>
@@ -2852,7 +2899,7 @@ export default function MaterialExpenseBooking() {
                                   </TableCell>
                                   <TableCell className="py-3">
                                     {rec.status === "Draft" ? (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25">
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/25">
                                         <Package
                                           size={10}
                                           className="shrink-0"
@@ -2863,10 +2910,12 @@ export default function MaterialExpenseBooking() {
                                     <ApprovalStatusChain
                                       table="ExpenseBooking"
                                       recordId={rec.id}
-                                      fallback={<StatusBadge status={rec.status} className="text-[10px] px-2 py-0.5" />}
+                                      fallback={<StatusBadge status={rec.status} className="text-[0.625rem] px-2 py-0.5" />}
+                                      preloaded={expenseApprovalTrails.get(String(rec.id)) ?? null}
+                                      preloadedLoading={expenseApprovalTrailsLoading}
                                     />
                                   </TableCell>
-                                  <TableCell className="py-3">
+                                  <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>
                                     <div className="flex gap-1 items-center justify-end">
                                       <ApprovalActions
                                         status={rec.status}
@@ -2875,7 +2924,7 @@ export default function MaterialExpenseBooking() {
                                         submitOnly
                                         onSuccess={() => fetchRecords(page)}
                                       />
-                                      <button
+                                      <button data-row-view
                                         type="button"
                                         className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
                                         onClick={() => openPreview(rec)}
@@ -2947,7 +2996,7 @@ export default function MaterialExpenseBooking() {
                 simply continues from its current max, so removing a
                 document permanently leaves a gap (e.g. deleting #6 and #7
                 out of #1-#10 means the next new invoice is #11, not #6). */}
-            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-[#ffe2021a] px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
               <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
               <span>
                 {(() => {

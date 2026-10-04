@@ -1,9 +1,9 @@
-// src/api/documentTypeApi.ts
+﻿// src/api/documentTypeApi.ts
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE_URL = "/api/document-type";
 
-// ── Response types ────────────────────────────────────────────────────────────
+// â”€â”€ Response types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface DocTypeRecord {
   TypeOfDocId: number;
@@ -51,7 +51,7 @@ export interface ProjectOption {
   CompanyId: number | null;
 }
 
-// ── Payload type shared by create + update ────────────────────────────────────
+// â”€â”€ Payload type shared by create + update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface DocTypePayload {
   Prefix: string;
@@ -66,39 +66,39 @@ export interface DocTypePayload {
   ModuleCode?: string | null;
   DocNoPrefix?: string | null;
   FinYearReset?: boolean;
-  // ProjectCode is intentionally excluded — server resolves it from ProjectId
+  // ProjectCode is intentionally excluded â€” server resolves it from ProjectId
 }
 
-// ── Fetch lists ───────────────────────────────────────────────────────────────
+// â”€â”€ Fetch lists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const getDocumentTypes = async (): Promise<DocTypeRecord[]> => {
   const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error("Failed to fetch document types");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
-/** Entry_Type master — provides EntryType label + Eprefix */
+/** Entry_Type master â€” provides EntryType label + Eprefix */
 export const getEntryTypes = async (): Promise<EntryTypeOption[]> => {
   const res = await fetchWithAuth(`${BASE_URL}/entrytypes`);
   if (!res.ok) throw new Error("Failed to fetch entry types");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 /** Companies dropdown (enterprise where business_type = 'C') */
 export const getCompanies = async (): Promise<CompanyOption[]> => {
   const res = await fetchWithAuth(`${BASE_URL}/companies`);
   if (!res.ok) throw new Error("Failed to fetch companies");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 /** Projects dropdown (enterprise where business_type = 'P') */
 export const getProjects = async (): Promise<ProjectOption[]> => {
   const res = await fetchWithAuth(`${BASE_URL}/projects`);
   if (!res.ok) throw new Error("Failed to fetch projects");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
-// ── Mutations ─────────────────────────────────────────────────────────────────
+// â”€â”€ Mutations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const createDocumentType = async (
   data: DocTypePayload,

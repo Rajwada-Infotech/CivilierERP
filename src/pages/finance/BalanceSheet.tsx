@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type ReactNode } from "react";
+import { Fragment, useEffect, useState, useCallback, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -28,6 +28,7 @@ import {
   AlertCircle,
   Target,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -46,14 +47,29 @@ interface StatementGroup {
   total: number;
 }
 
+interface PartnerRollForward {
+  key: string;
+  name: string;
+  opening: number;
+  capitalIntroduced: number;
+  credits: number;
+  drawings: number;
+  closing: number;
+}
+
 interface PartnersCapital {
   openingCapital: number;
-  retainedEarningsPrior: number;
   furtherCapital: number;
   netProfitCurrent: number;
   drawings: number;
   total: number;
   capitalHeads: Head[];
+  partners: PartnerRollForward[];
+}
+
+interface ReservesAndSurplus {
+  retainedEarningsPrior: number;
+  total: number;
 }
 
 interface Ratios {
@@ -73,9 +89,14 @@ interface BalanceSheetResponse {
   companyName:  string | null;
   entityType:   string | null;
   partnersCapital: PartnersCapital;
+  reservesAndSurplus: ReservesAndSurplus;
   partnersDrawings: StatementGroup[];
   provisionsReserves: StatementGroup[];
   fixedLiabilities: StatementGroup[];
+  // Includes an "Advance from Customers" group for any Sundry Debtors head
+  // with a credit balance — an advance, not a debtor — reclassified here
+  // instead of appearing as a negative figure under Sundry Debtors on the
+  // Assets side.
   currentLiabilities: StatementGroup[];
   fixedAssets: { tangible: StatementGroup[]; intangible: StatementGroup[] };
   investments: StatementGroup[];
@@ -116,7 +137,7 @@ function ratioHealth(key: string, value: number | null): "good" | "warn" | "bad"
 
 const healthColors = {
   good:    "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/25",
-  warn:    "text-amber-600  dark:text-amber-400  bg-amber-500/10  border-amber-500/25",
+  warn:    "text-amber-600  dark:text-amber-400  bg-[#ffe2021a]  border-amber-500/25",
   bad:     "text-red-600    dark:text-red-400    bg-red-500/10    border-red-500/25",
   neutral: "text-foreground                      bg-muted/40      border-border",
 };
@@ -146,10 +167,10 @@ function RatioCard({
     <div className={`flex-1 min-w-[140px] rounded-xl border p-3.5 transition-all hover:shadow-md ${healthColors[health]}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-[9px] font-heading uppercase tracking-widest opacity-60 mb-1">{label}</p>
+          <p className="text-[0.5625rem] font-heading uppercase tracking-widest opacity-60 mb-1">{label}</p>
           <p className="text-base font-bold tabular-nums leading-tight">{formatted}</p>
-          {subtitle && <p className="text-[9px] opacity-60 mt-0.5">{subtitle}</p>}
-          {benchmark && <p className="text-[8px] opacity-50 mt-0.5 italic">{benchmark}</p>}
+          {subtitle && <p className="text-[0.5625rem] opacity-60 mt-0.5">{subtitle}</p>}
+          {benchmark && <p className="text-[0.5rem] opacity-50 mt-0.5 italic">{benchmark}</p>}
         </div>
         <div className={`rounded-lg p-1.5 bg-background/60 ${healthIconColors[health]}`}>
           <Icon size={12} />
@@ -176,8 +197,8 @@ function StatementSheet({
           {companyName || "Consolidated — All Companies"}
         </h2>
         <h3 className="text-xs font-semibold text-foreground mt-1.5">Balance Sheet</h3>
-        <p className="text-[11px] text-muted-foreground mt-0.5">{asOfLabel}</p>
-        <p className="text-[9px] text-muted-foreground/50 mt-1">
+        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{asOfLabel}</p>
+        <p className="text-[0.5625rem] text-muted-foreground/50 mt-1">
           (All amounts in Indian Rupees ₹, unless otherwise stated)
         </p>
       </div>
@@ -193,7 +214,7 @@ function SectionHeader({ roman, label }: { roman: string; label: string }) {
     <tr className="bg-muted/30">
       <td colSpan={4} className="py-2 px-3">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono text-muted-foreground/60">{roman}.</span>
+          <span className="text-[0.625rem] font-mono text-muted-foreground/60">{roman}.</span>
           <span className="text-xs font-bold text-foreground uppercase tracking-wide">{label}</span>
         </div>
       </td>
@@ -229,7 +250,7 @@ function GroupRow({
         className={`border-b border-border/30 transition-colors ${clickable ? "cursor-pointer hover:bg-muted/25" : ""}`}
         onClick={() => clickable && onToggle(key)}
       >
-        <td className="py-2 pr-3 text-[11px] text-foreground" style={{ paddingLeft: indent * 4 }}>
+        <td className="py-2 pr-3 text-[0.6875rem] text-foreground" style={{ paddingLeft: indent * 4 }}>
           <div className="flex items-center gap-2">
             {clickable ? (
               isOpen
@@ -240,14 +261,14 @@ function GroupRow({
           </div>
         </td>
         {/* Note ref */}
-        <td className="py-2 px-3 text-right text-[9px] text-muted-foreground/40 w-16">
+        <td className="py-2 px-3 text-right text-[0.5625rem] text-muted-foreground/40 w-16">
           {showNote && noteNum ? noteNum : ""}
         </td>
         {/* Sub-amount (heads sum) — only shown when there's more than one head to sum */}
-        <td className="py-2 px-3 text-right text-[11px] tabular-nums text-muted-foreground/70 w-32">
+        <td className="py-2 px-3 text-right text-[0.6875rem] tabular-nums text-muted-foreground/70 w-32">
           {group.heads.length > 1 ? fmt(group.total) : ""}
         </td>
-        <td className="py-2 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium text-foreground w-36">
+        <td className="py-2 pl-3 pr-5 text-right text-[0.6875rem] tabular-nums font-medium text-foreground w-36">
           {fmt(group.total)}
         </td>
       </tr>
@@ -257,7 +278,7 @@ function GroupRow({
           <td colSpan={4} className="pb-1.5">
             <div className="ml-4 mr-5 border-l-2 border-primary/20 pl-3 py-1 space-y-0.5" style={{ marginLeft: indent * 4 + 8 }}>
               {group.heads.map((h) => (
-                <div key={h.id ?? h.name} className="flex items-center justify-between text-[10px] text-muted-foreground group">
+                <div key={h.id ?? h.name} className="flex items-center justify-between text-[0.625rem] text-muted-foreground group">
                   <span className="truncate pr-4 group-hover:text-foreground transition-colors">{h.name}</span>
                   <Signed amount={h.amount} className="shrink-0 font-medium" />
                 </div>
@@ -282,7 +303,7 @@ function GroupList({
   noteRef: NoteRef;
 }) {
   if (groups.length === 0) {
-    return <tr><td colSpan={4} className="py-1.5 pl-8 text-[10px] text-muted-foreground italic">— {emptyLabel} —</td></tr>;
+    return <tr><td colSpan={4} className="py-1.5 pl-8 text-[0.625rem] text-muted-foreground italic">— {emptyLabel} —</td></tr>;
   }
   return (
     <>
@@ -301,7 +322,7 @@ function SectionBlock({ label, amount, children }: { label: string; amount: numb
     <>
       <tr>
         <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
-          <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">{label}</span>
+          <span className="text-[0.6875rem] font-bold text-foreground uppercase tracking-wide">{label}</span>
         </td>
       </tr>
       {children}
@@ -333,137 +354,120 @@ function GrandTotalRow({ label, amount, variant }: { label: string; amount: numb
 
 // ─── Partners' Capital block ──────────────────────────────────────────────────
 // Rendered on its own (not via SectionBlock/GroupRow) since it's a
-// roll-forward, not a flat group list: Opening + Retained Earnings b/f +
-// Further Capital + Net Profit − Drawings = Partners' Capital. Drawings
-// expands to the partner-wise drill-down (Cash Withdrawal, Interest on
-// Drawings, ...) per partner; the individual capital ledger heads (one per
-// partner's Capital A/c) expand separately.
+// roll-forward, not a flat group list: Opening + Further Capital + Net
+// Profit − Drawings = Partners' Capital. Retained Earnings b/f (prior
+// years' net P&L) is NOT a partner capital contribution, so it's reported
+// separately under Reserves & Surplus instead — see ReservesAndSurplusBlock
+// below. Drawings expands to the partner-wise drill-down (Cash Withdrawal,
+// Interest on Drawings, ...) per partner; the individual capital ledger
+// heads (one per partner's Capital A/c) expand separately.
 
 function PartnersCapitalBlock({
-  data, openKey, onToggle, noteRef,
+  data,
 }: {
   data: PartnersCapital;
   openKey: string | null;
   onToggle: (k: string) => void;
   noteRef: NoteRef;
 }) {
-  const capitalKey = "capital-heads";
-  const capitalOpen = openKey === capitalKey;
-  // Only "Opening Partners' Capital" is an actual chart-of-accounts group
-  // (it expands to the individual Capital A/c heads) — the Retained
-  // Earnings/Further Capital/Net Profit/Drawings lines below are computed
-  // roll-forward figures, not groups, so they carry no note number.
-  const openingNoteNum = data.capitalHeads.length > 0 ? noteRef.current++ : null;
+  // One block per partner, laid out like a firm's printed partners' capital
+  // schedule: Balance as per last account + Capital introduced + Share of
+  // profit / remuneration / interest (credited to the Current A/c) −
+  // Drawings = closing. The period's Net Profit sits below as its own line
+  // until it's allocated to partners (no profit-sharing ratio is stored).
+  // Only worth a line once something has actually been credited to a
+  // partner's Current A/c (profit share, remuneration, interest) — when the
+  // only entries are drawings, an always-zero line is just noise.
+  const showCredits = data.partners.some((p) => Math.abs(p.credits) > 0.005);
+  const row = (label: string, amount: number, opts: { sub?: boolean; strong?: boolean; neg?: boolean } = {}) => (
+    <tr className={opts.sub ? "border-t border-border/40" : "border-b border-border/20"}>
+      <td className={`py-1 pl-10 pr-3 text-[0.6875rem] ${opts.strong ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{label}</td>
+      <td className="w-16" />
+      <td className="py-1 px-3 text-right text-[0.6875rem] tabular-nums text-muted-foreground/80 w-32">
+        {!opts.strong && (opts.neg ? `(${fmt(amount)})` : <Signed amount={amount} />)}
+      </td>
+      <td className="py-1 pl-3 pr-5 text-right text-[0.6875rem] tabular-nums w-36">
+        {opts.strong && <span className="font-semibold"><Signed amount={amount} /></span>}
+      </td>
+    </tr>
+  );
 
   return (
     <>
       <tr>
         <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
-          <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">Partners' Capital</span>
+          <span className="text-[0.6875rem] font-bold text-foreground uppercase tracking-wide">Partners' Capital Account</span>
         </td>
       </tr>
 
-      <tr
-        className={`border-b border-border/30 ${data.capitalHeads.length > 0 ? "cursor-pointer hover:bg-muted/25" : ""}`}
-        onClick={() => data.capitalHeads.length > 0 && onToggle(capitalKey)}
-      >
-        <td className="py-1.5 pl-8 pr-3 text-[11px] text-foreground">
-          <div className="flex items-center gap-2">
-            {data.capitalHeads.length > 0 ? (
-              capitalOpen
-                ? <ChevronDown size={10} className="text-primary/60 shrink-0" />
-                : <ChevronRight size={10} className="text-muted-foreground/50 shrink-0" />
-            ) : <span className="w-[10px] shrink-0" />}
-            Opening Partners' Capital
-          </div>
-        </td>
-        <td className="py-1.5 px-3 text-right text-[9px] text-muted-foreground/40 w-16">{openingNoteNum ?? ""}</td>
-        <td className="py-1.5 px-3 text-right text-[11px] tabular-nums text-muted-foreground/70 w-32">
-          {data.capitalHeads.length > 1 ? fmt(data.openingCapital) : ""}
-        </td>
-        <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.openingCapital} /></td>
-      </tr>
-      {capitalOpen && data.capitalHeads.length > 0 && (
-        <tr>
-          <td colSpan={4} className="pb-1.5">
-            <div className="ml-16 mr-5 border-l-2 border-primary/20 pl-3 py-1 space-y-0.5">
-              {data.capitalHeads.map((h) => (
-                <div key={h.id ?? h.name} className="flex items-center justify-between text-[10px] text-muted-foreground">
-                  <span className="truncate pr-4">{h.name} <span className="opacity-50">(life-to-date)</span></span>
-                  <Signed amount={h.amount} className="shrink-0 font-medium" />
-                </div>
-              ))}
-            </div>
-          </td>
-        </tr>
+      {data.partners.length === 0 && (
+        <tr><td colSpan={4} className="py-1.5 pl-8 text-[0.6875rem] italic text-muted-foreground">No partner capital recorded</td></tr>
       )}
 
-      {Math.abs(data.retainedEarningsPrior) > 0.005 && (
-        <tr className="border-b border-border/30">
-          <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Retained Earnings b/f (Prior Years)</td>
-          <td className="w-16" />
-          <td className="w-32" />
-          <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.retainedEarningsPrior} /></td>
-        </tr>
-      )}
+      {data.partners.map((p) => {
+        const before = p.opening + p.capitalIntroduced + p.credits;
+        return (
+          <Fragment key={p.key}>
+            <tr>
+              <td colSpan={4} className="pt-2 pb-0.5 pl-8">
+                <span className="text-[0.6875rem] font-semibold underline underline-offset-2 text-foreground">{p.name} :</span>
+              </td>
+            </tr>
+            {row("Balance as per last account", p.opening)}
+            {row("Add: Capital introduced", p.capitalIntroduced)}
+            {showCredits && row("Add: Share of Profit / Remuneration / Interest", p.credits)}
+            {row("Sub-total", before, { sub: true })}
+            {row("Less: Drawings", p.drawings, { neg: true })}
+            {row(`Closing balance — ${p.name}`, p.closing, { sub: true, strong: true })}
+          </Fragment>
+        );
+      })}
 
-      <tr className="border-b border-border/30">
-        <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Further Capital</td>
-        <td className="w-16" />
-        <td className="w-32" />
-        <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.furtherCapital} /></td>
-      </tr>
-
-      <tr className="border-b border-border/30">
-        <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Net Profit (Current Period)</td>
-        <td className="w-16" />
-        <td className="w-32" />
-        <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.netProfitCurrent} /></td>
-      </tr>
-
-      <tr className="border-b border-border/30">
-        <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">− Partners' Drawings</td>
-        <td className="w-16" />
-        <td className="w-32" />
-        <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36 text-red-600 dark:text-red-400">
-          {data.drawings > 0.005 ? `(${fmt(data.drawings)})` : fmt(0)}
+      <tr className="border-t border-border/40">
+        <td className="py-1.5 pl-8 pr-3 text-[0.6875rem] text-muted-foreground">
+          Add: Net Profit / (Loss) for the period <span className="opacity-60">(not yet allocated to partners)</span>
         </td>
+        <td className="w-16" />
+        <td className="w-32" />
+        <td className="py-1.5 pl-3 pr-5 text-right text-[0.6875rem] tabular-nums font-medium w-36"><Signed amount={data.netProfitCurrent} /></td>
       </tr>
 
       <tr className="border-t border-border/60">
-        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Partners' Capital</td>
-        <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(data.total)}</td>
+        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Partners' Capital Account</td>
+        <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36"><Signed amount={data.total} /></td>
       </tr>
       <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
     </>
   );
 }
 
-// ─── Partners' Drawings drill-down (own note, referenced from the capital
-// block above) — flat list of drawings heads/groups, same GroupRow pattern
-// as every other section. ─────────────────────────────────────────────────
-
-function PartnersDrawingsNote({ groups, total, openKey, onToggle }: {
-  groups: StatementGroup[]; total: number; openKey: string | null; onToggle: (k: string) => void;
-}) {
-  if (groups.length === 0) return null;
-
+// ─── Reserves & Surplus block ─────────────────────────────────────────────────
+// Retained Earnings b/f (prior years' net P&L) used to sit inside Partners'
+// Capital's roll-forward — moved out since it's the result of invoices and
+// payments posted in earlier financial years, not a partner capital
+// contribution. Same single-line-plus-subtotal shape as Partners' Capital's
+// roll-forward rows, just its own section.
+function ReservesAndSurplusBlock({ data }: { data: ReservesAndSurplus }) {
+  if (Math.abs(data.total) < 0.005) return null;
   return (
-    <div className="mt-4 rounded-lg border border-border/60 overflow-hidden">
-      <div className="flex items-center justify-between px-3.5 py-2 bg-muted/30 border-b border-border/60">
-        <span className="text-[11px] font-bold uppercase tracking-wide text-foreground">
-          Partners' Drawings — Detail
-        </span>
-        <span className="text-[11px] font-semibold tabular-nums">{fmt(total)}</span>
-      </div>
-      <table className="w-full border-collapse">
-        <tbody>
-          {groups.map((g) => (
-            <GroupRow key={String(g.groupId)} group={g} openKey={openKey} onToggle={onToggle} indent={2} />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <tr>
+        <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
+          <span className="text-[0.6875rem] font-bold text-foreground uppercase tracking-wide">Reserves &amp; Surplus</span>
+        </td>
+      </tr>
+      <tr className="border-b border-border/30">
+        <td className="py-1.5 pl-8 pr-3 text-[0.6875rem] text-muted-foreground">Retained Earnings b/f (Prior Years)</td>
+        <td className="w-16" />
+        <td className="w-32" />
+        <td className="py-1.5 pl-3 pr-5 text-right text-[0.6875rem] tabular-nums font-medium w-36"><Signed amount={data.retainedEarningsPrior} /></td>
+      </tr>
+      <tr className="border-t border-border/60">
+        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Reserves &amp; Surplus</td>
+        <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(data.total)}</td>
+      </tr>
+      <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
+    </>
   );
 }
 
@@ -498,16 +502,16 @@ function VerticalStatement({
       <table className="w-full border-collapse min-w-[560px]">
         <thead>
           <tr className="border-b-2 border-foreground/20">
-            <th className="pb-2.5 pl-5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+            <th className="pb-2.5 pl-5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
               Particulars
             </th>
-            <th className="pb-2.5 px-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-16">
+            <th className="pb-2.5 px-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-16">
               Note No.
             </th>
-            <th className="pb-2.5 px-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-32">
+            <th className="pb-2.5 px-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-32">
               Sub-Total ₹
             </th>
-            <th className="pb-2.5 pl-3 pr-5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-36">
+            <th className="pb-2.5 pl-3 pr-5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-36">
               Amount ₹
             </th>
           </tr>
@@ -519,6 +523,8 @@ function VerticalStatement({
 
           <PartnersCapitalBlock data={data.partnersCapital} openKey={openKey} onToggle={toggle} noteRef={noteRef} />
 
+          <ReservesAndSurplusBlock data={data.reservesAndSurplus} />
+
           <SectionBlock label="Provisions & Reserves" amount={totalProvisionsReserves}>
             <GroupList groups={data.provisionsReserves} openKey={openKey} onToggle={toggle} emptyLabel="No provisions or reserves" noteRef={noteRef} />
           </SectionBlock>
@@ -527,6 +533,10 @@ function VerticalStatement({
             <GroupList groups={data.fixedLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No fixed liabilities" noteRef={noteRef} />
           </SectionBlock>
 
+          {/* Includes an "Advance from Customers" group for any Sundry
+              Debtors head with a credit balance — customers who've paid
+              more than they currently owe — instead of showing as a
+              negative figure under Sundry Debtors on the Assets side. */}
           <SectionBlock label="Current Liabilities" amount={totalCurrentLiabilities}>
             <GroupList groups={data.currentLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No current liabilities" noteRef={noteRef} />
           </SectionBlock>
@@ -539,18 +549,18 @@ function VerticalStatement({
 
           <tr>
             <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
-              <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">Fixed Assets</span>
+              <span className="text-[0.6875rem] font-bold text-foreground uppercase tracking-wide">Fixed Assets</span>
             </td>
           </tr>
           <tr>
             <td colSpan={4} className="pt-1 pb-0.5 pl-7">
-              <span className="text-[10px] font-semibold text-foreground/70">Tangible Assets</span>
+              <span className="text-[0.625rem] font-semibold text-foreground/70">Tangible Assets</span>
             </td>
           </tr>
           <GroupList groups={data.fixedAssets.tangible} openKey={openKey} onToggle={toggle} emptyLabel="No tangible assets" noteRef={noteRef} />
           <tr>
             <td colSpan={4} className="pt-1.5 pb-0.5 pl-7">
-              <span className="text-[10px] font-semibold text-foreground/70">Intangible Assets</span>
+              <span className="text-[0.625rem] font-semibold text-foreground/70">Intangible Assets</span>
             </td>
           </tr>
           <GroupList groups={data.fixedAssets.intangible} openKey={openKey} onToggle={toggle} emptyLabel="No intangible assets" noteRef={noteRef} />
@@ -577,13 +587,6 @@ function VerticalStatement({
         </tbody>
       </table>
 
-      <PartnersDrawingsNote
-        groups={data.partnersDrawings}
-        total={data.partnersDrawings.reduce((s, g) => s + g.total, 0)}
-        openKey={openKey}
-        onToggle={toggle}
-      />
-
       {/* Balance check bar */}
       <div className={`mt-4 mx-0 flex items-center justify-between px-4 py-2.5 rounded-lg border text-xs font-medium ${
         data.balanced
@@ -609,7 +612,7 @@ function VerticalStatement({
 
       {/* Note */}
       <div className="mt-3 pt-2.5 border-t border-border/40">
-        <p className="text-[9px] text-muted-foreground/50 italic">
+        <p className="text-[0.5625rem] text-muted-foreground/50 italic">
           Prepared per the classic vertical Balance Sheet format for partnership/proprietorship entities. Every figure is pulled live
           from the account groups tagged in Account Group Master — click any row (›) to view the underlying ledger heads.
           Net Profit is pulled from the current Profit &amp; Loss statement; Partners' Drawings are deducted from Partners' Capital.
@@ -680,7 +683,7 @@ export default function BalanceSheet() {
   const exportRows = data
     ? [
         { side: "Liabilities", group: "Partners' Capital", head: "Opening Capital", amount: data.partnersCapital.openingCapital },
-        { side: "Liabilities", group: "Partners' Capital", head: "Retained Earnings b/f", amount: data.partnersCapital.retainedEarningsPrior },
+        { side: "Liabilities", group: "Reserves & Surplus", head: "Retained Earnings b/f", amount: data.reservesAndSurplus.retainedEarningsPrior },
         { side: "Liabilities", group: "Partners' Capital", head: "Further Capital", amount: data.partnersCapital.furtherCapital },
         { side: "Liabilities", group: "Partners' Capital", head: "Net Profit (Current Period)", amount: data.partnersCapital.netProfitCurrent },
         { side: "Liabilities", group: "Partners' Capital", head: "Partners' Drawings", amount: -data.partnersCapital.drawings },
@@ -715,7 +718,7 @@ export default function BalanceSheet() {
 
           {/* Quick date buttons */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mr-1">As On</span>
+            <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mr-1">As On</span>
             {[
               { label: "Today",        fn: setToday },
               { label: "H1 End (Sep)", fn: setFYMid },
@@ -724,7 +727,7 @@ export default function BalanceSheet() {
               <button
                 key={label}
                 onClick={fn}
-                className="px-2.5 h-7 rounded-md text-[10px] font-medium bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground border border-border/50 transition-all"
+                className="px-2.5 h-7 rounded-md text-[0.625rem] font-medium bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground border border-border/50 transition-all"
               >
                 {label}
               </button>
@@ -735,18 +738,17 @@ export default function BalanceSheet() {
           <div className="flex flex-wrap items-end gap-3">
 
             <div className="flex flex-col gap-0.5">
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
                 <CalendarDays size={9} /> As at Date
               </span>
-              <input
-                type="date" value={asOf}
+              <DateInput value={asOf}
                 onChange={(e) => setAsOf(e.target.value)}
                 className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
 
             <div className="flex flex-col gap-0.5 min-w-[160px]">
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
                 <Building size={9} /> Company
               </span>
               <select
@@ -760,7 +762,7 @@ export default function BalanceSheet() {
             </div>
 
             <div className="flex flex-col gap-0.5 min-w-[160px]">
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
                 <FolderKanban size={9} /> Project
               </span>
               <select
@@ -820,12 +822,12 @@ export default function BalanceSheet() {
                 <div className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-[9px] font-heading uppercase tracking-widest text-emerald-700/60 dark:text-emerald-400/60 mb-1">Total Assets</p>
+                      <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-emerald-700/60 dark:text-emerald-400/60 mb-1">Total Assets</p>
                       <p className="text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400 tracking-tight">
                         {fmt(data.totals.assets)}
                       </p>
                       {r && (
-                        <p className="text-[10px] text-muted-foreground/60 mt-1">
+                        <p className="text-[0.625rem] text-muted-foreground/60 mt-1">
                           Current: {fmt(r.totalCurrentAssets)} · Non-Current: {fmt(r.totalNonCurrentAssets)}
                         </p>
                       )}
@@ -838,12 +840,12 @@ export default function BalanceSheet() {
                 <div className="rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 to-violet-500/5 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-[9px] font-heading uppercase tracking-widest text-violet-700/60 dark:text-violet-400/60 mb-1">Total Liabilities</p>
+                      <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-violet-700/60 dark:text-violet-400/60 mb-1">Total Liabilities</p>
                       <p className="text-2xl font-bold tabular-nums text-violet-700 dark:text-violet-400 tracking-tight">
                         {fmt(data.totals.liabilities)}
                       </p>
                       {r && (
-                        <p className="text-[10px] text-muted-foreground/60 mt-1">
+                        <p className="text-[0.625rem] text-muted-foreground/60 mt-1">
                           Partners' Capital: {fmt(r.totalEquity)} · Other Liabilities: {fmt(r.totalCurrentLiabilities + r.totalNonCurrentLiabilities)}
                         </p>
                       )}
@@ -875,7 +877,7 @@ export default function BalanceSheet() {
               {/* ── Financial Ratios ── */}
               {r && (
                 <div className="mb-5">
-                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-2.5 flex items-center gap-1.5">
+                  <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-2.5 flex items-center gap-1.5">
                     <Activity size={9} /> Key Financial Ratios
                   </p>
                   <div className="flex flex-wrap gap-3">
@@ -917,7 +919,7 @@ export default function BalanceSheet() {
                   </div>
 
                   {/* Ratio interpretation guide */}
-                  <div className="mt-2.5 flex flex-wrap gap-3 text-[9px] text-muted-foreground/50">
+                  <div className="mt-2.5 flex flex-wrap gap-3 text-[0.5625rem] text-muted-foreground/50">
                     {[
                       { color: "bg-emerald-500", label: "Healthy" },
                       { color: "bg-amber-500",   label: "Monitor" },
@@ -943,7 +945,7 @@ export default function BalanceSheet() {
               <VerticalStatement data={data} asOfLabel={asOfLabel} />
 
               {/* ── Info ── */}
-              <div className="mt-4 flex items-start gap-2 text-[10px] text-muted-foreground/60">
+              <div className="mt-4 flex items-start gap-2 text-[0.625rem] text-muted-foreground/60">
                 <Info size={11} className="shrink-0 mt-0.5" />
                 <span>
                   Section classification is heuristic-based on Account Group names — set up Partners Drawings / Fictitious Assets
@@ -964,11 +966,46 @@ export default function BalanceSheet() {
 
       </FinanceShell>
 
-      {/* Print styles */}
+      {/* Print styles — #bs-printable is nested deep inside FinanceShell's
+          layout chrome, not a direct child of body, so a `body > *` selector
+          can't isolate it: none of body's actual direct children match
+          #bs-printable, so they'd all get hidden — including the ancestor
+          that #bs-printable itself lives inside, taking it down too (a
+          blank print preview). visibility (inherited, but overridable per
+          element) sidesteps that: hide everything, then explicitly make
+          #bs-printable and its descendants visible again regardless of how
+          deep they're nested. */}
       <style>{`
         @media print {
-          body > *:not(#bs-printable) { display: none !important; }
-          #bs-printable { display: block !important; box-shadow: none !important; border: none !important; }
+          body * { visibility: hidden !important; }
+          #bs-printable, #bs-printable * { visibility: visible !important; }
+          /* The dark theme's --foreground/--muted-foreground resolve to
+             near-white text, which nothing here forces back to a readable
+             color for print — amounts would render white-on-white, invisible
+             on paper. Same fix already applied on ProfitAndLoss.tsx's
+             #pl-printable. */
+          #bs-printable, #bs-printable * {
+            color: #000 !important;
+            background-color: transparent !important;
+            border-color: #999 !important;
+          }
+          #bs-printable {
+            /* fixed (not absolute) so it anchors to the page itself instead
+               of whatever relatively-positioned ancestor it happens to sit
+               inside — absolute was positioning it relative to that
+               ancestor's box (somewhere down the page, past the app's
+               navbar/sidebar/toolbar chrome), which is why the printed page
+               opened with a large blank void before the content instead of
+               starting flush at the top. Same fix already applied on
+               ProfitAndLoss.tsx's #pl-printable. */
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
         }
       `}</style>
     </>

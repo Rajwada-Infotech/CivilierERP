@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Package } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface MaterialShellProps {
   title: string;
@@ -23,7 +23,7 @@ export const MaterialShell: React.FC<MaterialShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {
@@ -162,7 +162,7 @@ export const MaterialGlassCard: React.FC<{
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div
@@ -205,7 +205,7 @@ export const MaterialGlassCard: React.FC<{
       <div className="relative z-10 p-4">
         <div className="flex items-start justify-between gap-2 mb-3">
           <p
-            className="text-[10px] font-heading font-semibold uppercase tracking-widest"
+            className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest"
             style={{ color: accentColor, opacity: 0.85 }}
           >
             {label}
@@ -254,7 +254,7 @@ export const MaterialSection: React.FC<{
   accentColor?: string;
 }> = ({ title, icon: Icon, action, children, accentColor = "#10b981" }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <div className="space-y-3">

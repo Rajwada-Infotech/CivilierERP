@@ -1,3 +1,4 @@
+import ActivityCommentsTab from "./ActivityCommentsTab";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,7 +18,6 @@ import {
   ChevronRight,
   ZoomIn,
   ZoomOut,
-  Upload,
   Package,
   UserRound,
   CalendarDays,
@@ -26,6 +26,15 @@ import {
   Plus,
   Save,
   UserX,
+  ListChecks,
+  Check,
+  Timer,
+  TrendingUp,
+  History,
+  ShieldQuestion,
+  Lock,
+  CalendarClock,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -36,10 +45,23 @@ import {
   getBlueprintAnnotation,
   getBlueprintAnnotationHistory,
   updateAssignmentDetail,
+  getRungAssignment,
+  saveRungAssignment,
+  getAssignmentAttempts,
+  restoreCancelledActivity,
+  getProgressLog,
+  getDailyLog,
+  deleteDailyLogEntry,
+  startDelayInfo,
+  ASSIGNMENT_STATUS_META,
   type PhotoPhase,
   type ActivityPhotoMeta,
   type ReportedAssignment,
+  type AssignmentCheckpoint,
+  type AssignmentStatus,
+  type DailyLogEntry,
 } from "@/api/dependencyActivityAssignmentApi";
+import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 import {
   getAttendance,
   saveAttendance,
@@ -49,10 +71,25 @@ import {
 import { AddWorkerDialog, inputCls, STATUS_LABEL, STATUS_CLS, todayIso } from "@/pages/civilworkdpr/WorkerAttendance";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
-import { useCameraCapture } from "@/hooks/useCameraCapture";
+import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
+import { useAuth } from "@/contexts/AuthContext";
+import { DateInput } from "@/components/ui/date-input";
 
-type DetailTab = "overview" | "blueprint" | "photos" | "attendance";
+type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "daily-log" | "comments" | "history";
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function diffDays(startStr: string, endStr: string): number | null {
+  const s = new Date(`${startStr}T00:00:00`);
+  const e = new Date(`${endStr}T00:00:00`);
+  const diff = Math.round((e.getTime() - s.getTime()) / 86400000);
+  return diff >= 0 ? diff : null;
+}
 
 const TAG_META: Record<PhotoPhase, { label: string; icon: LucideIcon; color: string }> = {
   before: { label: "Before", icon: Clock, color: "#f59e0b" },
@@ -212,7 +249,6 @@ function PhotosTab({ rungId }: { rungId: number }) {
   const [activeTag, setActiveTag] = useState<PhotoPhase>("after");
   const [lightboxPhoto, setLightboxPhoto] = useState<ActivityPhotoMeta | null>(null);
   const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const camera = useCameraCapture();
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["activity-photos", rungId] });
@@ -260,6 +296,10 @@ function PhotosTab({ rungId }: { rungId: number }) {
       const note = await getGeoTag();
       const file = new File([blob], `${activeTag}-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" });
       await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
+      // Upload had no success feedback at all before this — only a failure
+      // toast existed, so a working upload and a silently-swallowed one
+      // looked identical to the user (nothing visibly happens either way).
+      toast.success(`${TAG_META[activeTag].label} photo saved.`);
       refresh();
     } catch (err: any) {
       toast.error(err.message || "Upload failed");
@@ -269,30 +309,25 @@ function PhotosTab({ rungId }: { rungId: number }) {
   };
 
   const handleShutter = async () => {
-    const blob = await camera.capture();
+    // Field photos are downscaled before upload: a full-resolution frame is
+    // several MB, and the server stores it as base64 text in the database, so
+    // size here is what decides how slow a crowd of simultaneous uploads gets.
+    const blob = await camera.capture({ maxDimension: 1600, quality: 0.8 });
     if (blob) await addPhoto(blob);
-  };
-
-  const handleFilePicked = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    await carryForwardBeforeIfNeeded();
-    for (const file of Array.from(files)) {
-      setUploading(true);
-      try {
-        const note = await getGeoTag();
-        await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
-      } catch (err: any) {
-        toast.error(err.message || "Upload failed");
-      } finally {
-        setUploading(false);
-      }
-    }
-    refresh();
   };
 
   const openCamera = async () => {
     const ok = await camera.start();
-    if (!ok) fileInputRef.current?.click();
+    if (!ok) {
+      // This used to also fire fileInputRef.current?.click() right here as
+      // a fallback — but by the time an awaited getUserMedia() call settles,
+      // the click that triggered this handler is no longer "fresh" user
+      // activation. Safari in particular silently refuses to open the file
+      // picker from a .click() that happens after an await, so the fallback
+      // looked exactly like "neither button does anything": the toast below
+      // fired, but no picker ever appeared.
+      toast.error(CAMERA_ERROR_TEXT[camera.error ?? "other"]);
+    }
   };
 
   return (
@@ -308,7 +343,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
               key={tag}
               type="button"
               onClick={() => setActiveTag(tag)}
-              className="flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded-full text-[0.6875rem] font-medium border transition-colors"
               style={
                 active
                   ? { background: `${meta.color}1A`, borderColor: `${meta.color}60`, color: meta.color }
@@ -351,27 +386,8 @@ function PhotosTab({ rungId }: { rungId: number }) {
             >
               <CameraIcon size={13} /> Open camera
             </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Upload size={11} /> Upload instead
-            </button>
           </div>
         )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            handleFilePicked(e.target.files);
-            e.target.value = "";
-          }}
-        />
       </div>
 
       {/* Gallery, grouped by tag */}
@@ -388,7 +404,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
             const carriedCount = photos.filter((p) => p.note === CARRIED_FORWARD_NOTE).length;
             return (
               <div key={tag} className="pl-3 border-l-2" style={{ borderColor: `${meta.color}45` }}>
-                <p className="flex items-center gap-1 text-[10px] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
+                <p className="flex items-center gap-1 text-[0.625rem] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
                   <Icon size={10} /> {meta.label} · {photos.length}
                   {carriedCount > 0 && (
                     <span className="normal-case font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
@@ -397,7 +413,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
                   )}
                 </p>
                 {photos.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground/70 flex items-center gap-1">
+                  <p className="text-[0.6875rem] text-muted-foreground/70 flex items-center gap-1">
                     <ImageOff size={11} /> None yet
                   </p>
                 ) : (
@@ -510,7 +526,7 @@ function BlueprintTab({ rungId, roomId }: { rungId: number; roomId: number }) {
         )}
       </div>
 
-      <p className="text-[11px] text-muted-foreground text-center">
+      <p className="text-[0.6875rem] text-muted-foreground text-center">
         {rev.updatedBy ? `${rev.updatedBy} · ` : ""}
         {fmtDateTime(rev.updatedAt)}
       </p>
@@ -523,6 +539,11 @@ function BlueprintTab({ rungId, roomId }: { rungId: number; roomId: number }) {
 // Worker Attendance page (src/pages/civilworkdpr/WorkerAttendance.tsx),
 // just pinned to this rung — the natural place to check "who worked on
 // this activity" alongside its Overview/Photos.
+// Stable fallback while the attendance query has no data yet (loading or
+// failed): a fresh `[]` default every render made the status-sync effect
+// below (deps: [attendanceRows]) setState on every render, looping forever.
+const NO_ATTENDANCE_ROWS: never[] = [];
+
 function AttendanceTab({ rungId }: { rungId: number }) {
   const queryClient = useQueryClient();
   const [date, setDate] = useState(todayIso());
@@ -530,7 +551,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
   const [statusByWorker, setStatusByWorker] = useState<Record<number, AttendanceStatus>>({});
   const [saving, setSaving] = useState(false);
 
-  const { data: attendanceRows = [], isFetching } = useQuery({
+  const { data: attendanceRows = NO_ATTENDANCE_ROWS, isFetching } = useQuery({
     queryKey: ["workerAttendanceAttendance", rungId, date],
     queryFn: () => getAttendance(rungId, date),
     staleTime: 10 * 1000,
@@ -577,7 +598,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
         <label className="flex items-center gap-1.5 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground">
           <CalendarDays size={12} /> Date
         </label>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} w-auto`} />
+        <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} w-auto`} />
       </div>
 
       {isFetching ? (
@@ -597,7 +618,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
               <div key={row.workerId} className="flex items-center justify-between gap-3 px-3 py-2.5">
                 <div className="min-w-0">
                   <p className="text-sm text-foreground truncate">{row.workerName}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
+                  <p className="text-[0.625rem] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <select
@@ -651,12 +672,156 @@ function AttendanceTab({ rungId }: { rungId: number }) {
   );
 }
 
+// ── Checkpoints tab ──────────────────────────────────────────────────────
+// The interactive checklist — checking off happens HERE, in Reporting, not
+// in Work Allocation (RungAssignmentModal, which now only shows these
+// read-only). What's on the list is configured in Activity Master and
+// auto-seeded onto this rung's assignment the first time it's fetched (see
+// dependencyActivityAssignment.js's GET /:rungId); nothing is added or
+// removed from this tab.
+function CheckpointsTab({ rungId }: { rungId: number }) {
+  const queryClient = useQueryClient();
+  const [checkpoints, setCheckpoints] = useState<AssignmentCheckpoint[]>([]);
+  const [saving, setSaving] = useState<number | null>(null);
+
+  const { data: detail, isLoading } = useQuery({
+    queryKey: ["dependency-activity-assignment", rungId],
+    queryFn: () => getRungAssignment(rungId),
+  });
+
+  useEffect(() => {
+    setCheckpoints(detail?.assignment?.checkpoints || []);
+  }, [detail]);
+
+  const startDate = detail?.assignment?.startDate ? detail.assignment.startDate.slice(0, 10) : "";
+
+  // Same rule the server enforces on save (dependencyActivityAssignment.js
+  // POST /:rungId) — caught here first for an immediate, specific reason
+  // instead of a save-time rejection.
+  const checkpointGate = (cp: AssignmentCheckpoint): { locked: boolean; daysLeft: number | null } => {
+    if (cp.isChecked || cp.minWaitDays == null || cp.minWaitDays <= 0) return { locked: false, daysLeft: null };
+    if (!startDate) return { locked: true, daysLeft: null };
+    const eligibleDate = addDays(startDate, cp.minWaitDays);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (todayStr >= eligibleDate) return { locked: false, daysLeft: null };
+    return { locked: true, daysLeft: diffDays(todayStr, eligibleDate) };
+  };
+
+  const toggleCheckpoint = async (index: number) => {
+    if (!detail?.assignment) return;
+    const cp = checkpoints[index];
+    if (!cp.isChecked) {
+      const gate = checkpointGate(cp);
+      if (gate.locked) {
+        toast.error(
+          startDate
+            ? `"${cp.fieldName}" needs ${cp.minWaitDays} day(s) after the start date — ${gate.daysLeft ?? cp.minWaitDays} day(s) left.`
+            : `"${cp.fieldName}" needs a Start Date set (in Work Allocation) before it can be checked off.`,
+        );
+        return;
+      }
+    }
+    const next = checkpoints.map((c, i) => (i === index ? { ...c, isChecked: !c.isChecked } : c));
+    setCheckpoints(next);
+    setSaving(index);
+    try {
+      const a = detail.assignment;
+      await saveRungAssignment(rungId, {
+        engineerIds: a.engineerIds,
+        qcUserIds: a.qcUserIds,
+        approvalLevels: a.approvalLevels,
+        startDate: a.startDate,
+        days: a.days,
+        endDate: a.endDate,
+        labourSource: a.labourSource,
+        materialSource: a.materialSource,
+        labourContractorId: a.labourContractorId,
+        materialContractorId: a.materialContractorId,
+        description: a.description,
+        remarks: a.remarks,
+        materials: a.materials,
+        checkpoints: next,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["dependency-activity-assignment", rungId] });
+    } catch (err: any) {
+      setCheckpoints(checkpoints); // revert the optimistic toggle
+      toast.error(err.message || "Failed to save checkpoint");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading checkpoints…
+      </div>
+    );
+  }
+
+  if (checkpoints.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground italic text-center py-10">
+        No checkpoints tagged to this activity — add them in Activity Master.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-0">
+      {checkpoints.map((cp, i) => {
+        const gate = checkpointGate(cp);
+        return (
+          <div key={`${cp.checkpointId ?? "custom"}-${i}`} className="flex items-start gap-3">
+            <div className="flex flex-col items-center shrink-0">
+              <button
+                type="button"
+                onClick={() => toggleCheckpoint(i)}
+                disabled={saving === i}
+                className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors disabled:opacity-50 ${
+                  cp.isChecked
+                    ? "bg-emerald-500 border-emerald-500 text-white"
+                    : gate.locked
+                      ? "bg-background border-amber-500/40 text-transparent"
+                      : "bg-background border-border text-transparent hover:border-cyan-500/50"
+                }`}
+                title={cp.isChecked ? "Mark incomplete" : gate.locked ? "Not eligible yet" : "Mark complete"}
+              >
+                {saving === i ? <Loader2 size={10} className="animate-spin text-muted-foreground" /> : <Check size={11} strokeWidth={3} />}
+              </button>
+              {i < checkpoints.length - 1 && (
+                <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-emerald-500/40" : "bg-border"}`} />
+              )}
+            </div>
+            <div className="flex-1 min-w-0 pb-3 pt-0.5">
+              <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
+                {cp.fieldName}
+                {cp.isDaily && (
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                    <CalendarDays size={9} /> Daily
+                  </span>
+                )}
+                {gate.locked && (
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full">
+                    <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
+                  </span>
+                )}
+              </span>
+              {cp.isDaily && <CheckpointDailyUpdates checkpointId={cp.id} startDate={startDate || undefined} />}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Overview tab ─────────────────────────────────────────────────────────
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-0.5">{label}</p>
+      <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-0.5">{label}</p>
       <div className="text-sm text-foreground">{children}</div>
     </div>
   );
@@ -687,6 +852,21 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
             <CalendarDays size={13} className="text-muted-foreground" />
             {row.startDate ? new Date(row.startDate).toLocaleDateString("en-IN") : "—"}
           </span>
+          {(() => {
+            const delay = startDelayInfo(row.startDate, row.firstReportedAt);
+            if (!delay) return null;
+            return (
+              <span
+                className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
+                  delay.tone === "on-time"
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
+                }`}
+              >
+                {delay.label}
+              </span>
+            );
+          })()}
         </Field>
         <Field label="End Date">{row.endDate ? new Date(row.endDate).toLocaleDateString("en-IN") : "—"}</Field>
         <Field label="Days">{row.days ?? "—"}</Field>
@@ -716,7 +896,7 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
       </Field>
 
       <div>
-        <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">Remarks</p>
+        <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">Remarks</p>
         <textarea
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
@@ -728,12 +908,475 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
         />
         {remarksMutation.isPending && (
-          <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+          <p className="text-[0.625rem] text-muted-foreground mt-1 flex items-center gap-1">
             <Loader2 size={9} className="animate-spin" /> Saving…
           </p>
         )}
       </div>
     </div>
+  );
+}
+
+// ── Progress bar ─────────────────────────────────────────────────────────
+// Docked below the tabbed content, inside the modal — a draggable
+// percent-done bar. Dragging only moves the thumb visually now; nothing
+// reaches the server until the engineer explicitly clicks Save, which also
+// logs the change (who, when, from/to %) to the history list right below
+// the bar — every past save is visible there, newest first. Two rules,
+// both enforced here AND server-side (dependencyActivityAssignment.js's
+// PATCH /:rungId/status — never trust the client alone for either):
+//  - One-way ratchet: it can only move forward. Dragging to 45% means the
+//    bar can go on to 50 but never back down to 40 — the track itself is
+//    clamped so the thumb physically can't be pulled below the last saved
+//    value, not just rejected on release.
+//  - Locked once Completed: reaching 100% bundles status: "COMPLETED" into
+//    the same Save request (what sends the activity to Quality Check), and
+//    from then on the whole bar is frozen — no more dragging at all,
+//    forward or back. A mistaken 100% now goes through QC sending it back
+//    for rework (a fresh attempt), not a drag on this same bar.
+function ProgressDragBar({ row }: { row: ReportedAssignment }) {
+  const queryClient = useQueryClient();
+  const trackRef = useRef<HTMLDivElement>(null);
+  const saved = row.progressPercent ?? 0;
+  const locked = row.status === "COMPLETED";
+  const [percent, setPercent] = useState(saved);
+  const [dragging, setDragging] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const dirty = percent !== saved;
+
+  useEffect(() => {
+    if (!dragging) setPercent(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.rungId, saved]);
+
+  const { data: log = [], isLoading: logLoading } = useQuery({
+    queryKey: ["activity-progress-log", row.rungId],
+    queryFn: () => getProgressLog(row.rungId),
+    enabled: showLog,
+  });
+
+  const mutation = useMutation({
+    mutationFn: (patch: { progressPercent: number; status?: AssignmentStatus }) =>
+      updateAssignmentDetail(row.rungId, patch),
+    onSuccess: (_res, patch) => {
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      queryClient.invalidateQueries({ queryKey: ["qc-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["activity-progress-log", row.rungId] });
+      if (patch.status === "COMPLETED") toast.success("Activity completed — sent to Quality Check.");
+      else toast.success("Progress saved.");
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Failed to save progress.");
+      setPercent(saved);
+    },
+  });
+
+  // Clamped to [saved, 100] — the floor is the last saved value (the
+  // ratchet), never 0, so the drag itself can't go backward.
+  const percentFromClientX = (clientX: number): number => {
+    const el = trackRef.current;
+    if (!el) return percent;
+    const rect = el.getBoundingClientRect();
+    const ratio = (clientX - rect.left) / rect.width;
+    return Math.max(saved, Math.min(100, Math.round(ratio * 100)));
+  };
+
+  const commit = (next: number) => {
+    if (next === saved) return;
+    const patch: { progressPercent: number; status?: AssignmentStatus } = { progressPercent: next };
+    if (next === 100 && row.status !== "COMPLETED") patch.status = "COMPLETED";
+    mutation.mutate(patch);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (locked) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+    setPercent(percentFromClientX(e.clientX));
+  };
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging || locked) return;
+    setPercent(percentFromClientX(e.clientX));
+  };
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging || locked) return;
+    setDragging(false);
+    setPercent(percentFromClientX(e.clientX));
+  };
+
+  return (
+    <div className="px-4 py-3 border-t border-border shrink-0 bg-muted/10">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+          <TrendingUp size={11} /> Work Done
+          {locked && <Lock size={10} className="text-muted-foreground/70" />}
+        </span>
+        <span className="text-xs font-heading font-bold text-foreground tabular-nums flex items-center gap-1">
+          {mutation.isPending && <Loader2 size={10} className="animate-spin text-muted-foreground" />}
+          {percent}%
+        </span>
+      </div>
+      <div
+        ref={trackRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        title={locked ? "Locked — this activity is Completed" : undefined}
+        className={`relative h-3 rounded-full bg-muted touch-none select-none ${locked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+      >
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500"
+          style={{ width: `${percent}%`, transition: dragging ? "none" : "width 150ms ease-out" }}
+        />
+        <div
+          className="absolute top-1/2 w-4 h-4 rounded-full bg-white border-2 border-cyan-500 shadow-md -translate-y-1/2 -translate-x-1/2"
+          style={{ left: `${percent}%`, transition: dragging ? "none" : "left 150ms ease-out" }}
+        />
+      </div>
+
+      <div className="flex items-center justify-between mt-2.5">
+        <button
+          type="button"
+          onClick={() => setShowLog((v) => !v)}
+          className="flex items-center gap-1 text-[0.625rem] font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <History size={10} /> {showLog ? "Hide" : "Show"} update log
+        </button>
+        {!locked && dirty && (
+          <button
+            type="button"
+            onClick={() => commit(percent)}
+            disabled={mutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[0.6875rem] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-60 transition-colors"
+          >
+            {mutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+            Save
+          </button>
+        )}
+      </div>
+
+      {showLog && (
+        <div className="mt-2 rounded-lg border border-border bg-background/60 max-h-40 overflow-y-auto">
+          {logLoading ? (
+            <p className="text-[0.6875rem] text-muted-foreground text-center py-3">Loading…</p>
+          ) : log.length === 0 ? (
+            <p className="text-[0.6875rem] text-muted-foreground text-center py-3">No updates logged yet.</p>
+          ) : (
+            <div className="divide-y divide-border/60">
+              {log.map((entry) => (
+                <div key={entry.id} className="px-3 py-1.5 text-[0.6875rem]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-foreground">
+                      {entry.fromProgressPercent != null && entry.toProgressPercent != null
+                        ? `${entry.fromProgressPercent}% → ${entry.toProgressPercent}%`
+                        : entry.remarks
+                          ? "Remarks updated"
+                          : "Updated"}
+                    </span>
+                    <span className="text-muted-foreground shrink-0">
+                      {new Date(entry.loggedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                  {entry.remarks && (
+                    <p className="text-foreground/90 whitespace-pre-wrap break-words mt-0.5">{entry.remarks}</p>
+                  )}
+                  <p className="text-muted-foreground/80 truncate">{entry.loggedBy || "—"}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── History tab ──────────────────────────────────────────────────────────
+// Every past attempt at this rung — only shown once there's more than one
+// (a rework fork happened via QC or an Approval rejection). Read-only:
+// this is the "keep the history of the reworked task" record, not
+// something acted on here.
+const REWORK_SOURCE_LABEL: Record<string, string> = { QC: "Quality Check", APPROVAL: "Approval" };
+
+function HistoryTab({ rungId }: { rungId: number }) {
+  const { data: attempts = [], isLoading } = useQuery({
+    queryKey: ["activity-attempts", rungId],
+    queryFn: () => getAssignmentAttempts(rungId),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading history…
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0">
+      {attempts.map((a, i) => (
+        <div key={a.assignmentId} className="flex items-start gap-3">
+          <div className="flex flex-col items-center shrink-0">
+            <div
+              className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                a.isCurrent ? "bg-cyan-500 border-cyan-500 text-white" : "bg-background border-border text-transparent"
+              }`}
+            >
+              {a.isCurrent && <Check size={11} strokeWidth={3} />}
+            </div>
+            {i < attempts.length - 1 && <div className="w-0.5 flex-1 min-h-[18px] bg-border" />}
+          </div>
+          <div className="flex-1 min-w-0 pb-4 pt-0.5">
+            <span className="text-sm flex items-center gap-1.5 flex-wrap text-foreground font-medium">
+              Attempt {a.attemptNo}
+              {a.isCurrent && (
+                <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                  Current
+                </span>
+              )}
+              <span className="text-xs font-normal text-muted-foreground">
+                · {ASSIGNMENT_STATUS_META[a.status]?.label ?? a.status}
+              </span>
+            </span>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {a.engineerNames || "Unassigned"}
+              {a.startDate ? ` · Started ${new Date(a.startDate).toLocaleDateString("en-IN")}` : ""}
+            </p>
+            {a.reworkReason && (
+              <p className="text-xs mt-1.5 flex items-start gap-1.5 text-fuchsia-700 dark:text-fuchsia-400">
+                <RotateCcw size={11} className="shrink-0 mt-0.5" />
+                <span>
+                  Sent back for rework via {REWORK_SOURCE_LABEL[a.reworkSource || ""] || "unknown"}: {a.reworkReason}
+                </span>
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Daily Log tab ────────────────────────────────────────────────────────
+// One permanent snapshot per day this activity was reported on (see the
+// PATCH /:rungId/status route's MERGE) — newest first. Photos for a day are
+// fetched lazily on expand since most days won't be opened.
+function DailyLogDayPhotos({ rungId, logDate }: { rungId: number; logDate: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["activity-photos", rungId, logDate],
+    queryFn: () => getActivityPhotos(rungId, logDate),
+  });
+  const [lightboxPhoto, setLightboxPhoto] = useState<ActivityPhotoMeta | null>(null);
+  const all = [...(data?.before ?? []), ...(data?.after ?? [])];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-4">
+        <Loader2 size={14} className="animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (all.length === 0) {
+    return <p className="text-[0.6875rem] text-muted-foreground/70 flex items-center gap-1 py-1"><ImageOff size={11} /> No photos logged this day</p>;
+  }
+  return (
+    <>
+      <div className="flex flex-wrap gap-2 pt-1">
+        {all.map((p) => (
+          <PhotoThumb key={p.id} rungId={rungId} photo={p} onOpen={() => setLightboxPhoto(p)} onDeleted={() => {}} />
+        ))}
+      </div>
+      {lightboxPhoto && <PhotoLightbox rungId={rungId} photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />}
+    </>
+  );
+}
+
+function DailyLogTab({ rungId }: { rungId: number }) {
+  const { data: entries = [], isLoading } = useQuery({
+    queryKey: ["activity-daily-log", rungId],
+    queryFn: () => getDailyLog(rungId),
+  });
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const queryClient = useQueryClient();
+
+  const handleDelete = async (entry: DailyLogEntry) => {
+    if (!window.confirm("Delete this daily log entry?")) return;
+    setDeletingId(entry.id);
+    try {
+      await deleteDailyLogEntry(rungId, entry.id);
+      toast.success("Daily log entry deleted.");
+      queryClient.invalidateQueries({ queryKey: ["activity-daily-log", rungId] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete entry");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading daily log…
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+        <CalendarClock size={22} className="text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">No daily entries logged yet — saving progress or remarks today creates one.</p>
+      </div>
+    );
+  }
+
+  const todayStr = todayIso();
+
+  return (
+    <div className="flex flex-col gap-2">
+      {entries.map((entry) => {
+        const isToday = entry.logDate === todayStr;
+        const isOpen = expanded === entry.logDate;
+        return (
+          <div key={entry.id} className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+            <div className="flex items-center hover:bg-muted/30 transition-colors">
+            <button
+              type="button"
+              onClick={() => setExpanded(isOpen ? null : entry.logDate)}
+              className="flex-1 min-w-0 flex items-center gap-3 px-3.5 py-2.5 text-left"
+            >
+              <div className="flex flex-col items-start shrink-0 w-24">
+                <span className="text-sm font-heading font-semibold text-foreground">
+                  {new Date(entry.logDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                </span>
+                {isToday && (
+                  <span className="text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                    Today
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-foreground truncate">{entry.remarks || <span className="text-muted-foreground italic">No remarks</span>}</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5 flex items-center gap-2">
+                  {entry.progressPercent != null && (
+                    <span className="flex items-center gap-1">
+                      <TrendingUp size={10} /> {entry.progressPercent}%
+                    </span>
+                  )}
+                  {entry.photoCount > 0 && (
+                    <span className="flex items-center gap-1">
+                      <CameraIcon size={10} /> {entry.photoCount}
+                    </span>
+                  )}
+                  {entry.updatedBy && <span>· {entry.updatedBy}</span>}
+                </p>
+              </div>
+              {isOpen ? <ChevronLeft size={14} className="rotate-90 text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+            </button>
+            <button
+              type="button"
+              title="Delete entry"
+              onClick={() => handleDelete(entry)}
+              disabled={deletingId === entry.id}
+              className="shrink-0 mr-2 w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+            >
+              {deletingId === entry.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+            </button>
+            </div>
+            {isOpen && (
+              <div className="px-3.5 pb-3 border-t border-border">
+                <DailyLogDayPhotos rungId={rungId} logDate={entry.logDate} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Restore (Cancelled only, super_admin only) ──────────────────────────
+// Bringing a Cancelled activity back is a rare, deliberate override — kept
+// out of the plain status dropdown (that badge stays terminal once
+// Cancelled) and behind an explicit confirm step here, only reachable
+// after opening this modal and reviewing the activity's full detail. The
+// target status (APPROVED vs IN_PROGRESS) is decided server-side from
+// PreCancelStatus, but shown here up front so the confirm step isn't a
+// guess — see restoreCancelledActivity's own comment.
+function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const restoreTo: AssignmentStatus = row.preCancelStatus === "APPROVED" ? "APPROVED" : "IN_PROGRESS";
+
+  const restore = useMutation({
+    mutationFn: () => restoreCancelledActivity(row.rungId),
+    onSuccess: (res) => {
+      toast.success(`Restored — back to ${ASSIGNMENT_STATUS_META[res.status].label}.`);
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      setConfirmOpen(false);
+      onClose();
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to restore this activity."),
+  });
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setConfirmOpen(true)}
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-heading font-bold uppercase tracking-wide border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-[#ffe2021a] transition-colors"
+        title="Restore this Cancelled activity"
+      >
+        <ShieldQuestion size={12} /> Restore
+      </button>
+
+      {confirmOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-4" onClick={() => setConfirmOpen(false)}>
+            <div
+              className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl p-5 space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#ffe2021a] flex items-center justify-center shrink-0">
+                  <ShieldQuestion size={16} className="text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-heading font-semibold text-foreground">Restore this activity?</p>
+                  <p className="text-xs text-muted-foreground">{row.activityName}</p>
+                </div>
+              </div>
+              <p className="text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
+                It will move from <span className="font-semibold">Cancelled</span> back to{" "}
+                <span className="font-semibold">{ASSIGNMENT_STATUS_META[restoreTo].label}</span>
+                {restoreTo === "IN_PROGRESS" && " — it hadn't been approved yet, so it goes through Reporting/QC/Approval again from there"}.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={restore.isPending}
+                  onClick={() => restore.mutate()}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 transition-colors"
+                >
+                  {restore.isPending && <Loader2 size={14} className="animate-spin" />}
+                  Restore
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -744,6 +1387,10 @@ const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
   { id: "blueprint", label: "Blueprint", icon: ScanLine },
   { id: "photos", label: "Photos", icon: CameraIcon },
   { id: "attendance", label: "Attendance", icon: Users2 },
+  { id: "checkpoints", label: "Checkpoints", icon: ListChecks },
+  { id: "daily-log", label: "Daily Log", icon: CalendarClock },
+  { id: "comments", label: "Comments", icon: MessageSquare },
+  { id: "history", label: "History", icon: History },
 ];
 
 export default function ActivityDetailModal({
@@ -757,6 +1404,8 @@ export default function ActivityDetailModal({
 }) {
   useOverlayBackClose(onClose);
   const [tab, setTab] = useState<DetailTab>(initialTab);
+  const { currentUser } = useAuth();
+  const canRestore = currentUser?.role === "super_admin" && row.status === "CANCELLED";
 
   const { data: annotation } = useQuery({
     queryKey: ["blueprint-annotation", row.rungId, row.roomId, "allocation"],
@@ -771,7 +1420,12 @@ export default function ActivityDetailModal({
   const hasBlueprint = row.roomId != null && !!annotation;
   const photoCount = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
 
-  const visibleTabs = useMemo(() => TABS.filter((t) => t.id !== "blueprint" || hasBlueprint), [hasBlueprint]);
+  const visibleTabs = useMemo(
+    () =>
+      TABS.filter((t) => t.id !== "blueprint" || hasBlueprint)
+        .filter((t) => t.id !== "history" || row.attemptNo > 1),
+    [hasBlueprint, row.attemptNo],
+  );
 
   return createPortal(
     <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4">
@@ -782,7 +1436,10 @@ export default function ActivityDetailModal({
           subtitle={row.scopePath}
           icon={ActivityIcon}
           action={
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
+              <QcBadge qcStatus={row.qcStatus} />
+              <AttemptBadge attemptNo={row.attemptNo} />
+              {canRestore && <RestoreCancelledButton row={row} onClose={onClose} />}
               <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
               <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
                 <X size={18} />
@@ -791,7 +1448,13 @@ export default function ActivityDetailModal({
           }
         >
           <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
-            <div className="flex items-center gap-1 px-4 pt-3 border-b border-border shrink-0">
+            {/* Six tabs' worth of icon+label never fit a phone's width — this
+                used to just overflow the flex row silently (no scrollbar, no
+                affordance), clipping "Daily Log"/"History" off-screen with
+                no way to reach them. overflow-x-auto + shrink-0 makes it a
+                swipeable strip instead; thin-scroll keeps the scrollbar from
+                looking like a stray horizontal rule when it does show. */}
+            <div className="flex items-center gap-1 px-4 pt-3 border-b border-border shrink-0 overflow-x-auto thin-scroll">
               {visibleTabs.map((t) => {
                 const Icon = t.icon;
                 const active = tab === t.id;
@@ -800,14 +1463,14 @@ export default function ActivityDetailModal({
                     key={t.id}
                     type="button"
                     onClick={() => setTab(t.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors ${
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors shrink-0 whitespace-nowrap ${
                       active ? "border-cyan-500 text-cyan-600 dark:text-cyan-400" : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Icon size={13} />
                     {t.label}
                     {t.id === "photos" && photoCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400">
+                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[0.5625rem] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400">
                         {photoCount}
                       </span>
                     )}
@@ -821,7 +1484,13 @@ export default function ActivityDetailModal({
               {tab === "blueprint" && row.roomId != null && <BlueprintTab rungId={row.rungId} roomId={row.roomId} />}
               {tab === "photos" && <PhotosTab rungId={row.rungId} />}
               {tab === "attendance" && <AttendanceTab rungId={row.rungId} />}
+              {tab === "checkpoints" && <CheckpointsTab rungId={row.rungId} />}
+              {tab === "daily-log" && <DailyLogTab rungId={row.rungId} />}
+              {tab === "comments" && <ActivityCommentsTab rungId={row.rungId} />}
+              {tab === "history" && <HistoryTab rungId={row.rungId} />}
             </div>
+
+            <ProgressDragBar row={row} />
           </div>
         </CivilWorkDprShell>
       </div>

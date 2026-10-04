@@ -40,18 +40,7 @@ export const fetchAgreement         = (applicationId: number) => get(withAppId("
 export const fetchAgreementDocuments = (applicationId: number) => get(withAppId("/agreement/documents", applicationId)).catch(() => []);
 export const fetchInvoices          = (applicationId: number) => get(withAppId("/invoices", applicationId)).catch(() => []);
 
-export async function uploadAgreementDocument(docId: number, file: File, applicationId: number) {
-  const token = localStorage.getItem("crm_portal_token");
-  const formData = new FormData();
-  formData.append("file", file);
-  const res = await fetch(`${API}/agreement/documents/${docId}/upload${withAppId("", applicationId).replace("", "?")}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: formData,
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Upload failed");
-  return res.json();
-}
+
 
 // Cleaner version of uploadAgreementDocument with proper query string
 export async function uploadAgreementDoc(docId: number, file: File, applicationId: number) {
@@ -125,10 +114,6 @@ export async function respondSalesDeed(applicationId: number, decision: "Approve
 }
 
 export const fetchQueryPaymentAttachments = (applicationId: number) => get(withAppId("/query-payment/attachments", applicationId)).catch(() => []);
-
-export const fetchAllotmentLetter = (applicationId: number) => get(withAppId("/allotment-letter", applicationId)).catch(() => null);
-export const allotmentLetterPdfUrl  = (applicationId: number, download = false) =>
-  `${API}/allotment-letter/pdf?applicationId=${applicationId}${download ? "&download=1" : ""}`;
 
 // Files travel as base64 JSON, decoded server-side into the same
 // VARBINARY(MAX) column staff uploads use — see crmPortal.js POST

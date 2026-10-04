@@ -9,6 +9,7 @@ import {
   Route,
   Navigate,
   useLocation,
+  useSearchParams,
 } from "react-router-dom";
 
 // Static imports (needed synchronously for auth shell)
@@ -122,6 +123,33 @@ const ChequeCancellation = lazy(() => import("./pages/finance/ChequeCancellation
 const Records = lazy(() => import("./pages/records/Records"));
 const LoanDashboard = lazy(() => import("./pages/loan/LoanDashboard"));
 const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
+const MaintenanceDashboard = lazy(() => import("./pages/maintenance/MaintenanceDashboard"));
+const HrPayrollDashboard = lazy(() => import("./pages/hrpayroll/HrPayrollDashboard"));
+const EmployeeMaster = lazy(() => import("./pages/hrpayroll/EmployeeMaster"));
+const DesignationMaster = lazy(() => import("./pages/hrpayroll/DesignationMaster"));
+const CandidateMaster = lazy(() => import("./pages/hrpayroll/CandidateMaster"));
+const ShiftMaster = lazy(() => import("./pages/hrpayroll/ShiftMaster"));
+const GraceTimeMaster = lazy(() => import("./pages/hrpayroll/GraceTimeMaster"));
+const HolidayMaster = lazy(() => import("./pages/hrpayroll/HolidayMaster"));
+const DeductionAdditionMaster = lazy(() => import("./pages/hrpayroll/DeductionAdditionMaster"));
+const SalaryStructure = lazy(() => import("./pages/hrpayroll/SalaryStructure"));
+const PayrollRun = lazy(() => import("./pages/hrpayroll/PayrollRun"));
+const Payslip = lazy(() => import("./pages/hrpayroll/Payslip"));
+const AttendanceLeaveOvertime = lazy(() => import("./pages/hrpayroll/AttendanceLeaveOvertime"));
+const SalaryCalculation = lazy(() => import("./pages/hrpayroll/SalaryCalculation"));
+const IncentiveMaster = lazy(() => import("./pages/hrpayroll/IncentiveMaster"));
+const Interview = lazy(() => import("./pages/hrpayroll/Interview"));
+const OfferLetterJoining = lazy(() => import("./pages/hrpayroll/OfferLetterJoining"));
+const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
+const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
+const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
+const SecurityAttendance = lazy(() => import("./pages/maintenance/SecurityAttendance"));
+const ElectricityMaintenance = lazy(() => import("./pages/maintenance/ElectricityMaintenance"));
+const MaintenanceServiceRequests = lazy(() => import("./pages/maintenance/MaintenanceServiceRequests"));
+const MeterReadingMaster = lazy(() => import("./pages/masters/MeterReadingMaster"));
+const ElectricityProviderMaster = lazy(() => import("./pages/masters/ElectricityProviderMaster"));
+const ElectricityTariffMaster = lazy(() => import("./pages/masters/ElectricityTariffMaster"));
+const ChargeHeadMaster = lazy(() => import("./pages/masters/ChargeHeadMaster"));
 const CivilWorkDprDashboard = lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
 );
@@ -130,6 +158,12 @@ const CivilWorkDprWorkDone = lazy(
 );
 const CivilWorkDprActivityReporting = lazy(
   () => import("./pages/civilworkdpr/ActivityReporting"),
+);
+const CivilWorkDprQualityCheck = lazy(
+  () => import("./pages/civilworkdpr/QualityCheck"),
+);
+const CivilWorkDprAmendment = lazy(
+  () => import("./pages/civilworkdpr/Amendment"),
 );
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
@@ -188,6 +222,10 @@ const TagMaster = lazy(
 const CancelTemplateMaster = lazy(
   () => import("./pages/admin/masters/CancelTemplateMaster"),
 );
+const CrmResales = lazy(() => import("./pages/CRM/CrmResales"));
+const ProjectTypeMaster = lazy(
+  () => import("./pages/admin/masters/ProjectTypeMaster"),
+);
 const DepartmentMaster = lazy(
   () => import("./pages/admin/masters/DepartmentMaster"),
 );
@@ -196,6 +234,7 @@ const UnitMatrixPage = lazy(() => import("./pages/CRM/CrmUnitMatrix"));
 const ParkingMatrixPage = lazy(() => import("./pages/CRM/CrmParkingMatrix"));
 const CrmParkingBookingPage = lazy(() => import("./pages/CRM/CrmParkingBooking"));
 const BankMaster = lazy(() => import("./pages/masters/BankMaster"));
+const PartnerMaster = lazy(() => import("./pages/masters/PartnerMaster"));
 const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
 const ItemGroupMaster = lazy(() => import("./pages/masters/ItemGroupMaster"));
@@ -208,10 +247,12 @@ const GRN = lazy(() => import("./pages/material/GRN"));
 const FixedAssetDashboard = lazy(() => import("./pages/fixedAsset/FixedAssetDashboard"));
 const FixedAssetRecord = lazy(() => import("./pages/fixedAsset/FixedAssetRecord"));
 const FixedAssetTagging = lazy(() => import("./pages/fixedAsset/FixedAssetTagging"));
+const FixedAssetDepreciationTagStickers = lazy(() => import("./pages/fixedAsset/FixedAssetDepreciationTagStickers"));
 const FixedAssetInventoryImport = lazy(() => import("./pages/fixedAsset/FixedAssetInventoryImport"));
 const FixedAssetAssignment = lazy(() => import("./pages/fixedAsset/FixedAssetAssignment"));
 const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
 const FixedAssetQualityCheck = lazy(() => import("./pages/fixedAsset/FixedAssetQualityCheck"));
+const FixedAssetMaintenance = lazy(() => import("./pages/fixedAsset/FixedAssetMaintenance"));
 const IDTemplateMaster = lazy(() => import("./pages/fixedAsset/IDTemplateMaster"));
 const ShortClose = lazy(() => import("./pages/material/ShortClose"));
 const DepreciationSetup = lazy(() => import("./pages/fixedAsset/DepreciationSetup"));
@@ -250,6 +291,7 @@ const NamedEntryTypeMaster = lazy(
 );
 const TypeOfDocMaster = lazy(() => import("./pages/masters/TypeOfDocMaster"));
 const ActivityMaster = lazy(() => import("./pages/masters/ActivityMaster"));
+const EngineeringActivityMaster = lazy(() => import("./pages/masters/EngineeringActivityMaster"));
 const DebitNoteMaster = lazy(() => import("./pages/masters/DebitNoteMaster"));
 const BillingTermsMaster = lazy(
   () => import("./pages/masters/BillingTermsMaster"),
@@ -264,6 +306,7 @@ const UnitOfMeasurementMaster = lazy(
 const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
 const Stock = lazy(() => import("./pages/material/Stock"));
 const StockTransfer = lazy(() => import("./pages/material/StockTransfer"));
+const StockUpdate = lazy(() => import("./pages/material/StockUpdate"));
 const SaleOrder = lazy(() => import("./pages/sales/SaleOrder"));
 const SalesPayment = lazy(() => import("./pages/sales/Payment"));
 const SaleInvoice = lazy(() => import("./pages/sales/SaleInvoice"));
@@ -301,10 +344,12 @@ const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
 const PostApprovalRights = lazy(
   () => import("./pages/admin/PostApprovalRights"),
 );
+const ProjectAccess = lazy(() => import("./pages/admin/ProjectAccess"));
 const ApprovalInbox = lazy(() => import("./pages/admin/ApprovalInbox"));
 
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
+const ApkManagerPage = lazy(() => import("./pages/admin/ApkManager"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
 const AdminProfile = lazy(() => import("./pages/admin/AdminProfile"));
 const DBAProfile = lazy(() => import("./pages/dba/DBAProfile"));
@@ -397,8 +442,10 @@ const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
 // button, both of which now link here instead of the old inline checklist.
 const CrmBooking           = lazy(() => import("./pages/CRM/CrmBooking"));
 const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
+// The Agreement workspace now merges the old Agreement Papers, AFS Query
+// Payment and AFS Registry pages in as tabs — the standalone routes below
+// redirect into it (?tab=…). See CrmAgreement.tsx.
 const CrmAgreement         = lazy(() => import("./pages/CRM/CrmAgreement"));
-const CrmAgreementPapers   = lazy(() => import("./pages/CRM/CrmAgreementPapers"));
 const CrmPaymentMilestones = lazy(() => import("./pages/CRM/CrmPaymentMilestones"));
 const CrmDemands           = lazy(() => import("./pages/CRM/CrmDemands"));
 const CrmMoneyReceipts     = lazy(() => import("./pages/CRM/CrmMoneyReceipts"));
@@ -407,28 +454,25 @@ const CrmInvoices          = lazy(() => import("./pages/CRM/CrmInvoices"));
 const CrmHandover          = lazy(() => import("./pages/CRM/CrmHandover"));
 const CrmServiceTickets    = lazy(() => import("./pages/CRM/CrmServiceTickets"));
 const CrmCancellations     = lazy(() => import("./pages/CRM/CrmCancellations"));
+const CrmRefunds           = lazy(() => import("./pages/CRM/CrmRefunds"));
 const CrmCustomer360       = lazy(() => import("./pages/CRM/CrmCustomer360"));
 const CrmLoanTracking      = lazy(() => import("./pages/CRM/CrmLoanTracking"));
 const CrmLegalMilestones   = lazy(() => import("./pages/CRM/CrmLegalMilestones"));
 const CrmNoc               = lazy(() => import("./pages/CRM/CrmNoc"));
 const CrmSalesDeed         = lazy(() => import("./pages/CRM/CrmSalesDeed"));
 const CrmLeads             = lazy(() => import("./pages/CRM/CrmLeads"));
-const CrmAfsQueryPayment   = lazy(() => import("./pages/CRM/CrmAfsQueryPayment"));
-const CrmAfsRegistry       = lazy(() => import("./pages/CRM/CrmAfsRegistry"));
 const CrmOcCc              = lazy(() => import("./pages/CRM/CrmOcCc"));
-const CrmAllotmentLetter   = lazy(() => import("./pages/CRM/CrmAllotmentLetter"));
 const CrmMutation          = lazy(() => import("./pages/CRM/CrmMutation"));
-const CrmQueryPayment      = lazy(() => import("./pages/CRM/CrmQueryPayment"));
-const CrmRegistry          = lazy(() => import("./pages/CRM/CrmRegistry"));
 const CrmPrePossession     = lazy(() => import("./pages/CRM/CrmPrePossession"));
 const CrmPossessionNotice  = lazy(() => import("./pages/CRM/CrmPossessionNotice"));
 const CrmConstructionUpdates = lazy(() => import("./pages/CRM/CrmConstructionUpdates"));
-const CrmCommunication     = lazy(() => import("./pages/CRM/CrmCommunication"));
 const CrmDashboard         = lazy(() => import("./pages/CRM/CrmDashboard"));
 const CrmCustomerBankDetails = lazy(() => import("./pages/CRM/CrmCustomerBankDetails"));
+const CrmBookingAmendments = lazy(() => import("./pages/CRM/CrmBookingAmendments"));
 const CrmBrokerage         = lazy(() => import("./pages/CRM/CrmBrokerage"));
 const CrmPaymentPlans      = lazy(() => import("./pages/CRM/CrmPaymentPlans"));
 const CrmProjectAutoSetup  = lazy(() => import("./pages/CRM/CrmProjectAutoSetup"));
+const CrmPlotMaster        = lazy(() => import("./pages/CRM/CrmPlotMaster"));
 const CrmMilestoneMaster   = lazy(() => import("./pages/CRM/CrmMilestoneMaster"));
 const CrmBrokerageRateTiers = lazy(() => import("./pages/CRM/CrmBrokerageRateTiers"));
 const CrmBrokerMaster      = lazy(() => import("./pages/CRM/CrmBrokerMaster"));
@@ -441,7 +485,6 @@ const PortalBooking        = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalAgreement      = lazy(() => import("./pages/CrmCustomerPortal/PortalAgreement"));
 const PortalPayments       = lazy(() => import("./pages/CrmCustomerPortal/PortalPayments"));
 const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/PortalConstruction"));
-const PortalDocuments      = lazy(() => import("./pages/CrmCustomerPortal/PortalDocuments"));
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
@@ -454,6 +497,7 @@ const MaterialAmendment = lazy(() => import("./pages/material/MaterialAmendment"
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
+const GLPostingFailures = lazy(() => import("./pages/dba/GLPostingFailures"));
 
 // Engineering Pages
 const EngineeringDashboard = lazy(
@@ -619,6 +663,29 @@ function ProtectedRoute({
   );
 }
 
+// Redirects an old standalone pre-sale/AFS route into the merged Agreement
+// workspace, keeping ?bookingId= and forcing the right ?tab=.
+function AgreementTabRedirect({ tab }: { tab: string }) {
+  const [sp] = useSearchParams();
+  const bookingId = sp.get("bookingId");
+  const qs = new URLSearchParams();
+  if (bookingId) qs.set("bookingId", bookingId);
+  qs.set("tab", tab);
+  return <Navigate to={`/crm/agreements?${qs.toString()}`} replace />;
+}
+
+// Registry and Query Payment were both merged into the Sale Deed page as
+// their own dedicated tabs ("Registry" / "Query Payment") — redirect old
+// standalone links to the matching tab, keeping ?bookingId=.
+function SalesDeedTabRedirect({ tab }: { tab: string }) {
+  const [sp] = useSearchParams();
+  const bookingId = sp.get("bookingId");
+  const qs = new URLSearchParams();
+  if (bookingId) qs.set("bookingId", bookingId);
+  qs.set("tab", tab);
+  return <Navigate to={`/crm/sales-deed?${qs.toString()}`} replace />;
+}
+
 // ─── Auth Session Bridge ──────────────────────────────────────────────────────
 function AuthSessionBridge({ children }: { children: React.ReactNode }) {
   const { recordLogin, recordLogout } = useActivityBrowser();
@@ -638,11 +705,11 @@ function AppRoutes() {
       <Route path="/crm-client-portal/login" element={<Suspense fallback={<PageSkeleton />}><PortalLogin /></Suspense>} />
       <Route path="/crm-client-portal/change-password" element={<Suspense fallback={<PageSkeleton />}><PortalChangePassword /></Suspense>} />
       <Route path="/crm-client-portal" element={<Suspense fallback={<PageSkeleton />}><PortalLayout /></Suspense>}>
+        <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<PortalOverview />} />
         <Route path="booking" element={<PortalBooking />} />
         <Route path="agreement" element={<PortalAgreement />} />
         <Route path="payments" element={<PortalPayments />} />
-        <Route path="documents" element={<PortalDocuments />} />
         <Route path="construction" element={<PortalConstruction />} />
         <Route path="tickets" element={<PortalTickets />} />
         <Route path="activity" element={<PortalActivity />} />
@@ -898,6 +965,222 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/maintenance"
+        element={
+          <ProtectedRoute pageKey="maintenance-dashboard">
+            <MaintenanceDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll"
+        element={
+          <ProtectedRoute pageKey="hr-payroll-dashboard">
+            <HrPayrollDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/employees"
+        element={
+          <ProtectedRoute pageKey="employee-master">
+            <EmployeeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/designation-master"
+        element={
+          <ProtectedRoute pageKey="designation-master">
+            <DesignationMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/candidate-master"
+        element={
+          <ProtectedRoute pageKey="candidate-master">
+            <CandidateMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/shift-master"
+        element={
+          <ProtectedRoute pageKey="shift-master">
+            <ShiftMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/grace-time-master"
+        element={
+          <ProtectedRoute pageKey="grace-time-master">
+            <GraceTimeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/deduction-addition-master"
+        element={
+          <ProtectedRoute pageKey="deduction-addition-master">
+            <DeductionAdditionMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/salary-structure"
+        element={
+          <ProtectedRoute pageKey="salary-structure">
+            <SalaryStructure />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/payroll-run"
+        element={
+          <ProtectedRoute pageKey="payroll-run">
+            <PayrollRun />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/payroll-run/:runId/payslip/:employeeId"
+        element={
+          <ProtectedRoute pageKey="payroll-run">
+            <Payslip />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/attendance-leave-overtime"
+        element={
+          <ProtectedRoute pageKey="attendance-leave-overtime">
+            <AttendanceLeaveOvertime />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/salary-calculation"
+        element={
+          <ProtectedRoute pageKey="salary-calculation">
+            <SalaryCalculation />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/incentive"
+        element={
+          <ProtectedRoute pageKey="incentive">
+            <IncentiveMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/holiday-master"
+        element={
+          <ProtectedRoute pageKey="holiday-master">
+            <HolidayMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/interviews"
+        element={
+          <ProtectedRoute pageKey="interview">
+            <Interview />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/offer-letter-joining"
+        element={
+          <ProtectedRoute pageKey="offer-letter-joining">
+            <OfferLetterJoining />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/directory"
+        element={
+          <ProtectedRoute pageKey="maintenance-directory">
+            <MaintenanceDirectory />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/customer/:bookingId"
+        element={
+          <ProtectedRoute pageKey="maintenance-directory">
+            <CustomerMaintenanceProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/bills"
+        element={
+          <ProtectedRoute pageKey="maintenance-bills">
+            <MaintenanceBills />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/security-attendance"
+        element={
+          <ProtectedRoute pageKey="maintenance-security-attendance">
+            <SecurityAttendance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/electricity"
+        element={
+          <ProtectedRoute pageKey="maintenance-electricity">
+            <ElectricityMaintenance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/service-requests"
+        element={
+          <ProtectedRoute pageKey="crm-service-tickets">
+            <MaintenanceServiceRequests />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/meter-reading"
+        element={
+          <ProtectedRoute pageKey="meter-reading-master">
+            <MeterReadingMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/electricity-provider"
+        element={
+          <ProtectedRoute pageKey="electricity-provider-master">
+            <ElectricityProviderMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/electricity-tariff"
+        element={
+          <ProtectedRoute pageKey="electricity-tariff-master">
+            <ElectricityTariffMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/charge-head"
+        element={
+          <ProtectedRoute pageKey="charge-head-master">
+            <ChargeHeadMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/civilworkdpr"
         element={
           <ProtectedRoute pageKey="civilworkdpr-dashboard">
@@ -918,6 +1201,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-activity-reporting">
             <CivilWorkDprActivityReporting />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/quality-check"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-quality-check">
+            <CivilWorkDprQualityCheck />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/amendment"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-amendment">
+            <CivilWorkDprAmendment />
           </ProtectedRoute>
         }
       />
@@ -1068,6 +1367,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/masters/partners"
+        element={
+          <ProtectedRoute pageKey="partner-master">
+            <PartnerMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/expenses"
         element={
           <ProtectedRoute pageKey="expenses-master">
@@ -1172,6 +1479,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/fixed-asset/depreciation-tag-stickers"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-tagging">
+            <FixedAssetDepreciationTagStickers />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/fixed-asset/transfer"
         element={
           <ProtectedRoute pageKey="asset-transfer">
@@ -1200,6 +1515,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="fixed-asset-quality-check">
             <FixedAssetQualityCheck />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/maintenance"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-maintenance">
+            <FixedAssetMaintenance />
           </ProtectedRoute>
         }
       />
@@ -1333,6 +1656,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="stock-ledger">
             <Stock />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/stock-update"
+        element={
+          <ProtectedRoute pageKey="stock-update">
+            <StockUpdate />
           </ProtectedRoute>
         }
       />
@@ -1522,6 +1853,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/masters/engineering-activity"
+        element={
+          <ProtectedRoute pageKey="engineering-activity-master">
+            <EngineeringActivityMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/dependency"
         element={
           <ProtectedRoute pageKey="dependency-master">
@@ -1691,6 +2030,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/dba/gl-posting-failures"
+        element={
+          <ProtectedRoute pageKey="dba-gl-posting-failures">
+            <GLPostingFailures />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/dba/:userId?"
         element={
           <ProtectedRoute pageKey="dba-dashboard">
@@ -1805,6 +2152,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/admin/rights/project-access"
+        element={
+          <AdminRoute>
+            <ProjectAccess />
+          </AdminRoute>
+        }
+      />
+      <Route
         path="/admin/approval/inbox"
         element={
           <ApprovalInboxRoute>
@@ -1825,6 +2180,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <SignaturePage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/apk-manager"
+        element={
+          <AdminRoute>
+            <ApkManagerPage />
           </AdminRoute>
         }
       />
@@ -2149,10 +2512,14 @@ function AppRoutes() {
       <Route path="/crm/customers"       element={<ProtectedRoute pageKey="crm-customers"><CrmCustomers /></ProtectedRoute>} />
       <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />
       <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
+      <Route path="/crm/booking-amendments" element={<ProtectedRoute pageKey="crm-bookings"><CrmBookingAmendments /></ProtectedRoute>} />
       <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />
-      <Route path="/crm/allotment-letter" element={<ProtectedRoute pageKey="crm-allotment-letter"><CrmAllotmentLetter /></ProtectedRoute>} />
       <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />
-      <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreementPapers /></ProtectedRoute>} />
+      {/* Merged into the Agreement workspace — redirect old links */}
+      <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-agreements"><AgreementTabRedirect tab="papers" /></ProtectedRoute>} />
+      {/* Allotment Letter removed from the CRM workflow — send stale links to the
+          Agreement workspace (keeping ?bookingId= so a per-booking link still lands right) */}
+      <Route path="/crm/allotment-letter" element={<AgreementTabRedirect tab="overview" />} />
       <Route path="/crm/payments"         element={<ProtectedRoute pageKey="crm-payments"><CrmPaymentMilestones /></ProtectedRoute>} />
       <Route path="/crm/demands"          element={<ProtectedRoute pageKey="crm-payments"><CrmDemands /></ProtectedRoute>} />
       <Route path="/crm/money-receipts"   element={<ProtectedRoute pageKey="crm-money-receipts"><CrmMoneyReceipts /></ProtectedRoute>} />
@@ -2161,6 +2528,7 @@ function AppRoutes() {
       <Route path="/crm/handover"         element={<ProtectedRoute pageKey="crm-handover"><CrmHandover /></ProtectedRoute>} />
       <Route path="/crm/service-tickets"  element={<ProtectedRoute pageKey="crm-service-tickets"><CrmServiceTickets /></ProtectedRoute>} />
       <Route path="/crm/cancellations"    element={<ProtectedRoute pageKey="crm-cancellations"><CrmCancellations /></ProtectedRoute>} />
+      <Route path="/crm/refunds"          element={<ProtectedRoute pageKey="crm-refunds"><CrmRefunds /></ProtectedRoute>} />
       <Route path="/crm/customer-360"     element={<ProtectedRoute pageKey="crm-customer-360"><CrmCustomer360 /></ProtectedRoute>} />
       <Route path="/crm/loan-details"     element={<ProtectedRoute pageKey="crm-loan-details"><CrmLoanTracking /></ProtectedRoute>} />
       <Route path="/crm/dashboard"             element={<ProtectedRoute pageKey="crm-dashboard"><CrmDashboard /></ProtectedRoute>} />
@@ -2168,22 +2536,26 @@ function AppRoutes() {
       <Route path="/crm/legal-milestones"      element={<ProtectedRoute pageKey="crm-legal-milestones"><CrmLegalMilestones /></ProtectedRoute>} />
       <Route path="/crm/noc"                   element={<ProtectedRoute pageKey="crm-noc"><CrmNoc /></ProtectedRoute>} />
       <Route path="/crm/sales-deed"            element={<ProtectedRoute pageKey="crm-sales-deed"><CrmSalesDeed /></ProtectedRoute>} />
-      <Route path="/crm/afs-query-payment"     element={<ProtectedRoute pageKey="crm-afs-query-payment"><CrmAfsQueryPayment /></ProtectedRoute>} />
-      <Route path="/crm/afs-registry"         element={<ProtectedRoute pageKey="crm-afs-registry"><CrmAfsRegistry /></ProtectedRoute>} />
-      <Route path="/crm/query-payment"         element={<ProtectedRoute pageKey="crm-query-payment"><CrmQueryPayment /></ProtectedRoute>} />
-      <Route path="/crm/registry"              element={<ProtectedRoute pageKey="crm-registry"><CrmRegistry /></ProtectedRoute>} />
+      {/* Merged into the Agreement workspace — redirect old links */}
+      <Route path="/crm/afs-query-payment"     element={<ProtectedRoute pageKey="crm-afs-query-payment"><AgreementTabRedirect tab="afs-payment" /></ProtectedRoute>} />
+      <Route path="/crm/afs-registry"         element={<ProtectedRoute pageKey="crm-afs-registry"><AgreementTabRedirect tab="afs-registry" /></ProtectedRoute>} />
+      {/* Merged into the Sale Deed page's "Registration" tab — redirect old links */}
+      <Route path="/crm/query-payment"         element={<ProtectedRoute pageKey="crm-query-payment"><SalesDeedTabRedirect tab="Query Payment" /></ProtectedRoute>} />
+      <Route path="/crm/registry"              element={<ProtectedRoute pageKey="crm-registry"><SalesDeedTabRedirect tab="Registry" /></ProtectedRoute>} />
       <Route path="/crm/mutation"              element={<ProtectedRoute pageKey="crm-mutation"><CrmMutation /></ProtectedRoute>} />
       <Route path="/crm/oc-cc"                 element={<ProtectedRoute pageKey="crm-oc-cc"><CrmOcCc /></ProtectedRoute>} />
       <Route path="/crm/pre-possession"        element={<ProtectedRoute pageKey="crm-pre-possession"><CrmPrePossession /></ProtectedRoute>} />
       <Route path="/crm/possession-notice"     element={<ProtectedRoute pageKey="crm-possession-notice"><CrmPossessionNotice /></ProtectedRoute>} />
       <Route path="/crm/construction-updates"  element={<ProtectedRoute pageKey="crm-construction-updates"><CrmConstructionUpdates /></ProtectedRoute>} />
-      <Route path="/crm/communication"         element={<ProtectedRoute pageKey="crm-communication"><CrmCommunication /></ProtectedRoute>} />
+      {/* Communication Log page removed — stale links land on Bookings */}
+      <Route path="/crm/communication"         element={<Navigate to="/crm/bookings" replace />} />
       <Route path="/crm/customer-bank-details" element={<ProtectedRoute pageKey="crm-customer-bank-details"><CrmCustomerBankDetails /></ProtectedRoute>} />
       <Route path="/crm/unit-matrix"    element={<ProtectedRoute pageKey="crm-unit-matrix"><UnitMatrixPage /></ProtectedRoute>} />
       <Route path="/crm/parking-matrix" element={<ProtectedRoute pageKey="crm-parking-matrix"><ParkingMatrixPage /></ProtectedRoute>} />
       <Route path="/crm/brokerage"             element={<ProtectedRoute pageKey="crm-brokerage"><CrmBrokerage /></ProtectedRoute>} />
       <Route path="/crm/payment-plans"         element={<ProtectedRoute pageKey="crm-payment-plans"><CrmPaymentPlans /></ProtectedRoute>} />
       <Route path="/crm/setup/auto-project-setup" element={<ProtectedRoute pageKey="crm-auto-project-setup"><CrmProjectAutoSetup /></ProtectedRoute>} />
+      <Route path="/crm/setup/plot-master" element={<ProtectedRoute pageKey="crm-auto-project-setup"><CrmPlotMaster /></ProtectedRoute>} />
       {/* These masters are shared with the Follow-Up module (same
           component/data, same pageKey gating) — registered again under
           /crm/setup/* so the CRM Setup menu can link straight to them
@@ -2197,6 +2569,8 @@ function AppRoutes() {
       <Route path="/crm/setup/parking-master"      element={<ProtectedRoute pageKey="followup-parking-master"><ParkingMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-slot-master" element={<ProtectedRoute pageKey="followup-parking-slot-master"><ParkingSlotMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/extra-charge-master" element={<ProtectedRoute pageKey="followup-extra-charge-master"><ExtraChargeMaster /></ProtectedRoute>} />
+      <Route path="/crm/resales" element={<ProtectedRoute pageKey="crm-resales"><CrmResales /></ProtectedRoute>} />
+      <Route path="/masters/project-type-master" element={<ProtectedRoute pageKey="project-type-master"><ProjectTypeMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/department-master" element={<ProtectedRoute pageKey="followup-department-master"><DepartmentMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/tag-master" element={<ProtectedRoute pageKey="followup-tag-master"><TagMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/cancel-template" element={<ProtectedRoute pageKey="followup-cancel-template-master"><CancelTemplateMaster /></ProtectedRoute>} />

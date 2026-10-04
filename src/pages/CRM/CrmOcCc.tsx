@@ -12,6 +12,7 @@ import {
   FileText, CircleDot, Circle, Lock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DateInput } from "@/components/ui/date-input";
 
 const API      = "/api/crm/oc-cc";
 const PROJ_API = "/api/unit-master/projects";
@@ -26,7 +27,7 @@ const CERT_COLOR: Record<string, string> = {
 };
 
 const EMPTY_FORM = {
-  ProjectId: "", CertType: "OC" as string, Status: "Applied" as string,
+  ProjectId: "", BlockId: "", CertType: "OC" as string, Status: "Applied" as string,
   ApplicationDate: "", ReceivedDate: "", CertificateNo: "", IssuedBy: "", Remarks: "",
 };
 
@@ -48,6 +49,12 @@ async function fetchAll(): Promise<any[]> {
 async function fetchProjects(): Promise<any[]> {
   try { const r = await fetchWithAuth(PROJ_API); return r.ok ? r.json() : []; } catch { return []; }
 }
+// Reuses the same project-scoped blocks endpoint CrmCompanyProjectBlockFilter.tsx
+// already calls elsewhere in the CRM module — no new backend route needed.
+async function fetchBlocksForProject(projectId: string): Promise<any[]> {
+  if (!projectId) return [];
+  try { const r = await fetchWithAuth(`/api/unit-master/blocks?projectId=${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
+}
 
 // ── Status stepper ────────────────────────────────────────────────────────────
 function OcccStepper({ status }: { status: string }) {
@@ -65,14 +72,14 @@ function OcccStepper({ status }: { status: string }) {
             <div className="flex flex-col items-center">
               <div className={`flex items-center justify-center w-6 h-6 rounded-full border-2 ${
                 done ? "border-emerald-500 bg-emerald-500 text-white" :
-                curr ? "border-amber-400 bg-amber-50 text-amber-600 dark:bg-amber-950/30" :
+                curr ? "border-sky-400 bg-sky-50 text-sky-600 dark:bg-sky-950/30" :
                 "border-border bg-muted/30 text-muted-foreground"
               }`}>
                 <Icon size={12} />
               </div>
-              <span className={`text-[10px] mt-0.5 font-medium ${
+              <span className={`text-[0.625rem] mt-0.5 font-medium ${
                 done ? "text-emerald-600 dark:text-emerald-400" :
-                curr ? "text-amber-600 dark:text-amber-400" :
+                curr ? "text-sky-600 dark:text-sky-400" :
                 "text-muted-foreground"
               }`}>{step}</span>
             </div>
@@ -112,7 +119,10 @@ function OcccCard({ row, canEdit, onClick }: { row: any; canEdit: boolean; onCli
         {/* Header row */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="font-semibold text-base text-foreground leading-tight truncate">{row.ProjectName}</h3>
+            <h3 className="font-semibold text-base text-foreground leading-tight truncate">
+              {row.ProjectName}
+              {row.BlockName && <span className="text-muted-foreground font-normal"> · Block {row.BlockName}</span>}
+            </h3>
             {row.IssuedBy && (
               <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
                 <Building2 size={10} /> {row.IssuedBy}
@@ -120,7 +130,7 @@ function OcccCard({ row, canEdit, onClick }: { row: any; canEdit: boolean; onCli
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${CERT_COLOR[row.CertType] ?? CERT_COLOR["OC+CC"]}`}>
+            <span className={`text-[0.6875rem] font-bold px-2 py-0.5 rounded-md border ${CERT_COLOR[row.CertType] ?? CERT_COLOR["OC+CC"]}`}>
               {row.CertType}
             </span>
           </div>
@@ -130,19 +140,19 @@ function OcccCard({ row, canEdit, onClick }: { row: any; canEdit: boolean; onCli
         <OcccStepper status={row.Status} />
 
         {/* Key info grid */}
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
           <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Applied On</p>
+            <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Applied On</p>
             <p className="font-medium">{fmtDate(row.ApplicationDate) || "—"}</p>
           </div>
           {isReceived ? (
             <div>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Received On</p>
+              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Received On</p>
               <p className="font-medium text-emerald-600 dark:text-emerald-400">{fmtDate(row.ReceivedDate) || "—"}</p>
             </div>
           ) : (
             <div>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Days Pending</p>
+              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Days Pending</p>
               <p className={`font-semibold ${overdue ? "text-red-600" : warning ? "text-amber-600" : ""}`}>
                 {appDays != null ? `${appDays} days` : "—"}
               </p>
@@ -150,7 +160,7 @@ function OcccCard({ row, canEdit, onClick }: { row: any; canEdit: boolean; onCli
           )}
           {row.CertificateNo && (
             <div className="col-span-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Certificate No</p>
+              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Certificate No</p>
               <p className="font-mono font-medium text-emerald-700 dark:text-emerald-400">{row.CertificateNo}</p>
             </div>
           )}
@@ -164,7 +174,7 @@ function OcccCard({ row, canEdit, onClick }: { row: any; canEdit: boolean; onCli
             </span>
             {(row.BookingsAwaitingPossession ?? 0) > 0 && (
               <span className={`flex items-center gap-1 font-medium ${
-                isReceived ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+                isReceived ? "text-emerald-600 dark:text-emerald-400" : "text-sky-600 dark:text-sky-400"
               }`}>
                 {isReceived
                   ? <><CheckCircle2 size={11} /> {row.BookingsAwaitingPossession} possession-ready</>
@@ -173,10 +183,10 @@ function OcccCard({ row, canEdit, onClick }: { row: any; canEdit: boolean; onCli
               </span>
             )}
           </div>
-          <div className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+          <div className={`flex items-center gap-1 text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border ${
             isReceived
               ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-800"
-              : "text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-800"
+              : "text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-300 dark:bg-sky-950/30 dark:border-sky-800"
           }`}>
             {isReceived ? <><ShieldCheck size={10} /> Gate Cleared</> : <><Lock size={10} /> Gate Pending</>}
           </div>
@@ -198,19 +208,69 @@ function OcccForm({
   const sel = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary/40";
   const inp = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary/40";
 
+  // Scope is derived from whether a BlockId is already set — no separate
+  // state needed. Only settable at creation (same as Project itself, gated
+  // on showProject) — a cert's scope is immutable after creation, same as
+  // its Project: create a new one instead of moving an existing cert
+  // between scopes.
+  const scope = form.BlockId ? "block" : "project";
+  const { data: blocks = [] } = useQuery({
+    queryKey: ["oc-cc-blocks-for-project", form.ProjectId],
+    queryFn: () => fetchBlocksForProject(form.ProjectId),
+    enabled: showProject && !!form.ProjectId,
+  });
+
   return (
     <div className="space-y-4">
       {showProject && (
-        <div>
-          <label className="text-xs font-medium text-muted-foreground block mb-1">Project *</label>
-          <select value={form.ProjectId} onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value }))} className={sel}>
-            <option value="">Select project</option>
-            {projects.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-          </select>
-        </div>
+        <>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">Project *</label>
+            <select value={form.ProjectId}
+              onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "" }))}
+              className={sel}>
+              <option value="">Select project</option>
+              {projects.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">Scope</label>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setForm((f) => ({ ...f, BlockId: "" }))}
+                className={`flex-1 text-sm rounded-lg border px-3 py-2 transition-colors ${
+                  scope === "project" ? "border-primary bg-primary/5 text-foreground font-medium" : "border-border text-muted-foreground hover:bg-muted/40"
+                }`}>
+                Project-wide
+              </button>
+              <button type="button" onClick={() => setForm((f) => ({ ...f, BlockId: f.BlockId || (blocks[0] ? String(blocks[0].Id) : "") }))}
+                disabled={!form.ProjectId}
+                className={`flex-1 text-sm rounded-lg border px-3 py-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  scope === "block" ? "border-primary bg-primary/5 text-foreground font-medium" : "border-border text-muted-foreground hover:bg-muted/40"
+                }`}>
+                Specific Block
+              </button>
+            </div>
+            <p className="text-[0.6875rem] text-muted-foreground mt-1">
+              {scope === "project"
+                ? "Applies to every booking in the project."
+                : "Applies only to bookings in the selected block — for a large project where some blocks are finished before others."}
+            </p>
+          </div>
+
+          {scope === "block" && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Block *</label>
+              <select value={form.BlockId} onChange={(e) => setForm((f) => ({ ...f, BlockId: e.target.value }))} className={sel}>
+                <option value="">Select block</option>
+                {blocks.map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.Name}</option>)}
+              </select>
+            </div>
+          )}
+        </>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="text-xs font-medium text-muted-foreground block mb-1">Certificate Type *</label>
           <select value={form.CertType} onChange={(e) => setForm((f) => ({ ...f, CertType: e.target.value }))} className={sel}>
@@ -225,12 +285,12 @@ function OcccForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="text-xs font-medium text-muted-foreground block mb-1 flex items-center gap-1">
             <Calendar size={10} /> Application Date
           </label>
-          <input type="date" value={form.ApplicationDate}
+          <DateInput value={form.ApplicationDate}
             onChange={(e) => setForm((f) => ({ ...f, ApplicationDate: e.target.value }))}
             className={inp} />
         </div>
@@ -238,7 +298,7 @@ function OcccForm({
           <label className="text-xs font-medium text-muted-foreground block mb-1 flex items-center gap-1">
             <CheckCircle2 size={10} /> Received Date
           </label>
-          <input type="date" value={form.ReceivedDate}
+          <DateInput value={form.ReceivedDate}
             onChange={(e) => setForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
             className={inp} />
         </div>
@@ -273,7 +333,10 @@ function OcccForm({
 
       {form.Status === "Received" && form.CertificateNo && (
         <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-3 py-2">
-          <CheckCircle2 size={13} /> Certificate recorded — possession gate will clear for all bookings in this project.
+          <CheckCircle2 size={13} />
+          {scope === "block"
+            ? "Certificate recorded — possession gate will clear for bookings in this block."
+            : "Certificate recorded — possession gate will clear for all bookings in this project."}
         </div>
       )}
     </div>
@@ -329,6 +392,7 @@ const CrmOcCc: React.FC = () => {
     setEditLocked(true);
     setEditForm({
       ProjectId:       String(row.ProjectId),
+      BlockId:         row.BlockId != null ? String(row.BlockId) : "",
       CertType:        row.CertType,
       Status:          row.Status,
       ApplicationDate: row.ApplicationDate ? String(row.ApplicationDate).slice(0, 10) : "",
@@ -351,6 +415,7 @@ const CrmOcCc: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ProjectId:       parseInt(createForm.ProjectId),
+          BlockId:         createForm.BlockId ? parseInt(createForm.BlockId) : undefined,
           CertType:        createForm.CertType,
           Status:          createForm.Status,
           ApplicationDate: createForm.ApplicationDate || undefined,
@@ -419,7 +484,7 @@ const CrmOcCc: React.FC = () => {
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           {canCreate && (
             <button onClick={() => setCreateOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors">
+              className="flex items-center gap-1.5 px-3 py-2 btn-module text-white text-sm font-medium rounded-lg transition-colors">
               <Plus size={14} /> Add OC/CC
             </button>
           )}
@@ -447,11 +512,11 @@ const CrmOcCc: React.FC = () => {
           <button key={tab.key} onClick={() => setActiveTab(tab.key)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
               activeTab === tab.key
-                ? "bg-primary text-primary-foreground border-primary"
+                ? "btn-module text-white border-primary"
                 : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}>
             {tab.label}
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${activeTab === tab.key ? "bg-primary-foreground/20" : "bg-muted"}`}>
+            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full ${activeTab === tab.key ? "bg-primary-foreground/20" : "bg-muted"}`}>
               {tab.count}
             </span>
           </button>
@@ -491,12 +556,13 @@ const CrmOcCc: React.FC = () => {
 
       {/* ── Detail / Edit Dialog ── */}
       <Dialog open={!!detailRow} onOpenChange={(o) => { if (!o) closeDetail(); }}>
-        <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto thin-scroll">
+        <DialogContent accent="crm" className="max-w-lg max-h-[92vh] overflow-y-auto thin-scroll">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
               <span className="flex items-center gap-2">
                 <ShieldCheck size={16} />
                 {detailRow?.ProjectName}
+                {detailRow?.BlockName && <span className="text-muted-foreground font-normal text-sm">· Block {detailRow.BlockName}</span>}
               </span>
               {canEdit && editLocked && (
                 <button onClick={() => setEditLocked(false)}
@@ -512,10 +578,10 @@ const CrmOcCc: React.FC = () => {
               {/* Status stepper */}
               <div className="px-4 py-3 rounded-xl border border-border bg-card flex items-center justify-between gap-4">
                 <OcccStepper status={detailRow.Status} />
-                <div className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border ${
+                <div className={`flex items-center gap-1 text-[0.625rem] font-semibold px-2 py-1 rounded-full border ${
                   detailRow.Status === "Received"
                     ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-800"
-                    : "text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-800"
+                    : "text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-300 dark:bg-sky-950/30 dark:border-sky-800"
                 }`}>
                   {detailRow.Status === "Received" ? <><ShieldCheck size={10} /> Gate Cleared</> : <><Lock size={10} /> Possession Blocked</>}
                 </div>
@@ -526,7 +592,7 @@ const CrmOcCc: React.FC = () => {
                 <div className={`rounded-xl border px-4 py-3 text-sm ${
                   detailRow.Status === "Received"
                     ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20"
-                    : "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20"
+                    : "border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/20"
                 }`}>
                   <div className="flex items-start gap-2">
                     <Users size={14} className="mt-0.5 shrink-0" />
@@ -536,7 +602,7 @@ const CrmOcCc: React.FC = () => {
                       </p>
                       {(detailRow.BookingsAwaitingPossession ?? 0) > 0 && (
                         <p className={`text-xs mt-0.5 ${
-                          detailRow.Status === "Received" ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"
+                          detailRow.Status === "Received" ? "text-emerald-700 dark:text-emerald-400" : "text-sky-700 dark:text-sky-400"
                         }`}>
                           {detailRow.Status === "Received"
                             ? `${detailRow.BookingsAwaitingPossession} bookings can now proceed to Pre-Possession check`
@@ -550,7 +616,7 @@ const CrmOcCc: React.FC = () => {
 
               {editLocked ? (
                 /* View mode */
-                <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
                   {[
                     { label: "Certificate Type", value: detailRow.CertType },
                     { label: "Status",           value: detailRow.Status   },
@@ -561,7 +627,7 @@ const CrmOcCc: React.FC = () => {
                     { label: "Remarks",          value: detailRow.Remarks,  span: 2 },
                   ].map((f) => (
                     <div key={f.label} className={f.span === 2 ? "col-span-2" : ""}>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium mb-0.5">{f.label}</p>
+                      <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest font-medium mb-0.5">{f.label}</p>
                       <p className={`text-sm ${f.mono ? "font-mono text-emerald-700 dark:text-emerald-400" : ""}`}>
                         {f.value || <span className="text-muted-foreground">—</span>}
                       </p>
@@ -569,7 +635,7 @@ const CrmOcCc: React.FC = () => {
                   ))}
                   {detailRow.CreatedByName && (
                     <div className="col-span-2 pt-2 border-t border-border">
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-[0.625rem] text-muted-foreground">
                         Created by {detailRow.CreatedByName}
                         {detailRow.UpdatedByName ? ` · Updated by ${detailRow.UpdatedByName}` : ""}
                       </p>
@@ -595,7 +661,7 @@ const CrmOcCc: React.FC = () => {
                       Cancel
                     </button>
                     <button onClick={handleUpdate} disabled={updating}
-                      className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                      className="px-5 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40 transition-colors">
                       {updating ? "Saving..." : "Save Changes"}
                     </button>
                   </>
@@ -608,7 +674,7 @@ const CrmOcCc: React.FC = () => {
 
       {/* ── Create Dialog ── */}
       <Dialog open={createOpen} onOpenChange={(o) => { if (!o) { setCreateOpen(false); setCreateForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-md max-h-[92vh] overflow-y-auto thin-scroll">
+        <DialogContent accent="crm" className="max-w-md max-h-[92vh] overflow-y-auto thin-scroll">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
               <Plus size={16} /> New OC / CC Application
@@ -621,7 +687,7 @@ const CrmOcCc: React.FC = () => {
               Cancel
             </button>
             <button onClick={handleCreate} disabled={saving || !createForm.ProjectId}
-              className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              className="px-5 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40 transition-colors">
               {saving ? "Saving..." : "Record Application"}
             </button>
           </div>

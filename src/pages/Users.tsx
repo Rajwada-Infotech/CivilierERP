@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { getRolesList } from "@/api/roleApi";
 import { getDepartmentOptions } from "@/api/departmentMasterApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface User {
@@ -39,7 +40,7 @@ const BASE_URL = "/api/users";
 
 const authHeaders = () => ({
   "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
 });
 
 const getUsers = async (): Promise<User[]> => {
@@ -158,6 +159,7 @@ function buildUserColumns(
     {
       accessorKey: "name",
       header: "User",
+      size: 240,
       cell: ({ row }) => (
         <div className="flex items-center gap-3">
           <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${getAvatarColor(row.original.id)}`}>
@@ -173,6 +175,7 @@ function buildUserColumns(
     {
       accessorKey: "roleName",
       header: "Role",
+      size: 140,
       cell: ({ row }) => (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted text-xs font-medium text-foreground">
           <ShieldCheck size={12} className="text-primary" />
@@ -183,6 +186,7 @@ function buildUserColumns(
     {
       accessorKey: "DepartmentName",
       header: "Department",
+      size: 140,
       cell: ({ row }) => (
         <span className="text-sm text-foreground">
           {row.original.DepartmentName ?? "—"}
@@ -192,6 +196,7 @@ function buildUserColumns(
     {
       accessorKey: "can_accept_tickets",
       header: "Ticket Access",
+      size: 140,
       cell: ({ row }) => {
         const user = row.original;
         const canAccept =
@@ -232,6 +237,7 @@ function buildUserColumns(
     {
       accessorKey: "discontinue",
       header: "Status",
+      size: 110,
       cell: ({ getValue }) => {
         const inactive = getValue() as boolean;
         return (
@@ -245,12 +251,13 @@ function buildUserColumns(
     {
       id: "actions",
       header: "",
+      size: 220,
       enableSorting: false,
       cell: ({ row }) => {
         const user = row.original;
         return (
-          <div className="flex items-center justify-end gap-1">
-            <button onClick={() => setViewUserId(user.id)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition" title="View"><Eye size={15} /></button>
+          <div className="flex items-center justify-end gap-2.5">
+            <button data-row-view onClick={() => setViewUserId(user.id)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition" title="View"><Eye size={15} /></button>
             <button onClick={() => setEditUserId(user.id)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition" title="Edit"><Edit size={15} /></button>
             <button
               onClick={() => updateMutation.mutate({ id: user.id, data: { discontinue: !user.discontinue } })}
@@ -474,7 +481,7 @@ const Users = () => {
         action={
           <button
             onClick={openAddDrawer}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
           >
             <UserPlus size={15} />
             Add User
@@ -564,8 +571,8 @@ const Users = () => {
 
       {/* ── Add / Edit Drawer ── */}
       {drawerOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 flex justify-end"
+        <BodyPortal><div
+          className="fixed inset-0 bg-black/50 z-[60] flex justify-end"
           onClick={closeDrawer}
         >
           <div
@@ -776,7 +783,7 @@ const Users = () => {
                 <button
                   type="submit"
                   disabled={addMutation.isPending || updateMutation.isPending}
-                  className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto flex-1 flex items-center justify-center rounded-lg disabled:opacity-50 transition-all"
+                  className="btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto flex-1 flex items-center justify-center rounded-lg disabled:opacity-50 transition-all"
                 >
                   {addMutation.isPending || updateMutation.isPending
                     ? "Saving…"
@@ -787,13 +794,13 @@ const Users = () => {
               </div>
             </form>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* ── View User Modal ── */}
       {viewedUser && (
-        <div
-          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+        <BodyPortal><div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]"
           onClick={() => setViewUserId(null)}
         >
           <div
@@ -870,12 +877,12 @@ const Users = () => {
 
             <button
               onClick={() => setViewUserId(null)}
-              className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto mt-6 w-full flex items-center justify-center rounded-lg transition-all"
+              className="btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto mt-6 w-full flex items-center justify-center rounded-lg transition-all"
             >
               Close
             </button>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

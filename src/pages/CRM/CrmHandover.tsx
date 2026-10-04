@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -12,6 +12,10 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Plus, Key, AlertTriangle, CheckCircle2, User } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API        = "/api/crm/handover";
 const SA_LEADS_API = "/api/sa/leads";
@@ -48,6 +52,35 @@ const statusLabel: Record<string, string> = {
 async function fetchHandovers(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchHandoverByBooking(bookingId: string): Promise<any | null> {
+  try {
+    const r = await fetchWithAuth(`${API}?bookingId=${bookingId}`);
+    if (!r.ok) return null;
+    const rows = await r.json();
+    return Array.isArray(rows) && rows.length ? rows[0] : null;
+  } catch { return null; }
+}
+
+const PAGE_SIZE = 20;
+interface HandoverListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchHandoversList(filters: HandoverListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
+}
 async function fetchDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   if (!r.ok) throw new Error("Failed to load handover");
@@ -73,6 +106,13 @@ const CrmHandover: React.FC = () => {
   const deepLinkBookingId = sp.get("bookingId");
 
   const [selectedId, setSelectedId]     = useState<number | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
   const [newDialog, setNewDialog]       = useState(false);
   const [snagDialog, setSnagDialog]     = useState(false);
   const [completeDialog, setCompleteDialog] = useState(false);
@@ -90,13 +130,21 @@ const CrmHandover: React.FC = () => {
     CustomerAcknowledged: false,
   });
 
-  const { data: handovers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-handovers"], queryFn: fetchHandovers, staleTime: 30_000,
+  const listFilters: HandoverListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-handovers", listFilters, page],
+    queryFn: () => fetchHandoversList(listFilters, page),
+    staleTime: 30_000,
   });
+  const handovers = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: detail } = useQuery({
     queryKey: ["crm-handover-detail", selectedId],
     queryFn: () => fetchDetail(selectedId!),
-    enabled: !!selectedId,
+    enabled: selectedId != null,
     staleTime: 30_000,
   });
   // Only bookings that pass every handover prerequisite gate
@@ -110,21 +158,24 @@ const CrmHandover: React.FC = () => {
     queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000,
   });
 
-  // Deep-link: ?bookingId=X — pre-select existing handover or open schedule dialog
+  // Deep-link: ?bookingId=X — pre-select existing handover or open schedule
+  // dialog. Looks the booking up directly via ?bookingId= (a small,
+  // unpaginated scoped query — see crmHandover.js) rather than scanning the
+  // now-paginated main `handovers` list, which could easily not include the
+  // one booking being deep-linked to if it's not on the current page.
   useEffect(() => {
-    if (!deepLinkBookingId || !(handovers as any[]).length) return;
+    if (!deepLinkBookingId) return;
     setSp({}, { replace: true });
-    const existing = (handovers as any[]).find(
-      (h: any) => String(h.BookingId) === deepLinkBookingId,
-    );
-    if (existing) {
-      setSelectedId(existing.Id);
-    } else {
-      setNewForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
-      setNewDialog(true);
-    }
+    fetchHandoverByBooking(deepLinkBookingId).then((existing) => {
+      if (existing) {
+        setSelectedId(existing.Id);
+      } else {
+        setNewForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
+        setNewDialog(true);
+      }
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, handovers]);
+  }, [deepLinkBookingId]);
 
   // ── Schedule handover ──────────────────────────────────────────────────────
   const handleSchedule = async () => {
@@ -159,7 +210,7 @@ const CrmHandover: React.FC = () => {
 
   // ── Raise snag ─────────────────────────────────────────────────────────────
   const handleAddSnag = async () => {
-    if (!selectedId || !snagForm.Description.trim()) { toast.error("Description is required"); return; }
+    if (selectedId == null || !snagForm.Description.trim()) { toast.error("Description is required"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/snags`, {
@@ -184,7 +235,7 @@ const CrmHandover: React.FC = () => {
 
   // ── Resolve snag ───────────────────────────────────────────────────────────
   const handleResolveSnag = async (snagId: number) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/snags/${snagId}`, {
         method: "PUT",
@@ -204,7 +255,7 @@ const CrmHandover: React.FC = () => {
 
   // ── Status transition (non-Completed) ──────────────────────────────────────
   const handleTransition = async (targetStatus: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (targetStatus === "Completed") {
       // Completed requires the full completion dialog
       setCompleteForm({ ActualHandoverDate: "", KeyHandoverBy: "", FinalDuesCleared: false, CustomerAcknowledged: false });
@@ -232,7 +283,7 @@ const CrmHandover: React.FC = () => {
 
   // ── Complete handover (with all mandatory fields) ──────────────────────────
   const handleComplete = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (!completeForm.ActualHandoverDate) { toast.error("Actual handover date is required"); return; }
     if (!completeForm.KeyHandoverBy) { toast.error("Select the staff member who handed the key"); return; }
     if (!completeForm.FinalDuesCleared) { toast.error("Confirm that all final dues are cleared"); return; }
@@ -289,7 +340,7 @@ const CrmHandover: React.FC = () => {
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           {rights.canCreate && (
             <button onClick={() => setNewDialog(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
             <Key size={14} /> Schedule Handover
           </button>
           )}
@@ -298,7 +349,15 @@ const CrmHandover: React.FC = () => {
     >
       <div className="flex gap-4 h-[calc(100vh-220px)]">
         {/* ── List panel ─────────────────────────────────────────────────── */}
-        <div className="w-80 shrink-0 overflow-y-auto space-y-1.5">
+        <div className="w-80 shrink-0 flex flex-col gap-2">
+        <div className="relative">
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search customer, booking... (Enter to search)"
+            className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+        <div className="flex-1 overflow-y-auto space-y-1.5">
           {isLoading ? (
             <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
           ) : (handovers as any[]).length === 0 ? (
@@ -320,21 +379,23 @@ const CrmHandover: React.FC = () => {
               className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedId === h.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium truncate">{h.ApplicantName}</span>
-                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${statusColor[h.Status] || ""}`}>{h.Status}</span>
+                <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${statusColor[h.Status] || ""}`}>{h.Status}</span>
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">{h.BookingNo} · {h.UnitNo}</div>
               {h.OpenSnagCount > 0 && (
-                <div className="text-xs text-orange-600 flex items-center gap-1 mt-1">
+                <div className="text-xs text-sky-600 flex items-center gap-1 mt-1">
                   <AlertTriangle size={10} /> {h.OpenSnagCount} open snag(s)
                 </div>
               )}
             </button>
           ))}
         </div>
+        <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+        </div>
 
         {/* ── Detail panel ───────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto space-y-4">
-          {!selectedId ? (
+          {selectedId == null ? (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Select a handover</div>
           ) : !detail ? (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
@@ -353,7 +414,7 @@ const CrmHandover: React.FC = () => {
                 </div>
 
                 {/* Dates & flags */}
-                <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm mb-3">
                   <div><span className="text-xs text-muted-foreground">Scheduled: </span>{detail.handover.ScheduledDate ? String(detail.handover.ScheduledDate).slice(0, 10) : "—"}</div>
                   <div><span className="text-xs text-muted-foreground">Actual: </span>{detail.handover.ActualHandoverDate ? String(detail.handover.ActualHandoverDate).slice(0, 10) : "—"}</div>
                   <div>
@@ -433,15 +494,15 @@ const CrmHandover: React.FC = () => {
 
       {/* ── Schedule Handover dialog ─────────────────────────────────────── */}
       <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">Schedule Handover</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">
                 Booking *{" "}
-                <span className="text-[10px] text-primary">(only eligible bookings shown — AFS Registered, Possession Notice Acknowledged, no NOC left Pending/Approved, no overdue dues)</span>
+                <span className="text-[0.625rem] text-primary">(only eligible bookings shown — AFS Registered, Possession Notice Acknowledged, no NOC left Pending/Approved, no overdue dues)</span>
               </label>
-              <select value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <SearchableNativeSelect value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(eligibleBookings as any[]).length === 0 && (
@@ -450,11 +511,11 @@ const CrmHandover: React.FC = () => {
                 {(eligibleBookings as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} ({b.UnitNo})</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Scheduled Date</label>
-              <input type="date" value={newForm.ScheduledDate}
+              <DateInput value={newForm.ScheduledDate}
                 onChange={(e) => setNewForm((f) => ({ ...f, ScheduledDate: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
@@ -467,7 +528,7 @@ const CrmHandover: React.FC = () => {
           <DialogFooter>
             <button onClick={() => setNewDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSchedule} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Scheduling..." : "Schedule"}
             </button>
           </DialogFooter>
@@ -476,7 +537,7 @@ const CrmHandover: React.FC = () => {
 
       {/* ── Raise Snag dialog ────────────────────────────────────────────── */}
       <Dialog open={snagDialog} onOpenChange={(o) => { if (!o) setSnagDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Raise Snag Item</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -495,7 +556,7 @@ const CrmHandover: React.FC = () => {
           <DialogFooter>
             <button onClick={() => setSnagDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleAddSnag} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Adding..." : "Raise Snag"}
             </button>
           </DialogFooter>
@@ -506,7 +567,7 @@ const CrmHandover: React.FC = () => {
       {/* Collecting all 4 mandatory fields the backend requires for Completed:
           ActualHandoverDate, KeyHandoverBy, FinalDuesCleared, CustomerAcknowledged */}
       <Dialog open={completeDialog} onOpenChange={(o) => { if (!o) setCompleteDialog(false); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader>
             <DialogTitle className="font-heading">Complete Handover</DialogTitle>
           </DialogHeader>
@@ -516,20 +577,20 @@ const CrmHandover: React.FC = () => {
           <div className="space-y-3 pt-1">
             <div>
               <label className="text-xs font-medium block mb-1">Actual Handover Date *</label>
-              <input type="date" value={completeForm.ActualHandoverDate}
+              <DateInput value={completeForm.ActualHandoverDate}
                 onChange={(e) => setCompleteForm((f) => ({ ...f, ActualHandoverDate: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
             <div>
               <label className="text-xs font-medium block mb-1">Key Handed Over By (Staff Member) *</label>
-              <select value={completeForm.KeyHandoverBy}
+              <SearchableNativeSelect value={completeForm.KeyHandoverBy}
                 onChange={(e) => setCompleteForm((f) => ({ ...f, KeyHandoverBy: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">— Select staff member —</option>
                 {(users as any[]).map((u: any) => (
                   <option key={u.value} value={u.value}>{u.label}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div className="rounded-lg border border-border p-3 space-y-2.5">
               <p className="text-xs font-semibold text-foreground">Handover Confirmations *</p>

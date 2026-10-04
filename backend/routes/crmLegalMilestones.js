@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -6,6 +7,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { requireActiveBooking, requireApprovedBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -32,8 +34,6 @@ const LM_SELECT = `
   SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
     -- Agreement status (Executed / Registered / etc.)
     ag.Status AS AgreementStatus, ag.AgreementNo,
-    -- Allotment Letter (issued right after booking, before agreement signing)
-    al.Id AS AllotmentLetterId, al.AlNo, al.Status AS AllotmentLetterStatus,
     -- Sub-Registrar Visit 1: Agreement for Sale registration
     aqp.Id AS AfsQPId, aqp.AfsQPNo, aqp.Status AS AfsQPStatus,
     areg.Id AS AfsRegistryId, areg.AfsRegNo, areg.Status AS AfsRegistryStatus,
@@ -66,20 +66,42 @@ const LM_SELECT = `
       WHERE pm.BookingId = m.BookingId
         AND pm.Status NOT IN ('Paid', 'Waived')
         AND pm.AmountDue > ISNULL(pm.AmountPaid, 0)
-    ) THEN 1 ELSE 0 END AS HasOutstandingDues
+    ) THEN 1 ELSE 0 END AS HasOutstandingDues,
+    -- No Objection Certificate is a SINGLE step per booking, not two — the
+    -- bank's NOC and the developer's NOC serve the same purpose (clearing
+    -- the booking for Possession/Handover); a booking only ever needs one,
+    -- decided by how it's financed (see resolveNocType in
+    -- crmWorkflowGuards.js for the full precedence rules, mirrored here as
+    -- a single-query CASE for the list endpoint):
+    --   1. A real, non-Rejected CrmNoc row already on file settles it —
+    --      never contradict data that already exists.
+    --   2. Otherwise: loan-financed (FinancingType = 'LoanFinanced', or an
+    --      active CrmLoanDetail row — SanctionStatus NOT IN ('NotApplied',
+    --      'Rejected'), same convention as crmBookings.js's ActiveLoans
+    --      column) → Bank; otherwise → Organisation.
+    b.FinancingType,
+    CASE
+      WHEN bankNoc.Id IS NOT NULL AND bankNoc.Status <> 'Rejected' THEN 'Bank'
+      WHEN orgNoc.Id  IS NOT NULL AND orgNoc.Status  <> 'Rejected' THEN 'Organisation'
+      WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
+        SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
+          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+      ) THEN 'Bank'
+      ELSE 'Organisation'
+    END AS NocResolvedType
   FROM dbo.CrmLegalMilestone m
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+  -- Needed for block-level OC/CC resolution below (migration 447) — moved
+  -- here (was previously only appended by the GET / list route's own
+  -- SELECT_WITH_BLOCK) so GET /booking/:bookingId gets it too.
+  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
   OUTER APPLY (
     SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) ag
-  OUTER APPLY (
-    SELECT TOP 1 Id, AlNo, Status FROM dbo.CrmAllotmentLetter
-    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
-  ) al
   OUTER APPLY (
     SELECT TOP 1 Id, AfsQPNo, Status FROM dbo.CrmAfsQueryPayment
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
@@ -104,10 +126,17 @@ const LM_SELECT = `
     SELECT TOP 1 Id, MutationNo, Status FROM dbo.CrmMutation
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) mut
+  -- Block-level OC/CC (migration 447) is authoritative when this booking's
+  -- own block has a Received cert of its own; falls back to the project's
+  -- blanket (BlockId IS NULL) cert otherwise — same fallback resolveOcCcGate
+  -- (crmWorkflowGuards.js) implements for single-booking JS lookups.
   OUTER APPLY (
     SELECT CASE WHEN EXISTS (
-      SELECT 1 FROM dbo.CrmOccupancyCertificate
-      WHERE ProjectId = b.ProjectId AND Status = 'Received'
+      SELECT 1 FROM dbo.CrmOccupancyCertificate oc
+      WHERE oc.Status = 'Received' AND (
+        (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
+        OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
+      )
     ) THEN 1 ELSE 0 END AS HasReceived
   ) occc
   OUTER APPLY (
@@ -136,10 +165,84 @@ const LM_SELECT = `
 router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`${LM_SELECT} ORDER BY m.CreatedAt DESC`);
-    res.json(result.recordset);
+    const { search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
+    }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    // um is now joined directly inside LM_SELECT itself (needed there for
+    // block-level OC/CC resolution) — this alias just keeps the name used
+    // by the WHERE clause below meaningful, no second join needed.
+    const SELECT_WITH_BLOCK = LM_SELECT;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY m.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY m.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmLegalMilestone m
+          JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-legal-milestones] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /eligible-bookings — bookings the "Start Workflow" dialog should offer.
+// Mirrors the real POST / gate exactly (requireApprovedBooking + an Agreement
+// on file + no tracker yet) so the dialog never lists a booking that then
+// fails on submit. A plain "all bookings minus already-tracked" client-side
+// filter drifted out of sync with the real gate — Expired/Cancelled/
+// not-yet-approved bookings, or ones with no Agreement yet, kept showing up
+// and 400ing on click.
+router.get("/eligible-bookings", requirePageRight("crm-legal-milestones", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      JOIN dbo.CrmAgreement agr ON agr.BookingId = b.Id
+      WHERE b.Status = 'Approved'
+        AND b.IsActive = 1
+        AND (b.IsFrozen = 0 OR (b.FreezeExpiresAt IS NOT NULL AND b.FreezeExpiresAt < SYSDATETIME()))
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmLegalMilestone WHERE BookingId = b.Id)
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-legal-milestones] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -203,7 +306,8 @@ router.post("/", requirePageRight("crm-legal-milestones", "create"), async (req,
 router.put("/:id/:step", requirePageRight("crm-legal-milestones", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const step = req.params.step;
     if (!STEPS.includes(step)) return res.status(400).json({ error: `Invalid step. Must be one of: ${STEPS.join(", ")}` });
     const b = req.body;

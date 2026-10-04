@@ -109,27 +109,23 @@ const SaSiteVisits: React.FC = () => {
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toPayload(event.record)) });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to schedule visit");
-        toast.success("Site visit scheduled!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toPayload(event.record)) });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to update visit");
-        toast.success("Site visit updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to cancel visit");
-        toast.success("Site visit cancelled!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["sa-site-visits"] });
-      await queryClient.invalidateQueries({ queryKey: ["sa-leads"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toPayload(event.record)) });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to schedule visit");
+      toast.success("Site visit scheduled!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toPayload(event.record)) });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to update visit");
+      toast.success("Site visit updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to cancel visit");
+      toast.success("Site visit cancelled!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["sa-site-visits"] });
+    await queryClient.invalidateQueries({ queryKey: ["sa-leads"] });
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading site visits...</div>;
@@ -189,7 +185,7 @@ const SaSiteVisits: React.FC = () => {
                     <div key={String(v._id)} className={`rounded-lg border p-3 space-y-2 ${urgency}`}>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-semibold text-foreground truncate">{String(v.CustomerName)}</span>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isToday ? "bg-amber-500/20 text-amber-600" : isTomorrow ? "bg-blue-500/20 text-blue-600" : "bg-muted text-muted-foreground"}`}>
+                        <span className={`text-[0.625rem] font-bold px-1.5 py-0.5 rounded-full ${isToday ? "bg-amber-500/20 text-amber-600" : isTomorrow ? "bg-blue-500/20 text-blue-600" : "bg-muted text-muted-foreground"}`}>
                           {isToday ? "TODAY" : isTomorrow ? "TOMORROW" : `in ${diffDays}d`}
                         </span>
                       </div>
@@ -200,8 +196,8 @@ const SaSiteVisits: React.FC = () => {
                       {v.ProjectName && <div className="text-xs text-foreground font-medium">{String(v.ProjectName)}</div>}
                       {v.ExecutiveName && <div className="text-xs text-muted-foreground">Exec: {String(v.ExecutiveName)}</div>}
                       <div className="flex items-center gap-2">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${String(v.Status) === "Scheduled" ? "bg-blue-500/10 text-blue-600" : "bg-muted text-muted-foreground"}`}>{String(v.Status)}</span>
-                        {String(v.PickupRequired) === "Yes" && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 font-semibold">Pickup</span>}
+                        <span className={`text-[0.625rem] px-2 py-0.5 rounded-full font-semibold ${String(v.Status) === "Scheduled" ? "bg-blue-500/10 text-blue-600" : "bg-muted text-muted-foreground"}`}>{String(v.Status)}</span>
+                        {String(v.PickupRequired) === "Yes" && <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-[#ffe2021a] text-amber-600 font-semibold">Pickup</span>}
                       </div>
                     </div>
                   );

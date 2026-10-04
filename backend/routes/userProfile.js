@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -15,7 +16,8 @@ router.use(authMiddleware);
 const SALT_ROUNDS = 12;
 
 function isSelfOrAdmin(req) {
-  const requestedId = parseInt(req.params.id, 10);
+  const requestedId = parseId(req.params.id);
+  if (!requestedId) return res.status(400).json({ error: "Invalid id" });
   const callerId = req.user?.userId || req.user?.id;
   const callerRole = normalizeRole(req.user?.role);
   if (["admin", "super_admin", "dba"].includes(callerRole)) return true;

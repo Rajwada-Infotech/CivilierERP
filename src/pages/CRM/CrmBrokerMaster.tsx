@@ -22,6 +22,36 @@ import {
   Pencil, Trash2, X, Check, Plus, Search, AlertCircle, Eye, XCircle,
   User, Phone, Mail, MapPin, CreditCard, UserRound, FileBadge, Upload, FileText, Lock,
 } from "lucide-react";
+import { BodyPortal } from "@/components/ui/body-portal";
+
+function AuthDownloadLink({ url, filename, label }: { url: string; filename: string; label: string }) {
+  const [loading, setLoading] = useState(false);
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    try {
+      const res = await fetchWithAuth(url);
+      if (!res.ok) throw new Error("Failed to load file");
+      const blob = await res.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      anchor.click();
+      setTimeout(() => window.URL.revokeObjectURL(objectUrl), 10000);
+    } catch (err: any) {
+      toast.error(err.message || "Could not download file");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <button onClick={handleDownload} disabled={loading} className="flex items-center gap-1.5 text-xs text-primary hover:underline mb-2 disabled:opacity-50">
+      <FileText size={12} /> {loading ? "Downloading..." : label}
+    </button>
+  );
+}
 
 const BROKER_TYPE = "BR";
 
@@ -255,7 +285,7 @@ const CrmBrokerMaster: React.FC = () => {
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1">
-              <span className="text-[11px] text-muted-foreground mr-1">Delete?</span>
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">Delete?</span>
               <button onClick={() => deleteMut.mutate(id)} className="p-1 rounded text-destructive hover:bg-destructive/10"><Check size={12} /></button>
               <button onClick={() => setDeleteConfirm(null)} className="p-1 rounded text-muted-foreground hover:bg-muted"><X size={12} /></button>
             </div>
@@ -263,7 +293,7 @@ const CrmBrokerMaster: React.FC = () => {
         }
         return (
           <div className="flex items-center gap-2">
-            <button onClick={() => setViewRecord(row.original)} className="p-1 rounded text-sky-500 hover:bg-sky-500/10" title="View"><Eye size={15} /></button>
+            <button data-row-view onClick={() => setViewRecord(row.original)} className="p-1 rounded text-sky-500 hover:bg-sky-500/10" title="View"><Eye size={15} /></button>
             {rights.canEdit && <button onClick={() => startEdit(row.original)} className="p-1 rounded text-blue-400 hover:bg-blue-400/10" title="Edit"><Pencil size={15} /></button>}
             {rights.canDelete && <button onClick={() => setDeleteConfirm(id)} className="p-1 rounded text-destructive hover:bg-destructive/10" title="Delete"><Trash2 size={15} /></button>}
           </div>
@@ -283,8 +313,8 @@ const CrmBrokerMaster: React.FC = () => {
             <div className="flex items-center gap-3">
               <UserRound size={16} className="text-primary" />
               <div>
-                <h2 className="text-sm font-semibold">{editingId ? "Edit Broker" : "Add Broker"}</h2>
-                <p className="text-[11px] text-muted-foreground">Brokers are ledger accounts (LHeadType='BR'), same as Contractors</p>
+                <h2 className="text-sm font-semibold">{editingId != null ? "Edit Broker" : "Add Broker"}</h2>
+                <p className="text-[0.6875rem] text-muted-foreground">Brokers are ledger accounts (LHeadType='BR'), same as Contractors</p>
               </div>
             </div>
             {editingId != null && locked && (
@@ -373,10 +403,11 @@ const CrmBrokerMaster: React.FC = () => {
               <div className="rounded-lg border border-border p-3">
                 <label className="text-xs text-muted-foreground block mb-2 flex items-center gap-1.5"><FileBadge size={13} /> RERA / Broker Certificate</label>
                 {editingBroker?.LHeadCertificateFileName && (
-                  <a href={`/api/account-head/${editingId}/certificate/file`} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1.5 text-xs text-primary hover:underline mb-2">
-                    <FileText size={12} /> {editingBroker.LHeadCertificateFileName} (uploaded — click to view)
-                  </a>
+                  <AuthDownloadLink 
+                    url={`/api/account-head/${editingId}/certificate/file`}
+                    filename={editingBroker.LHeadCertificateFileName}
+                    label={`${editingBroker.LHeadCertificateFileName} (uploaded — click to download)`}
+                  />
                 )}
                 <div className="flex items-center gap-2">
                   <input ref={certInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" disabled={locked}
@@ -401,17 +432,17 @@ const CrmBrokerMaster: React.FC = () => {
             {/* TDS Applicable — Sec. 194H applies to brokerage payments */}
             <div className="flex items-center gap-3">
               <button type="button" disabled={locked} onClick={() => setForm((p) => ({ ...p, isTdsApplicable: !p.isTdsApplicable }))}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${form.isTdsApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}>
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${form.isTdsApplicable ? "bg-sky-500" : "bg-muted-foreground/30"}`}>
                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.isTdsApplicable ? "translate-x-4" : "translate-x-0.5"}`} />
               </button>
-              <span className="text-xs text-muted-foreground">TDS Applicable — <span className={form.isTdsApplicable ? "text-amber-600 font-medium" : ""}>{form.isTdsApplicable ? "Yes (Sec. 194H)" : "No"}</span></span>
+              <span className="text-xs text-muted-foreground">TDS Applicable — <span className={form.isTdsApplicable ? "text-sky-600 font-medium" : ""}>{form.isTdsApplicable ? "Yes (Sec. 194H)" : "No"}</span></span>
             </div>
 
             {/* TDS Limit — only shown when TDS is on */}
             {form.isTdsApplicable && (
               <div className="flex items-center gap-3">
                 <button type="button" disabled={locked} onClick={() => setForm((p) => ({ ...p, tdsLimitApplicable: !p.tdsLimitApplicable }))}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${form.tdsLimitApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}>
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${form.tdsLimitApplicable ? "bg-sky-500" : "bg-muted-foreground/30"}`}>
                   <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.tdsLimitApplicable ? "translate-x-4" : "translate-x-0.5"}`} />
                 </button>
                 <span className="text-xs text-muted-foreground">TDS Limit (₹30k / ₹1L threshold) — <span className={form.tdsLimitApplicable ? "text-amber-600 font-medium" : ""}>{form.tdsLimitApplicable ? "Applied" : "Deduct on every bill"}</span></span>
@@ -423,10 +454,10 @@ const CrmBrokerMaster: React.FC = () => {
               <button onClick={resetForm} className="px-4 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted">Close</button>
             ) : (
               <>
-                <button onClick={resetForm} className="px-4 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted">{editingId ? "Cancel" : "Reset"}</button>
+                <button onClick={resetForm} className="px-4 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted">{editingId != null ? "Cancel" : "Reset"}</button>
                 <button onClick={handleSave} disabled={saving || !canSave}
-                  className="px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground disabled:opacity-40 flex items-center gap-1.5">
-                  {editingId ? <Check size={14} /> : <Plus size={14} />} {saving ? "Saving..." : editingId ? "Update Broker" : "Save Broker"}
+                  className="px-4 py-1.5 rounded-lg text-sm font-medium btn-module text-white disabled:opacity-40 flex items-center gap-1.5">
+                  {editingId != null ? <Check size={14} /> : <Plus size={14} />} {saving ? "Saving..." : editingId != null ? "Update Broker" : "Save Broker"}
                 </button>
               </>
             )}
@@ -458,7 +489,7 @@ const CrmBrokerMaster: React.FC = () => {
       </div>
 
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setViewRecord(null)} />
           <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
@@ -479,17 +510,18 @@ const CrmBrokerMaster: React.FC = () => {
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">{label}</p>
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-1">{label}</p>
                   <p className="text-sm">{value}</p>
                 </div>
               ))}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Certificate</p>
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-1">Certificate</p>
                 {viewRecord.LHeadCertificateFileName ? (
-                  <a href={`/api/account-head/${viewRecord.LHeadId}/certificate/file`} target="_blank" rel="noreferrer"
-                    className="text-sm text-primary hover:underline flex items-center gap-1">
-                    <FileText size={13} /> {viewRecord.LHeadCertificateFileName}
-                  </a>
+                  <AuthDownloadLink 
+                    url={`/api/account-head/${viewRecord.LHeadId}/certificate/file`}
+                    filename={viewRecord.LHeadCertificateFileName}
+                    label={`${viewRecord.LHeadCertificateFileName} (click to download)`}
+                  />
                 ) : <p className="text-sm text-muted-foreground">Not uploaded</p>}
               </div>
             </div>
@@ -497,13 +529,13 @@ const CrmBrokerMaster: React.FC = () => {
               <button onClick={() => setViewRecord(null)} className="px-4 py-2 rounded-lg text-sm border border-border text-muted-foreground hover:bg-muted">Close</button>
               {rights.canEdit && (
                 <button onClick={() => { startEdit(viewRecord); setViewRecord(null); }}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-primary-foreground flex items-center gap-1.5">
+                  className="px-4 py-2 rounded-lg text-sm font-semibold btn-module text-white flex items-center gap-1.5">
                   <Pencil size={13} /> Edit Broker
                 </button>
               )}
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </CrmShell>
   );

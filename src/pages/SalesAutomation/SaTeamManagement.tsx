@@ -10,6 +10,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { UserPlus, UserMinus, ArrowRightLeft, TrendingUp, TrendingDown, Users, ChevronDown, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/teams";
 
@@ -30,8 +31,8 @@ async function fetchUnassigned() {
 }
 
 const roleBadge = (role: string) => {
-  if (role === "sales_team_lead") return <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-purple-500/10 text-purple-600">Team Lead</span>;
-  return <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-blue-500/10 text-blue-600">Sales Person</span>;
+  if (role === "sales_team_lead") return <span className="px-1.5 py-0.5 text-[0.625rem] font-semibold rounded-full bg-purple-500/10 text-purple-600">Team Lead</span>;
+  return <span className="px-1.5 py-0.5 text-[0.625rem] font-semibold rounded-full bg-blue-500/10 text-blue-600">Sales Person</span>;
 };
 
 const SaTeamManagement: React.FC = () => {
@@ -180,7 +181,7 @@ const SaTeamManagement: React.FC = () => {
                   <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => { setAddMemberDialog({ teamLeadId: team.Id, teamLeadName: team.Name }); setSelectedAddUser(""); }}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium btn-module text-white transition-colors"
                     >
                       <UserPlus size={12} /> Add Member
                     </button>
@@ -221,21 +222,21 @@ const SaTeamManagement: React.FC = () => {
                                 <div className="flex justify-end gap-1.5">
                                   <button
                                     onClick={() => { setTransferDialog({ memberId: m.MemberUserId, memberName: m.MemberName }); setSelectedTransferLead(""); }}
-                                    className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
+                                    className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
                                   >
                                     <ArrowRightLeft size={11} /> Transfer
                                   </button>
                                   <button
                                     onClick={() => handlePromote(m.MemberUserId, m.MemberName)}
                                     disabled={loading === `promote-${m.MemberUserId}`}
-                                    className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border border-border text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors"
+                                    className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium border border-border text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors"
                                   >
                                     <TrendingUp size={11} /> Promote
                                   </button>
                                   <button
                                     onClick={() => handleRemoveMember(team.Id, m.MemberUserId, m.MemberName)}
                                     disabled={loading === `remove-${m.MemberUserId}`}
-                                    className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border border-border text-red-500 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
+                                    className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium border border-border text-red-500 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
                                   >
                                     <UserMinus size={11} /> Remove
                                   </button>
@@ -269,7 +270,7 @@ const SaTeamManagement: React.FC = () => {
                   <button
                     onClick={() => handlePromote(u.Id, u.Name)}
                     disabled={loading === `promote-${u.Id}`}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-border text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors"
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.625rem] font-medium border border-border text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors"
                   >
                     <TrendingUp size={10} /> Promote
                   </button>
@@ -289,7 +290,7 @@ const SaTeamManagement: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="text-xs text-muted-foreground block mb-1.5">Select Sales Person</label>
-              <select
+              <SearchableNativeSelect
                 value={selectedAddUser}
                 onChange={(e) => setSelectedAddUser(e.target.value)}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background"
@@ -298,7 +299,7 @@ const SaTeamManagement: React.FC = () => {
                 {(unassigned as any[]).map((u: any) => (
                   <option key={u.Id} value={u.Id}>{u.Name} ({u.Role.replace(/_/g, " ")})</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button
@@ -308,7 +309,7 @@ const SaTeamManagement: React.FC = () => {
               <button
                 onClick={handleAddMember}
                 disabled={!selectedAddUser || loading === "add"}
-                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold btn-module text-white disabled:opacity-40 transition-colors"
               >{loading === "add" ? "Adding..." : "Add to Team"}</button>
             </div>
           </div>
@@ -324,7 +325,7 @@ const SaTeamManagement: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="text-xs text-muted-foreground block mb-1.5">Transfer to Team Lead</label>
-              <select
+              <SearchableNativeSelect
                 value={selectedTransferLead}
                 onChange={(e) => setSelectedTransferLead(e.target.value)}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background"
@@ -333,7 +334,7 @@ const SaTeamManagement: React.FC = () => {
                 {teamLeads.map((tl: any) => (
                   <option key={tl.Id} value={tl.Id}>{tl.Name}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button
@@ -343,7 +344,7 @@ const SaTeamManagement: React.FC = () => {
               <button
                 onClick={handleTransfer}
                 disabled={!selectedTransferLead || loading === "transfer"}
-                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold btn-module text-white disabled:opacity-40 transition-colors"
               >{loading === "transfer" ? "Transferring..." : "Transfer"}</button>
             </div>
           </div>

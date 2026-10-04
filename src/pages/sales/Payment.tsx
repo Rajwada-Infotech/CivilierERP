@@ -32,6 +32,8 @@ import {
   type ReceivedPaymentRecord,
 } from "@/api/receivedPaymentApi";
 import { useFinYear } from "@/contexts/FinYearContext";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -101,6 +103,17 @@ const MODE_COLOR: Record<string, string> = {
   Card: "bg-orange-500/10 text-orange-600",
 };
 
+// The stored PaymentMode value is still literally "Check" (renaming it
+// would mean a DB migration for every historical row's RPMode) — the
+// dropdown already shows the friendly "Cheque" label instead of the raw
+// value, but the list/table below used to render r.RPMode directly,
+// showing the raw "Check" spelling. This is the same {value, label}
+// lookup PAYMENT_MODES already carries, just applied where the badge
+// renders too.
+const MODE_LABEL: Record<string, string> = Object.fromEntries(
+  PAYMENT_MODES.map((m) => [m.value, m.label]),
+);
+
 const STATUS_CONFIG: Record<
   string,
   { cls: string; icon: React.ReactNode; label: string }
@@ -111,7 +124,7 @@ const STATUS_CONFIG: Record<
     label: "Draft",
   },
   Pending: {
-    cls: "bg-amber-500/10 text-amber-600",
+    cls: "bg-[#ffe2021a] text-amber-600",
     icon: <Clock size={11} />,
     label: "Pending",
   },
@@ -137,7 +150,7 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[11px] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+    <label className="block text-[0.6875rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -272,7 +285,7 @@ function SaleOrderPicker({
                       <p className="text-sm font-bold text-foreground">
                         {fmtAmt(o.TotalAmount)}
                       </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                      <p className="text-[0.625rem] text-muted-foreground mt-0.5">
                         {fmtDate(o.OrderDate)}
                       </p>
                     </div>
@@ -335,7 +348,7 @@ function PaymentHistoryTable({
               ].map((h) => (
                 <th
                   key={h}
-                  className="px-4 py-3 text-left text-[11px] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap"
+                  className="px-4 py-3 text-left text-[0.6875rem] uppercase tracking-wider font-semibold text-muted-foreground whitespace-nowrap"
                 >
                   {h}
                 </th>
@@ -352,7 +365,7 @@ function PaymentHistoryTable({
                 >
                   <td className="px-4 py-3 font-mono text-xs text-violet-600 font-semibold whitespace-nowrap">
                     {r.RPDocNo || (
-                      <span className="text-muted-foreground/50 text-[10px] italic">
+                      <span className="text-muted-foreground/50 text-[0.625rem] italic">
                         No doc no
                       </span>
                     )}
@@ -368,9 +381,9 @@ function PaymentHistoryTable({
                   </td>
                   <td className="px-4 py-3">
                     <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${MODE_COLOR[r.RPMode] ?? "bg-muted text-muted-foreground"}`}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium ${MODE_COLOR[r.RPMode] ?? "bg-muted text-muted-foreground"}`}
                     >
-                      {r.RPMode}
+                      {MODE_LABEL[r.RPMode] ?? r.RPMode}
                     </span>
                   </td>
                   <td className="px-4 py-3 font-semibold text-foreground whitespace-nowrap">
@@ -378,13 +391,13 @@ function PaymentHistoryTable({
                   </td>
                   <td className="px-4 py-3">
                     <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${cfg.cls}`}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium ${cfg.cls}`}
                     >
                       {cfg.icon} {cfg.label}
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <button
+                    <button data-row-view
                       onClick={() => setViewing(r)}
                       className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
                       title="View"
@@ -401,7 +414,7 @@ function PaymentHistoryTable({
 
       {/* View Modal */}
       {viewing && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <div>
@@ -426,7 +439,7 @@ function PaymentHistoryTable({
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                     Sale Order
                   </p>
                   <p className="font-mono font-semibold">
@@ -434,13 +447,13 @@ function PaymentHistoryTable({
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                     Date
                   </p>
                   <p>{fmtDate(viewing.RPDocDate)}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                     Bank
                   </p>
                   <p>
@@ -448,14 +461,14 @@ function PaymentHistoryTable({
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                     Mode
                   </p>
-                  <p>{viewing.RPMode}</p>
+                  <p>{MODE_LABEL[viewing.RPMode] ?? viewing.RPMode}</p>
                 </div>
                 {viewing.RPTransactionID && (
                   <div className="col-span-2">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                       Transaction / UTR
                     </p>
                     <p className="font-mono text-xs">
@@ -465,7 +478,7 @@ function PaymentHistoryTable({
                 )}
                 {viewing.RPCheckNumber && (
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                       Cheque No.
                     </p>
                     <p>{viewing.RPCheckNumber}</p>
@@ -473,7 +486,7 @@ function PaymentHistoryTable({
                 )}
                 {viewing.RPRemarks && (
                   <div className="col-span-2">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                       Remarks
                     </p>
                     <p className="text-muted-foreground text-xs">
@@ -492,7 +505,7 @@ function PaymentHistoryTable({
               </div>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );
@@ -689,29 +702,29 @@ export default function Payment() {
               {selectedOrder && (
                 <div className="rounded-xl bg-violet-500/5 border border-violet-400/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                       From
                     </p>
                     <p className="font-medium text-foreground text-xs">
                       {selectedOrder.FromProjectName}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[0.625rem] text-muted-foreground">
                       {selectedOrder.FromGodownName}
                     </p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                       To
                     </p>
                     <p className="font-medium text-foreground text-xs">
                       {selectedOrder.ToProjectName}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[0.625rem] text-muted-foreground">
                       {selectedOrder.ToGodownName}
                     </p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                       Order Date
                     </p>
                     <p className="font-medium text-foreground text-xs">
@@ -719,7 +732,7 @@ export default function Payment() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">
                       Order Value
                     </p>
                     <p className="font-bold text-foreground">
@@ -756,7 +769,7 @@ export default function Payment() {
                   {selectedBank && (
                     <div className="mt-1.5 flex items-center gap-1.5">
                       <Landmark size={11} className="text-muted-foreground" />
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-[0.6875rem] text-muted-foreground">
                         {accountGroupLabel
                           ? `Linked to ${accountGroupLabel} · posts to Trial Balance`
                           : "No account group linked — won't appear in Trial Balance"}
@@ -810,8 +823,7 @@ export default function Payment() {
 
                 <div>
                   <FieldLabel required>Payment Date</FieldLabel>
-                  <input
-                    type="date"
+                  <DateInput
                     value={payDate}
                     onChange={(e) => setPayDate(e.target.value)}
                     className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-violet-500/30 transition-colors"
@@ -867,7 +879,7 @@ export default function Payment() {
                 <button
                   onClick={handleSubmit}
                   disabled={!canSubmit}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module text-white disabled:opacity-50 transition-colors shadow-sm"
                 >
                   {mutation.isPending ? (
                     <>
@@ -915,7 +927,7 @@ export default function Payment() {
                   key={n}
                   className="flex gap-3 text-xs text-muted-foreground"
                 >
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-500/10 text-violet-600 text-[10px] font-bold">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-500/10 text-violet-600 text-[0.625rem] font-bold">
                     {n}
                   </span>
                   <span>{text}</span>

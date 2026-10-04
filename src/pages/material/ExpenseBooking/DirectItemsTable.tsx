@@ -41,6 +41,11 @@ export interface DirectLineItem {
   rate: number;
   /** Computed: qty x rate. */
   amount: number;
+  // From the selected Item Master row's own tag (M_CostCenterId) — same
+  // auto-fill convention Purchase Order's line items already use. Not yet
+  // consumed by GL posting for direct/TOD bookings (see the comment on
+  // DirectItemsTable below) — persisted so it's available once that's wired.
+  costCenterId?: string | null;
 }
 
 interface UomOption {
@@ -56,7 +61,7 @@ function makeKey() {
 }
 
 function blankItem(defaultUom: string): DirectLineItem {
-  return { _key: makeKey(), description: "", qty: 1, uom: defaultUom, rate: 0, amount: 0 };
+  return { _key: makeKey(), description: "", qty: 1, uom: defaultUom, rate: 0, amount: 0, costCenterId: null };
 }
 
 export function computeItemAmount(qty: number, rate: number): number {
@@ -78,6 +83,7 @@ export function makeDirectLineItem(data: Partial<DirectLineItem>): DirectLineIte
     uom: data.uom || "",
     rate,
     amount: computeItemAmount(qty, rate),
+    costCenterId: data.costCenterId ?? null,
   };
 }
 
@@ -204,8 +210,11 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
 
   // Item picker — DINV/Other Expenses is a service-driven booking (no
   // goods, since goods always flow through a GRN first), so only Item
-  // Master rows tagged M_Type='Service' are offered here. Posting these
-  // against GL/cost-center per item is a follow-up, not wired yet.
+  // Master rows tagged M_Type='Service' are offered here. Each line now
+  // carries costCenterId (auto-filled from the item's own Item Master tag,
+  // see onSelect below) so it's captured and persisted — actually posting
+  // it against GL per item (rather than the booking's single header-level
+  // ECostCenter) is still a follow-up.
   const [serviceItems, setServiceItems] = useState<DbItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(false);
 
@@ -220,7 +229,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
   useEffect(() => {
     setUomLoading(true);
     fetch("/api/unit-of-measurement", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+      headers: { Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}` },
     })
       .then((r) => r.json())
       .then((data: any[]) => {
@@ -303,7 +312,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
           {/* Header */}
-          <div className="hidden sm:grid sm:grid-cols-[1fr_72px_96px_84px_88px_28px] text-[10px] uppercase tracking-widest font-semibold text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border gap-1">
+          <div className="hidden sm:grid sm:grid-cols-[1fr_72px_96px_84px_88px_28px] text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border gap-1">
             <span>Description</span>
             <span className="text-center">Qty</span>
             <span className="text-center">UOM</span>
@@ -332,6 +341,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
                     patch(i, {
                       description: it.M_Name,
                       ...(it.M_UOM ? { uom: it.M_UOM } : {}),
+                      costCenterId: it.M_CostCenterId != null ? String(it.M_CostCenterId) : null,
                     });
                     if (it.M_UOM) lastUom.current = it.M_UOM;
                   }}
@@ -424,7 +434,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
       )}
 
       {!readOnly && items.length > 0 && (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-[0.625rem] text-muted-foreground">
           Basic Amount is automatically calculated from the sum of all line items (qty x rate).
         </p>
       )}

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import * as spApi from "@/api/supplierPortalApi";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
@@ -18,6 +18,8 @@ import {
   Truck,
   Star,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const inputCls =
   "w-full text-sm rounded-lg border border-border/60 px-3 py-2 bg-background/60 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition";
@@ -82,7 +84,7 @@ export default function SupplierQuotationDetail() {
   });
 
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const submitted = detail?.MySubmissionStatus === "Submitted";
   const filledCount = Object.values(rows).filter((r) => r.Rate && Number(r.Rate) > 0).length;
   const totalCount = detail?.items.length ?? 0;
@@ -103,13 +105,13 @@ export default function SupplierQuotationDetail() {
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-background">
       {/* Page glow — subtle in both modes */}
-      <div className="fixed inset-0 pointer-events-none z-0">
+      <BodyPortal><div className="fixed inset-0 pointer-events-none z-0">
         <div style={{
           position: "absolute", top: "-10%", left: "50%", transform: "translateX(-50%)",
           width: "70vw", height: "40vh",
           background: `radial-gradient(ellipse at 50% 0%, rgba(16,185,129,${isDark ? "0.06" : "0.04"}) 0%, transparent 70%)`,
         }} />
-      </div>
+      </div></BodyPortal>
 
       <div className="relative z-10 max-w-4xl mx-auto px-4 py-8 space-y-5">
 
@@ -125,11 +127,11 @@ export default function SupplierQuotationDetail() {
           <span className="text-border">|</span>
           <span className="font-mono font-bold text-sm text-emerald-500">{detail.DocNo}</span>
           {submitted ? (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+            <span className="inline-flex items-center gap-1 text-[0.625rem] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
               <CheckCircle2 size={9} /> Submitted
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+            <span className="inline-flex items-center gap-1 text-[0.625rem] font-bold text-amber-500 bg-[#ffe2021a] px-2 py-0.5 rounded-full border border-amber-500/20">
               <Clock size={9} /> Pending
             </span>
           )}
@@ -162,22 +164,22 @@ export default function SupplierQuotationDetail() {
             {/* Top row: DocNo + status badges */}
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
-                <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/60 mb-1">Quotation Reference</div>
+                <div className="text-[0.5625rem] font-bold uppercase tracking-widest text-emerald-300/60 mb-1">Quotation Reference</div>
                 <h2 className="font-mono text-2xl font-extrabold text-white tracking-tight leading-none">
                   {detail.DocNo}
                 </h2>
               </div>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {submitted ? (
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-300 bg-emerald-400/15 border border-emerald-400/30 px-3 py-1 rounded-full">
+                  <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold text-emerald-300 bg-emerald-400/15 border border-emerald-400/30 px-3 py-1 rounded-full">
                     <CheckCircle2 size={11} /> Submitted
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-300 bg-amber-400/15 border border-amber-400/30 px-3 py-1 rounded-full">
+                  <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold text-amber-300 bg-amber-400/15 border border-amber-400/30 px-3 py-1 rounded-full">
                     <Clock size={11} /> Pending
                   </span>
                 )}
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-white/60 bg-white/10 border border-white/15 px-3 py-1 rounded-full">
+                <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-semibold text-white/60 bg-white/10 border border-white/15 px-3 py-1 rounded-full">
                   <Package size={10} /> {totalCount} item{totalCount !== 1 ? "s" : ""}
                 </span>
               </div>
@@ -190,7 +192,7 @@ export default function SupplierQuotationDetail() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3">
               {detail.CompanyName && (
                 <div>
-                  <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Company</div>
+                  <div className="text-[0.5625rem] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Company</div>
                   <div className="flex items-center gap-1.5 text-sm font-medium text-white/90 truncate">
                     <Building2 size={12} className="text-emerald-400/70 shrink-0" />
                     <span className="truncate">{detail.CompanyName}</span>
@@ -199,7 +201,7 @@ export default function SupplierQuotationDetail() {
               )}
               {detail.ProjectName && (
                 <div>
-                  <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Project</div>
+                  <div className="text-[0.5625rem] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Project</div>
                   <div className="flex items-center gap-1.5 text-sm font-medium text-white/90 truncate">
                     <Package size={12} className="text-emerald-400/70 shrink-0" />
                     <span className="truncate">{detail.ProjectName}</span>
@@ -208,7 +210,7 @@ export default function SupplierQuotationDetail() {
               )}
               {detail.DocDate && (
                 <div>
-                  <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Issued On</div>
+                  <div className="text-[0.5625rem] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Issued On</div>
                   <div className="flex items-center gap-1.5 text-sm font-medium text-white/90">
                     <CalendarDays size={12} className="text-emerald-400/70 shrink-0" />
                     {fmtDate(detail.DocDate)}
@@ -217,12 +219,12 @@ export default function SupplierQuotationDetail() {
               )}
               {detail.DueDate && (
                 <div>
-                  <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Due Date</div>
+                  <div className="text-[0.5625rem] font-bold uppercase tracking-widest text-emerald-300/50 mb-0.5">Due Date</div>
                   <div className={`flex items-center gap-1.5 text-sm font-semibold ${new Date(detail.DueDate) < new Date() ? "text-red-300" : "text-white/90"}`}>
                     <CalendarDays size={12} className={`shrink-0 ${new Date(detail.DueDate) < new Date() ? "text-red-400" : "text-emerald-400/70"}`} />
                     {fmtDate(detail.DueDate)}
                     {new Date(detail.DueDate) < new Date() && (
-                      <span className="ml-1 text-[9px] font-bold text-red-300 bg-red-400/15 border border-red-400/25 px-1.5 py-0.5 rounded-full">Overdue</span>
+                      <span className="ml-1 text-[0.5625rem] font-bold text-red-300 bg-red-400/15 border border-red-400/25 px-1.5 py-0.5 rounded-full">Overdue</span>
                     )}
                   </div>
                 </div>
@@ -269,12 +271,12 @@ export default function SupplierQuotationDetail() {
                 {/* Item header */}
                 <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/40">
                   <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 rounded-md bg-muted/60 flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
+                    <span className="w-6 h-6 rounded-md bg-muted/60 flex items-center justify-center text-[0.625rem] font-bold text-muted-foreground shrink-0">
                       {idx + 1}
                     </span>
                     <span className="font-semibold text-sm text-foreground">{it.ItemName}</span>
                     {it.UOMCode && (
-                      <span className="text-[10px] font-medium text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full">
+                      <span className="text-[0.625rem] font-medium text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full">
                         {it.UOMCode}
                       </span>
                     )}
@@ -290,7 +292,7 @@ export default function SupplierQuotationDetail() {
                 <div className="px-5 py-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {/* Rate */}
                   <div>
-                    <label className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
+                    <label className="flex items-center gap-1 text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
                       <IndianRupee size={10} /> Your Rate *
                     </label>
                     <div className="relative">
@@ -310,11 +312,10 @@ export default function SupplierQuotationDetail() {
 
                   {/* Supply date */}
                   <div>
-                    <label className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
+                    <label className="flex items-center gap-1 text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
                       <Truck size={10} /> Date of Supply
                     </label>
-                    <input
-                      type="date"
+                    <DateInput
                       value={r.SupplyDate}
                       onChange={(e) => setRow(it.QuotationItemId, "SupplyDate", e.target.value)}
                       disabled={submitted}
@@ -324,7 +325,7 @@ export default function SupplierQuotationDetail() {
 
                   {/* Quality */}
                   <div>
-                    <label className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
+                    <label className="flex items-center gap-1 text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
                       <Star size={10} /> Quality
                     </label>
                     <input
@@ -358,7 +359,7 @@ export default function SupplierQuotationDetail() {
               type="button"
               onClick={() => submitMutation.mutate()}
               disabled={!canSubmit || submitMutation.isPending}
-              className="gap-2 bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0 disabled:opacity-40 min-w-[140px]"
+              className="gap-2 btn-module text-white hover:opacity-90 border-0 disabled:opacity-40 min-w-[140px]"
             >
               {submitMutation.isPending
                 ? <><RefreshCw size={14} className="animate-spin" /> Submitting…</>

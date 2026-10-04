@@ -35,6 +35,15 @@ export function ActivityLadder({ active, rungs, onAdd, onRemove, onMove, readOnl
     setOverIndex(null);
   };
 
+  // onDragEnd always fires on release, even when the drop lands outside any
+  // rung (or the drag is cancelled) and onDrop never gets called — without
+  // this, dragIndex stayed set forever and that rung stayed dimmed at 40%
+  // opacity with no way to clear it short of reloading the page.
+  const handleDragEnd = () => {
+    setDragIndex(null);
+    setOverIndex(null);
+  };
+
   const rail = (
     <>
       {rungs.length === 0 ? (
@@ -54,6 +63,7 @@ export function ActivityLadder({ active, rungs, onAdd, onRemove, onMove, readOnl
               onDragStart={setDragIndex}
               onDragOver={setOverIndex}
               onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
               isDragging={dragIndex === i}
               isDropTarget={overIndex === i && dragIndex !== i}
             />
@@ -82,7 +92,7 @@ export function ActivityLadder({ active, rungs, onAdd, onRemove, onMove, readOnl
         <h3 className="text-xs font-heading font-semibold uppercase tracking-widest text-foreground">
           Activity Chain
         </h3>
-        <span className="text-[10px] text-muted-foreground/60 ml-1">
+        <span className="text-[0.625rem] text-muted-foreground/60 ml-1">
           strictly linear — each activity must finish before the next starts
         </span>
       </div>

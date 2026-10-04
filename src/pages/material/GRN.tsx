@@ -10,6 +10,7 @@ import {
   Truck,
   Package,
   Trash2,
+  Pencil,
   Save,
   X,
   Search,
@@ -43,6 +44,7 @@ import {
   Lock,
 } from "lucide-react";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
+import { printStatusLabel } from "@/utils/printStatus";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { ExportMenu } from "@/components/ExportMenu";
 import {
@@ -86,7 +88,7 @@ const GRN_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "PO Number", accessor: "PONumber" },
   { header: "Company", accessor: "CompanyName" },
   { header: "Project", accessor: "ProjectName" },
-  { header: "Status", accessor: "Status" },
+  { header: "Status", accessor: (r) => printStatusLabel(r.Status as string) },
 ];
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -99,12 +101,16 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import type {
   GRNFormDataPayload,
   GRNItemLine as GRNItemLineBase,
   PurchaseOrder,
   UOM,
 } from "@/api/grnApi";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // Extend the base type with GST fields sourced from PurchaseOrderItems.TaxPct
 // (which itself comes from ItemMaster / HSN master at PO creation time).
@@ -182,7 +188,7 @@ function RemainingItemsPanel({
         <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
           Remaining Items — Not Yet Expense Booked
         </span>
-        <span className="ml-auto text-[10px] text-muted-foreground">
+        <span className="ml-auto text-[0.625rem] text-muted-foreground">
           {data.pendingItems.length}{" "}
           {data.pendingItems.length === 1 ? "item" : "items"} pending
         </span>
@@ -191,30 +197,30 @@ function RemainingItemsPanel({
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-muted/10 border-b border-amber-500/15">
-              <th className="px-3 py-2 text-left text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <th className="px-3 py-2 text-left text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 Item
               </th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 Ordered
               </th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                 Received
               </th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">
+              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">
                 Remaining
               </th>
-              <th className="px-3 py-2 text-left text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <th className="px-3 py-2 text-left text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 UOM
               </th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 Rate (₹)
               </th>
-              <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">
+              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">
                 Pending Amt (₹)
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-amber-500/10">
+          <tbody className="divide-y divide-[#ffe2021a]">
             {data.pendingItems.map((item, idx) => (
               <tr key={idx} className="hover:bg-amber-500/5 transition-colors">
                 <td className="px-3 py-2 font-medium text-foreground max-w-[160px] truncate">
@@ -253,7 +259,7 @@ function RemainingItemsPanel({
             <tr>
               <td
                 colSpan={6}
-                className="px-3 py-2.5 text-[10px] font-heading uppercase tracking-wider text-muted-foreground"
+                className="px-3 py-2.5 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground"
               >
                 Total Pending Value
               </td>
@@ -270,7 +276,7 @@ function RemainingItemsPanel({
         <div className="border-t border-amber-500/15">
           <div className="px-4 py-2 bg-muted/20 flex items-center gap-2">
             <FileText size={11} className="text-muted-foreground shrink-0" />
-            <span className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+            <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
               Other GRN receipts for this PO
             </span>
           </div>
@@ -279,22 +285,22 @@ function RemainingItemsPanel({
               <div key={g.grnId} className="flex items-center gap-3 px-4 py-2.5 text-xs">
                 <span className="font-mono font-semibold text-foreground">{g.grnNo}</span>
                 <span className="text-muted-foreground">{new Date(g.grnDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
-                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                   g.status === "Approved" ? "bg-emerald-500/10 text-emerald-600" :
-                  g.status === "Pending" ? "bg-amber-500/10 text-amber-600" :
+                  g.status === "Pending" ? "bg-[#ffe2021a] text-amber-600" :
                   "bg-muted text-muted-foreground"
                 }`}>{g.status}</span>
                 <span className="ml-auto font-mono text-muted-foreground">
                   ₹{g.totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
                 </span>
-                <span className="text-muted-foreground/60 text-[10px]">{g.itemCount} item{g.itemCount !== 1 ? "s" : ""}</span>
+                <span className="text-muted-foreground/60 text-[0.625rem]">{g.itemCount} item{g.itemCount !== 1 ? "s" : ""}</span>
               </div>
             ))}
           </div>
         </div>
       )}
       <div className="px-4 py-2.5 border-t border-amber-500/15 bg-amber-500/5 flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-[10px] text-amber-600 dark:text-amber-500">
+        <p className="text-[0.625rem] text-amber-600 dark:text-amber-500">
           These items have been received but not yet booked as expenses. Create
           an Expense Booking from the Finance → Invoice page to book them.
         </p>
@@ -416,7 +422,7 @@ function LinkedExpenseBookings({ grnId }: { grnId: number }) {
     if (s === "Approved" || s === "Booked")
       return "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400";
     if (s === "Pending")
-      return "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400";
+      return "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400";
     if (s === "Rejected")
       return "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400";
     return "bg-muted border-border text-muted-foreground";
@@ -454,7 +460,7 @@ function LinkedExpenseBookings({ grnId }: { grnId: number }) {
           className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${isAutoSplit(b) ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-muted/20"}`}
         >
           <div
-            className={`shrink-0 p-1.5 rounded-lg ${isAutoSplit(b) ? "bg-amber-500/10" : "bg-emerald-500/10"}`}
+            className={`shrink-0 p-1.5 rounded-lg ${isAutoSplit(b) ? "bg-[#ffe2021a]" : "bg-emerald-500/10"}`}
           >
             <Receipt
               size={13}
@@ -471,24 +477,24 @@ function LinkedExpenseBookings({ grnId }: { grnId: number }) {
                 {b.EDocNo ?? `Draft #${b.Eid}`}
               </span>
               {isAutoSplit(b) && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20 font-medium">
+                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20 font-medium">
                   Pending split
                 </span>
               )}
               <span
-                className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${statusColor(b.EStatus)}`}
+                className={`inline-flex items-center gap-1 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-semibold ${statusColor(b.EStatus)}`}
               >
                 {StatusIcon(b.EStatus)}
                 {b.EStatus}
               </span>
             </div>
             {b.EName && !isAutoSplit(b) && (
-              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+              <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">
                 {b.EName}
               </p>
             )}
             {isAutoSplit(b) && (
-              <p className="text-[10px] text-amber-600 dark:text-amber-500 mt-0.5">
+              <p className="text-[0.625rem] text-amber-600 dark:text-amber-500 mt-0.5">
                 Remaining items — review in Expense Booking
               </p>
             )}
@@ -500,7 +506,7 @@ function LinkedExpenseBookings({ grnId }: { grnId: number }) {
               </p>
             )}
             {b.EDocDate && (
-              <p className="text-[10px] text-muted-foreground mt-0.5">
+              <p className="text-[0.625rem] text-muted-foreground mt-0.5">
                 {new Date(b.EDocDate).toLocaleDateString("en-IN")}
               </p>
             )}
@@ -518,6 +524,12 @@ let onView: (grn: any) => void;
 let deleteMutation: { mutate: (id: string) => void };
 let handleDeleteGrn: (id: string) => void;
 let _canDelete = true;
+let _canEdit = true;
+// Reassigned each render by GRN() below — see useApprovalTrailsBulk's own
+// comment for why the "chain" column reads from this instead of firing its
+// own per-row GET /trail.
+let _grnApprovalTrails = new Map<string, import("@/components/ApprovalStatusChain").TrailData | null>();
+let _grnApprovalTrailsLoading = false;
 
 // ─── List Columns ─────────────────────────────────────────────────────────────
 // isTransferGRN: doc number starts with "TRF-GRN" — these rows came from a
@@ -539,7 +551,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             {docNo || "—"}
           </span>
           {isTRF ? (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-400/20 w-fit">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.5625rem] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-400/20 w-fit">
               <ArrowLeftRight size={8} /> Transfer GRN
             </span>
           ) : grn.POType && grn.POType !== "Direct" ? (
@@ -548,7 +560,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             // has no Vehicle In/Out (the common case), and the two badges
             // read as the same thing side by side.
             <span
-              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border w-fit ${
+              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[0.5625rem] font-semibold border w-fit ${
                 grn.POType === "Normal"
                   ? "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
                   : grn.POType === "WO_PO"
@@ -567,7 +579,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
           {!isTRF && !grn.VehicleInOutID && (
             <span
               title={grn.DirectEntryReason || undefined}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-400/20 w-fit"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.5625rem] font-semibold bg-[#ffe2021a] text-amber-700 dark:text-amber-400 border border-amber-400/20 w-fit"
             >
               Direct Entry
             </span>
@@ -589,7 +601,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       if (isTRF) {
         return (
           <div className="flex flex-col gap-0.5">
-            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
               Transfer
             </span>
             <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400">
@@ -602,7 +614,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
         <div className="flex flex-col gap-0.5">
           {grn.PONumber ? (
             <>
-              <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+              <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
                 PO
               </span>
               <span className="font-mono text-xs">{grn.PONumber}</span>
@@ -639,7 +651,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             <span className="text-xs text-muted-foreground">—</span>
           )}
           {grn.SourceMRDocNo && (
-            <span className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+            <span className="font-mono text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400">
               {grn.SourceMRDocNo}
             </span>
           )}
@@ -657,7 +669,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       return (
         <div className="flex flex-col gap-0.5">
           <span className="text-xs">{grn.CompanyName || "—"}</span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[0.625rem] text-muted-foreground">
             {grn.ProjectName || "—"}
           </span>
         </div>
@@ -703,6 +715,9 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
         table="GoodsReceiptNotes"
         recordId={row.original.GRNID}
         compact
+        fallback={<StatusBadge status={row.original.Status} />}
+        preloaded={_grnApprovalTrails.get(String(row.original.GRNID)) ?? null}
+        preloadedLoading={_grnApprovalTrailsLoading}
       />
     ),
   },
@@ -715,16 +730,25 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       const grn = row.original;
       return (
         <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={() => onView(grn)}
+          <button data-row-view="hide"
+            onClick={(e) => { e.stopPropagation(); onView(grn); }}
             className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
             title="View details"
           >
             <Eye size={15} />
           </button>
+          {_canEdit && !isTransferGRN(grn) && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(grn); }}
+              className="p-1 rounded text-primary hover:bg-primary/10 transition-colors"
+              title="Edit this GRN"
+            >
+              <Pencil size={15} />
+            </button>
+          )}
           {_canDelete && (
             <button
-              onClick={() => handleDeleteGrn(String(grn.GRNID))}
+              onClick={(e) => { e.stopPropagation(); handleDeleteGrn(String(grn.GRNID)); }}
               className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
               title="Delete this GRN"
             >
@@ -746,7 +770,7 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+    <label className="block text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -787,7 +811,7 @@ function SectionTitle({
         <p className="text-xs font-semibold text-foreground tracking-wide">
           {label}
         </p>
-        {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
+        {sub && <p className="text-[0.625rem] text-muted-foreground">{sub}</p>}
       </div>
     </div>
   );
@@ -818,7 +842,7 @@ function InfoPill({
   if (!safeValue) return null;
   return (
     <div className="flex flex-col gap-0.5 px-3 py-2 rounded-lg bg-muted/60 border border-border/60 min-w-0">
-      <span className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+      <span className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
         {label}
       </span>
       <span
@@ -836,6 +860,7 @@ export default function GRN() {
   const rights = usePageRights("grn-master");
   const today = new Date().toISOString().slice(0, 10);
   _canDelete = rights.canDelete;
+  _canEdit = rights.canEdit;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -1198,6 +1223,15 @@ export default function GRN() {
     return Array.from(groups.values());
   }, [filteredGrns]);
 
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: grnApprovalTrails, isLoading: grnApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "GoodsReceiptNotes",
+    filteredGrns.map((g: any) => g.GRNID),
+  );
+  _grnApprovalTrails = grnApprovalTrails;
+  _grnApprovalTrailsLoading = grnApprovalTrailsLoading;
+
   const [collapsedGrnGroups, setCollapsedGrnGroups] = useState<
     Record<string, boolean>
   >({});
@@ -1322,7 +1356,7 @@ export default function GRN() {
     }
     setLoadingPO(true);
     try {
-      const res = await fetchWithAuth(`/api/purchase-orders/${poId}`);
+      const res = await fetchWithAuth(`/api/grns/po/${poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
@@ -1419,6 +1453,7 @@ export default function GRN() {
           totalAmount,
           gstPct,
           gstAmount: totalAmount * (gstPct / 100),
+          costCenterId: it.CostCenterId != null ? String(it.CostCenterId) : null,
         };
       });
 
@@ -1493,7 +1528,7 @@ export default function GRN() {
 
     setLoadingPO(true);
     try {
-      const res = await fetchWithAuth(`/api/purchase-orders/${pending.poId}`);
+      const res = await fetchWithAuth(`/api/grns/po/${pending.poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
@@ -1597,7 +1632,14 @@ export default function GRN() {
         ? formData.directEntryReason
         : null,
       grnItems: formData.items,
-      status: "Draft",
+      // On create this is always "Draft". On edit, send the record's own
+      // current status (loaded into formData.status when it was fetched) —
+      // NOT a hardcoded "Draft", which used to silently downgrade an
+      // already-Approved GRN instead of sending it back for re-approval.
+      // The backend is authoritative here regardless (an Approved record
+      // always gets forced to Pending server-side), but the payload should
+      // reflect intent rather than lie about it.
+      status: editingId ? formData.status || "Draft" : "Draft",
       remarks: formData.remarks,
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,
@@ -1927,7 +1969,7 @@ export default function GRN() {
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? (
                   <Loader2 size={13} className="animate-spin" />
@@ -1946,7 +1988,7 @@ export default function GRN() {
                     setFormData(buildEmptyForm());
                     setErrors({});
                   }}
-                  className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
+                  className="btn-module inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
                 >
                   <Plus size={13} /> New GRN
                 </button>
@@ -2187,12 +2229,12 @@ export default function GRN() {
                       />
                     </div>
                     {errors.poId && (
-                      <p className="text-destructive text-[11px] mt-1">
+                      <p className="text-destructive text-[0.6875rem] mt-1">
                         {errors.poId}
                       </p>
                     )}
                     {loadingPO && (
-                      <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5">
+                      <p className="text-[0.6875rem] text-muted-foreground mt-1 flex items-center gap-1.5">
                         <span className="w-2.5 h-2.5 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin inline-block" />
                         Loading PO details…
                       </p>
@@ -2247,12 +2289,12 @@ export default function GRN() {
                         />
                       </div>
                       {errors.vehicleInOutId && (
-                        <p className="text-destructive text-[11px] mt-1">
+                        <p className="text-destructive text-[0.6875rem] mt-1">
                           {errors.vehicleInOutId}
                         </p>
                       )}
                       {formData.grnSourceMode === "remaining" && (
-                        <p className="text-[11px] text-muted-foreground mt-1">
+                        <p className="text-[0.6875rem] text-muted-foreground mt-1">
                           Sourced from remaining PO items instead — clear it below to pick a Vehicle In/Out lot.
                         </p>
                       )}
@@ -2277,7 +2319,7 @@ export default function GRN() {
                         <span className="text-xs font-semibold text-foreground">
                           Remaining Items on this PO
                         </span>
-                        <span className="ml-auto text-[10px] text-muted-foreground">
+                        <span className="ml-auto text-[0.625rem] text-muted-foreground">
                           {countRemainingItems(poRemainingItems)} of{" "}
                           {poRemainingItems.length} item
                           {poRemainingItems.length !== 1 ? "s" : ""} left
@@ -2289,16 +2331,16 @@ export default function GRN() {
                             <table className="w-full text-xs">
                               <thead>
                                 <tr className="bg-muted/10 border-b border-border">
-                                  <th className="px-3 py-2 text-left text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                                  <th className="px-3 py-2 text-left text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                                     Item
                                   </th>
-                                  <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                                  <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                                     Ordered
                                   </th>
-                                  <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                                  <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                                     Received
                                   </th>
-                                  <th className="px-3 py-2 text-right text-[10px] font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                                  <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                                     Remaining
                                   </th>
                                 </tr>
@@ -2397,8 +2439,7 @@ export default function GRN() {
                       size={13}
                       className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
-                    <input
-                      type="date"
+                    <DateInput
                       value={formData.grnDate}
                       max={today}
                       onChange={(e) => {
@@ -2418,8 +2459,7 @@ export default function GRN() {
                       size={13}
                       className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
-                    <input
-                      type="date"
+                    <DateInput
                       value={formData.docDate}
                       max={today}
                       onChange={(e) => {
@@ -2495,7 +2535,7 @@ export default function GRN() {
                           <span className="font-medium text-sm truncate">
                             {item.itemName || "—"}
                           </span>
-                          <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                          <span className="shrink-0 text-[0.625rem] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
                             {item.uom || "—"}
                           </span>
                         </div>
@@ -2518,7 +2558,7 @@ export default function GRN() {
                             ],
                           ].map(([l, v, c]) => (
                             <div key={l}>
-                              <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                              <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                                 {l}
                               </p>
                               <p className={`font-semibold ${c}`}>{v}</p>
@@ -2529,7 +2569,7 @@ export default function GRN() {
                           {(["receivedQty", "rate", "quantity"] as const).map(
                             (field) => (
                               <div key={field}>
-                                <label className="block text-[9px] uppercase tracking-widest text-muted-foreground mb-1">
+                                <label className="block text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">
                                   {field === "receivedQty"
                                     ? "Received"
                                     : field === "rate"
@@ -2601,7 +2641,7 @@ export default function GRN() {
                           return (
                             <div className="grid grid-cols-2 gap-1.5">
                               <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
-                                <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                <span className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                                   PO Value (incl. GST)
                                 </span>
                                 <span className="text-xs font-semibold text-foreground">
@@ -2610,7 +2650,7 @@ export default function GRN() {
                               </div>
                               {formData.poReceivedAmount > 0 && (
                                 <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
-                                  <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                  <span className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                                     Already Received
                                   </span>
                                   <span className="text-xs font-semibold text-foreground">
@@ -2619,9 +2659,9 @@ export default function GRN() {
                                 </div>
                               )}
                               <div
-                                className={`flex flex-col px-3 py-2.5 rounded-xl border ${diff > 0.005 ? "bg-amber-500/10 border-amber-500/30" : "bg-green-500/10 border-green-500/30"}`}
+                                className={`flex flex-col px-3 py-2.5 rounded-xl border ${diff > 0.005 ? "bg-[#ffe2021a] border-amber-500/30" : "bg-green-500/10 border-green-500/30"}`}
                               >
-                                <span className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                <span className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                                   Balance on PO
                                 </span>
                                 <span
@@ -2666,7 +2706,7 @@ export default function GRN() {
                         ].map(({ h, align }) => (
                           <th
                             key={h}
-                            className={`px-3 py-2.5 ${align} text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap`}
+                            className={`px-3 py-2.5 ${align} text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap`}
                           >
                             {h.replace(" *", "")}
                             {h.includes("*") && (
@@ -2800,7 +2840,7 @@ export default function GRN() {
                         <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
                           <td
                             colSpan={7}
-                            className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                            className="px-4 py-3 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
                           >
                             GRN Total (this receipt)
                           </td>
@@ -2819,7 +2859,7 @@ export default function GRN() {
                                 <tr className="bg-muted/30 border-t border-border/50">
                                   <td
                                     colSpan={7}
-                                    className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                    className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
                                   >
                                     PO Value (incl. GST)
                                   </td>
@@ -2831,7 +2871,7 @@ export default function GRN() {
                                   <tr className="bg-muted/20 border-t border-border/50">
                                     <td
                                       colSpan={7}
-                                      className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                      className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
                                     >
                                       Already Received
                                     </td>
@@ -2843,13 +2883,13 @@ export default function GRN() {
                                 <tr
                                   className={
                                     diff > 0.005
-                                      ? "bg-amber-500/10 border-t border-amber-500/20"
+                                      ? "bg-[#ffe2021a] border-t border-amber-500/20"
                                       : "bg-green-500/10 border-t border-green-500/20"
                                   }
                                 >
                                   <td
                                     colSpan={7}
-                                    className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                    className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
                                   >
                                     Balance on PO
                                   </td>
@@ -2901,7 +2941,7 @@ export default function GRN() {
                   formData.items.some((i) => i.receivedQty > 0 || i.rate > 0);
                 return (
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-                    <p className="text-[11px] text-muted-foreground hidden sm:block">
+                    <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                       {canSave ? (
                         <span className="text-emerald-500 font-medium">
                           Ready to save
@@ -2925,7 +2965,7 @@ export default function GRN() {
                       <button
                         onClick={onSubmit}
                         disabled={!canSave || isSaving}
-                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                       >
                         {isSaving ? (
                           <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -2990,7 +3030,7 @@ export default function GRN() {
                         key={s}
                         type="button"
                         onClick={() => setGrnStatusFilter(s)}
-                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${grnStatusFilter === s ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${grnStatusFilter === s ? "btn-module text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
                       >
                         {s}
                       </button>
@@ -3038,7 +3078,7 @@ export default function GRN() {
                             · {group.supplierName}
                           </span>
                         )}
-                        <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                        <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                           {group.rows.length} GRN
                           {group.rows.length !== 1 ? "s" : ""}
                         </span>
@@ -3051,9 +3091,11 @@ export default function GRN() {
                           <DataTable
                             data={group.rows}
                             columns={GRN_LIST_COLUMNS}
+                            onRowClick={(row) => onView(row.original)}
                             searchable={false}
                             paginated={false}
                             emptyMessage="No GRNs found."
+                            getRowId={(r: any) => String(r.GRNID)}
                           />
                         </div>
                       )}
@@ -3111,7 +3153,7 @@ export default function GRN() {
           );
           const subtotalInclGST = subtotal + gstTotal;
           return (
-            <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+            <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 bw-modal-topmost">
               <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
                 {/* Modal header */}
                 <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
@@ -3123,7 +3165,7 @@ export default function GRN() {
                           : `GRN-${viewingGrn.GRNNo}`
                         : "—"}
                     </h2>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
                       Goods Receipt Note
                     </p>
                   </div>
@@ -3200,6 +3242,10 @@ export default function GRN() {
                           value: viewingGrn.PONumber || "—",
                         },
                         {
+                          label: "Created By",
+                          value: viewingGrn.CreatedBy || "—",
+                        },
+                        {
                           label: "Company",
                           value: viewingGrn.CompanyName || "—",
                         },
@@ -3265,7 +3311,7 @@ export default function GRN() {
                           key={label}
                           className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
                         >
-                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                             {label}
                           </p>
                           <p
@@ -3281,7 +3327,7 @@ export default function GRN() {
 
                     {/* Items */}
                     <div>
-                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
+                      <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
                         Received Items
                       </p>
 
@@ -3297,7 +3343,7 @@ export default function GRN() {
                                 <span className="font-medium text-sm">
                                   {item.itemName || "—"}
                                 </span>
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
                                   {item.uom || "—"}
                                 </span>
                               </div>
@@ -3318,7 +3364,7 @@ export default function GRN() {
                                   ],
                                 ].map(([l, v, c]) => (
                                   <div key={l}>
-                                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                                       {l}
                                     </p>
                                     <p className={c}>{v}</p>
@@ -3327,7 +3373,7 @@ export default function GRN() {
                               </div>
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pt-1 border-t border-border">
                                 <div>
-                                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                                     Rate
                                   </p>
                                   <p>
@@ -3337,13 +3383,13 @@ export default function GRN() {
                                   </p>
                                 </div>
                                 <div>
-                                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                                     Qty Bill
                                   </p>
                                   <p>{item.quantity ?? "—"}</p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                                     Total
                                   </p>
                                   <p className="font-bold text-emerald-600 dark:text-emerald-400">
@@ -3361,7 +3407,7 @@ export default function GRN() {
                                     setDebitNoteReason("");
                                   }}
                                   title="Raise a debit note if part of this line was found below the ordered grade"
-                                  className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[11px] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
+                                  className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[0.6875rem] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
                                 >
                                   <FileWarning size={12} /> Raise Debit Note
                                 </button>
@@ -3393,7 +3439,7 @@ export default function GRN() {
                               ].map((h) => (
                                 <th
                                   key={h}
-                                  className={`px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ${h === "Item" || h === "UOM" || h === "" ? "text-left" : "text-right"}`}
+                                  className={`px-3 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground ${h === "Item" || h === "UOM" || h === "" ? "text-left" : "text-right"}`}
                                 >
                                   {h}
                                 </th>
@@ -3446,7 +3492,7 @@ export default function GRN() {
                                           setDebitNoteReason("");
                                         }}
                                         title="Raise a debit note if part of this line was found below the ordered grade"
-                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[11px] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors whitespace-nowrap"
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[0.6875rem] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors whitespace-nowrap"
                                       >
                                         <FileWarning size={12} /> Debit Note
                                       </button>
@@ -3470,7 +3516,7 @@ export default function GRN() {
                               <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
                                 <td
                                   colSpan={8}
-                                  className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                  className="px-4 py-3 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
                                 >
                                   GRN Total (received)
                                 </td>
@@ -3489,7 +3535,7 @@ export default function GRN() {
                                       <tr className="bg-muted/30 border-t border-border/50">
                                         <td
                                           colSpan={8}
-                                          className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                          className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
                                         >
                                           PO Value (incl. GST)
                                         </td>
@@ -3500,13 +3546,13 @@ export default function GRN() {
                                       <tr
                                         className={
                                           diff > 0.005
-                                            ? "bg-amber-500/10 border-t border-amber-500/20"
+                                            ? "bg-[#ffe2021a] border-t border-amber-500/20"
                                             : "bg-green-500/10 border-t border-green-500/20"
                                         }
                                       >
                                         <td
                                           colSpan={8}
-                                          className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                                          className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
                                         >
                                           Balance on PO
                                         </td>
@@ -3544,7 +3590,7 @@ export default function GRN() {
 
                       return (
                         <div>
-                          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
+                          <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
                             GST Breakdown
                           </p>
                           <div className="border border-border rounded-xl overflow-hidden text-sm">
@@ -3564,7 +3610,7 @@ export default function GRN() {
                                 >
                                   <span className="text-xs text-muted-foreground">
                                     GST{" "}
-                                    <span className="font-mono text-[10px] bg-muted px-1 rounded">
+                                    <span className="font-mono text-[0.625rem] bg-muted px-1 rounded">
                                       {rate}%
                                     </span>
                                   </span>
@@ -3589,7 +3635,7 @@ export default function GRN() {
 
                     {/* Linked Expense Bookings */}
                     <div>
-                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                      <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
                         <Receipt
                           size={10}
                           className="text-emerald-600 dark:text-emerald-400"
@@ -3601,7 +3647,7 @@ export default function GRN() {
 
                     {/* Remaining Items — not yet expense-booked */}
                     <div>
-                      <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                      <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
                         <AlertTriangle size={10} className="text-amber-500" />{" "}
                         Remaining Items
                       </p>
@@ -3614,7 +3660,7 @@ export default function GRN() {
                     {/* Remarks */}
                     {viewingGrn.Remarks && (
                       <div>
-                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                        <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                           Remarks
                         </p>
                         <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
@@ -3637,9 +3683,9 @@ export default function GRN() {
                         </span>
                       </div>
                       {grnPostingLoading ? (
-                        <span className="text-[10px] text-muted-foreground">Loading…</span>
+                        <span className="text-[0.625rem] text-muted-foreground">Loading…</span>
                       ) : grnPostingData?.isPosted ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+                        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
                           Posted · {grnPostingData.jvNo}
                         </span>
                       ) : null}
@@ -3674,16 +3720,33 @@ export default function GRN() {
                       // broken out per received item instead of lumped into
                       // one cumulative figure, so a reviewer can see exactly
                       // what each line item contributed.
-                      const buildRows = (idx: string, base: number, gst: number): PostRow[] => [
-                        { key: `purchase-base-${idx}`, label: purchaseLabel, code: purchaseCode, side: "debit", amount: base },
-                        { key: `pgrn-${idx}`, label: pgrnLabel, code: pgrnCode, side: "credit", amount: base },
-                        ...(gst > 0
-                          ? [
-                              { key: `provisional-${idx}`, label: provisionalLabel, code: provisionalCode, side: "debit" as const, amount: gst },
-                              { key: `purchase-tax-${idx}`, label: purchaseLabel, code: purchaseCode, side: "credit" as const, amount: gst },
-                            ]
-                          : []),
-                      ];
+                      // Each item posts its base/tax legs to its OWN tagged
+                      // GL Account (Item Master → GL Account) when one is
+                      // set, not the shared Purchase A/c — mirrors the
+                      // backend's /post-to-gl leg construction exactly.
+                      const buildRows = (idx: string, base: number, gst: number, glLabel?: string | null, glCode?: string | null, glIsExplicitTag?: boolean): PostRow[] => {
+                        // Show the item's tagged GL Account (e.g. "Raw
+                        // Material - Iron") alongside "Purchase A/c" in the
+                        // same row, rather than replacing it — the reviewer
+                        // sees both the actual posted account and the
+                        // system ledger it's standing in for. This only
+                        // applies to an explicit item-level tag; a Fixed
+                        // Asset item's "Fixed Assets A/c" fallback replaces
+                        // Purchase A/c outright (it was never a Purchase
+                        // A/c candidate) so it's shown alone.
+                        const baseLabel = glLabel ? (glIsExplicitTag ? `${glLabel} — ${purchaseLabel}` : glLabel) : purchaseLabel;
+                        const baseCode = glLabel ? (glCode ?? null) : purchaseCode;
+                        return [
+                          { key: `purchase-base-${idx}`, label: baseLabel, code: baseCode, side: "debit", amount: base },
+                          { key: `pgrn-${idx}`, label: pgrnLabel, code: pgrnCode, side: "credit", amount: base },
+                          ...(gst > 0
+                            ? [
+                                { key: `provisional-${idx}`, label: provisionalLabel, code: provisionalCode, side: "debit" as const, amount: gst },
+                                { key: `purchase-tax-${idx}`, label: baseLabel, code: baseCode, side: "credit" as const, amount: gst },
+                              ]
+                            : []),
+                        ];
+                      };
 
                       type ItemGroup = { key: string; itemName: string | null; qty: number | null; rate: number | null; uom: string | null; costCentre: { id: number; name: string; code: string | null } | null; rows: PostRow[] };
                       const itemGroups: ItemGroup[] =
@@ -3695,7 +3758,7 @@ export default function GRN() {
                               rate: it.rate ?? null,
                               uom: it.uom ?? null,
                               costCentre: it.costCentre ?? null,
-                              rows: buildRows(String(it.itemId ?? idx), Number(it.baseAmount) || 0, Number(it.gstAmount) || 0),
+                              rows: buildRows(String(it.itemId ?? idx), Number(it.baseAmount) || 0, Number(it.gstAmount) || 0, it.glHeadName ?? null, it.glHeadCode ?? null, !!it.glHeadIsExplicitTag),
                             }))
                           : [{ key: "lumped", itemName: null, qty: null, rate: null, uom: null, costCentre: null, rows: buildRows("lumped", baseAmount, taxAmount) }];
 
@@ -3716,7 +3779,7 @@ export default function GRN() {
                         <div className="space-y-3">
                         {ccBreakdown.length > 1 && (
                           <div className="rounded-xl border border-border overflow-hidden">
-                            <div className="px-3 sm:px-4 py-2 bg-muted/40 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                            <div className="px-3 sm:px-4 py-2 bg-muted/40 border-b border-border text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold">
                               Cost Centre — Money Breakdown
                             </div>
                             <div className="divide-y divide-border/50">
@@ -3730,7 +3793,7 @@ export default function GRN() {
                           </div>
                         )}
                         <div className="rounded-xl border border-border overflow-hidden">
-                          <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
+                          <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[0.5625rem] sm:text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
                             <span>Account</span>
                             <span className="text-center">Cost Centre</span>
                             <span className="text-right">Debit (₹)</span>
@@ -3740,9 +3803,9 @@ export default function GRN() {
                             <div key={group.key}>
                               {group.itemName && (
                                 <div className="px-2 sm:px-4 pt-3 pb-1.5 bg-muted/10 flex items-baseline justify-between gap-2 border-b border-border/30">
-                                  <span className="text-[11px] sm:text-xs font-semibold text-foreground truncate">{group.itemName}</span>
+                                  <span className="text-[0.6875rem] sm:text-xs font-semibold text-foreground truncate">{group.itemName}</span>
                                   {(group.qty != null || group.rate != null) && (
-                                    <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                                    <span className="text-[0.625rem] text-muted-foreground flex-shrink-0">
                                       {group.qty != null ? `${group.qty}${group.uom ? ` ${group.uom}` : ""}` : ""}
                                       {group.qty != null && group.rate != null ? " × " : ""}
                                       {group.rate != null ? `₹${fmt(group.rate)}` : ""}
@@ -3757,11 +3820,11 @@ export default function GRN() {
                                 >
                                   <div className="flex items-center gap-2 min-w-0 pl-1">
                                     <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
-                                    <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
+                                    <span className="text-[0.6875rem] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
                                       {row.label}{row.code ? ` (${row.code})` : ""}
                                     </span>
                                   </div>
-                                  <span className="text-[11px] text-muted-foreground text-center truncate">{group.costCentre?.name || "Unassigned"}</span>
+                                  <span className="text-[0.6875rem] text-muted-foreground text-center truncate">{group.costCentre?.name || "Unassigned"}</span>
                                   <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
                                     {row.side === "debit" ? fmt(row.amount) : ""}
                                   </span>
@@ -3773,7 +3836,7 @@ export default function GRN() {
                             </div>
                           ))}
                           <div className={`grid ${gridCols} px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2`}>
-                            <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                            <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
                             <span />
                             <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(totalDebit)}</span>
                             <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(totalCredit)}</span>
@@ -3814,7 +3877,7 @@ export default function GRN() {
                 )}{" "}
                 {/* end posting tab */}
               </div>
-            </div>
+            </div></BodyPortal>
           );
         })()}
 

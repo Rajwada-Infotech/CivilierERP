@@ -21,6 +21,7 @@ export function blankForm(): Omit<PaymentRecord, "id"> {
     company: "",
     expenseRef: "",
     expenseId: "",
+    jvNo: null,
     docNo: "",
     parentDocNo: "",
     rootExBDocNo: "",
@@ -49,6 +50,8 @@ export function blankForm(): Omit<PaymentRecord, "id"> {
     supplierContact: "",
     contractId: "",
     partyId: null,
+    jvLineId: null,
+    mergedInvoices: [],
     expenseHeadAllocations: [],
     tdsId: null,
     tdsNature: null,
@@ -72,10 +75,16 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
     bankName: (item.PBankName && item.PBankName !== "N/A") ? item.PBankName : "",
     project: item.PProjectName || item.PProject || "",
     projectSite: item.PProjectName || item.PProject || "",
-    company: item.PCompany || "",
+    // Same "prefer the resolved name, fall back to the raw stored value"
+    // pattern already used for project below — PCompany alone is often just
+    // the enterprise id as text for CRM-sourced payouts (Brokerage/Refund),
+    // which never matches a company dropdown option keyed by label.
+    company: item.PCompanyName || item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
     expenseId: item.PExpenseId ? String(item.PExpenseId) : "",
+    jvNo: item.JVNo || null,
     docNo: item.DocNo || "",
+    createdByName: (item as any).CreatedByName || (item as any).PCreatedBy || "",
     parentDocNo: item.ParentDocNo || "",
     rootExBDocNo: item.RootExBDocNo || "",
     docType: item.PDocType || "",
@@ -110,6 +119,11 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
     billingTermsData: null,
     contractId: String((item as { ContractId?: number }).ContractId ?? ""),
     partyId: (item as any).PPartyId ?? null,
+    jvLineId: (item as any).JVLineId ?? null,
+    // Editing a merged payment isn't supported yet — it always loads back
+    // in with no merge selection (its PExpenseRef-less, multi-invoice link
+    // rows still exist and post correctly, just aren't re-editable here).
+    mergedInvoices: [],
     expenseHeadAllocations: Array.isArray((item as any).EExpenseHeadAllocations)
       ? (item as any).EExpenseHeadAllocations.map((a: any) => ({
           _key: `eha-${a.allocationId}`,

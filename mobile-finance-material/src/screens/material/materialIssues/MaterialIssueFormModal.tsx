@@ -112,12 +112,17 @@ export function MaterialIssueFormModal({
 
   useEffect(() => {
     if (!visible || editingId != null) return;
+    // Both calls used to be unhandled — a rejection from either (network
+    // blip, or a 403 on a doc-type-scoped right) crashed the whole app the
+    // moment this New Material Issue modal opened, since nothing else
+    // catches a promise here. docTypeId/docNo just stay unset on failure —
+    // the backend still accepts the request without a preview.
     fetchDocTypes("ISS").then((types) => {
       if (types[0]) {
         setDocTypeId(types[0].TypeOfDocId);
-        fetchNextDocNumber(types[0].TypeOfDocId, form.finYear || undefined).then(setDocNo);
+        fetchNextDocNumber(types[0].TypeOfDocId, form.finYear || undefined).then(setDocNo).catch(() => {});
       }
-    });
+    }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, editingId, form.finYear]);
 
@@ -138,15 +143,20 @@ export function MaterialIssueFormModal({
     );
   }, [visible, editingId, existing]);
 
-  // Auto-select the godown when exactly one matches the chosen company+project.
+  // Auto-select the project's own godown once a project is picked — matched
+  // on projectId alone, not company+project. A project merely tagged to a
+  // company (not owned by it — see web's StockTransfer.tsx projectGodown
+  // comment, and the identical fix in StockTransferFormModal.tsx) has its
+  // godown listed under the OWNING company, so requiring both to match made
+  // a tagged project's godown invisible here.
   useEffect(() => {
-    if (!form.companyId || !form.projectId) return;
-    const matches = godowns.filter((g) => (!g.companyId || String(g.companyId) === form.companyId) && (!g.projectId || String(g.projectId) === form.projectId));
+    if (!form.projectId) return;
+    const matches = godowns.filter((g) => String(g.projectId ?? "") === form.projectId);
     if (matches.length === 1 && form.godownId !== String(matches[0].id)) {
       setForm((f) => ({ ...f, godownId: String(matches[0].id), godownName: matches[0].name }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.companyId, form.projectId, godowns]);
+  }, [form.projectId, godowns]);
 
   const itemMap = useMemo(() => new Map(itemOptions.map((i) => [i.M_Id, i])), [itemOptions]);
 
@@ -226,8 +236,15 @@ export function MaterialIssueFormModal({
 
   const companyOptions: PickerOption[] = companies.map((c) => ({ key: c.id, label: c.name }));
   const projectOptions: PickerOption[] = (form.companyId ? projects.filter((p) => p.companyId === form.companyId) : projects).map((p) => ({ key: p.id, label: p.name }));
+  // Once a project is picked, its godown is the unambiguous match regardless
+  // of which company it's filed under — same reasoning as the auto-select
+  // effect above.
   const godownOptions: PickerOption[] = godowns
-    .filter((g) => (!form.companyId || !g.companyId || String(g.companyId) === form.companyId) && (!form.projectId || !g.projectId || String(g.projectId) === form.projectId))
+    .filter((g) =>
+      form.projectId
+        ? !g.projectId || String(g.projectId) === form.projectId
+        : !form.companyId || !g.companyId || String(g.companyId) === form.companyId,
+    )
     .map((g) => ({ key: String(g.id), label: g.name, sublabel: g.code ?? undefined }));
   const finYearOptions: PickerOption[] = finYears.map((f) => ({ key: f.label, label: f.label }));
   const issuedToPickerOptions: PickerOption[] = issuedToOptions.map((o) => ({ key: o.id, label: o.name }));

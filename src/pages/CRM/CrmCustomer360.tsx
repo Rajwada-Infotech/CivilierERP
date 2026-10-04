@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -12,18 +12,32 @@ import {
   CalendarClock, ExternalLink, Activity
 } from "lucide-react";
 
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+
 const API = "/api/crm/customer-360";
 
-async function fetchCustomerList(search: string): Promise<any[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  const r = await fetchWithAuth(`${API}?${params}`);
-  if (!r.ok) return [];
-  return r.json();
+const PAGE_SIZE = 20;
+interface Customer360Filters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
 }
-async function fetchCustomer360(mobile: string): Promise<any> {
-  if (!mobile) return null;
-  const r = await fetchWithAuth(`${API}/${mobile}`);
+async function fetchCustomerList(filters: Customer360Filters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  const r = await fetchWithAuth(`${API}?${params}`);
+  if (!r.ok) return { rows: [], total: 0 };
+  const data = await r.json();
+  return { rows: data.rows || [], total: data.total || 0 };
+}
+async function fetchCustomer360(customerId: number): Promise<any> {
+  if (customerId == null) return null;
+  const r = await fetchWithAuth(`${API}/${customerId}`);
   if (!r.ok) return null;
   return r.json();
 }
@@ -41,7 +55,7 @@ const CustomerTimeline: React.FC<{ data: any }> = ({ data }) => {
   }
   if (data.serviceTickets) {
     data.serviceTickets.forEach((t: any) => {
-      if (t.CreatedAt) events.push({ id: `ticket-${t.Id}`, date: new Date(t.CreatedAt), type: "Ticket", title: `[${t.TicketNo}] ${t.Category}`, desc: t.Subject, icon: Wrench, color: "text-orange-500" });
+      if (t.CreatedAt) events.push({ id: `ticket-${t.Id}`, date: new Date(t.CreatedAt), type: "Ticket", title: `[${t.TicketNo}] ${t.Category}`, desc: t.Subject, icon: Wrench, color: "text-sky-500" });
     });
   }
   if (data.bookings) {
@@ -95,26 +109,34 @@ const CrmCustomer360: React.FC = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedMobile, setSelectedMobile] = useState<string | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [expandedBookingId, setExpandedBookingId] = useState<number | null>(null);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
 
-  const { data: list = [], isLoading: listLoading } = useQuery({
-    queryKey: ["crm-customer-360-list", searchTerm],
-    queryFn: () => fetchCustomerList(searchTerm),
-    enabled: !selectedMobile,
+  const listFilters: Customer360Filters = useMemo(
+    () => ({ search: searchTerm, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [searchTerm, cpb]
+  );
+  const { data: listResult, isLoading: listLoading } = useQuery({
+    queryKey: ["crm-customer-360-list", listFilters, page],
+    queryFn: () => fetchCustomerList(listFilters, page),
+    enabled: selectedCustomerId == null,
     staleTime: 30_000,
   });
+  const list = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["crm-customer-360", selectedMobile],
-    queryFn: () => fetchCustomer360(selectedMobile as string),
-    enabled: !!selectedMobile,
+    queryKey: ["crm-customer-360", selectedCustomerId],
+    queryFn: () => fetchCustomer360(selectedCustomerId as number),
+    enabled: selectedCustomerId != null,
     staleTime: 30_000,
   });
 
   const toggleBooking = (id: number) => setExpandedBookingId((cur) => (cur === id ? null : id));
-  const openCustomer = (mobile: string) => { setSelectedMobile(mobile); setExpandedBookingId(null); };
-  const backToList = () => setSelectedMobile(null);
+  const openCustomer = (customerId: number) => { setSelectedCustomerId(customerId); setExpandedBookingId(null); };
+  const backToList = () => setSelectedCustomerId(null);
 
   usePageRights("crm-customer-360");
 
@@ -122,20 +144,21 @@ const CrmCustomer360: React.FC = () => {
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Customer 360"]} />
       <CrmShell title="CRM — Applicant Ledger" subtitle="Full customer journey and centralized financial ledger — lead to after-sales, in one view">
-      {!selectedMobile ? (
+      {selectedCustomerId == null ? (
         <>
-          <div className="flex gap-2 max-w-md">
-            <div className="relative flex-1">
+          <div className="flex gap-2 flex-wrap items-center">
+            <div className="relative flex-1 min-w-56 max-w-md">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input value={search} onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && setSearchTerm(search.trim())}
+                onKeyDown={(e) => e.key === "Enter" && (setSearchTerm(search.trim()), setPage(1))}
                 placeholder="Filter by name, mobile, or customer no..."
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
-            <button onClick={() => setSearchTerm(search.trim())}
-              className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            <button onClick={() => { setSearchTerm(search.trim()); setPage(1); }}
+              className="px-4 py-2 btn-module text-white text-sm font-medium rounded-lg ">
               Filter
             </button>
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
           </div>
 
           {listLoading ? (
@@ -145,7 +168,7 @@ const CrmCustomer360: React.FC = () => {
           ) : (
             <div className="rounded-xl border border-border overflow-hidden divide-y divide-border">
               {list.map((c: any) => (
-                <button key={c.Id} onClick={() => openCustomer(c.Mobile)}
+                <button key={c.Id} onClick={() => openCustomer(c.Id)}
                   className="w-full text-left flex items-center gap-3 px-5 py-4 hover:bg-muted/20 transition-colors">
                   <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold shrink-0">
                     {(c.CustomerName || "?").trim().charAt(0).toUpperCase()}
@@ -159,13 +182,14 @@ const CrmCustomer360: React.FC = () => {
                   </span>
                   <div className="text-right shrink-0 w-28">
                     <div className="text-xs text-muted-foreground">Outstanding</div>
-                    <div className="text-sm font-semibold text-orange-600">{fmt(c.TotalOutstanding)}</div>
+                    <div className="text-sm font-semibold text-sky-600">{fmt(c.TotalOutstanding)}</div>
                   </div>
                   <ChevronRight size={16} className="text-muted-foreground shrink-0" />
                 </button>
               ))}
             </div>
           )}
+          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </>
       ) : (
         <>
@@ -286,7 +310,7 @@ const CrmCustomer360: React.FC = () => {
                           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2 text-xs">
                             <div><span className="text-muted-foreground">Value: </span>{fmt(b.GrandTotal ?? b.TotalValue)}</div>
                             <div><span className="text-muted-foreground">Paid: </span><span className="text-green-600 font-medium">{fmt(b.TotalPaid)}</span></div>
-                            <div><span className="text-muted-foreground">Balance: </span><span className="text-orange-600 font-medium">{fmt(b.TotalOutstanding)}</span></div>
+                            <div><span className="text-muted-foreground">Balance: </span><span className="text-sky-600 font-medium">{fmt(b.TotalOutstanding)}</span></div>
                             <div><span className="text-muted-foreground">Agreement: </span>{b.AgreementStatus || "—"}</div>
                             <div><span className="text-muted-foreground">Handover: </span>{b.HandoverStatus || "—"}</div>
                             <div><span className="text-muted-foreground">Legal: </span>{b.LegalMilestoneStatus || "—"}</div>
@@ -310,7 +334,7 @@ const CrmCustomer360: React.FC = () => {
                             {b.HasCancellation > 0 && <div className="text-red-600 font-medium">Cancellation pending</div>}
                           </div>
                           {!expanded && (
-                            <div className="text-[11px] text-muted-foreground mt-1.5">
+                            <div className="text-[0.6875rem] text-muted-foreground mt-1.5">
                               {ledgerCount > 0 ? `${ledgerCount} ledger record${ledgerCount === 1 ? "" : "s"} — click to view` : "No ledger records yet"}
                             </div>
                           )}
@@ -435,13 +459,13 @@ const CrmCustomer360: React.FC = () => {
 const TONE_CLASSES: Record<string, string> = {
   default: "text-foreground",
   green: "text-green-600",
-  orange: "text-orange-600",
+  orange: "text-sky-600",
   sky: "text-sky-600",
 };
 
 const SummaryTile: React.FC<{ label: string; value: string; tone?: keyof typeof TONE_CLASSES }> = ({ label, value, tone = "default" }) => (
   <div className="rounded-xl border border-border p-3">
-    <div className="text-[11px] text-muted-foreground flex items-center gap-1"><IndianRupee size={11} /> {label}</div>
+    <div className="text-[0.6875rem] text-muted-foreground flex items-center gap-1"><IndianRupee size={11} /> {label}</div>
     <div className={`text-sm font-semibold mt-0.5 ${TONE_CLASSES[tone]}`}>{value}</div>
   </div>
 );
@@ -477,7 +501,7 @@ function LedgerSubSection<T>({ icon: Icon, title, rows, empty, children }: {
 }
 
 const Row: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="grid grid-cols-5 gap-3 items-center px-2 py-2 rounded-lg hover:bg-muted/10 text-sm">
+  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 items-center px-2 py-2 rounded-lg hover:bg-muted/10 text-sm">
     {children}
   </div>
 );

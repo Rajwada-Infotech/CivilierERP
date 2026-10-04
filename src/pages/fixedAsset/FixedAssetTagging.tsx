@@ -18,10 +18,11 @@ import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems } from "@/api/itemMasterApi";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
-  getEligibleAssetItems, getFixedAssetTaggings, createFixedAssetTagging,
+  getEligibleAssetItems, getPendingBatches, deletePendingBatch, getFixedAssetTaggings, createFixedAssetTagging,
   updateFixedAssetTagging, deleteFixedAssetTagging,
-  type EligibleAssetItem, type TaggingListItem,
+  type EligibleAssetItem, type PendingBatch, type TaggingListItem,
 } from "@/api/fixedAssetTaggingApi";
+import { DateInput } from "@/components/ui/date-input";
 
 function ensureArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -105,6 +106,12 @@ function deriveFinYear(docDate: string, finYears: { year: string; startDate: str
 type ViewMode = "list" | "form";
 
 // ── bulk import (Excel/CSV) ────────────────────────────────────────────────────
+// Two modes share one importer: "Bulk" keeps the Quantity column (one row can
+// tag several identical units at once, exactly as before); "Individual" drops
+// it entirely — every row is always exactly one unit, so importing 10
+// laptops means 10 rows instead of one row with Quantity=10.
+type ImportMode = "bulk" | "individual";
+
 const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
   { header: "Company", accessor: "Company" },
   { header: "Project", accessor: "Project" },
@@ -112,6 +119,15 @@ const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
   { header: "Item", accessor: "Item" },
   { header: "Date", accessor: "Date" },
   { header: "Quantity", accessor: "Quantity" },
+  { header: "Remarks", accessor: "Remarks" },
+];
+
+const INDIVIDUAL_IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
+  { header: "Company", accessor: "Company" },
+  { header: "Project", accessor: "Project" },
+  { header: "Godown", accessor: "Godown" },
+  { header: "Item", accessor: "Item" },
+  { header: "Date", accessor: "Date" },
   { header: "Remarks", accessor: "Remarks" },
 ];
 
@@ -153,13 +169,22 @@ export default function FixedAssetTagging() {
   const [editDocDate, setEditDocDate] = useState("");
   const [editRemarks, setEditRemarks] = useState("");
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deletePendingId, setDeletePendingId] = useState<number | null>(null);
 
   // ── bulk import (Excel/CSV) ──
   const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importMode, setImportMode] = useState<ImportMode>("bulk");
   const [importPreview, setImportPreview] = useState<ImportRow[] | null>(null);
   const [importDone, setImportDone] = useState(false);
   const [importSubmitting, setImportSubmitting] = useState(false);
   const [importValidating, setImportValidating] = useState(false);
+
+  // Received Fixed Asset stock (GRN / Inventory Import) not tagged yet — auto-tagging
+  // skips a project that has no ID Template, so this keeps that stock visible.
+  const { data: pendingBatches = [] } = useQuery({
+    queryKey: ["fixed-asset-pending-batches"],
+    queryFn: getPendingBatches,
+  });
 
   const setField = useCallback(<K extends keyof FormState>(k: K, v: FormState[K]) => {
     setForm((p) => ({ ...p, [k]: v }));
@@ -224,12 +249,8 @@ export default function FixedAssetTagging() {
   );
 
   // ── filtered list ─────────────────────────────────────────────────────────
-  // Cancelled entries are deleted from this view the moment they're
-  // cancelled — the row itself is kept server-side (soft-cancel, see
-  // DELETE /:id) so its FA Item Code and stock stay auditable, but it no
-  // longer clutters the working Tagging Transaction History list.
   const filtered = useMemo(() => {
-    let r = ensureArray<TaggingListItem>(taggings).filter((t) => t.Status !== "Cancelled");
+    let r = ensureArray<TaggingListItem>(taggings);
     if (filterCompany) r = r.filter((t) => String(t.CompanyId) === filterCompany);
     if (filterProject) r = r.filter((t) => String(t.ProjectId) === filterProject);
     if (filterFromDate) r = r.filter((t) => t.DocDate && new Date(t.DocDate) >= new Date(filterFromDate));
@@ -245,8 +266,22 @@ export default function FixedAssetTagging() {
     return r;
   }, [taggings, filterCompany, filterProject, filterFromDate, filterToDate, search]);
 
+  // Received Fixed Asset stock with no tags yet — listed in the same table, above the tagged units.
+  const filteredPending = useMemo(() => {
+    let r = ensureArray<PendingBatch>(pendingBatches);
+    if (filterCompany) r = r.filter((b) => String(b.CompanyId) === filterCompany);
+    if (filterProject) r = r.filter((b) => String(b.ProjectId) === filterProject);
+    if (filterFromDate) r = r.filter((b) => b.DocDate && new Date(b.DocDate) >= new Date(filterFromDate));
+    if (filterToDate)   r = r.filter((b) => b.DocDate && new Date(b.DocDate) <= new Date(`${filterToDate}T23:59:59`));
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      r = r.filter((b) => (b.SourceDocNo || "").toLowerCase().includes(s) || (b.AssetName || "").toLowerCase().includes(s));
+    }
+    return r;
+  }, [pendingBatches, filterCompany, filterProject, filterFromDate, filterToDate, search]);
+
   const stats = useMemo(() => {
-    const live = ensureArray<TaggingListItem>(taggings).filter((t) => t.Status !== "Cancelled");
+    const live = ensureArray<TaggingListItem>(taggings);
     return {
       count: live.length,
       totalQty: live.reduce((s, t) => s + (t.TaggedQty || 0), 0),
@@ -263,6 +298,7 @@ export default function FixedAssetTagging() {
       });
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
       resetForm();
       setViewMode("list");
@@ -284,14 +320,27 @@ export default function FixedAssetTagging() {
   const deleteMut = useMutation({
     mutationFn: deleteFixedAssetTagging,
     onSuccess: () => {
-      toast.success("Tagging entry cancelled");
+      toast.success("Tagging entry deleted");
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
       setDeleteId(null);
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deletePendingMut = useMutation({
+    mutationFn: deletePendingBatch,
+    onSuccess: () => {
+      toast.success("Removed from FA Inventory");
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      setDeletePendingId(null);
+    },
+    onError: (e: Error) => { toast.error(e.message); setDeletePendingId(null); },
   });
 
   const openEdit = (t: TaggingListItem) => {
@@ -312,6 +361,14 @@ export default function FixedAssetTagging() {
   const handleImportClick = () => importFileInputRef.current?.click();
 
   const handleDownloadImportTemplate = () => {
+    if (importMode === "individual") {
+      exportToCsv(
+        [{ Company: "", Project: "", Godown: "", Item: "", Date: "", Remarks: "" }],
+        INDIVIDUAL_IMPORT_TEMPLATE_COLUMNS,
+        "fa-inventory-individual-import-template",
+      );
+      return;
+    }
     exportToCsv(
       [{ Company: "", Project: "", Godown: "", Item: "", Date: "", Quantity: "", Remarks: "" }],
       IMPORT_TEMPLATE_COLUMNS,
@@ -368,7 +425,7 @@ export default function FixedAssetTagging() {
           status: "error",
         };
 
-        if (!companyName || !projectName || !godownName || !itemName || !docDate || !quantityRaw) {
+        if (!companyName || !projectName || !godownName || !itemName || !docDate || (importMode === "bulk" && !quantityRaw)) {
           row.message = "Missing required field(s)";
           results.push(row);
           continue;
@@ -401,11 +458,14 @@ export default function FixedAssetTagging() {
         const finYear = deriveFinYear(docDate, finYears);
         if (!finYear) { row.message = "Date doesn't fall in any configured Financial Year"; results.push(row); continue; }
 
-        const quantity = parseInt(quantityRaw, 10);
-        if (!Number.isFinite(quantity) || quantity <= 0 || String(quantity) !== quantityRaw) {
-          row.message = "Quantity must be a positive whole number";
-          results.push(row);
-          continue;
+        let quantity = 1;
+        if (importMode === "bulk") {
+          quantity = parseInt(quantityRaw, 10);
+          if (!Number.isFinite(quantity) || quantity <= 0 || String(quantity) !== quantityRaw) {
+            row.message = "Quantity must be a positive whole number";
+            results.push(row);
+            continue;
+          }
         }
         row.quantity = quantity;
 
@@ -479,6 +539,7 @@ export default function FixedAssetTagging() {
     if (successCount > 0) {
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
     }
     if (errorCount === 0) {
@@ -539,7 +600,7 @@ export default function FixedAssetTagging() {
               <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               <Hash size={13} /> {saving ? "Generating…" : "Generate ID"}
             </button>
           </div>
@@ -571,7 +632,7 @@ export default function FixedAssetTagging() {
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Date *</label>
-                <input type="date" value={form.docDate}
+                <DateInput value={form.docDate}
                   onChange={(e) => setForm((p) => ({ ...p, docDate: e.target.value, itemId: "" }))}
                   className={inputCls} />
               </div>
@@ -618,7 +679,7 @@ export default function FixedAssetTagging() {
               {selectedItem && (
                 <>
                   <div className="sm:col-span-2">
-                    <p className="text-[10px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5 mb-3">
+                    <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5 mb-3">
                       Stock Item Info
                     </p>
                     <div className="grid grid-cols-3 gap-3">
@@ -632,7 +693,7 @@ export default function FixedAssetTagging() {
                     <input type="number" min="1" step="1" max={selectedItem.UntaggedQty}
                       value={form.numberOfItems} onChange={(e) => setField("numberOfItems", e.target.value)}
                       placeholder="0" className={`${inputCls} font-semibold border-yellow-500/30 focus:ring-yellow-500/30 bg-yellow-500/[0.03]`} />
-                    <p className="text-[11px] text-muted-foreground mt-1">
+                    <p className="text-[0.6875rem] text-muted-foreground mt-1">
                       Clicking "Generate ID" creates this many unique FA Item Codes and saves them.
                     </p>
                   </div>
@@ -667,14 +728,26 @@ export default function FixedAssetTagging() {
           <div className="flex items-center gap-2">
             <input ref={importFileInputRef} type="file" accept=".csv"
               onChange={handleImportFileChange} className="hidden" />
+            <div className="inline-flex rounded-lg border border-border p-0.5 text-xs font-heading font-semibold" role="group" aria-label="Import mode">
+              <button type="button" onClick={() => setImportMode("bulk")}
+                title="One row can tag several identical units at once (Quantity column)"
+                className={`px-2.5 py-1 rounded-md transition-colors ${importMode === "bulk" ? "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400" : "text-muted-foreground hover:text-foreground"}`}>
+                Bulk
+              </button>
+              <button type="button" onClick={() => setImportMode("individual")}
+                title="Every row is exactly one unit — no Quantity column"
+                className={`px-2.5 py-1 rounded-md transition-colors ${importMode === "individual" ? "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400" : "text-muted-foreground hover:text-foreground"}`}>
+                Individual
+              </button>
+            </div>
             <button onClick={handleDownloadImportTemplate}
               title="Download a blank CSV import template (opens/edits fine in Excel)"
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
               <Download size={13} /> <span className="hidden sm:inline">Template</span>
             </button>
             <button onClick={handleImportClick} disabled={importValidating}
-              title="Bulk import FA Inventory rows from Excel/CSV"
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              title={importMode === "individual" ? "Import FA Inventory rows from Excel/CSV — one row per unit" : "Bulk import FA Inventory rows from Excel/CSV"}
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               {importValidating ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
               {importValidating ? "Validating…" : "Import from Excel"}
             </button>
@@ -722,11 +795,11 @@ export default function FixedAssetTagging() {
             </div>
             <div>
               <label className={labelCls}><Calendar size={11} /> From Date</label>
-              <input type="date" value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} className={inputCls} />
+              <DateInput value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} className={inputCls} />
             </div>
             <div>
               <label className={labelCls}><Calendar size={11} /> To Date</label>
-              <input type="date" value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} className={inputCls} />
+              <DateInput value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} className={inputCls} />
             </div>
           </div>
 
@@ -754,7 +827,7 @@ export default function FixedAssetTagging() {
         <CardContent className="p-0">
           {isLoading ? (
             <div className="text-center py-20 text-muted-foreground text-sm">Loading…</div>
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && filteredPending.length === 0 ? (
             <div className="flex flex-col items-center gap-3 py-20 text-muted-foreground">
               <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/60">
                 <TagIcon size={26} className="opacity-40" />
@@ -762,7 +835,7 @@ export default function FixedAssetTagging() {
               <p className="text-sm">No tagging entries found</p>
               {rights.canCreate && (
                 <button onClick={goToCreate}
-                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
                   <Plus size={13} /> Add First Tagging
                 </button>
               )}
@@ -784,8 +857,40 @@ export default function FixedAssetTagging() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
+                  {filteredPending.map((b) => (
+                    <tr key={`pending-${b.AssetId}`} className="bg-amber-500/5 hover:bg-[#ffe2021a] transition-colors">
+                      <td className="px-4 py-3 font-mono text-xs">{b.SourceDocNo || "—"}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{fmtDate(b.DocDate)}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-medium truncate">{b.AssetName}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground">{b.SourceType === "GRN" ? "Received via GRN" : "Inventory Import"} · Qty {fmt(b.Quantity)}</p>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">—</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {b.CompanyName || "—"}{b.ProjectName ? ` / ${b.ProjectName}` : ""}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Untagged</span>
+                      </td>
+                      <td className="px-4 py-3"><span className="text-muted-foreground text-xs">—</span></td>
+                      <td className="px-4 py-3 text-xs text-amber-700 dark:text-amber-400 max-w-[260px]">
+                        {b.Reason === "NO_TEMPLATE"
+                          ? `No Project Alias for ${b.ProjectName || "this project"} — add one in ID Template Master to tag these units automatically.`
+                          : "Ready to tag — use New Tagging."}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          {rights.canDelete && (
+                            <button onClick={() => setDeletePendingId(b.AssetId)} title="Delete"
+                              className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500">
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                   {filtered.map((t) => {
-                    const alreadyCancelled = t.Status === "Cancelled";
                     const hasRecord = t.RecordStatus === "Done";
                     return (
                     <tr key={t.TagId} className="hover:bg-muted/30 transition-colors">
@@ -793,7 +898,7 @@ export default function FixedAssetTagging() {
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(t.DocDate)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium truncate">{t.AssetName || "—"}</p>
-                        <p className="text-[11px] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{t.FAItemCode || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">
@@ -825,8 +930,8 @@ export default function FixedAssetTagging() {
                           {rights.canDelete && (
                             <button
                               onClick={() => setDeleteId(t.TagId)}
-                              disabled={alreadyCancelled || hasRecord}
-                              title={alreadyCancelled ? "Already cancelled" : hasRecord ? "Has a Fixed Asset Record — delete that first" : "Cancel"}
+                              disabled={hasRecord}
+                              title={hasRecord ? "Has a Fixed Asset Record — delete that first" : "Delete"}
                               className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:cursor-not-allowed">
                               <Trash2 size={13} />
                             </button>
@@ -856,7 +961,7 @@ export default function FixedAssetTagging() {
               </p>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Date *</label>
-                <input type="date" value={editDocDate} onChange={(e) => setEditDocDate(e.target.value)} className={inputCls} />
+                <DateInput value={editDocDate} onChange={(e) => setEditDocDate(e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}>Remarks</label>
@@ -869,7 +974,7 @@ export default function FixedAssetTagging() {
                   Cancel
                 </button>
                 <button onClick={handleSaveEdit} disabled={updateMut.isPending}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
                   <Check size={13} /> {updateMut.isPending ? "Saving…" : "Save"}
                 </button>
               </div>
@@ -878,15 +983,41 @@ export default function FixedAssetTagging() {
         </DialogContent>
       </Dialog>
 
-      {/* ── delete (cancel) confirm ── */}
+      {/* ── delete untagged received stock ── */}
+      {deletePendingId != null && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertCircle size={20} className="text-destructive mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold text-sm">Remove this received stock?</p>
+                <p className="text-xs text-muted-foreground mt-0.5">This permanently removes it from FA Inventory and cannot be undone. The GRN itself is not changed.</p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeletePendingId(null)}
+                className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                Keep
+              </button>
+              <button onClick={() => deletePendingMut.mutate(deletePendingId)} disabled={deletePendingMut.isPending}
+                className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
+                {deletePendingMut.isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* ── delete confirm ── */}
       {deleteId && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
             <div className="flex items-start gap-3 mb-4">
               <AlertCircle size={20} className="text-destructive mt-0.5 shrink-0" />
               <div>
-                <p className="font-semibold text-sm">Cancel this tagging entry?</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Its FA Item Code will be released back to untagged stock.</p>
+                <p className="font-semibold text-sm">Delete this tagging entry?</p>
+                <p className="text-xs text-muted-foreground mt-0.5">This permanently removes it and cannot be undone. Its FA Item Code will be released back to untagged stock.</p>
               </div>
             </div>
             <div className="flex gap-2 justify-end">
@@ -896,7 +1027,7 @@ export default function FixedAssetTagging() {
               </button>
               <button onClick={() => deleteMut.mutate(deleteId!)} disabled={deleteMut.isPending}
                 className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
-                {deleteMut.isPending ? "Cancelling…" : "Cancel Entry"}
+                {deleteMut.isPending ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>
@@ -974,13 +1105,13 @@ export default function FixedAssetTagging() {
                 </button>
                 <button onClick={handleConfirmImport}
                   disabled={importSubmitting || !importPreview?.some((r) => r.status === "valid")}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
                   {importSubmitting ? "Importing…" : `Import ${importPreview?.filter((r) => r.status === "valid").length || 0} Valid Row(s)`}
                 </button>
               </>
             ) : (
               <button onClick={closeImportDialog}
-                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
                 Close
               </button>
             )}

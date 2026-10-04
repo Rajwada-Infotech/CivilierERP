@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -6,9 +7,10 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { maybeAutoCreateAgreement, requireActiveBooking, requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateAgreement, requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -22,12 +24,14 @@ const WC_SELECT = `
     b.BookingNo,
     COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
     COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
-    a.ApplicantName, a.Mobile
+    a.ApplicantName, a.Mobile,
+    CASE WHEN sub.IsLocked = 1 THEN 1 ELSE 0 END AS HasSubmittedChecklist
   FROM dbo.CrmWelcomeCall wc
-  JOIN  dbo.CrmBooking b     ON b.Id = wc.BookingId
-  JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+  JOIN dbo.CrmBooking b ON b.Id = wc.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-  LEFT JOIN dbo.Users u      ON u.id = wc.CalledBy
+  LEFT JOIN dbo.Users u ON u.id = wc.CalledBy
+  LEFT JOIN dbo.CrmWelcomeCallSubmission sub ON sub.BookingId = wc.BookingId
 `;
 
 const OUTCOMES = ["Welcomed","NotReachable","RequestedCallback","VoiceMail","Busy","SwitchedOff"];
@@ -53,7 +57,21 @@ function computeStreak(orderedOutcomes) {
 router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    // Not paginated — this queue is naturally bounded to "still needs a
+    // call" bookings, not the full historical volume. Company/Project/Block
+    // still narrows it for a multi-company deployment.
+    const conds = [
+      `b.Status = '${CrmStatus.APPROVED}'`, "b.IsActive = 1",
+      "(last.Id IS NULL OR (last.Outcome <> 'Welcomed' AND (last.NextCallDate IS NULL OR last.NextCallDate <= CAST(SYSDATETIME() AS DATE))))",
+    ];
+    const req0 = pool.request();
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -75,17 +93,14 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       OUTER APPLY (
         SELECT TOP 1 Id, Outcome, CallDate, NextCallDate
         FROM dbo.CrmWelcomeCall
         WHERE BookingId = b.Id
         ORDER BY CallDate DESC, CreatedAt DESC
       ) last
-      WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
-        AND (
-          last.Id IS NULL
-          OR (last.Outcome <> 'Welcomed' AND (last.NextCallDate IS NULL OR last.NextCallDate <= CAST(SYSDATETIME() AS DATE)))
-        )
+      WHERE ${conds.join(" AND ")}
       ORDER BY ISNULL(last.NextCallDate, b.BookingDate)
     `);
     // Compute the real consecutive streak in JS for each row and strip the
@@ -112,7 +127,8 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
 router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
 
     const [welcome, callCount, docs, coApplicants, bankDetail, noc, agreement] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId)
@@ -136,8 +152,6 @@ router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"
           NULLIF(LTRIM(RTRIM(ISNULL(AccountNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(IfscCode, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(AccountHolderName, ''))), '') IS NOT NULL AND
-          NULLIF(LTRIM(RTRIM(ISNULL(NomineeName, ''))), '') IS NOT NULL AND
-          NULLIF(LTRIM(RTRIM(ISNULL(NomineeRelation, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(PanNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(AadhaarNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(Occupation, ''))), '') IS NOT NULL
@@ -180,11 +194,13 @@ router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"
 router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
 
-    const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes] = await Promise.all([
+    const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes, padRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
         SELECT b.Id, b.BookingNo,
+               CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bpx WHERE bpx.BookingId = b.Id) THEN 1 ELSE 0 END AS BIT) AS IsPlotSale,
                COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
                COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
                COALESCE(bn.UnitType, b.UnitType) AS UnitType,
@@ -235,6 +251,17 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
       // it "ConsecutiveNonReached" but it counted ALL non-reached rows).
       pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT TOP 20 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CallDate DESC, CreatedAt DESC"),
+      // Latest NON-NULL PreferredAgreementDate across every call logged so
+      // far — a follow-up call that didn't re-ask/re-enter it must not make
+      // it look like nothing was ever captured. Surfaced so the "Log Call"
+      // form can pre-fill/carry it forward instead of silently starting
+      // blank on every new call (see the same latest-non-null fix in
+      // crmAgreements.js POST / which reads this for real).
+      pool.request().input("bid", sql.Int, bookingId).query(`
+        SELECT TOP 1 PreferredAgreementDate FROM dbo.CrmWelcomeCall
+        WHERE BookingId = @bid AND PreferredAgreementDate IS NOT NULL
+        ORDER BY CreatedAt DESC
+      `),
     ]);
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
 
@@ -260,6 +287,9 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
       // so the Bank Preference tab can show the current selection without an
       // additional fetch.
       financingType: booking.FinancingType || null,
+      // Latest known PreferredAgreementDate, carried forward across follow-up
+      // calls that didn't re-enter it — see comment on the query above.
+      latestPreferredAgreementDate: padRes.recordset[0]?.PreferredAgreementDate || null,
     });
   } catch (e) {
     console.error("[crm-welcome-calls] GET /:bookingId/call-context error:", e.message);
@@ -271,14 +301,55 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
 router.get("/", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { bookingId, pending } = req.query;
+    const { bookingId, pending, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
     if (bookingId) { req0.input("bid", sql.Int, parseInt(bookingId)); conds.push("wc.BookingId = @bid"); }
     if (pending === "1") conds.push("wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)");
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
+    }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`${WC_SELECT} ${where} ORDER BY wc.CreatedAt DESC`);
-    res.json(result.recordset);
+    const SELECT_WITH_BLOCK = `${WC_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY wc.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY wc.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("bid2", sql.Int, bookingId ? parseInt(bookingId) : null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmWelcomeCall wc
+          JOIN dbo.CrmBooking b ON b.Id = wc.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@bid2 IS NULL OR wc.BookingId = @bid2)
+            ${pending === "1" ? "AND wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)" : ""}
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-welcome-calls] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -331,79 +402,95 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
     }
 
     const bookingId = parseInt(b.BookingId);
-    await pool.request()
-      .input("bid",  sql.Int,           bookingId)
-      .input("cb",   sql.Int,           b.CalledBy ? parseInt(b.CalledBy) : actorId(req))
-      .input("dt",   sql.DateTime2(3),  b.CallDate || null)
-      .input("dur",  sql.Int,           b.DurationSeconds ? parseInt(b.DurationSeconds) : null)
-      .input("out",  sql.NVarChar(50),  b.Outcome || null)
-      .input("ncd",  sql.Date,          b.NextCallDate || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson)
-      .input("pad",  sql.Date,          b.PreferredAgreementDate || null)
-      .input("ppc",  sql.Bit,           b.PaymentPlanConfirmed === true ? 1 : b.PaymentPlanConfirmed === false ? 0 : null)
-      .input("ppcat",sql.DateTime2(3),  b.PaymentPlanConfirmed === true ? new Date() : null)
-      .input("ppr",  sql.NVarChar(500), b.PaymentPlanConfirmed === false ? String(b.PaymentPlanDisputeReason).trim() : null)
-      .input("acb",  sql.Int,           actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmWelcomeCall
-          (BookingId, CalledBy, CallDate, DurationSeconds, Outcome, NextCallDate, Notes, CustomFields, PreferredAgreementDate, PaymentPlanConfirmed, PaymentPlanConfirmedAt, PaymentPlanDisputeReason, CreatedBy, CreatedAt)
-        VALUES (@bid, @cb, ISNULL(@dt, SYSDATETIME()), @dur, @out, @ncd, @note, @cf, @pad, @ppc, @ppcat, @ppr, @acb, SYSDATETIME())
-      `);
-
     const bookingRow = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT BookingNo, ApplicationId, AssignedTo FROM dbo.CrmBooking WHERE Id = @bid");
     const booking = bookingRow.recordset[0];
 
-    // Auto-flow: every logged call is itself a customer touchpoint — seed it
-    // into the Communication Log automatically so that page becomes the
-    // unified, continuing record of "further works and other tasks" instead
-    // of staff having to separately re-log the same call there by hand.
-    if (booking) {
-      await pool.request()
-        .input("aid",  sql.Int, booking.ApplicationId)
-        .input("bid",  sql.Int, bookingId)
-        .input("subj", sql.NVarChar(300), `Welcome Call${b.Outcome ? ` — ${b.Outcome}` : ""}`)
-        .input("sum",  sql.NVarChar(sql.MAX), b.Notes || null)
-        .input("cat",  sql.DateTime2(3), b.CallDate || null)
-        .input("cb",   sql.Int, actorId(req))
+    // The call INSERT, its auto-seeded Communication Log entry, and (on a
+    // decline) the payment-plan-dispute log entry describe one event and
+    // must land together — wrapped so a failure partway through can't leave
+    // the call logged with no trace of it in the Communication Log, or a
+    // dispute recorded on the call but invisible to whoever works that page.
+    // Notification stays outside (pure websocket, no DB write).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("bid",  sql.Int,           bookingId)
+        .input("cb",   sql.Int,           b.CalledBy ? parseInt(b.CalledBy) : actorId(req))
+        .input("dt",   sql.DateTime2(3),  b.CallDate || null)
+        .input("dur",  sql.Int,           b.DurationSeconds ? parseInt(b.DurationSeconds) : null)
+        .input("out",  sql.NVarChar(50),  b.Outcome || null)
+        .input("ncd",  sql.Date,          b.NextCallDate || null)
+        .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("cf",   sql.NVarChar(sql.MAX), customFieldsJson)
+        .input("pad",  sql.Date,          b.PreferredAgreementDate || null)
+        .input("ppc",  sql.Bit,           b.PaymentPlanConfirmed === true ? 1 : b.PaymentPlanConfirmed === false ? 0 : null)
+        .input("ppcat",sql.DateTime2(3),  b.PaymentPlanConfirmed === true ? new Date() : null)
+        .input("ppr",  sql.NVarChar(500), b.PaymentPlanConfirmed === false ? String(b.PaymentPlanDisputeReason).trim() : null)
+        .input("acb",  sql.Int,           actorId(req))
         .query(`
-          INSERT INTO dbo.CrmCommunicationLog
-            (ApplicationId, BookingId, Channel, Direction, Subject, Summary, ContactedAt, CreatedBy, CreatedAt)
-          VALUES (@aid, @bid, 'Call', 'Outbound', @subj, @sum, ISNULL(@cat, SYSDATETIME()), @cb, SYSDATETIME())
+          INSERT INTO dbo.CrmWelcomeCall
+            (BookingId, CalledBy, CallDate, DurationSeconds, Outcome, NextCallDate, Notes, CustomFields, PreferredAgreementDate, PaymentPlanConfirmed, PaymentPlanConfirmedAt, PaymentPlanDisputeReason, CreatedBy, CreatedAt)
+          VALUES (@bid, @cb, ISNULL(@dt, SYSDATETIME()), @dur, @out, @ncd, @note, @cf, @pad, @ppc, @ppcat, @ppr, @acb, SYSDATETIME())
         `);
 
-      // A customer declining the payment plan is a real, open issue — hand
-      // it to the Communication Log as its own entry (Inbound, since it's
-      // the customer's own objection) so whoever works that page next has
-      // something concrete to follow up on, not just a checkbox buried on
-      // this page.
-      if (b.PaymentPlanConfirmed === false) {
-        await logCommunication(pool, {
-          applicationId: booking.ApplicationId, bookingId,
-          direction: "Inbound",
-          subject: "Payment Plan Not Confirmed",
-          summary: String(b.PaymentPlanDisputeReason).trim(),
-          createdBy: actorId(req),
-        });
-        if (booking.AssignedTo) {
-          await emitNotification(pool, booking.AssignedTo, "crm_payment_plan_disputed",
-            "Customer Did Not Agree to Payment Plan",
-            `${booking.BookingNo}: ${String(b.PaymentPlanDisputeReason).trim()}`,
-            bookingId, "crm_booking");
+      // Auto-flow: every logged call is itself a customer touchpoint — seed it
+      // into the Communication Log automatically so that page becomes the
+      // unified, continuing record of "further works and other tasks" instead
+      // of staff having to separately re-log the same call there by hand.
+      if (booking) {
+        await tx.request()
+          .input("aid",  sql.Int, booking.ApplicationId)
+          .input("bid",  sql.Int, bookingId)
+          .input("subj", sql.NVarChar(300), `Welcome Call${b.Outcome ? ` — ${b.Outcome}` : ""}`)
+          .input("sum",  sql.NVarChar(sql.MAX), b.Notes || null)
+          .input("cat",  sql.DateTime2(3), b.CallDate || null)
+          .input("cb",   sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmCommunicationLog
+              (ApplicationId, BookingId, Channel, Direction, Subject, Summary, ContactedAt, CreatedBy, CreatedAt)
+            VALUES (@aid, @bid, 'Call', 'Outbound', @subj, @sum, ISNULL(@cat, SYSDATETIME()), @cb, SYSDATETIME())
+          `);
+
+        // A customer declining the payment plan is a real, open issue — hand
+        // it to the Communication Log as its own entry (Inbound, since it's
+        // the customer's own objection) so whoever works that page next has
+        // something concrete to follow up on, not just a checkbox buried on
+        // this page.
+        if (b.PaymentPlanConfirmed === false) {
+          await logCommunication(tx, {
+            applicationId: booking.ApplicationId, bookingId,
+            direction: "Inbound",
+            subject: "Payment Plan Not Confirmed",
+            summary: String(b.PaymentPlanDisputeReason).trim(),
+            createdBy: actorId(req),
+          });
         }
       }
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    if (booking?.AssignedTo && b.PaymentPlanConfirmed === false) {
+      await emitNotification(pool, booking.AssignedTo, "crm_payment_plan_disputed",
+        "Customer Did Not Agree to Payment Plan",
+        `${booking.BookingNo}: ${String(b.PaymentPlanDisputeReason).trim()}`,
+        bookingId, "crm_booking");
     }
 
     // Auto-flow: a completed welcome call is one of two prerequisites for
-    // agreement prep — fire the auto-create check (no-op if bank/nominee
+    // agreement prep — fire the auto-create check (no-op if bank/PAN/Aadhaar
     // details aren't in yet) rather than waiting on staff to notice.
     if (b.Outcome === "Welcomed") {
       const created = await maybeAutoCreateAgreement(pool, bookingId, actorId(req));
       if (!created && booking?.AssignedTo) {
         await emitNotification(pool, booking.AssignedTo, "crm_bank_details_due",
           "Customer Details Needed",
-          `Welcome call done for booking ${booking.BookingNo} — collect bank, nominee, PAN, and Aadhaar details to proceed to agreement.`,
+          `Welcome call done for booking ${booking.BookingNo} — collect bank, PAN, and Aadhaar details to proceed to agreement.`,
           bookingId, "crm_booking");
       }
     }
@@ -419,7 +506,8 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
 router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (b.Outcome && !OUTCOMES.includes(b.Outcome))
       return res.status(400).json({ error: `Invalid Outcome. Must be: ${OUTCOMES.join(", ")}` });
@@ -543,14 +631,21 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
 router.put("/:bookingId/financing-type", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const { FinancingType } = req.body;
 
     if (!["SelfFunded", "LoanFinanced"].includes(FinancingType)) {
       return res.status(400).json({ error: "FinancingType must be SelfFunded or LoanFinanced" });
     }
 
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    // Same gate as the Welcome Call itself (POST / above uses
+    // requireApprovedBooking) — this whole workflow (call, financing type,
+    // bank preference, checklist, co-applicant, customer bank/KYC) only ever
+    // starts once the booking is actually Approved, so every action inside
+    // it should require the same, not the weaker "merely still active"
+    // (which also lets through Pending/Expired) requireActiveBooking.
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     await pool.request()
@@ -574,7 +669,8 @@ router.put("/:bookingId/financing-type", requirePageRight("crm-welcome-calls", "
 router.get("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request()
       .input("bid", sql.Int, bookingId)
       .query(`
@@ -595,14 +691,17 @@ router.get("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls",
 router.post("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const { BankName, Remarks } = req.body;
 
     if (!BankName || !String(BankName).trim()) {
       return res.status(400).json({ error: "BankName is required" });
     }
 
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    // Same gate as the rest of this workflow — see the comment on
+    // PUT /:bookingId/financing-type above.
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const result = await pool.request()
@@ -628,8 +727,10 @@ router.post("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls"
 router.delete("/:bookingId/bank-preferences/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
-    const id = parseInt(req.params.id);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const existing = await pool.request()
       .input("id",  sql.Int, id)
@@ -655,7 +756,8 @@ router.delete("/:bookingId/bank-preferences/:id", requirePageRight("crm-welcome-
 router.delete("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const call = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Outcome FROM dbo.CrmWelcomeCall WHERE Id = @id");
     if (!call.recordset.length) return res.status(404).json({ error: "Call log not found" });

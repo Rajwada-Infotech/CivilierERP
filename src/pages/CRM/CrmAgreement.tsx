@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -15,14 +16,17 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { ProxyActionDialog, PROXY_METHODS, type ProxyMethod, PROXY_METHOD_LABELS } from "@/components/crm/ProxyActionDialog";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import CrmAfsQueryPayment from "@/pages/CRM/CrmAfsQueryPayment";
+import CrmAfsRegistry from "@/pages/CRM/CrmAfsRegistry";
+import { AutoInput, DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/agreements";
-// NOTE: mount path assumed as "/api/users" to match users.js's PRIVILEGED_ROLES
-// comment ("Password Reset, User Management") — unverified against server.js,
-// which wasn't available. If it's mounted elsewhere, this is a one-line fix.
 const USERS_API = "/api/users";
 
-const DOC_TYPES = ["SaleAgreement", "AllotmentLetter", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
+const DOC_TYPES = ["SaleAgreement", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
 
 const agrStatusColor: Record<string, string> = {
   Draft:      "text-muted-foreground bg-muted/50 border-border",
@@ -30,49 +34,29 @@ const agrStatusColor: Record<string, string> = {
   Registered: "text-green-600 bg-green-50 border-green-200",
   Cancelled:  "text-red-600 bg-red-50 border-red-200",
 };
-// A Booking can be cancelled independently, from the Bookings module, after
-// its Agreement already exists — this flags that so the workflow actions
-// below (Edit, Send, Mark Executed, etc.) can be locked, matching the
-// server-side guard in crmAgreements.js.
+
 function isBookingCancelled(a: { BookingStatus?: string | null; BookingIsActive?: boolean | null }): boolean {
   return a.BookingIsActive === false || ["Cancelled", "Rejected"].includes(a.BookingStatus || "");
 }
 
-// Consolidated Agreement Date status — replaces the old spread of separate
-// "Agreement Date" / "Proposed Date (Company)" / "Proposed Date (Customer)"
-// raw-value lines with one badge cluster. "Accepted by Company/Customer"
-// both light up together the instant AgreementDate is confirmed — matching
-// proposals is a single mutual event (finalizeAgreementDate on the backend),
-// there's no separate per-side "accept" action, so both badges reflect that
-// same moment rather than implying an extra step that doesn't exist.
 const DATE_BADGE_COLORS: Record<string, string> = {
   purple: "text-purple-600 bg-purple-50 border-purple-200",
   blue:   "text-blue-600 bg-blue-50 border-blue-200",
   green:  "text-green-600 bg-green-50 border-green-200",
 };
-// Only ever rendered once actually true — a grey placeholder for a status
-// that hasn't happened yet ("Proposed by Customer" showing before anyone
-// has proposed anything) is misleading, not informative.
 function DateStatusBadge({ label, date, color, active }: { label: string; date?: string | null; color: "purple" | "blue" | "green"; active: boolean }) {
   if (!active) return null;
   return (
-    <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${DATE_BADGE_COLORS[color]}`}>
+    <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium ${DATE_BADGE_COLORS[color]}`}>
       {label}{date ? `: ${String(date).slice(0, 10)}` : ""}
     </span>
   );
 }
 
-// Mirrors the backend's mark-executed check (crmAgreements.js) — mandatory
-// documents must be Verified before execution, not just present.
 function unverifiedMandatoryDocs(documents: any[] | undefined): any[] {
   return (documents || []).filter((d) => d.IsMandatory && d.Status !== "Verified");
 }
 
-// Agreement Followup — % of mandatory document TYPES that actually have a
-// file attached. Computed live from the same `documents` array already
-// fetched (never a stored/stale snapshot), mirroring the backend's own
-// agreementFollowupProgress() in crmAgreements.js exactly — 0 required docs
-// means 0%, not a vacuous 100%, since "nothing requested yet" isn't "done."
 function followupProgress(documents: any[] | undefined): { required: number; uploaded: number; percent: number } {
   const mandatory = (documents || []).filter((d) => d.IsMandatory);
   const required = mandatory.length;
@@ -81,24 +65,23 @@ function followupProgress(documents: any[] | undefined): { required: number; upl
   return { required, uploaded, percent };
 }
 
-// Module-level so both agreementStepStates() and the component's own
-// useState can share the exact same type — the stepper's steps and the tab
-// bar below it must always agree on what tabs actually exist.
-const AGR_TABS = ["Overview", "Legal & Approval", "Documents"] as const;
+const AGR_TABS = ["Timeline", "Overview", "Legal & Approval", "Documents", "AFS Payment", "AFS Registry"] as const;
 type AgrTab = typeof AGR_TABS[number];
 
-// A single, honest read of where this agreement actually is in its real
-// lifecycle — mirrors the exact same gates the buttons below already
-// enforce (legal exec -> followup -> senior approval -> sent -> customer
-// approval -> date agreed -> executed -> registered), just rendered as a
-// progress trail instead of scattered status pills, so the workflow is
-// legible at a glance instead of something staff have to piece together
-// from separate fields. Each step carries the tab it belongs to — same
-// pattern as CrmBookingDetail.tsx's own checklist row, where tapping a step
-// jumps straight to the section that covers it.
+const TAB_SLUGS: Record<string, AgrTab> = {
+  timeline: "Timeline", overview: "Overview", legal: "Legal & Approval",
+  "legal-approval": "Legal & Approval", documents: "Documents", papers: "Documents",
+  "afs-payment": "AFS Payment", "afs-query-payment": "AFS Payment",
+  "afs-registry": "AFS Registry",
+};
+const SLUG_FOR_TAB: Record<AgrTab, string> = {
+  Timeline: "timeline", Overview: "overview", "Legal & Approval": "legal",
+  Documents: "documents", "AFS Payment": "afs-payment", "AFS Registry": "afs-registry",
+};
+
 type StepState = "done" | "current" | "upcoming";
 function agreementStepStates(a: any, documents: any[] | undefined): { label: string; state: StepState; tab: AgrTab }[] {
-  const legalAssigned = !!a?.LegalExecutiveId;
+  const legalAssigned = a?.LegalExecutiveId != null;
   const followup = followupProgress(documents);
   const followupDone = followup.required > 0 && followup.percent === 100;
   const senior = a?.SeniorApprovalStatus === CrmStatus.APPROVED;
@@ -127,7 +110,7 @@ function AgreementStepper({ steps, activeTab, onStepClick }: { steps: { label: s
         <React.Fragment key={s.label}>
           <button onClick={() => onStepClick(s.tab)}
             className={`flex items-center gap-1.5 shrink-0 rounded-lg px-2 py-1.5 hover:bg-muted/60 transition-colors group ${activeTab === s.tab ? "bg-muted/50" : ""}`}>
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ring-2 ${
+            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ring-2 ${
               s.state === "done"
                 ? "bg-green-500 text-white ring-green-200 dark:ring-green-900"
                 : s.state === "current"
@@ -135,7 +118,7 @@ function AgreementStepper({ steps, activeTab, onStepClick }: { steps: { label: s
                 : "bg-muted text-muted-foreground ring-transparent"}`}>
               {s.state === "done" ? <Check size={11} /> : i + 1}
             </span>
-            <span className={`text-[11px] font-semibold whitespace-nowrap leading-tight ${
+            <span className={`text-[0.6875rem] font-semibold whitespace-nowrap leading-tight ${
               s.state === "done" ? "text-green-600 dark:text-green-400"
               : s.state === "current" ? "text-foreground"
               : "text-muted-foreground/60"}`}>
@@ -152,26 +135,131 @@ function AgreementStepper({ steps, activeTab, onStepClick }: { steps: { label: s
 }
 const docStatusColor: Record<string, string> = {
   Pending:   "text-orange-600 bg-orange-50 border-orange-200",
-  Requested: "text-amber-600 bg-amber-50 border-amber-200",
+  Requested: "text-sky-600 bg-sky-50 border-sky-200",
   Uploaded:  "text-blue-600 bg-blue-50 border-blue-200",
   Submitted: "text-blue-600 bg-blue-50 border-blue-200",
   Verified:  "text-green-600 bg-green-50 border-green-200",
   Rejected:  "text-red-600 bg-red-50 border-red-200",
 };
 
+type TlState = "done" | "current" | "upcoming" | "blocked";
+function TlRow({ n, title, detailText, state, badge, onJump, last }: {
+  n: number; title: string; detailText?: string; state: TlState; badge?: string;
+  onJump: () => void; last?: boolean;
+}) {
+  const ring =
+    state === "done" ? "bg-green-500 text-white" :
+    state === "current" ? "bg-primary text-primary-foreground" :
+    state === "blocked" ? "bg-muted text-muted-foreground" :
+    "bg-muted text-muted-foreground";
+  return (
+    <button onClick={onJump} className="w-full text-left flex gap-3 group">
+      <div className="flex flex-col items-center">
+        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 ${ring}`}>
+          {state === "done" ? <Check size={13} /> : n}
+        </span>
+        {!last && <span className={`w-px flex-1 my-1 ${state === "done" ? "bg-green-400" : "bg-border"}`} />}
+      </div>
+      <div className={`flex-1 min-w-0 pb-4 ${last ? "pb-0" : ""}`}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-sm font-semibold ${
+            state === "done" ? "text-green-700 dark:text-green-400"
+            : state === "current" ? "text-foreground"
+            : "text-muted-foreground"}`}>{title}</span>
+          {badge && (
+            <span className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border border-border bg-muted/50 text-muted-foreground">{badge}</span>
+          )}
+          <ArrowRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+        {detailText && <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{detailText}</p>}
+      </div>
+    </button>
+  );
+}
+function AgreementTimeline({ agreement, bookingId, onJump, canViewAfsPay = true, canViewAfsReg = true }: { agreement: any; bookingId: number; onJump: (t: AgrTab) => void; canViewAfsPay?: boolean; canViewAfsReg?: boolean }) {
+  const { data: afsQp } = useQuery({
+    queryKey: ["crm-afs-query-payment-booking", bookingId],
+    queryFn: async () => { const r = await fetchWithAuth(`/api/crm/afs-query-payment/booking/${bookingId}`); return r.ok ? r.json() : null; },
+    staleTime: 15_000,
+    enabled: canViewAfsPay && bookingId != null,
+  });
+  const { data: afsReg } = useQuery({
+    queryKey: ["crm-afs-registry-booking", bookingId],
+    queryFn: async () => { const r = await fetchWithAuth(`/api/crm/afs-registry/booking/${bookingId}`); return r.ok ? r.json() : null; },
+    staleTime: 15_000,
+    enabled: canViewAfsReg && bookingId != null,
+  });
+
+  const executed = agreement?.Status === CrmStatus.EXECUTED || agreement?.Status === CrmStatus.REGISTERED;
+  const registered = agreement?.Status === CrmStatus.REGISTERED;
+  const qpConfirmed = afsQp?.Status === "Confirmed";
+  const regDone = afsReg?.Status === "Completed";
+
+  const agrStageText = registered ? "Registered at Sub-Registrar"
+    : executed ? "Executed — awaiting AFS registration"
+    : agreement?.SentToCustomerAt ? "Sent to customer for approval"
+    : agreement?.SeniorApprovalStatus === CrmStatus.APPROVED ? "Senior-approved — ready to send"
+    : agreement?.LegalExecutiveId != null ? "Drafting / legal review"
+    : "Not started — assign a Legal Executive";
+
+  const allRows: { n: number; title: string; detailText: string; state: TlState; badge?: string; tab: AgrTab }[] = [
+    {
+      n: 1, title: "Agreement for Sale",
+      detailText: agrStageText, state: registered ? "done" : executed ? "done" : "current",
+      badge: agreement?.Status, tab: "Overview",
+    },
+    {
+      n: 2, title: "Agreement Papers",
+      detailText: "Supporting documents — request, upload and verify",
+      state: executed ? "done" : agreement?.LegalExecutiveId != null ? "current" : "upcoming",
+      tab: "Documents",
+    },
+    {
+      n: 3, title: "AFS Query Payment",
+      detailText: !executed ? "Unlocks once the Agreement is Executed"
+        : qpConfirmed ? "Government fees confirmed paid"
+        : afsQp ? `In progress — ${afsQp.Status === "InfoSent" ? "info sent, awaiting payment" : "started"}`
+        : "Not started",
+      state: !executed ? "blocked" : qpConfirmed ? "done" : afsQp ? "current" : "current",
+      badge: afsQp?.Status, tab: "AFS Payment",
+    },
+    {
+      n: 4, title: "AFS Registry (Sub-Registrar Visit 1)",
+      detailText: !qpConfirmed ? "Unlocks once AFS Query Payment is Confirmed"
+        : regDone ? (afsReg?.AfsRegistrationNo ? "Completed & registration no. recorded" : "Visit complete — record the AFS Reg No on the Agreement tab")
+        : afsReg ? `In progress — ${afsReg.Status}`
+        : "Not started",
+      state: !qpConfirmed ? "blocked" : regDone ? "done" : afsReg ? "current" : "current",
+      badge: afsReg?.Status, tab: "AFS Registry",
+    },
+  ];
+  const rows = allRows
+    .filter((r) =>
+      r.tab === "AFS Payment" ? canViewAfsPay :
+      r.tab === "AFS Registry" ? canViewAfsReg : true,
+    )
+    .map((r, i) => ({ ...r, n: i + 1 }));
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h3 className="text-sm font-semibold mb-4 flex items-center gap-1.5">
+        <BarChart3 size={15} className="text-primary" /> Workflow Timeline
+      </h3>
+      <div>
+        {rows.map((r, i) => (
+          <TlRow key={r.n} n={r.n} title={r.title} detailText={r.detailText}
+            state={r.state} badge={r.badge} onJump={() => onJump(r.tab)} last={i === rows.length - 1} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const EMPTY_AGR_FORM = {
   BookingId: "", LegalName: "", LegalAddress: "",
   PanNo: "", AadhaarNo: "", Notes: "", LegalExecutiveId: "",
 };
 
-// Legal Executive picker — deliberately NOT the Sales Automation leads
-// module's /users endpoint (that's what this called before; unrelated
-// module, likely scoped to salespeople, and also required the
-// Users-page-admin permission that most CRM/legal staff don't have — which
-// is why the dropdown was rendering empty). This hits a dedicated endpoint
-// scoped server-side to legal_head/legal_person roles only, open to any
-// authenticated user (the page itself is already gated by
-// crm-agreements:view, so no extra restriction needed here).
 async function fetchUsers(): Promise<{ value: string; label: string }[]> {
   try {
     const r = await fetchWithAuth(`${USERS_API}/legal-executives`);
@@ -209,13 +297,6 @@ async function fetchDocAudit(docId: number): Promise<any[]> {
   } catch { return []; }
 }
 
-// Review dialog for a single agreement document — preview, verify/reject
-// (rejecting a legal document with no reason on record is never allowed,
-// server-enforced too, see PUT /:id/documents/:docId), and a History tab
-// showing every prior status change from CrmAuditLog. Replaces the old
-// preview-only dialog + bare status <select>, which let a document be
-// silently flipped to Rejected with zero explanation and no easy way to see
-// what happened to it before — not acceptable for real contractual paperwork.
 const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: () => void; onReviewed: () => void }> =
   ({ agreementId, doc, onClose, onReviewed }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -271,10 +352,6 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
     }
   };
 
-  // Opening this dialog shouldn't inherit an error toast left over from
-  // whatever the user did right before (e.g. a failed date proposal) —
-  // that stale toast otherwise sits on screen looking like it's about
-  // this document, when it isn't.
   useEffect(() => {
     toast.dismiss();
   }, []);
@@ -315,11 +392,11 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent accent="crm" className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             {mimeIcon(doc.MimeType)} {doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
+            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
           </DialogTitle>
         </DialogHeader>
 
@@ -348,7 +425,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
                       <input type="file" ref={attachInputRef} className="hidden"
                         onChange={(e) => attachFile(e.target.files)} />
                       <button type="button" onClick={() => attachInputRef.current?.click()} disabled={attaching}
-                        className="mt-1 flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                        className="mt-1 flex items-center gap-1.5 px-3 py-1.5 text-xs btn-module text-white rounded-lg font-medium disabled:opacity-40">
                         <Upload size={12} /> {attaching ? "Uploading..." : "Upload File"}
                       </button>
                     </>
@@ -389,13 +466,13 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
                       </button>
                     </div>
                     <div>
-                      <p className="text-[11px] text-muted-foreground mb-1.5">How did the customer provide this document?</p>
-                      <div className="grid grid-cols-3 gap-1.5">
+                      <p className="text-[0.6875rem] text-muted-foreground mb-1.5">How did the customer provide this document?</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
                         {PROXY_METHODS.map((m) => (
                           <button type="button" key={m} onClick={() => setProxyUploadMethod(m)}
-                            className={`text-[11px] px-2 py-1.5 rounded-md border font-medium transition-colors ${
+                            className={`text-[0.6875rem] px-2 py-1.5 rounded-md border font-medium transition-colors ${
                               proxyUploadMethod === m
-                                ? "bg-primary text-primary-foreground border-primary"
+                                ? "btn-module text-white border-primary"
                                 : "border-border text-muted-foreground hover:bg-muted"
                             }`}>
                             {PROXY_METHOD_LABELS[m]}
@@ -419,7 +496,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
                       </button>
                       <button type="button" onClick={handleProxyAttach}
                         disabled={proxyUploading || !proxyUploadFile || !proxyUploadRemarks.trim()}
-                        className="shrink-0 text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-md font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                        className="shrink-0 text-xs px-3 py-1.5 btn-module text-white rounded-md font-semibold hover:shadow-lg disabled:opacity-40 transition-colors">
                         {proxyUploading ? "Uploading…" : "Submit"}
                       </button>
                     </div>
@@ -462,7 +539,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
                     </div>
                     <div className="text-right text-muted-foreground shrink-0">
                       <div>{h.ChangedByName || "System"}</div>
-                      <div>{String(h.ChangedAt).replace("T", " ").slice(0, 16)}</div>
+                      <div>{fmtIstIso(h.ChangedAt)}</div>
                     </div>
                   </li>
                 ))}
@@ -490,10 +567,39 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
 async function fetchAgreements(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
 }
+
+const PAGE_SIZE = 20;
+interface AgreementListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchAgreementsList(filters: AgreementListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
+}
 async function fetchAgreementDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   if (!r.ok) throw new Error("Failed to load agreement");
   return r.json();
+}
+async function fetchAgreementIdByBooking(bookingId: string): Promise<number | null> {
+  try {
+    const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.agreement?.Id ?? null;
+  } catch { return null; }
 }
 async function fetchDateHistory(id: number): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/${id}/date-history`); return r.ok ? r.json() : []; } catch { return []; }
@@ -501,13 +607,6 @@ async function fetchDateHistory(id: number): Promise<any[]> {
 async function fetchRevisions(id: number): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/${id}/revisions`); return r.ok ? r.json() : []; } catch { return []; }
 }
-// Only bookings that are Approved, have no Agreement yet, and pass every
-// agreement-prep prerequisite (welcome call Welcomed, bank/nominee/PAN/
-// Aadhaar details, unit linked, email/mobile present) — same gate
-// POST /api/crm/agreements enforces server-side, so a booking picked here
-// can never be rejected for "prerequisites incomplete" on save. Deliberately
-// NOT the raw /api/crm/bookings list, which includes Pending/Draft bookings
-// and bookings that already have an agreement.
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
 }
@@ -520,17 +619,19 @@ const CrmAgreement: React.FC = () => {
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const bkgFilter = sp.get("bookingId") || "";
-  const idFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
+  const rawIdFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
+  const idFilter = rawIdFilter !== null && rawIdFilter > 0 ? rawIdFilter : null;
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<number | null>(idFilter);
-  // Selecting a row only ever set local state — the URL stayed at whatever
-  // it loaded with, so a refresh or shared link lost track of which
-  // agreement was open. Keeps ?id= in sync with the actual selection,
-  // matching the read side above (idFilter).
+
   const selectAgreement = (id: number) => {
     setSelectedId(id);
     setSp((p) => { p.set("id", String(id)); return p; }, { replace: true });
   };
+
   const [agrDialog, setAgrDialog] = useState(false);
   const [docDialog, setDocDialog] = useState(false);
   const [docRequestDialog, setDocRequestDialog] = useState(false);
@@ -550,26 +651,41 @@ const CrmAgreement: React.FC = () => {
   const docFileInputRef = useRef<HTMLInputElement>(null);
   const [editDialog, setEditDialog] = useState(false);
   const [editForm, setEditForm] = useState({ LegalName: "", LegalAddress: "", PanNo: "", AadhaarNo: "", RevisionReason: "", LegalExecutiveId: "" });
-  // Always opens on an existing agreement, so always opens locked.
   const [editLocked, setEditLocked] = useState(true);
   const editInputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${editLocked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
   const [saving, setSaving] = useState(false);
-  // Same tabbed pattern as CrmBookingDetail.tsx — the detail panel used to
-  // be one long stack of cards (Overview, Approval Workflow, Documents all
-  // scrolling together), which read as a messy wall of text rather than a
-  // step-by-step flow. Header actions + the lifecycle Stepper/Next-Action
-  // banner stay always visible above the tabs since they're global, not
-  // section-specific. AGR_TABS/AgrTab are declared at module scope (shared
-  // with agreementStepStates) so the stepper's steps can each carry a real
-  // tab and stay clickable, same as Booking's own checklist row.
-  const [agrTab, setAgrTab] = useState<AgrTab>("Overview");
-  useEffect(() => { setAgrTab("Overview"); setEditingLegalExec(false); }, [selectedId]);
 
-  const { data: agreements = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 30_000 });
+  const urlTab = TAB_SLUGS[(sp.get("tab") || "").toLowerCase()];
+  const [agrTab, setAgrTabRaw] = useState<AgrTab>(urlTab || "Timeline");
+  const setAgrTab = (t: AgrTab) => {
+    setAgrTabRaw(t);
+    setSp((p) => { p.set("tab", SLUG_FOR_TAB[t]); return p; }, { replace: true });
+  };
+  useEffect(() => {
+    setAgrTabRaw(TAB_SLUGS[(sp.get("tab") || "").toLowerCase()] || "Timeline");
+    setEditingLegalExec(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+  const listFilters: AgreementListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-agreements", listFilters, page],
+    queryFn: () => fetchAgreementsList(listFilters, page),
+    staleTime: 30_000,
+  });
+  const agreements = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
+
   const { data: detail } = useQuery({
     queryKey: ["crm-agreement-detail", selectedId],
     queryFn: () => fetchAgreementDetail(selectedId!),
-    enabled: !!selectedId,
+    enabled: selectedId != null,
     staleTime: 30_000,
   });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -577,19 +693,19 @@ const CrmAgreement: React.FC = () => {
   const { data: dateHistory = [] } = useQuery({
     queryKey: ["crm-agreement-date-history", selectedId],
     queryFn: () => fetchDateHistory(selectedId!),
-    enabled: !!selectedId,
+    enabled: selectedId != null,
     staleTime: 30_000,
   });
   const { data: revisions = [] } = useQuery({
     queryKey: ["crm-agreement-revisions", selectedId],
     queryFn: () => fetchRevisions(selectedId!),
-    enabled: !!selectedId,
+    enabled: selectedId != null,
     staleTime: 30_000,
   });
   const { data: welcomeCallsForBkg = [] } = useQuery({
     queryKey: ["crm-welcome-calls-for-bkg", (detail as any)?.BookingId],
     queryFn: () => fetchWelcomeCallsForBooking((detail as any).BookingId),
-    enabled: !!selectedId && !!(detail as any)?.BookingId,
+    enabled: selectedId != null && (detail as any)?.BookingId != null,
     staleTime: 60_000,
   });
   const preferredAgrDate = (() => {
@@ -597,38 +713,80 @@ const CrmAgreement: React.FC = () => {
     return hit ? String(hit.PreferredAgreementDate).slice(0, 10) : "";
   })();
 
-  const filtered = useMemo(() =>
-    (agreements as any[]).filter((a: any) =>
-      !search || a.ApplicantName?.toLowerCase().includes(search.toLowerCase())
-        || a.AgreementNo?.includes(search) || a.BookingNo?.includes(search)
-    ), [agreements, search]);
+  const filtered = agreements;
 
-  // Arriving here via CrmBooking.tsx's "Agreement" next-step link
-  // (`/crm/agreements?bookingId=X`) means the booking already cleared
-  // Welcome Call + Bank Details, so an Agreement has usually already been
-  // auto-created for it (see maybeAutoCreateAgreement). Jump straight to
-  // reviewing/approving that agreement instead of dropping staff on the
-  // unfiltered list to go find it themselves. Only falls back to opening
-  // the New Agreement dialog (pre-filled) for the rare case where
-  // auto-create hasn't fired yet — e.g. a prerequisite landed through a
-  // path that doesn't call it, or a previous auto-create attempt failed.
-  // Runs once per bkgFilter value so it doesn't fight with the user closing
-  // the dialog or switching to a different agreement afterward. Explicit
-  // ?id= links (opening a specific agreement directly) always take
-  // priority and skip this entirely.
+  // ── Auto-select first agreement ─────────────────────────────────────────
+  // On first load (or after a filter change that leaves the current
+  // selection out of the visible list), open the first agreement in the
+  // list so the detail panel is never a dead "Select an agreement"
+  // placeholder when the user clearly has agreements to look at. Skips
+  // entirely when a specific ?id= or ?bookingId= deep-link is active.
+  // Uses a ref so a background React Query refetch never stomps on whatever
+  // the user had navigated to. All array access is guarded so a fresh
+  // fetch that returns an empty or malformed row can't crash the render.
+  const autoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (isLoading) return;
+    if (idFilter || bkgFilter) return;
+    if (selectedId != null) return;
+    if (!Array.isArray(agreements) || agreements.length === 0) return;
+    if (autoSelectedRef.current) return;
+    const first = agreements[0];
+    if (!first || first.Id == null) return;
+    autoSelectedRef.current = true;
+    selectAgreement(first.Id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, agreements, idFilter, bkgFilter, selectedId]);
+
+  // If the currently-selected agreement is no longer in the (filtered)
+  // list, fall back to the first row. Does not fire while ?id= is set
+  // explicitly, and does not fire when the user clicked a different row
+  // (that already updates selectedId to something in the list).
+  useEffect(() => {
+    if (isLoading || idFilter || bkgFilter) return;
+    if (selectedId == null) return;
+    if (!Array.isArray(agreements) || agreements.length === 0) return;
+    const stillVisible = agreements.some((a: any) => a && a.Id === selectedId);
+    if (stillVisible) return;
+    const first = agreements[0];
+    if (!first || first.Id == null) return;
+    selectAgreement(first.Id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, agreements, idFilter, bkgFilter, selectedId]);
+
+  // ?bookingId= deep-link resolver — same as before.
   const handledBkgFilterRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!bkgFilter || idFilter || isLoading) return;
+    if (!bkgFilter || idFilter) return;
     if (handledBkgFilterRef.current === bkgFilter) return;
     handledBkgFilterRef.current = bkgFilter;
-    const existing = (agreements as any[]).find((a) => String(a.BookingId) === String(bkgFilter));
-    if (existing) {
-      setSelectedId(existing.Id);
-    } else {
-      setAgrForm((f) => ({ ...f, BookingId: bkgFilter }));
-      setAgrDialog(true);
-    }
-  }, [bkgFilter, idFilter, agreements, isLoading]);
+    let cancelled = false;
+    (async () => {
+      const agId = await fetchAgreementIdByBooking(bkgFilter);
+      if (cancelled) return;
+      if (agId) {
+        setSelectedId(agId);
+      } else {
+        setAgrForm((f) => ({ ...f, BookingId: bkgFilter }));
+        setAgrDialog(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [bkgFilter, idFilter]);
+
+  // Auto-fill from booking in the New Agreement dialog.
+  useEffect(() => {
+    if (!agrForm.BookingId || !agrDialog) return;
+    const bkg = (bookings as any[]).find((b) => String(b.Id) === String(agrForm.BookingId));
+    if (!bkg) return;
+    setAgrForm((f) => ({
+      ...f,
+      LegalName:    f.LegalName    || bkg.LegalName    || "",
+      PanNo:        f.PanNo        || bkg.PanNo        || "",
+      AadhaarNo:    f.AadhaarNo    || bkg.AadhaarNo    || "",
+      LegalAddress: f.LegalAddress || bkg.LegalAddress || "",
+    }));
+  }, [agrForm.BookingId, agrDialog]);
 
   const handleSaveAgreement = async () => {
     if (!agrForm.BookingId) { toast.error("Booking is required"); return; }
@@ -658,7 +816,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleAddDocument = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (!docForm.DocumentUrl.trim()) { toast.error("Enter a URL, or use the upload button to attach a file"); return; }
     setSaving(true);
     try {
@@ -682,7 +840,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleRequestDocument = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/documents/request`, {
@@ -704,7 +862,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleUploadDocFiles = async (files: FileList | null) => {
-    if (!selectedId || !files?.length) return;
+    if (selectedId == null || !files?.length) return;
     setUploadingDocs(true);
     try {
       const formData = new FormData();
@@ -728,13 +886,8 @@ const CrmAgreement: React.FC = () => {
     }
   };
 
-  // Quick-verify only (Rejected always requires remarks, server-enforced —
-  // that path goes through DocumentReviewDialog instead). Previously this
-  // never checked res.ok, so a failed verify (e.g. the "not uploaded yet"
-  // guard firing) silently did nothing with no error shown — fixed to
-  // actually surface the real outcome.
   const handleDocStatusChange = async (docId: number, status: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/documents/${docId}`, {
         method: "PUT",
@@ -751,7 +904,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleSendToCustomer = async (proposedDate: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/send-to-customer`, {
@@ -775,7 +928,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleProposeDate = async (proposedDate: string) => {
-    if (!selectedId || !proposedDate) { toast.error("Pick a date"); return; }
+    if (selectedId == null || !proposedDate) { toast.error("Pick a date"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/propose-date`, {
@@ -797,10 +950,8 @@ const CrmAgreement: React.FC = () => {
     }
   };
 
-  // Accept the customer's currently-proposed date as-is — no re-typing it.
-  // Only enabled when ProposedDateStatus shows it's the company's turn.
   const handleAcceptDate = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/date/accept`, { method: "PUT" });
@@ -818,7 +969,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleAgreementAction = async (action: "mark-executed" | "mark-registered" | "cancel") => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/${action}`, { method: "PUT" });
       const data = await res.json();
@@ -837,7 +988,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleMarkRegistered = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (!regForm.AfsRegistrationNo.trim()) { toast.error("AFS Registration No. is required"); return; }
     if (!regForm.AfsRegistrationDate) { toast.error("AFS Registration Date is required"); return; }
     setRegSaving(true);
@@ -875,7 +1026,7 @@ const CrmAgreement: React.FC = () => {
   const [proxySaving, setProxySaving] = useState(false);
 
   const handleProxyCustomerApprove = async (method: ProxyMethod, remarks: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/proxy-customer-approve`, {
@@ -897,7 +1048,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleProxyDateAccept = async (method: ProxyMethod, remarks: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/proxy-date-accept`, {
@@ -919,7 +1070,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleProxyCustomerRecheck = async (method: ProxyMethod, remarks: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/proxy-customer-recheck`, {
@@ -941,7 +1092,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleProxyProposeDate = async (method: ProxyMethod, remarks: string) => {
-    if (!selectedId || !proxyProposedDate) return;
+    if (selectedId == null || !proxyProposedDate) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/proxy-propose-date`, {
@@ -965,7 +1116,7 @@ const CrmAgreement: React.FC = () => {
 
   const [togglingPortal, setTogglingPortal] = useState(false);
   const handleTogglePortalAccess = async (deactivate: boolean) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setTogglingPortal(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/portal/${deactivate ? "deactivate" : "reactivate"}`, { method: "PUT" });
@@ -983,12 +1134,12 @@ const CrmAgreement: React.FC = () => {
   const openEdit = () => {
     if (!detail?.agreement) return;
     setEditForm({
-      LegalName: detail.agreement.LegalName || "",
+      LegalName: detail.agreement.LegalName || detail.agreement.ApplicantName || "",
       LegalAddress: detail.agreement.LegalAddress || "",
-      PanNo: detail.agreement.PanNo || "",
-      AadhaarNo: detail.agreement.AadhaarNo || "",
+      PanNo: detail.agreement.PanNo || detail.agreement.CustomerPanNo || "",
+      AadhaarNo: detail.agreement.AadhaarNo || detail.agreement.CustomerAadhaarNo || "",
       RevisionReason: "",
-      LegalExecutiveId: detail.agreement.LegalExecutiveId ? String(detail.agreement.LegalExecutiveId) : "",
+      LegalExecutiveId: detail.agreement.LegalExecutiveId != null ? String(detail.agreement.LegalExecutiveId) : "",
     });
     setEditLocked(true);
     setEditDialog(true);
@@ -996,12 +1147,8 @@ const CrmAgreement: React.FC = () => {
 
   const [assigningLegal, setAssigningLegal] = useState(false);
   const [editingLegalExec, setEditingLegalExec] = useState(false);
-  // Deliberately its own action, not folded into Edit Details — assigning
-  // "who is handling this" isn't a legal-content correction, so it
-  // shouldn't require unlocking Edit, filling a revision reason, or
-  // bumping VersionNo the way a PAN/address fix does.
   const handleAssignLegal = async (legalExecutiveId: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setAssigningLegal(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/assign-legal`, {
@@ -1023,18 +1170,9 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleSaveEdit = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (editForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(editForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
     if (editForm.AadhaarNo && !/^\d{12}$/.test(editForm.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
-    const alIssued = detail?.agreement?.AllotmentLetterStatus === "Issued";
-    const touchesLegal = editForm.LegalName !== (detail?.agreement?.LegalName || "")
-      || editForm.LegalAddress !== (detail?.agreement?.LegalAddress || "")
-      || editForm.PanNo !== (detail?.agreement?.PanNo || "")
-      || editForm.AadhaarNo !== (detail?.agreement?.AadhaarNo || "");
-    if (alIssued && touchesLegal && !editForm.RevisionReason.trim()) {
-      toast.error("Amendment reason is required — the Allotment Letter has been issued for this booking. State why this change is needed.");
-      return;
-    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}`, {
@@ -1058,6 +1196,11 @@ const CrmAgreement: React.FC = () => {
   };
 
   const rights = usePageRights("crm-agreements");
+  const afsPayRights = usePageRights("crm-afs-query-payment");
+  const afsRegRights = usePageRights("crm-afs-registry");
+  const tabAllowed = (t: AgrTab): boolean =>
+    t === "AFS Payment" ? afsPayRights.canView :
+    t === "AFS Registry" ? afsRegRights.canView : true;
 
   return (
     <>
@@ -1069,7 +1212,7 @@ const CrmAgreement: React.FC = () => {
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => setAgrDialog(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
           <Plus size={14} /> New Agreement
         </button>
         </div>
@@ -1080,10 +1223,12 @@ const CrmAgreement: React.FC = () => {
         <div className="w-80 shrink-0 flex flex-col gap-2">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search agreements..."
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+              placeholder="Search agreements... (Enter to search)"
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
           </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
           <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5">
             {isLoading ? (
               <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
@@ -1099,21 +1244,21 @@ const CrmAgreement: React.FC = () => {
                   <div className="flex-1 min-w-0 p-3 space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-sm font-semibold leading-tight truncate">{a.ApplicantName}</span>
-                      <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${agrStatusColor[a.Status] || ""}`}>{a.Status}</span>
+                      <span className={`shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${agrStatusColor[a.Status] || ""}`}>{a.Status}</span>
                     </div>
                     {isBookingCancelled(a) && (
-                      <div className="text-[10px] font-semibold text-red-600">⚠ Booking {a.BookingStatus || "inactive"} — locked</div>
+                      <div className="text-[0.625rem] font-semibold text-red-600">⚠ Booking {a.BookingStatus || "inactive"} — locked</div>
                     )}
-                    <div className="text-[11px] font-mono text-muted-foreground">{a.AgreementNo}</div>
+                    <div className="text-[0.6875rem] font-mono text-muted-foreground">{a.AgreementNo}</div>
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-[11px] text-muted-foreground truncate">{a.BookingNo} · {a.UnitNo}</div>
-                      <div className="shrink-0 text-[10px] text-muted-foreground">{a.DocumentCount || 0} doc{a.DocumentCount !== 1 ? "s" : ""}</div>
+                      <div className="text-[0.6875rem] text-muted-foreground truncate">{a.BookingNo} · {a.UnitNo}</div>
+                      <div className="shrink-0 text-[0.625rem] text-muted-foreground">{a.DocumentCount || 0} doc{a.DocumentCount !== 1 ? "s" : ""}</div>
                     </div>
-                    <div className="text-[11px] flex items-center gap-1">
+                    <div className="text-[0.6875rem] flex items-center gap-1">
                       <UserCircle2 size={10} className="text-muted-foreground shrink-0" />
                       {a.LegalExecutiveName
                         ? <span className="text-foreground font-medium truncate">{a.LegalExecutiveName}</span>
-                        : <span className="text-amber-600 font-medium">Unassigned</span>}
+                        : <span className="text-sky-600 font-medium">Unassigned</span>}
                     </div>
                   </div>
                 </div>
@@ -1121,11 +1266,12 @@ const CrmAgreement: React.FC = () => {
               );
             })}
           </div>
+          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </div>
 
         {/* Detail */}
         <div className="flex-1 overflow-y-auto thin-scroll space-y-4">
-          {!selectedId ? (
+          {selectedId == null ? (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
               Select an agreement to view details
             </div>
@@ -1133,9 +1279,6 @@ const CrmAgreement: React.FC = () => {
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
           ) : (
             <>
-              {/* Lifecycle progress + the one thing to actually do right now —
-                  replaces staff having to piece the current state together
-                  from separate status pills scattered further down. */}
               {detail.agreement?.Status !== CrmStatus.CANCELLED && (
                 <div className="rounded-xl border border-border bg-card p-4 space-y-3">
                   <AgreementStepper steps={agreementStepStates(detail.agreement, detail.documents)} activeTab={agrTab} onStepClick={setAgrTab} />
@@ -1159,7 +1302,7 @@ const CrmAgreement: React.FC = () => {
                       variant = "info";
                       text = "Agreement executed.";
                       subtext = "Record the Sub-Registrar Registration No. to mark it Registered.";
-                    } else if (!a?.LegalExecutiveId) {
+                    } else if (a?.LegalExecutiveId == null) {
                       variant = "warning";
                       text = "No Legal Executive assigned.";
                       subtext = "Assign someone responsible for preparing the paperwork — required before execution (server-enforced).";
@@ -1208,7 +1351,7 @@ const CrmAgreement: React.FC = () => {
                     type VariantDef = { card: string; text: string; sub: string; icon: React.ReactNode };
                     const variantDef: Record<BannerVariant, VariantDef> = {
                       error:   { card: "border-red-300 bg-red-500/10 dark:border-red-800 dark:bg-red-950/50",     text: "text-red-700 dark:text-red-300",   sub: "text-red-600/80 dark:text-red-400/80",   icon: <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" /> },
-                      warning: { card: "border-amber-300 bg-amber-500/10 dark:border-amber-800 dark:bg-amber-950/50", text: "text-amber-800 dark:text-amber-200", sub: "text-amber-700/80 dark:text-amber-400/80", icon: <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" /> },
+                      warning: { card: "border-amber-300 bg-[#ffe2021a] dark:border-amber-800 dark:bg-amber-950/50", text: "text-amber-800 dark:text-amber-200", sub: "text-amber-700/80 dark:text-amber-400/80", icon: <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" /> },
                       info:    { card: "border-blue-300 bg-blue-500/10 dark:border-blue-800 dark:bg-blue-950/50",   text: "text-blue-800 dark:text-blue-200",   sub: "text-blue-700/80 dark:text-blue-400/80",   icon: <Info size={16} className="text-blue-500 shrink-0 mt-0.5" /> },
                       success: { card: "border-green-300 bg-green-500/10 dark:border-green-800 dark:bg-green-950/50", text: "text-green-800 dark:text-green-200", sub: "text-green-700/80 dark:text-green-400/80", icon: <CheckCircle2 size={16} className="text-green-500 shrink-0 mt-0.5" /> },
                       action:  { card: "border-primary/40 bg-primary/10",                                            text: "text-foreground",                   sub: "text-muted-foreground",                   icon: <ArrowRight size={16} className="text-primary shrink-0 mt-0.5" /> },
@@ -1225,7 +1368,7 @@ const CrmAgreement: React.FC = () => {
                         </div>
                         {cta && (
                           <button onClick={cta.onClick}
-                            className="shrink-0 px-3.5 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 whitespace-nowrap">
+                            className="shrink-0 px-3.5 py-1.5 text-xs btn-module text-white rounded-lg font-semibold hover:shadow-lg whitespace-nowrap">
                             {cta.label}
                           </button>
                         )}
@@ -1235,9 +1378,6 @@ const CrmAgreement: React.FC = () => {
                 </div>
               )}
 
-              {/* Header — name, status, and every global action. Stays
-                  visible across all tabs since these apply to the whole
-                  agreement, not one section of it. */}
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className={`px-4 py-3 flex items-center justify-between gap-3 flex-wrap ${
                   detail.agreement?.Status === "Registered" ? "bg-gradient-to-r from-green-500/10 to-green-500/5 border-b border-green-200/60 dark:border-green-900/40"
@@ -1258,8 +1398,8 @@ const CrmAgreement: React.FC = () => {
                         : "text-primary"} />
                     </div>
                     <div className="min-w-0">
-                      <h2 className="font-bold text-[15px] text-foreground leading-tight truncate">{detail.agreement?.ApplicantName}</h2>
-                      <p className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                      <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate">{detail.agreement?.ApplicantName}</h2>
+                      <p className="text-[0.6875rem] font-mono text-muted-foreground mt-0.5">
                         {detail.agreement?.AgreementNo}
                         {detail.agreement?.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{detail.agreement.VersionNo}</span>}
                       </p>
@@ -1280,11 +1420,6 @@ const CrmAgreement: React.FC = () => {
                         <span title="Booking is cancelled — cannot edit" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
                           Edit Details
                         </span>
-                      ) : detail.agreement?.AllotmentLetterStatus === "Issued" ? (
-                        <button onClick={openEdit} title="Allotment Letter issued — any change to legal details requires an amendment reason"
-                          className="flex items-center gap-1 text-xs px-2 py-0.5 border border-amber-300 rounded-full text-amber-700 bg-amber-50 hover:bg-amber-100">
-                          <Lock size={10} /> Amend Details
-                        </button>
                       ) : (
                         <button onClick={openEdit}
                           className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
@@ -1312,9 +1447,7 @@ const CrmAgreement: React.FC = () => {
                           </span>
                         );
                       }
-                      if (!detail.agreement?.LegalExecutiveId) {
-                        // Same order as the backend (LegalExecutiveId before
-                        // mandatory docs) and the Next Action banner above.
+                      if (detail.agreement?.LegalExecutiveId == null) {
                         return (
                           <span title="A Legal Executive must be assigned first — pick one from the Legal Executive field above"
                             className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
@@ -1349,20 +1482,10 @@ const CrmAgreement: React.FC = () => {
                       ) : (
                         <button onClick={() => {
                             const ag = detail.agreement;
-                            // Priority 1: ConfirmedAmount from the AFS QP record (what the
-                            // customer actually paid, as attested during AFS QP confirmation).
-                            // Priority 2: individual StampDuty / RegistrationFee from the QP
-                            // record (the estimate that was sent to the customer).
-                            // Priority 3: whatever was previously saved on the Agreement itself
-                            // (non-null only if mark-registered was run before and already had
-                            // a value). Blank as last resort — same as before this fix.
                             const hasConfirmed = ag?.AfsQpConfirmedAmount != null;
                             let prefillStamp = "";
                             let prefillFee   = "";
                             if (hasConfirmed) {
-                              // ConfirmedAmount is a single total — split proportionally to
-                              // QP's own Stamp/Fee split if both exist, otherwise put it all
-                              // in StampDuty and leave Fee blank for staff to split manually.
                               if (ag.AfsQpStampDuty != null && ag.AfsQpRegistrationFee != null) {
                                 prefillStamp = String(ag.AfsQpStampDuty);
                                 prefillFee   = String(ag.AfsQpRegistrationFee);
@@ -1395,17 +1518,13 @@ const CrmAgreement: React.FC = () => {
                 </div>
               </div>
 
-              {/* Tab bar — same visual pattern as CrmBookingDetail.tsx's own
-                  tabs (underline style), so the two most-used CRM detail
-                  pages feel like one consistent system instead of each
-                  inventing their own step UI. */}
-              <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1">
-                {AGR_TABS.map((t, i) => (
+              <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1 overflow-x-auto thin-scroll">
+                {AGR_TABS.filter(tabAllowed).map((t, i) => (
                   <button key={t} onClick={() => setAgrTab(t)}
                     className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                       agrTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}>
-                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ${
                       agrTab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{i + 1}</span>
                     {t}
                   </button>
@@ -1414,29 +1533,18 @@ const CrmAgreement: React.FC = () => {
 
               {agrTab === "Overview" && (
               <div className="rounded-xl border border-border overflow-hidden space-y-0">
-                {detail.agreement?.AllotmentLetterStatus === "Issued" && (
-                  <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border-b border-amber-200 dark:bg-amber-950/40 dark:border-amber-900/40 px-4 py-2.5">
-                    <Lock size={11} className="shrink-0" />
-                    Allotment Letter issued{detail.agreement?.AllotmentLetterIssuedOn ? ` on ${String(detail.agreement.AllotmentLetterIssuedOn).slice(0, 10)}` : ""} — legal details are locked. Use <strong className="mx-0.5">Amend Details</strong> to make a recorded change.
-                  </div>
-                )}
-
-                {/* Key summary row */}
                 <div className="grid grid-cols-3 divide-x divide-border border-b border-border">
                   <div className="px-4 py-3">
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Booking</p>
+                    <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Booking</p>
                     <p className="text-sm font-semibold">{detail.agreement?.BookingNo}</p>
-                    <p className="text-[11px] text-muted-foreground">{detail.agreement?.UnitNo}</p>
+                    <p className="text-[0.6875rem] text-muted-foreground">{detail.agreement?.UnitNo}</p>
                   </div>
                   <div className="px-4 py-3">
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Project</p>
+                    <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Project</p>
                     <p className="text-sm font-semibold truncate">{detail.agreement?.ProjectName || "—"}</p>
-                    <p className={`text-[11px] font-medium ${detail.agreement?.AllotmentLetterStatus === "Issued" ? "text-green-600" : "text-muted-foreground"}`}>
-                      AL: {detail.agreement?.AllotmentLetterStatus || "—"}
-                    </p>
                   </div>
                   <div className={`px-4 py-3 ${detail.agreement?.AgreementDate ? "bg-green-500/[0.04]" : ""}`}>
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Agreement Date</p>
+                    <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Agreement Date</p>
                     {detail.agreement?.AgreementDate ? (
                       <p className="text-sm font-bold text-green-700 dark:text-green-400">{String(detail.agreement.AgreementDate).slice(0, 10)}</p>
                     ) : (
@@ -1445,35 +1553,33 @@ const CrmAgreement: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Legal details */}
                 <div className="px-4 py-3 space-y-2 border-b border-border">
-                  <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium">Legal Details</p>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                  <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-medium">Legal Details</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                   {[
-                    ["Legal Name",       detail.agreement?.LegalName || "—"],
-                    ["PAN",              detail.agreement?.PanNo || "—"],
-                    ["Aadhaar",          detail.agreement?.AadhaarNo || "—"],
+                    ["Legal Name",       detail.agreement?.LegalName || detail.agreement?.ApplicantName || "—"],
+                    ["PAN",              detail.agreement?.PanNo || detail.agreement?.CustomerPanNo || "—"],
+                    ["Aadhaar",          detail.agreement?.AadhaarNo || detail.agreement?.CustomerAadhaarNo || "—"],
                   ].map(([k, v]) => (
                     <div key={k}>
-                      <span className="text-[11px] text-muted-foreground block">{k}</span>
+                      <span className="text-[0.6875rem] text-muted-foreground block">{k}</span>
                       <span className="font-medium text-sm">{v}</span>
                     </div>
                   ))}
                   {detail.agreement?.LegalAddress && (
                     <div className="col-span-2">
-                      <span className="text-[11px] text-muted-foreground block">Legal Address</span>
+                      <span className="text-[0.6875rem] text-muted-foreground block">Legal Address</span>
                       <span className="text-sm text-muted-foreground">{detail.agreement.LegalAddress}</span>
                     </div>
                   )}
-                  {/* GrandTotal (GST-inclusive) */}
                   <div className="col-span-2 pt-1 border-t border-border/60">
-                    <span className="text-[11px] text-muted-foreground block">Total Value (incl. GST)</span>
+                    <span className="text-[0.6875rem] text-muted-foreground block">{detail.agreement?.IsPlotSale ? "Total Value (land — no GST)" : "Total Value (incl. GST)"}</span>
                     <span className="text-sm font-bold font-mono">
                       {detail.agreement?.GrandTotal ? `₹${Number(detail.agreement.GrandTotal).toLocaleString("en-IN")}` : "—"}
                     </span>
                     {detail.agreement?.GrandTotal > 0 && (
-                      <span className="text-[11px] text-muted-foreground block mt-0.5">
-                        Unit ₹{Number(detail.agreement.TotalValue).toLocaleString("en-IN")}
+                      <span className="text-[0.6875rem] text-muted-foreground block mt-0.5">
+                        {detail.agreement?.IsPlotSale ? "Land" : "Unit"} ₹{Number(detail.agreement.TotalValue).toLocaleString("en-IN")}
                         {detail.agreement?.UnitGstAmount > 0 && ` + GST ₹${Number(detail.agreement.UnitGstAmount).toLocaleString("en-IN")}`}
                         {detail.agreement?.ParkingTotal > 0 && ` + Parking ₹${Number(detail.agreement.ParkingTotal).toLocaleString("en-IN")}`}
                         {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra ₹${Number(detail.agreement.ExtraChargesTotal).toLocaleString("en-IN")}`}
@@ -1483,7 +1589,6 @@ const CrmAgreement: React.FC = () => {
                 </div>
                 </div>
 
-                {/* Financial progress bar */}
                 {detail?.financialSummary && (() => {
                   const ag = detail.agreement;
                   const storedGrand = Number(ag?.GrandTotal ?? 0);
@@ -1501,30 +1606,29 @@ const CrmAgreement: React.FC = () => {
                   );
                 })()}
 
-                {/* AFS Registration */}
                 {detail.agreement?.Status === CrmStatus.REGISTERED && (
                   <div className="px-4 py-3 bg-green-500/[0.04] border-b border-green-200/60 dark:border-green-900/40 space-y-2">
-                    <p className="text-[11px] font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide flex items-center gap-1.5">
+                    <p className="text-[0.6875rem] font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide flex items-center gap-1.5">
                       <CheckCircle2 size={12} /> AFS Registration (Sub-Registrar)
                     </p>
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                       <div>
-                        <span className="text-[11px] text-muted-foreground block">Doc No.</span>
+                        <span className="text-[0.6875rem] text-muted-foreground block">Doc No.</span>
                         <span className="font-semibold font-mono">{detail.agreement.AfsRegistrationNo || "—"}</span>
                       </div>
                       <div>
-                        <span className="text-[11px] text-muted-foreground block">Registration Date</span>
+                        <span className="text-[0.6875rem] text-muted-foreground block">Registration Date</span>
                         <span className="font-semibold">{detail.agreement.AfsRegistrationDate ? String(detail.agreement.AfsRegistrationDate).slice(0, 10) : "—"}</span>
                       </div>
                       {detail.agreement.AfsStampDuty != null && (
                         <div>
-                          <span className="text-[11px] text-muted-foreground block">Stamp Duty Paid</span>
+                          <span className="text-[0.6875rem] text-muted-foreground block">Stamp Duty Paid</span>
                           <span className="font-semibold font-mono">{Number(detail.agreement.AfsStampDuty).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
                         </div>
                       )}
                       {detail.agreement.AfsRegistrationFee != null && (
                         <div>
-                          <span className="text-[11px] text-muted-foreground block">Registration Fee</span>
+                          <span className="text-[0.6875rem] text-muted-foreground block">Registration Fee</span>
                           <span className="font-semibold font-mono">{Number(detail.agreement.AfsRegistrationFee).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
                         </div>
                       )}
@@ -1532,19 +1636,18 @@ const CrmAgreement: React.FC = () => {
                   </div>
                 )}
 
-                {/* Version history */}
                 {revisions.length > 0 && (
                   <div className="px-4 py-3 border-b border-border">
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium mb-2">Version History (prior to v{detail.agreement?.VersionNo})</p>
+                    <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-medium mb-2">Version History (prior to v{detail.agreement?.VersionNo})</p>
                     <div className="space-y-1.5 text-xs">
                       {(revisions as any[]).map((r) => (
                         <div key={r.Id} className="rounded-lg border border-border p-2.5 bg-muted/20">
                           <div className="flex items-center gap-2 text-muted-foreground">
-                            <span className="px-1.5 py-0.5 rounded-full border border-violet-200 bg-violet-50 text-violet-600 text-[10px] font-medium">v{r.VersionNo}</span>
+                            <span className="px-1.5 py-0.5 rounded-full border border-violet-200 bg-violet-50 text-violet-600 text-[0.625rem] font-medium">v{r.VersionNo}</span>
                             <span>{r.Reason}</span>
-                            <span className="text-[10px]">({String(r.CreatedAt).slice(0,16).replace("T"," ")}{r.CreatedByName ? ` · ${r.CreatedByName}` : ""})</span>
+                            <span className="text-[0.625rem]">({fmtIstIso(r.CreatedAt)}{r.CreatedByName ? ` · ${r.CreatedByName}` : ""})</span>
                           </div>
-                          <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5">
+                          <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
                             {r.LegalName && <div><span className="text-muted-foreground">Legal Name: </span>{r.LegalName}</div>}
                             {r.AgreementDate && <div><span className="text-muted-foreground">Agreement Date: </span>{String(r.AgreementDate).slice(0,10)}</div>}
                             {r.PanNo && <div><span className="text-muted-foreground">PAN: </span>{r.PanNo}</div>}
@@ -1561,7 +1664,7 @@ const CrmAgreement: React.FC = () => {
               {agrTab === "Legal & Approval" && (() => {
                 const a = detail.agreement;
                 const cancelled = isBookingCancelled(a);
-                const legalAssigned = !!a?.LegalExecutiveId;
+                const legalAssigned = a?.LegalExecutiveId != null;
                 const seniorStatus = a?.SeniorApprovalStatus;
                 const seniorApproved = seniorStatus === CrmStatus.APPROVED;
                 const seniorPending  = seniorStatus === CrmStatus.PENDING;
@@ -1582,21 +1685,19 @@ const CrmAgreement: React.FC = () => {
 
                 return (
                   <div className="space-y-4">
-                    {/* Legal Executive */}
                     <div className="rounded-xl border border-border overflow-hidden">
                       <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
                         <h3 className="text-sm font-semibold flex items-center gap-1.5">
                           <UserCircle2 size={15} className="text-primary" /> Legal Executive
                         </h3>
                         {legalAssigned
-                          ? <span className="text-[11px] text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full font-semibold">Assigned</span>
-                          : <span className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">Unassigned</span>
+                          ? <span className="text-[0.6875rem] text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full font-semibold">Assigned</span>
+                          : <span className="text-[0.6875rem] text-sky-600 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full font-semibold">Unassigned</span>
                         }
                       </div>
                       <div className="px-4 py-3 space-y-2">
                         <p className="text-xs text-muted-foreground">The person responsible for preparing this agreement's paperwork. Required before execution (server-enforced).</p>
-                        {/* Locked display when assigned and not actively changing */}
-                        {a?.LegalExecutiveId && !editingLegalExec && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled ? (
+                        {a?.LegalExecutiveId != null && !editingLegalExec && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled ? (
                           <div className="flex items-center gap-2">
                             <div className="flex items-center gap-2 flex-1 bg-muted/40 border border-border rounded-lg px-3 py-1.5">
                               <UserCircle2 size={14} className="text-primary shrink-0" />
@@ -1610,18 +1711,18 @@ const CrmAgreement: React.FC = () => {
                             </button>
                           </div>
                         ) : ["Registered", "Cancelled"].includes(a?.Status) || cancelled ? (
-                          <div className="font-medium text-sm">{a?.LegalExecutiveName || <span className="text-amber-600">Unassigned</span>}</div>
+                          <div className="font-medium text-sm">{a?.LegalExecutiveName || <span className="text-sky-600">Unassigned</span>}</div>
                         ) : (
                           <div className="flex items-center gap-2">
-                            <select
-                              value={a?.LegalExecutiveId ? String(a.LegalExecutiveId) : ""}
+                            <SearchableNativeSelect
+                              value={a?.LegalExecutiveId != null ? String(a.LegalExecutiveId) : ""}
                               disabled={assigningLegal}
                               onChange={(e) => handleAssignLegal(e.target.value)}
                               className={`flex-1 text-sm border rounded-lg px-2 py-1.5 bg-background disabled:opacity-40 ${
-                                a?.LegalExecutiveId ? "border-border" : "border-amber-300 text-amber-600"}`}>
+                                a?.LegalExecutiveId != null ? "border-border" : "border-sky-300 text-sky-600"}`}>
                               <option value="">— Unassigned —</option>
                               {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                            </select>
+                            </SearchableNativeSelect>
                             {editingLegalExec && (
                               <button
                                 onClick={() => setEditingLegalExec(false)}
@@ -1631,15 +1732,14 @@ const CrmAgreement: React.FC = () => {
                             )}
                           </div>
                         )}
-                        {!a?.LegalExecutiveId && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled && (
-                          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                        {a?.LegalExecutiveId == null && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled && (
+                          <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded px-2 py-1.5">
                             Assign someone now so they receive an immediate notification and can start preparing the paperwork.
                           </p>
                         )}
                       </div>
                     </div>
 
-                    {/* Approval Timeline */}
                     <div className="rounded-xl border border-border overflow-hidden">
                       <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
                         <h3 className="text-sm font-semibold flex items-center gap-1.5">
@@ -1655,18 +1755,17 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Step 1 — Senior Review */}
                       <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${seniorApproved ? "bg-green-500/[0.04]" : seniorRejected ? "bg-red-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(seniorApproved ? "done" : seniorRejected ? "warn" : seniorPending ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(seniorApproved ? "done" : seniorRejected ? "warn" : seniorPending ? "active" : "upcoming")}`}>
                           {seniorApproved ? <Check size={14} /> : seniorRejected ? <AlertCircle size={13} /> : 1}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Senior Review</span>
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${
+                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                               seniorApproved ? "text-green-600 bg-green-50 border-green-200"
                               : seniorRejected ? "text-red-600 bg-red-50 border-red-200"
-                              : "text-amber-600 bg-amber-50 border-amber-200"
+                              : "text-sky-600 bg-sky-50 border-sky-200"
                             }`}>{seniorStatus || "Pending"}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
@@ -1701,15 +1800,14 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Step 2 — Shared with Customer */}
                       <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${sent ? "bg-blue-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(sent ? "done" : seniorApproved ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(sent ? "done" : seniorApproved ? "active" : "upcoming")}`}>
                           {sent ? <Check size={14} /> : 2}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Shared with Customer</span>
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${
+                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                               sent ? "text-blue-600 bg-blue-50 border-blue-200" : "text-muted-foreground bg-muted/30 border-border"
                             }`}>{sent ? "Sent" : "Not sent"}</span>
                           </div>
@@ -1718,12 +1816,12 @@ const CrmAgreement: React.FC = () => {
                           </p>
                           {sent && a?.SentToCustomerAt && (
                             <p className="text-xs text-blue-600 flex items-center gap-1">
-                              <Send size={11} /> Sent {String(a.SentToCustomerAt).slice(0,16).replace("T"," ")}
+                              <Send size={11} /> Sent {fmtIstIso(a.SentToCustomerAt)}
                             </p>
                           )}
                           {seniorApproved && !sent && !cancelled && (
                             <button onClick={() => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0,10) : ""); setSendDialog(true); }}
-                              className="mt-0.5 text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
+                              className="mt-0.5 text-xs px-3 py-1.5 btn-module text-white rounded-lg font-semibold ">
                               Send to Customer Portal
                             </button>
                           )}
@@ -1733,7 +1831,7 @@ const CrmAgreement: React.FC = () => {
                                 <strong>Recheck requested ({a.RecheckCount}x):</strong> {a.LastRecheckRemarks || "No remark provided"}
                               </div>
                               <button onClick={() => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0,10) : ""); setSendDialog(true); }}
-                                className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
+                                className="text-xs px-3 py-1.5 btn-module text-white rounded-lg font-semibold ">
                                 Resend After Recheck
                               </button>
                             </div>
@@ -1741,18 +1839,17 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Step 3 — Customer Approval */}
                       <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${custApproved ? "bg-green-500/[0.04]" : custRecheck ? "bg-red-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(custApproved ? "done" : custRecheck ? "warn" : sent ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(custApproved ? "done" : custRecheck ? "warn" : sent ? "active" : "upcoming")}`}>
                           {custApproved ? <Check size={14} /> : custRecheck ? <AlertCircle size={13} /> : 3}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Customer Approval</span>
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${
+                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                               custApproved ? "text-green-600 bg-green-50 border-green-200"
                               : custRecheck ? "text-red-600 bg-red-50 border-red-200"
-                              : "text-amber-600 bg-amber-50 border-amber-200"
+                              : "text-sky-600 bg-sky-50 border-sky-200"
                             }`}>{custStatus || "Pending"}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
@@ -1768,13 +1865,13 @@ const CrmAgreement: React.FC = () => {
                           )}
                           {sent && !custApproved && !custRecheck && !cancelled && (
                             <div className="pt-1 border-t border-border/60 mt-1">
-                              <p className="text-[11px] text-muted-foreground mb-1.5 flex items-center gap-1">
+                              <p className="text-[0.6875rem] text-muted-foreground mb-1.5 flex items-center gap-1">
                                 <UserCircle2 size={11} /> Customer not on portal?
                               </p>
                               <div className="flex flex-wrap gap-2">
                                 <button
                                   onClick={() => setProxyApproveDialog(true)}
-                                  className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5"
+                                  className="text-xs px-3 py-1.5 bg-sky-50 border border-sky-300 text-sky-800 rounded-lg font-semibold hover:bg-sky-100 flex items-center gap-1.5"
                                 >
                                   <UserCircle2 size={12} /> Record Approval on Their Behalf
                                 </button>
@@ -1790,24 +1887,23 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Step 4 — Agreement Date */}
                       <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${dated ? "bg-green-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(dated ? "done" : a?.DateApprovalStatus === CrmStatus.PENDING ? "warn" : custApproved ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(dated ? "done" : a?.DateApprovalStatus === CrmStatus.PENDING ? "warn" : custApproved ? "active" : "upcoming")}`}>
                           {dated ? <Check size={14} /> : <CalendarDays size={13} />}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Agreement Date</span>
                             {dated ? (
-                              <span className="text-[11px] px-2 py-0.5 rounded-full border font-semibold text-green-600 bg-green-50 border-green-200">
+                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-green-600 bg-green-50 border-green-200">
                                 Confirmed: {String(a.AgreementDate).slice(0,10)}
                               </span>
                             ) : a?.ProposedDate ? (
-                              <span className="text-[11px] px-2 py-0.5 rounded-full border font-semibold text-purple-600 bg-purple-50 border-purple-200">
+                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-purple-600 bg-purple-50 border-purple-200">
                                 Proposed: {String(a.ProposedDate).slice(0,10)}
                               </span>
                             ) : (
-                              <span className="text-[11px] px-2 py-0.5 rounded-full border font-semibold text-muted-foreground bg-muted/30 border-border">Not set</span>
+                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-muted-foreground bg-muted/30 border-border">Not set</span>
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground">
@@ -1815,7 +1911,7 @@ const CrmAgreement: React.FC = () => {
                           </p>
                           {!dated && custApproved && !cancelled && (() => {
                             if (a?.DateApprovalStatus === CrmStatus.PENDING) return (
-                              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 flex items-center gap-1.5">
+                              <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded px-2 py-1.5 flex items-center gap-1.5">
                                 <Clock size={11} /> Date matched — awaiting super admin sign-off
                               </p>
                             );
@@ -1823,10 +1919,10 @@ const CrmAgreement: React.FC = () => {
                               <div className="space-y-2">
                                 <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock size={11} /> Awaiting customer's response on proposed date {String(a.ProposedDate).slice(0,10)}</p>
                                 <div className="border-t border-border/60 pt-1.5">
-                                  <p className="text-[11px] text-muted-foreground mb-1.5 flex items-center gap-1"><UserCircle2 size={11} /> Customer not on portal?</p>
+                                  <p className="text-[0.6875rem] text-muted-foreground mb-1.5 flex items-center gap-1"><UserCircle2 size={11} /> Customer not on portal?</p>
                                   <button
                                     onClick={() => setProxyDateDialog(true)}
-                                    className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 flex items-center gap-1.5"
+                                    className="text-xs px-3 py-1.5 bg-sky-50 border border-sky-300 text-sky-800 rounded-lg font-semibold hover:bg-sky-100 flex items-center gap-1.5"
                                   >
                                     <UserCircle2 size={12} /> Accept Date on Their Behalf
                                   </button>
@@ -1848,17 +1944,17 @@ const CrmAgreement: React.FC = () => {
                             return (
                               <div className="space-y-2">
                                 <button onClick={() => { setSendDate(preferredAgrDate); setProposeDateDialog(true); }}
-                                  className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
+                                  className="text-xs px-3 py-1.5 btn-module text-white rounded-lg font-semibold ">
                                   Propose Agreement Date
                                 </button>
                                 <div className="border-t border-border/60 pt-1.5">
-                                  <p className="text-[11px] text-muted-foreground mb-1.5 flex items-center gap-1"><UserCircle2 size={11} /> Customer communicated a date off-portal?</p>
+                                  <p className="text-[0.6875rem] text-muted-foreground mb-1.5 flex items-center gap-1"><UserCircle2 size={11} /> Customer communicated a date off-portal?</p>
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <input type="date" value={proxyProposedDate} onChange={(e) => setProxyProposedDate(e.target.value)}
+                                    <DateInput value={proxyProposedDate} onChange={(e) => setProxyProposedDate(e.target.value)}
                                       className="text-xs border border-border rounded-md px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
                                     <button onClick={() => proxyProposedDate && setProxyProposeDateDialog(true)}
                                       disabled={!proxyProposedDate}
-                                      className="text-xs px-3 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg font-semibold hover:bg-amber-100 disabled:opacity-40 flex items-center gap-1.5">
+                                      className="text-xs px-3 py-1.5 bg-sky-50 border border-sky-300 text-sky-800 rounded-lg font-semibold hover:bg-sky-100 disabled:opacity-40 flex items-center gap-1.5">
                                       <UserCircle2 size={12} /> Record Customer's Proposed Date
                                     </button>
                                   </div>
@@ -1868,14 +1964,14 @@ const CrmAgreement: React.FC = () => {
                           })()}
                           {dateHistory.length > 0 && (
                             <div className="mt-1 space-y-1 border-t border-border/60 pt-2">
-                              <p className="text-[11px] text-muted-foreground font-medium flex items-center gap-1"><FolderClock size={11} /> Negotiation history</p>
+                              <p className="text-[0.6875rem] text-muted-foreground font-medium flex items-center gap-1"><FolderClock size={11} /> Negotiation history</p>
                               {(dateHistory as any[]).map((h) => (
-                                <div key={h.Id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                <div key={h.Id} className="flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
                                   <span className={`px-1.5 py-0.5 rounded-full border font-medium ${h.ProposedBy === "Company" ? "text-purple-600 bg-purple-50 border-purple-200" : "text-blue-600 bg-blue-50 border-blue-200"}`}>
                                     {h.ProposedBy}
                                   </span>
                                   proposed {String(h.ProposedDate).slice(0,10)}
-                                  <span className="text-[10px]">· {String(h.CreatedAt).slice(0,10)}{h.CreatedByName ? ` by ${h.CreatedByName}` : ""}</span>
+                                  <span className="text-[0.625rem]">· {String(h.CreatedAt).slice(0,10)}{h.CreatedByName ? ` by ${h.CreatedByName}` : ""}</span>
                                 </div>
                               ))}
                             </div>
@@ -1883,15 +1979,14 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Step 5 — Execution & Registration */}
                       <div className={`px-4 py-4 flex items-start gap-3 ${executed ? "bg-green-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 mt-0.5 ${circleCls(a?.Status === CrmStatus.REGISTERED ? "done" : a?.Status === CrmStatus.EXECUTED ? "active" : dated ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(a?.Status === CrmStatus.REGISTERED ? "done" : a?.Status === CrmStatus.EXECUTED ? "active" : dated ? "active" : "upcoming")}`}>
                           {a?.Status === CrmStatus.REGISTERED ? <Check size={14} /> : <BarChart3 size={13} />}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Execution &amp; Registration</span>
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${
+                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                               a?.Status === CrmStatus.REGISTERED ? "text-green-600 bg-green-50 border-green-200"
                               : a?.Status === CrmStatus.EXECUTED ? "text-blue-600 bg-blue-50 border-blue-200"
                               : "text-muted-foreground bg-muted/30 border-border"
@@ -1938,14 +2033,14 @@ const CrmAgreement: React.FC = () => {
                   </div>
                   {fp.required > 0 && (
                     <div className="space-y-1">
-                      <div className="flex items-center justify-between text-[11px]">
+                      <div className="flex items-center justify-between text-[0.6875rem]">
                         <span className="text-muted-foreground">Mandatory docs: {fp.uploaded}/{fp.required} uploaded{allVerified ? "" : ` · ${(detail.documents || []).filter((d: any) => d.IsMandatory && d.Status === "Verified").length} verified`}</span>
-                        <span className={`font-semibold ${fp.percent === 100 && allVerified ? "text-green-600" : fp.percent === 100 ? "text-amber-600" : "text-muted-foreground"}`}>{fp.percent}%</span>
+                        <span className={`font-semibold ${fp.percent === 100 && allVerified ? "text-green-600" : fp.percent === 100 ? "text-sky-600" : "text-muted-foreground"}`}>{fp.percent}%</span>
                       </div>
                       <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all ${
-                            allVerified ? "bg-green-500" : fp.percent === 100 ? "bg-amber-500" : "bg-primary"
+                            allVerified ? "bg-green-500" : fp.percent === 100 ? "bg-sky-500" : "bg-primary"
                           }`}
                           style={{ width: `${fp.percent}%` }}
                         />
@@ -1956,13 +2051,6 @@ const CrmAgreement: React.FC = () => {
                 {!detail.documents?.length ? (
                   <div className="p-4 text-center text-muted-foreground text-sm">No documents uploaded yet</div>
                 ) : (detail.documents as any[]).map((d: any) => {
-                  // "Requested" no longer always means waiting on the
-                  // customer — the SaleAgreement baseline document (seeded
-                  // automatically on every agreement) is staff/Legal-
-                  // Executive-uploaded, so it needs its own label instead of
-                  // the misleading "Awaiting upload from customer" that was
-                  // previously shown for every Requested-status document
-                  // regardless of who's actually supposed to attach it.
                   const awaitingUpload = d.Status === "Requested" && !d.FilePath && !d.DocumentUrl;
                   const awaitingCustomer = awaitingUpload && d.UploadedByType === "Customer";
                   const awaitingStaff = awaitingUpload && d.UploadedByType !== "Customer";
@@ -1973,7 +2061,6 @@ const CrmAgreement: React.FC = () => {
                       <div className="w-[3px] shrink-0 self-stretch" style={{ background: docRail }} />
                       <div className="flex-1 min-w-0 px-4 py-3.5 flex items-center gap-4">
 
-                        {/* Icon box */}
                         <div className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center border ${
                           d.Status === "Verified" ? "bg-green-100 border-green-200 dark:bg-green-900/40 dark:border-green-800" :
                           d.Status === "Rejected" ? "bg-red-100 border-red-200 dark:bg-red-900/40 dark:border-red-800" :
@@ -1981,54 +2068,52 @@ const CrmAgreement: React.FC = () => {
                           "bg-muted/60 border-border"
                         }`}>
                           {awaitingUpload
-                            ? <Clock size={15} className="text-amber-500" />
+                            ? <Clock size={15} className="text-sky-500" />
                             : React.cloneElement(mimeIcon(d.MimeType) as React.ReactElement, { size: 15 })}
                         </div>
 
-                        {/* Name + meta */}
                         <button onClick={() => setPreviewDoc(d)} className="flex-1 min-w-0 text-left">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-semibold leading-tight">
                               {d.Label || d.DocumentType.replace(/([A-Z])/g, " $1").trim()}
                             </span>
-                            {d.IsMandatory && <span className="text-[10px] text-red-500 font-bold">REQUIRED</span>}
-                            {d.VersionNo > 1 && <span className="text-[10px] text-violet-600 border border-violet-200 bg-violet-50 rounded px-1 font-medium">v{d.VersionNo}</span>}
+                            {d.IsMandatory && <span className="text-[0.625rem] text-red-500 font-bold">REQUIRED</span>}
+                            {d.VersionNo > 1 && <span className="text-[0.625rem] text-violet-600 border border-violet-200 bg-violet-50 rounded px-1 font-medium">v{d.VersionNo}</span>}
                             {d.UploadedByType === "Customer" && (
-                              <span className="flex items-center gap-0.5 text-[10px] text-violet-600 border border-violet-200 bg-violet-50 rounded px-1.5 py-0.5 font-medium">
+                              <span className="flex items-center gap-0.5 text-[0.625rem] text-violet-600 border border-violet-200 bg-violet-50 rounded px-1.5 py-0.5 font-medium">
                                 <UserCircle2 size={9} /> Customer
                               </span>
                             )}
                           </div>
                           <div className="mt-0.5 flex items-center gap-2 flex-wrap">
                             {awaitingCustomer ? (
-                              <span className="text-[11px] text-amber-600">Awaiting customer upload{d.RequestedAt ? ` · requested ${String(d.RequestedAt).slice(0, 10)}` : ""}</span>
+                              <span className="text-[0.6875rem] text-amber-600">Awaiting customer upload{d.RequestedAt ? ` · requested ${String(d.RequestedAt).slice(0, 10)}` : ""}</span>
                             ) : awaitingStaff ? (
-                              <span className="text-[11px] text-amber-600">Pending — Legal Executive to attach{d.RequestedAt ? ` · ${String(d.RequestedAt).slice(0, 10)}` : ""}</span>
+                              <span className="text-[0.6875rem] text-amber-600">Pending — Legal Executive to attach{d.RequestedAt ? ` · ${String(d.RequestedAt).slice(0, 10)}` : ""}</span>
                             ) : (
                               <>
-                                {d.FileName && <span className="text-[11px] text-muted-foreground truncate max-w-[200px]">{d.FileName}</span>}
-                                {d.FileSize && <span className="text-[11px] text-muted-foreground">{fmtBytes(d.FileSize)}</span>}
-                                {d.IssuedBy && <span className="text-[11px] text-muted-foreground">by {d.IssuedBy}</span>}
-                                {(d.FilePath || d.DocumentUrl) && <Eye size={11} className="text-muted-foreground/60" />}
+                                {d.FileName && <span className="text-[0.6875rem] text-muted-foreground truncate max-w-[200px]">{d.FileName}</span>}
+                                {d.FileSize && <span className="text-[0.6875rem] text-muted-foreground">{fmtBytes(d.FileSize)}</span>}
+                                {d.IssuedBy && <span className="text-[0.6875rem] text-muted-foreground">by {d.IssuedBy}</span>}
+                                
                               </>
                             )}
                           </div>
                         </button>
 
-                        {/* Status + actions */}
                         <div className="shrink-0 flex items-center gap-2">
-                          <span className={`text-[11px] px-2.5 py-1 rounded-lg border font-semibold ${docStatusColor[d.Status] || "text-muted-foreground border-border"}`}>
+                          <span className={`text-[0.6875rem] px-2.5 py-1 rounded-lg border font-semibold ${docStatusColor[d.Status] || "text-muted-foreground border-border"}`}>
                             {d.Status}
                           </span>
                           {!!d.FilePath && d.Status !== "Verified" && (
                             <button title="Quick verify" onClick={() => handleDocStatusChange(d.Id, "Verified")}
-                              className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 font-semibold dark:bg-green-900/30 dark:border-green-800 dark:text-green-400">
+                              className="flex items-center gap-1 text-[0.6875rem] px-2.5 py-1 rounded-lg border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 font-semibold dark:bg-green-900/30 dark:border-green-800 dark:text-green-400">
                               <Check size={11} /> Verify
                             </button>
                           )}
                           {!!d.FilePath && d.Status !== CrmStatus.REJECTED && (
                             <button title="Reject (opens review — a reason is required)" onClick={() => setPreviewDoc(d)}
-                              className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 font-semibold dark:bg-red-900/30 dark:border-red-800">
+                              className="flex items-center gap-1 text-[0.6875rem] px-2.5 py-1 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 font-semibold dark:bg-red-900/30 dark:border-red-800">
                               <X size={11} /> Reject
                             </button>
                           )}
@@ -2040,6 +2125,52 @@ const CrmAgreement: React.FC = () => {
               </div>
                 );
               })()}
+
+              {agrTab === "Timeline" && (
+                <AgreementTimeline
+                  agreement={detail.agreement}
+                  bookingId={detail.agreement.BookingId}
+                  onJump={(t) => setAgrTab(t)}
+                  canViewAfsPay={afsPayRights.canView}
+                  canViewAfsReg={afsRegRights.canView}
+                />
+              )}
+
+              {agrTab === "AFS Payment" && (
+                afsPayRights.canView ? (
+                  <CrmAfsQueryPayment
+                    embeddedBookingId={detail.agreement.BookingId}
+                    agreementStatus={detail.agreement.Status}
+                    onChanged={() => {
+                      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+                      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+                      qc.invalidateQueries({ queryKey: ["crm-afs-query-payment-booking", detail.agreement.BookingId] });
+                      qc.invalidateQueries({ queryKey: ["crm-afs-registry-booking", detail.agreement.BookingId] });
+                    }}
+                  />
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                    You don't have access to the AFS Query Payment stage.
+                  </div>
+                )
+              )}
+
+              {agrTab === "AFS Registry" && (
+                afsRegRights.canView ? (
+                  <CrmAfsRegistry
+                    embeddedBookingId={detail.agreement.BookingId}
+                    onChanged={() => {
+                      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+                      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+                      qc.invalidateQueries({ queryKey: ["crm-afs-registry-booking", detail.agreement.BookingId] });
+                    }}
+                  />
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                    You don't have access to the AFS Registry stage.
+                  </div>
+                )
+              )}
             </>
           )}
         </div>
@@ -2047,26 +2178,30 @@ const CrmAgreement: React.FC = () => {
 
       {/* New Agreement Dialog */}
       <Dialog open={agrDialog} onOpenChange={(o) => { if (!o) setAgrDialog(false); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="font-heading">New Agreement</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={agrForm.BookingId} onChange={(e) => setAgrForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <SearchableNativeSelect value={agrForm.BookingId} onChange={(e) => setAgrForm((f) => ({
+                  ...f,
+                  BookingId: e.target.value,
+                  LegalName: "", PanNo: "", AadhaarNo: "", LegalAddress: "",
+                }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(bookings as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
               {bookings.length === 0 && (
                 <p className="text-xs text-muted-foreground mt-1">
                   No bookings are eligible yet — a booking needs to be Approved, have its welcome call marked
-                  Welcomed, and have customer bank/nominee/PAN/Aadhaar details on file before an agreement can be created.
+                  Welcomed, and have customer bank/PAN/Aadhaar details on file before an agreement can be created.
                 </p>
               )}
               {bkgFilter && !(bookings as any[]).some((b) => String(b.Id) === String(bkgFilter)) && (
-                <p className="text-xs text-amber-600 mt-1">
+                <p className="text-xs text-sky-600 mt-1">
                   This dialog was opened for a specific booking, but that booking isn't eligible for an agreement yet
                   — pick from the list above, or complete its remaining prerequisites first.
                 </p>
@@ -2074,13 +2209,13 @@ const CrmAgreement: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
-              <select value={agrForm.LegalExecutiveId} onChange={(e) => setAgrForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
+              <SearchableNativeSelect value={agrForm.LegalExecutiveId} onChange={(e) => setAgrForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">— Unassigned —</option>
                 {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-              </select>
+              </SearchableNativeSelect>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
                 { key: "LegalName",    label: "Legal Name",      type: "text" },
                 { key: "PanNo",        label: "PAN No",          type: "text" },
@@ -2088,7 +2223,7 @@ const CrmAgreement: React.FC = () => {
               ].map(({ key, label, type }) => (
                 <div key={key}>
                   <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                  <input type={type} value={agrForm[key as keyof typeof agrForm]}
+                  <AutoInput type={type} value={agrForm[key as keyof typeof agrForm]}
                     onChange={(e) => setAgrForm((f) => ({ ...f, [key]: key === "PanNo" ? e.target.value.toUpperCase() : e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
@@ -2109,18 +2244,16 @@ const CrmAgreement: React.FC = () => {
             <button onClick={() => setAgrDialog(false)}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSaveAgreement} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Creating..." : "Create Agreement"}
             </button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Send to Customer Portal Dialog — proposed date is a real date
-          picker now (was a bare window.prompt), and pre-fills with the
-          agreement's existing company-proposed date on resend. */}
+      {/* Send to Customer Portal Dialog */}
       <Dialog open={sendDialog} onOpenChange={(o) => { if (!o) { setSendDialog(false); setSendDate(""); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Send to Customer Portal</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
@@ -2128,23 +2261,22 @@ const CrmAgreement: React.FC = () => {
             </p>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Proposed Agreement Date (optional)</label>
-              <input type="date" value={sendDate} onChange={(e) => setSendDate(e.target.value)}
+              <DateInput value={sendDate} onChange={(e) => setSendDate(e.target.value)}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              <p className="text-[11px] text-muted-foreground mt-1">If the customer proposes the same date, it's confirmed automatically as the Agreement Date.</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-1">If the customer proposes the same date, it's confirmed automatically as the Agreement Date.</p>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setSendDialog(false); setSendDate(""); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={() => handleSendToCustomer(sendDate)} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40">
               {saving ? "Sending..." : "Send"}
             </button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Proxy: Record customer approval on their behalf (off-portal) */}
       {proxyApproveDialog && (
         <ProxyActionDialog
           title="Record Customer Approval"
@@ -2156,7 +2288,6 @@ const CrmAgreement: React.FC = () => {
         />
       )}
 
-      {/* Proxy: Record customer recheck request on their behalf (off-portal) */}
       {proxyRecheckDialog && (
         <ProxyActionDialog
           title="Record Customer Recheck Request"
@@ -2168,7 +2299,6 @@ const CrmAgreement: React.FC = () => {
         />
       )}
 
-      {/* Proxy: Record date proposed by customer off-portal */}
       {proxyProposeDateDialog && (
         <ProxyActionDialog
           title="Record Customer's Proposed Date"
@@ -2180,7 +2310,6 @@ const CrmAgreement: React.FC = () => {
         />
       )}
 
-      {/* Proxy: Accept proposed date on customer's behalf (off-portal) */}
       {proxyDateDialog && (
         <ProxyActionDialog
           title="Accept Date on Customer's Behalf"
@@ -2192,11 +2321,8 @@ const CrmAgreement: React.FC = () => {
         />
       )}
 
-      {/* Propose/Revise Agreement Date — one live proposed date, turn-based
-          between company and customer. Submitting here always moves the
-          negotiation to the customer's turn next (PendingCustomerReview). */}
       <Dialog open={proposeDateDialog} onOpenChange={(o) => { if (!o) { setProposeDateDialog(false); setSendDate(""); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Propose Agreement Date</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
@@ -2204,10 +2330,10 @@ const CrmAgreement: React.FC = () => {
             </p>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Proposed Agreement Date</label>
-              <input type="date" value={sendDate} onChange={(e) => setSendDate(e.target.value)}
+              <DateInput value={sendDate} onChange={(e) => setSendDate(e.target.value)}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
               {preferredAgrDate && sendDate === preferredAgrDate && (
-                <p className="text-[11px] text-blue-600 mt-1 flex items-center gap-1">
+                <p className="text-[0.6875rem] text-blue-600 mt-1 flex items-center gap-1">
                   <span>ⓘ</span> Pre-filled from welcome call discussion
                 </p>
               )}
@@ -2217,18 +2343,15 @@ const CrmAgreement: React.FC = () => {
             <button onClick={() => { setProposeDateDialog(false); setSendDate(""); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={() => handleProposeDate(sendDate)} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40">
               {saving ? "Saving..." : "Propose Date"}
             </button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Mark Registered Dialog — collects the AFS registration details received
-          from the Sub-Registrar (Doc No + date). The physical AFS is registered
-          outside the system; this records the outcome of that event. */}
       <Dialog open={regDialog} onOpenChange={(o) => { if (!o) { setRegDialog(false); setRegFeesLocked(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-heading">Mark Agreement Registered</DialogTitle>
           </DialogHeader>
@@ -2247,41 +2370,39 @@ const CrmAgreement: React.FC = () => {
                 onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationNo: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
               />
-              <p className="text-[11px] text-muted-foreground mt-1">Doc No. issued by Sub-Registrar at the time of AFS registration.</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-1">Doc No. issued by Sub-Registrar at the time of AFS registration.</p>
             </div>
             <div>
               <label className="text-xs font-medium text-foreground block mb-1">AFS Registration Date <span className="text-red-500">*</span></label>
-              <input
-                type="date"
+              <DateInput
                 value={regForm.AfsRegistrationDate}
                 onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationDate: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
               />
             </div>
-            {/* Fee fields — locked when pre-filled from AFS QP, unlock to edit */}
             <div className={`rounded-lg border ${regFeesLocked ? "border-green-200 bg-green-500/[0.04] dark:border-green-900/50" : "border-border"} p-3 space-y-2`}>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold text-foreground">Government Fees</p>
                   {regFeesLocked && (
-                    <p className="text-[11px] text-green-700 dark:text-green-400 mt-0.5">Pre-filled from confirmed AFS Query Payment — verify against Sub-Registrar receipt</p>
+                    <p className="text-[0.6875rem] text-green-700 dark:text-green-400 mt-0.5">Pre-filled from confirmed AFS Query Payment — verify against Sub-Registrar receipt</p>
                   )}
                 </div>
                 {regFeesLocked ? (
                   <button type="button" onClick={() => setRegFeesLocked(false)}
-                    className="shrink-0 text-[11px] px-2 py-1 rounded-lg border border-border text-muted-foreground hover:bg-muted font-medium">
+                    className="shrink-0 text-[0.6875rem] px-2 py-1 rounded-lg border border-border text-muted-foreground hover:bg-muted font-medium">
                     Edit amounts
                   </button>
                 ) : (regForm.AfsStampDuty !== "" || regForm.AfsRegistrationFee !== "") ? (
                   <button type="button" onClick={() => setRegFeesLocked(true)}
-                    className="shrink-0 text-[11px] px-2 py-1 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 font-medium dark:border-green-700 dark:text-green-400">
+                    className="shrink-0 text-[0.6875rem] px-2 py-1 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 font-medium dark:border-green-700 dark:text-green-400">
                     Lock amounts
                   </button>
                 ) : null}
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[11px] text-muted-foreground block mb-1">Stamp Duty (₹)</label>
+                  <label className="text-[0.6875rem] text-muted-foreground block mb-1">Stamp Duty (₹)</label>
                   <input
                     type="number" placeholder="0"
                     value={regForm.AfsStampDuty}
@@ -2291,7 +2412,7 @@ const CrmAgreement: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] text-muted-foreground block mb-1">Registration Fee (₹)</label>
+                  <label className="text-[0.6875rem] text-muted-foreground block mb-1">Registration Fee (₹)</label>
                   <input
                     type="number" placeholder="0"
                     value={regForm.AfsRegistrationFee}
@@ -2301,27 +2422,22 @@ const CrmAgreement: React.FC = () => {
                   />
                 </div>
               </div>
-              <p className="text-[11px] text-muted-foreground">Stamp duty paid at AFS registration is creditable against Sale Deed stamp duty — the Sale Deed fee calculation will use this figure.</p>
+              <p className="text-[0.6875rem] text-muted-foreground">Stamp duty paid at AFS registration is creditable against Sale Deed stamp duty — the Sale Deed fee calculation will use this figure.</p>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setRegDialog(false); setRegFeesLocked(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleMarkRegistered} disabled={regSaving || !regForm.AfsRegistrationNo.trim() || !regForm.AfsRegistrationDate}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {regSaving ? "Saving..." : "Confirm Registration"}
             </button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Add Document Dialog — file upload is the primary path; File Name/
-          type/size are always taken from the real uploaded file, never
-          hand-typed, so the record can't drift from what was actually
-          attached. Pasting an external URL stays available as a fallback
-          for links that live outside our own storage. */}
       <Dialog open={docDialog} onOpenChange={(o) => { if (!o) { setDocDialog(false); setShowUrlField(false); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">Add Document</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -2350,7 +2466,7 @@ const CrmAgreement: React.FC = () => {
               className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 border-2 border-dashed border-border rounded-lg text-sm font-medium text-muted-foreground hover:border-primary/50 hover:text-primary disabled:opacity-40">
               <Upload size={14} /> {uploadingDocs ? "Uploading..." : "Upload File(s)"}
             </button>
-            <p className="text-[11px] text-muted-foreground text-center">PDF, images, Word, Excel · up to 10 files, 25 MB each</p>
+            <p className="text-[0.6875rem] text-muted-foreground text-center">PDF, images, Word, Excel · up to 10 files, 25 MB each</p>
 
             {showUrlField ? (
               <div className="flex items-center gap-2 pt-1">
@@ -2374,12 +2490,8 @@ const CrmAgreement: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Request Document Dialog — asks the customer for a document via
-          their portal instead of staff attaching it on their behalf. Shows
-          up there immediately as an open request once the agreement is
-          sent; their upload flips it to Submitted for review here. */}
       <Dialog open={docRequestDialog} onOpenChange={(o) => { if (!o) setDocRequestDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Request Document from Customer</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -2405,7 +2517,7 @@ const CrmAgreement: React.FC = () => {
             <button onClick={() => setDocRequestDialog(false)}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleRequestDocument} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Requesting..." : "Request"}
             </button>
           </div>
@@ -2421,27 +2533,23 @@ const CrmAgreement: React.FC = () => {
         />
       )}
 
-      {/* Edit Details — every save snapshots the prior values into Version
-          History (see backend PUT /:id) rather than silently overwriting them.
-          When Allotment Letter is Issued, legal fields are formally committed
-          and any change is treated as an amendment: reason becomes mandatory. */}
       <Dialog open={editDialog} onOpenChange={(o) => { if (!o) { setEditDialog(false); setEditLocked(true); } }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent accent="crm" className="max-w-lg">
           {(() => {
-            const alIssued = detail?.agreement?.AllotmentLetterStatus === "Issued";
-            const alIssuedOn = detail?.agreement?.AllotmentLetterIssuedOn;
+            const alIssued = false;
+            const alIssuedOn = null;
             return (
               <>
                 <DialogHeader>
                   <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
                     <span className="flex items-center gap-1.5">
-                      {alIssued && <Lock size={14} className="text-amber-600 shrink-0" />}
+                      {alIssued && <Lock size={14} className="text-sky-600 shrink-0" />}
                       {alIssued ? "Amend Agreement Details" : "Edit Agreement Details"}
                     </span>
                     {editLocked && (
                       <button onClick={() => setEditLocked(false)}
                         className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded-lg hover:bg-muted transition-colors shrink-0 ${
-                          alIssued ? "border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100" : "border-border"
+                          alIssued ? "border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100" : "border-border"
                         }`}>
                         <Pencil size={12} /> {alIssued ? "Unlock for Amendment" : "Edit"}
                       </button>
@@ -2450,7 +2558,7 @@ const CrmAgreement: React.FC = () => {
                 </DialogHeader>
                 {editLocked ? (
                   alIssued ? (
-                    <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 -mt-1">
+                    <div className="flex items-start gap-2 text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 -mt-1">
                       <Lock size={12} className="shrink-0 mt-0.5" />
                       <span>
                         Allotment Letter issued{alIssuedOn ? ` on ${String(alIssuedOn).slice(0, 10)}` : ""} — legal details are formally committed.
@@ -2463,7 +2571,7 @@ const CrmAgreement: React.FC = () => {
                     </div>
                   )
                 ) : alIssued ? (
-                  <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 -mt-1">
+                  <div className="flex items-start gap-2 text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 -mt-1">
                     <ShieldAlert size={12} className="shrink-0 mt-0.5" />
                     <span>
                       <strong>Amendment mode</strong> — the Allotment Letter has been issued. Any changes to legal details
@@ -2475,13 +2583,13 @@ const CrmAgreement: React.FC = () => {
                 <div className="space-y-3">
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
-                    <select value={editForm.LegalExecutiveId} disabled={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
+                    <SearchableNativeSelect value={editForm.LegalExecutiveId} disabled={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
                       className={editInputCls}>
                       <option value="">— Unassigned —</option>
                       {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                    </select>
+                    </SearchableNativeSelect>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs text-muted-foreground block mb-1">Legal Name</label>
                       <input type="text" value={editForm.LegalName} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalName: e.target.value }))}
@@ -2505,13 +2613,13 @@ const CrmAgreement: React.FC = () => {
                   </div>
                   {!editLocked && (
                     <div>
-                      <label className={`text-xs block mb-1 ${alIssued ? "text-amber-700 font-medium" : "text-muted-foreground"}`}>
+                      <label className={`text-xs block mb-1 ${alIssued ? "text-sky-700 font-medium" : "text-muted-foreground"}`}>
                         {alIssued ? <>Amendment Reason <span className="text-red-500">*</span></> : "Reason for this revision"}
                       </label>
                       <input type="text" value={editForm.RevisionReason} onChange={(e) => setEditForm((f) => ({ ...f, RevisionReason: e.target.value }))}
                         placeholder={alIssued ? "Required — e.g. Customer requested name correction (affidavit attached)" : "e.g. Customer requested recheck — corrected spelling"}
-                        className={`w-full text-sm border rounded px-2 py-1.5 bg-background ${alIssued ? "border-amber-300 focus:border-amber-500" : "border-border"}`} />
-                      {alIssued && <p className="text-[11px] text-amber-600 mt-1">Required when legal details change after Allotment Letter is issued. Saved permanently in version history.</p>}
+                        className={`w-full text-sm border rounded px-2 py-1.5 bg-background ${alIssued ? "border-sky-300 focus:border-sky-500" : "border-border"}`} />
+                      {alIssued && <p className="text-[0.6875rem] text-sky-600 mt-1">Required when legal details change after Allotment Letter is issued. Saved permanently in version history.</p>}
                     </div>
                   )}
                 </div>
@@ -2523,7 +2631,7 @@ const CrmAgreement: React.FC = () => {
                       <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                       <button onClick={handleSaveEdit} disabled={saving}
                         className={`px-4 py-1.5 text-sm rounded-lg font-medium disabled:opacity-40 ${
-                          alIssued ? "bg-amber-600 text-white hover:bg-amber-700" : "bg-primary text-primary-foreground hover:bg-primary/90"
+                          alIssued ? "bg-sky-600 text-white hover:bg-sky-700" : "btn-module text-white "
                         }`}>
                         {saving ? "Saving..." : alIssued ? "Save Amendment" : "Save"}
                       </button>

@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool } = require("../db");
+const { projectPredicate } = require("../services/projectScope");
 // No extra permission gate here — /api routes are already protected by
 // authMiddleware at the server level. Any authenticated user granted Civil
 // Work DPR rights can view aggregate dashboard stats.
@@ -29,6 +30,13 @@ const { getPool } = require("../db");
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
+    // Project scoping: a restricted user's tiles/feeds only count their projects.
+    const scope = req.projectScope;
+    const caProject = projectPredicate(scope, "ProjectId");
+    const dmProject = projectPredicate(scope, "dm.ProjectId");
+    const rungInScope = scope
+      ? `AND DependencyMasterActivityId IN (SELECT dma2.Id FROM dbo.DependencyMasterActivity dma2 JOIN dbo.DependencyMaster dm2 ON dm2.Id = dma2.DependencyMasterId WHERE 1=1${projectPredicate(scope, "dm2.ProjectId")})`
+      : "";
 
     const [
       activityStats,
@@ -58,6 +66,7 @@ router.get("/", async (req, res) => {
                                                                                 AS TodayCount,
           COUNT(CASE WHEN IsAcknowledged = 0 AND StartDate IS NULL THEN 1 END) AS NewCount
         FROM dbo.ContractorAllocation
+        WHERE 1=1${caProject}
       `),
 
       // ── Daily Labour (today) ────────────────────────────────────────────────
@@ -67,7 +76,7 @@ router.get("/", async (req, res) => {
           ISNULL(SUM(UnskilledLabourCount), 0)                                  AS UnskilledToday,
           COUNT(DISTINCT AllocationId)                                          AS CrewsToday
         FROM dbo.DailyLabourEntry
-        WHERE CAST(EntryDate AS DATE) = CAST(GETDATE() AS DATE)
+        WHERE CAST(EntryDate AS DATE) = CAST(GETDATE() AS DATE)${scope ? ` AND AllocationId IN (SELECT AllocationId FROM dbo.ContractorAllocation WHERE 1=1${caProject})` : ""}
       `),
 
       // ── Work Reporting's rung-level assignments (engineer/material,
@@ -79,6 +88,7 @@ router.get("/", async (req, res) => {
           COUNT(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END)
                                                                                 AS TodayCount
         FROM dbo.DependencyActivityAssignment
+        WHERE 1=1 ${rungInScope}
         GROUP BY Status
       `),
 
@@ -102,6 +112,7 @@ router.get("/", async (req, res) => {
         JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
         JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
         LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        WHERE 1=1${dmProject}
         ORDER BY daa.UpdatedAt DESC
       `),
 
@@ -109,7 +120,7 @@ router.get("/", async (req, res) => {
       pool.request().query(`
         SELECT CAST(CreatedAt AS DATE) AS Day, COUNT(*) AS Cnt
         FROM dbo.DependencyActivityAssignment
-        WHERE CAST(CreatedAt AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        WHERE CAST(CreatedAt AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE)) ${rungInScope}
         GROUP BY CAST(CreatedAt AS DATE)
       `),
 
@@ -121,7 +132,7 @@ router.get("/", async (req, res) => {
         FROM dbo.DependencyActivityAssignment
         WHERE Status = 'COMPLETED'
           AND UpdatedAt IS NOT NULL
-          AND CAST(UpdatedAt AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+          AND CAST(UpdatedAt AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE)) ${rungInScope}
         GROUP BY CAST(UpdatedAt AS DATE)
       `),
     ]);

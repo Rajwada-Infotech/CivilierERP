@@ -1,12 +1,31 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, paymentProjectSql, ebResolvedProjectSql, assertProjectRawAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a payment whose project is outside the user's scope.
+router.param("id", projectParamGuard(`SELECT ${paymentProjectSql("np")} AS ProjectId FROM dbo.NewPayment np WHERE np.PPaymentID = @id`));
+
+// A restricted user may only record a payment against a project they can see:
+// the one on the form, else the one on the invoice it settles.
+async function assertPaymentProjectAllowed(req, res, body) {
+  if (!req.projectScope) return true;
+  let raw = body?.PProject;
+  if ((raw == null || String(raw).trim() === "") && body?.PExpenseRef) {
+    const r = await getPool().request().input("d", sql.NVarChar(100), String(body.PExpenseRef))
+      .query(`SELECT TOP 1 ${ebResolvedProjectSql("eb")} AS pid FROM dbo.ExpenseBooking eb WHERE eb.EDocNo = @d`);
+    raw = r.recordset[0]?.pid;
+  }
+  return assertProjectRawAllowed(req, res, raw);
+}
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -23,8 +42,25 @@ const {
   replaceAllocations,
   getAllocationsForMany,
 } = require("../services/expenseHeadAllocation");
+const {
+  replaceLinks,
+  getLinks,
+  getLinksForMany,
+} = require("../services/paymentExpenseBookingLink");
 
-router.use(checkPermissionForMethod("Finance", "Payments"));
+// Approve/Reject are exempt from this blanket per-module permission gate —
+// transition() (approvalService.js) is the real authority there (role
+// whitelist / approval-inbox edit right / named workflow approver). Without
+// this, a person Approval Setup named as an approver but who never got this
+// module's own CanEdit permission under the legacy Finance/Payments role
+// grid got "Access denied" right here, before transition() ever ran — same
+// bug class already fixed by removing requirePageRight from those two
+// routes directly (this blanket check is a second, separate gate that fix
+// didn't reach).
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Finance", "Payments")(req, res, next);
+});
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -40,6 +76,120 @@ function normalizeBankId(value) {
   return Number.isFinite(bankId) && bankId > 0 ? bankId : null;
 }
 
+// "Merge invoices into one payment" (migration 501) — validates a proposed
+// set of ExpenseBooking ids and returns everything the create-payment route
+// needs to build the merged payment from scratch: the per-invoice link rows
+// (full settlement each, TDS already netted out) and the ONE shared
+// company/project/supplier every invoice in the set must agree on. Throws
+// (with .status = 400) on any mismatch — never trusts the client's own
+// company/project/partyId fields for a merged payment, since those are
+// derived here from the invoices themselves, not re-validated against them.
+async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
+  const ids = [...new Set(expenseBookingIds)]
+    .map((id) => parseInt(id, 10))
+    .filter((id) => Number.isInteger(id) && id > 0);
+  if (ids.length < 2) {
+    const err = new Error("Merging invoices requires at least two.");
+    err.status = 400;
+    throw err;
+  }
+
+  const req = pool.request();
+  const placeholders = ids.map((id, i) => {
+    req.input(`id${i}`, sql.Int, id);
+    return `@id${i}`;
+  });
+  const result = await req.query(`
+    SELECT
+      eb.Eid, eb.EDocNo, eb.EStatus, eb.EEmiPayment, eb.EBillStatus,
+      eb.ECompanyId, eb.EProjectName,
+      -- EProjectName is stored inconsistently — a numeric enterprise id as
+      -- text for most bookings, but a literal project NAME for others (same
+      -- ambiguity NewPayment.PCompany/PProject already have, see
+      -- resolvePaymentCompanyId's comment below). TRY_CAST-ing it to an int
+      -- and comparing THAT silently treated two invoices as "different
+      -- projects" whenever one was the numeric-id shape and the other the
+      -- literal-name shape, even though they displayed (and had already
+      -- passed the picker's own name-based filter) as the exact same
+      -- project. ProjectKey instead resolves to the enterprise's own name
+      -- when the value is a valid id, falling back to the raw value when
+      -- it's already a name — the same COALESCE expenseBooking.js's own
+      -- /options route already uses to DISPLAY a project name, so "same
+      -- project" here means exactly what the picker already showed the
+      -- user as matching.
+      COALESCE(proj.name, eb.EProjectName) AS ProjectKey,
+      ISNULL(eb.TDSAmount, 0) AS TDSAmount,
+      ISNULL(eb.ERemainingAmount, ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))) AS RemainingAmount,
+      CASE
+        WHEN eb.ESourceType = 'GRN'      AND eb.ESourceId IS NOT NULL THEN ahm.LHeadId
+        WHEN eb.ESourceType IN ('PO','WO_PO')                          THEN po_supp.LHeadId
+        WHEN eb.ESourceType = 'WORK_DONE'                              THEN wd_supp.LHeadId
+        WHEN eb.ESourceType = 'WO'                                     THEN wo_supp.LHeadId
+        ELSE eb.LHeadId
+      END AS SupplierId,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM dbo.DebitNote dn WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
+      ) THEN 1 ELSE 0 END AS HasActiveDebitNote
+    FROM dbo.ExpenseBooking eb
+    LEFT JOIN dbo.enterprise proj ON proj.id = TRY_CAST(eb.EProjectName AS INT)
+    LEFT JOIN dbo.GoodsReceiptNotes grn
+      ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+    LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
+    LEFT JOIN dbo.PurchaseOrders po_supp_po
+      ON eb.ESourceType IN ('PO','WO_PO') AND po_supp_po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+    LEFT JOIN dbo.AccountHeadMaster po_supp ON po_supp.LHeadId = po_supp_po.SupplierID
+    LEFT JOIN dbo.WorkDone wd_supp_wd
+      ON eb.ESourceType = 'WORK_DONE' AND wd_supp_wd.ID = TRY_CAST(eb.ESourceId AS INT)
+    LEFT JOIN dbo.AccountHeadMaster wd_supp ON wd_supp.LHeadId = wd_supp_wd.SupplierId
+    LEFT JOIN dbo.WorkOrderHeader wo_supp_wo
+      ON eb.ESourceType = 'WO' AND wo_supp_wo.Id = TRY_CAST(eb.ESourceId AS INT)
+    LEFT JOIN dbo.AccountHeadMaster wo_supp
+      ON wo_supp.LHeadId = COALESCE(wo_supp_wo.SupplierId, wo_supp_wo.ContractorId)
+    WHERE eb.Eid IN (${placeholders.join(",")})
+  `);
+
+  const rows = result.recordset;
+  const bad = (msg) => { const e = new Error(msg); e.status = 400; throw e; };
+
+  if (rows.length !== ids.length) bad("One or more invoices in this merge could not be found.");
+  for (const r of rows) {
+    if (r.EStatus !== "Approved") bad(`${r.EDocNo}: only Approved invoices can be paid.`);
+    if (r.EEmiPayment) bad(`${r.EDocNo}: EMI-enabled invoices are paid via their own installments, not a merge.`);
+    if (r.HasActiveDebitNote) bad(`${r.EDocNo}: has an active Debit Note — settle that first.`);
+    if (!r.SupplierId) bad(`${r.EDocNo}: could not resolve its supplier/party account.`);
+    if (Number(r.RemainingAmount) <= 0) bad(`${r.EDocNo}: already fully paid — nothing left to merge.`);
+  }
+
+  // Trim+lowercase ProjectKey specifically — it can fall back to the raw,
+  // manually-entered EProjectName text (see its own comment above) when the
+  // invoice isn't on a real enterprise id, and stray whitespace there
+  // shouldn't split two otherwise-identical projects into "different".
+  const distinctCompanies = new Set(rows.map((r) => Number(r.ECompanyId)));
+  const distinctProjects = new Set(rows.map((r) => String(r.ProjectKey ?? "").trim().toLowerCase()));
+  const distinctSuppliers = new Set(rows.map((r) => Number(r.SupplierId)));
+  if (distinctCompanies.size > 1) bad("All merged invoices must belong to the same company.");
+  if (distinctProjects.size > 1) bad("All merged invoices must belong to the same project.");
+  if (distinctSuppliers.size > 1) bad("All merged invoices must share the same supplier.");
+
+  const links = rows.map((r) => ({
+    expenseBookingId: r.Eid,
+    eDocNo: r.EDocNo,
+    allocatedAmount: Math.round(Number(r.RemainingAmount) * 100) / 100,
+    tdsAmount: Number(r.TDSAmount) || 0,
+  }));
+
+  return {
+    links,
+    companyId: rows[0].ECompanyId,
+    // Raw EProjectName (not ProjectKey) — PProject stores whatever shape
+    // the source invoice itself used (id-as-text or literal name), same
+    // convention a normal single-invoice payment already relies on.
+    projectRaw: rows[0].EProjectName,
+    supplierId: rows[0].SupplierId,
+    totalAmount: Math.round(links.reduce((s, l) => s + l.allocatedAmount, 0) * 100) / 100,
+  };
+}
+
 function paymentReferenceForBrokerage(row) {
   return row.PNeftNumber || row.PUpiTransactionId || row.PRtgsReference ||
     row.PImpsReference || row.PCardReference || row.PChequeNo || row.DocNo || null;
@@ -50,6 +200,20 @@ function paymentReferenceForBrokerage(row) {
 // DocYear (which only reflects the calendar year the doc number was issued
 // in). Used so direct/manual payments (no linked ExpenseBooking) are still
 // correctly filterable/displayable by Financial Year in Reports.
+// NewPayment.PCompany holds either the enterprise id ("23") or, for payments
+// saved from the current form, the company's NAME ("ABC TEST COMPANY") — both
+// shapes exist in the data (see also brs.js's dual match). TDS needs the id.
+async function resolvePaymentCompanyId(pool, pCompany) {
+  const text = String(pCompany ?? "").trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) return parseInt(text, 10);
+  const r = await pool
+    .request()
+    .input("Name", sql.NVarChar(255), text)
+    .query("SELECT TOP 1 id FROM dbo.enterprise WHERE name = @Name AND business_type = 'C'");
+  return r.recordset[0]?.id ?? null;
+}
+
 async function resolveFinYearId(pool, pDate) {
   if (!pDate) return null;
   const result = await pool
@@ -96,7 +260,42 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     // @docNumber` throws "Ambiguous column name 'DocNo'" the moment the
     // search or docNumber filter is used. The count query below is aliased
     // to match.
+    //
+    // The "Supplier / Contractor / Broker" filter (search) matches this
+    // same resolved-supplier expression the SELECT below exposes as
+    // PSupplierName — np.PPaymentName is just a free-text purpose/remarks
+    // field ("Overhead Expenses", "v2", "test payment"), essentially never
+    // the party's actual name, so a supplier search against it alone
+    // silently found nothing for the vast majority of payments. Both the
+    // count and data queries need the same supplier-resolving joins for
+    // this to work (SUPPLIER_JOINS_SQL below, shared with the data query's
+    // own copy further down).
+    const SUPPLIER_JOINS_SQL = `
+      LEFT JOIN dbo.ExpenseBooking eb_s ON eb_s.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.PurchaseOrders po_s
+        ON eb_s.ESourceType = 'PO' AND po_s.PurchaseOrderID = TRY_CAST(eb_s.ESourceId AS INT)
+      LEFT JOIN dbo.GoodsReceiptNotes grn_eb_s
+        ON eb_s.ESourceType = 'GRN' AND grn_eb_s.GRNID = TRY_CAST(eb_s.ESourceId AS INT)
+      LEFT JOIN dbo.AccountHeadMaster grn_sup_s ON grn_sup_s.LHeadId = grn_eb_s.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster po_sup_s ON po_sup_s.LHeadId = po_s.SupplierID
+      LEFT JOIN dbo.GoodsReceiptNotes grn2_s
+        ON eb_s.ESourceType NOT IN ('GRN','PO') AND grn2_s.POID = po_s.PurchaseOrderID
+      LEFT JOIN dbo.AccountHeadMaster grn2_sup_s ON grn2_sup_s.LHeadId = grn2_s.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster party_head_s ON party_head_s.LHeadId = np.PPartyId
+    `;
+    const RESOLVED_SUPPLIER_SQL = `
+      COALESCE(
+        CASE
+          WHEN eb_s.ESourceType = 'GRN' THEN grn_sup_s.LHeadName
+          WHEN eb_s.ESourceType = 'PO'  THEN po_sup_s.LHeadName
+          ELSE grn2_sup_s.LHeadName
+        END,
+        party_head_s.LHeadName
+      )
+    `;
+
     const conditions = [];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, paymentProjectSql("np"), "").trim());
     if (idFilter) conditions.push(`np.PPaymentID = @idFilter`);
     if (search) {
       conditions.push(`(np.PPaymentName LIKE @search
@@ -104,7 +303,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           OR np.PExpenseRef LIKE @search
           OR np.PProject LIKE @search
           OR np.PCompany LIKE @search
-          OR np.PBankName LIKE @search)`);
+          OR np.PBankName LIKE @search
+          OR ${RESOLVED_SUPPLIER_SQL} LIKE @search)`);
     }
     if (companyId) conditions.push(`np.PCompany = @companyId`);
     if (project) conditions.push(`np.PProject LIKE @project`);
@@ -145,7 +345,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (remarks) request.input("remarks", sql.NVarChar(200), `%${remarks}%`);
 
     const countResult = await request.query(
-      `SELECT COUNT(*) AS total FROM dbo.NewPayment np ${whereClause}`,
+      `SELECT COUNT(*) AS total FROM dbo.NewPayment np ${SUPPLIER_JOINS_SQL} ${whereClause}`,
     );
     const total = parseInt(countResult.recordset[0].total);
 
@@ -172,10 +372,11 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const result = await dataRequest.query(`
       SELECT
         np.*,
+        COALESCE(pcu.name, np.PCreatedBy)                  AS CreatedByName,
         -- Company name (resolved from enterprise table via PCompany text match)
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         -- Project name (resolved from EB → enterprise, or PO → enterprise)
-        COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
+        COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
         -- Supplier/contractor name — from the ExpenseBooking resolved chain
         -- when this payment is linked to an invoice, otherwise fall back to
         -- the party (PPartyId) picked directly on a direct/TOD payment.
@@ -227,6 +428,14 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         eb.EDocNo                                          AS RefDoc,
         -- Expense Booking primary key — used by "Pay Remaining" to pre-fill the form
         eb.Eid                                             AS PExpenseId,
+        -- Journal Voucher this payment settles (JVLineId, migration 417) —
+        -- so the list's Expense Ref column can show a JV chip the same way
+        -- it shows an invoice/GRN chip, instead of a bare "—".
+        (
+          SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
+          JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+          WHERE jvl.LineID = np.JVLineId
+        )                                                  AS JVNo,
         -- EB DocDate for reference
         eb.EDocDate                                        AS EBDocDate,
         -- Card display info (last 4 digits + network) when PCardId is set
@@ -266,6 +475,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           ELSE np.Status
         END                                                AS DisplayStatus
       FROM dbo.NewPayment np
+      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
@@ -280,6 +490,13 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
       LEFT JOIN dbo.enterprise po_proj
         ON po_proj.id = po.ProjectId AND po_proj.business_type = 'P'
+      -- Resolve project directly from np.PProject — same "the field itself
+      -- is a raw enterprise id as text" case as np.PCompany/ec above, for a
+      -- payment with no ExpenseBooking/PO linkage at all (CRM-sourced
+      -- payouts: Brokerage, Refund). Without this, PProjectName silently
+      -- fell back to the numeric id text with no company-name-style fix.
+      LEFT JOIN dbo.enterprise np_proj
+        ON np_proj.id = TRY_CAST(np.PProject AS INT) AND np_proj.business_type = 'P'
       -- Resolve supplier: GRN path
       LEFT JOIN dbo.GoodsReceiptNotes grn_eb
         ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
@@ -300,6 +517,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       LEFT JOIN dbo.BankReconciliation brc_list
         ON  brc_list.SourceType = 'PAYMENT'
         AND brc_list.SourceID   = np.PPaymentID
+      ${SUPPLIER_JOINS_SQL}
       ${whereClause}
       ORDER BY np.PPaymentID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -374,6 +592,11 @@ router.get("/cheque-lots", async (req, res) => {
           - ISNULL((
               SELECT COUNT(*) FROM dbo.CancelledCheque cc
               WHERE cc.ChequeLotId = cm.CId
+            ), 0)
+          - ISNULL((
+              SELECT COUNT(*) FROM dbo.JournalVoucher jv
+              WHERE jv.ChequeLotId = cm.CId AND jv.ChequeNo IS NOT NULL
+                AND jv.Status NOT IN ('Rejected', 'Deleted')
             ), 0) AS RemainingCheques
       FROM dbo.ChequeMaster cm
       LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
@@ -439,6 +662,15 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
           AND Status NOT IN ('Rejected', 'Deleted')
       `);
     ftUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
+
+    // ...and by a Journal Voucher that records a cheque settlement.
+    const jvUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
+      .query(`
+        SELECT ChequeNo FROM dbo.JournalVoucher
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo IS NOT NULL
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    jvUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
 
     // Same for Loan Sanctions
     const lsUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
@@ -542,6 +774,21 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque number already used in a Fund Transfer" });
     }
 
+    // ...and if a Journal Voucher claimed it.
+    const jvDupRes = await pool
+      .request()
+      .input("ChequeLotId", sql.Int, lotId)
+      .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+        SELECT COUNT(*) AS cnt FROM dbo.JournalVoucher
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    if (jvDupRes.recordset[0].cnt > 0) {
+      return res
+        .status(409)
+        .json({ error: "Cheque number already used in a Journal Voucher" });
+    }
+
     // Also block if a Loan Sanction claimed this number from this lot.
     const lsDupRes = await pool
       .request()
@@ -584,6 +831,9 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
             AND Status NOT IN ('Rejected', 'Deleted')) +
         (SELECT COUNT(*) FROM dbo.LoanSanction
           WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
+            AND Status NOT IN ('Rejected', 'Deleted')) +
+        (SELECT COUNT(*) FROM dbo.JournalVoucher
+          WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
             AND Status NOT IN ('Rejected', 'Deleted')) AS usedCount
     `);
     const totalCheques = lot.ChequeEndNumber - lot.ChequeStartNumber + 1;
@@ -602,7 +852,8 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
 
 // ── POST — Create payment ─────────────────────────────────────────────────────
 router.post("/", requirePageRight("new-payment", "create"), validateBody(paymentBodySchema), async (req, res) => {
-  const {
+  if (!(await assertPaymentProjectAllowed(req, res, req.body))) return;
+  let {
     PPaymentName,
     PRemarks,
     PMode,
@@ -631,10 +882,6 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     PImpsReference,
     PCardReference,
     PCardId,
-    // Inter-Company Stock Transfer workflow — see receivedPayment.js's
-    // identical SourceSaleInvoiceId handling for the mirror-image case on
-    // the customer/receiving side of that feature.
-    IsInterCompanyTransfer,
     // Re-issue: links this payment back to a bounced predecessor
     ReplacesPaymentId,
     // Optional bounce charge added on top of the original amount
@@ -644,12 +891,22 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // Party ID (AccountHeadMaster LHeadId) for direct-invoice payments.
     // Migration 180 adds PPartyId column; resolvePartyFromRef reads it as fallback.
     partyId,
+    // Journal Voucher credit line this payment settles (migration 417) —
+    // set alongside partyId (the JV line's own LHeadId) when the payment
+    // is made from the Payment page's "Journal Vouchers" tab.
+    JVLineId,
     // "Keep the balance on his on account" checkbox — see migration 188.
     oaSkipAutoApply,
     // Direct Expense Payment (migration 303) — pay one or more Expense
     // Heads straight from the bank, with no linked invoice/contract/party.
     // See services/expenseHeadAllocation.js.
     EExpenseHeadAllocations,
+    // "Merge invoices into one payment" (migration 501) — pays off several
+    // Approved ExpenseBooking invoices at once. When set, this REPLACES
+    // PExpenseRef/PCompany/PProject/partyId/PAmount below with values
+    // resolved (and validated) from the invoices themselves — never
+    // trusting whatever the client happened to send for those fields.
+    ExpenseBookingIds,
   } = req.body;
 
   try {
@@ -657,6 +914,27 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     if (!userEmail) return;
 
     const pool = getPool();
+
+    let mergedLinks = null;
+    if (Array.isArray(ExpenseBookingIds) && ExpenseBookingIds.length > 0) {
+      try {
+        const resolved = await resolveMergedInvoices(pool, sql, ExpenseBookingIds);
+        mergedLinks = resolved.links;
+        PCompany = String(resolved.companyId);
+        PProject = String(resolved.projectRaw ?? "");
+        partyId = resolved.supplierId;
+        PAmount = resolved.totalAmount;
+        PExpenseRef = null;
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.message });
+      }
+    }
+
+    try {
+      await assertProjectVisibleToCompany(pool, PProject, PCompany);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
 
     const expenseHeadAllocations = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocations.length > 0) {
@@ -669,36 +947,6 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       }
     }
 
-    // Inter-Company Stock Transfer payments must always be deposited to
-    // the Dummy Bank — this is a system-generated payment for a stock
-    // movement between two projects under different companies, settled
-    // without a real bank transaction. Same pattern as
-    // receivedPayment.js's SourceSaleInvoiceId handling: reject a
-    // mismatched client-supplied bank rather than silently overriding it.
-    if (IsInterCompanyTransfer) {
-      const dummyBank = await pool
-        .request()
-        .query(
-          "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
-        );
-      if (!dummyBank.recordset.length) {
-        return res.status(500).json({
-          error: "Dummy Bank account not found. Please contact your administrator.",
-        });
-      }
-      const dummyBankId = dummyBank.recordset[0].LHeadId;
-      const dummyBankName = dummyBank.recordset[0].LHeadName;
-
-      if (PBankID && parseInt(PBankID, 10) !== dummyBankId) {
-        return res.status(400).json({
-          error: `Inter-company transfer payments must be deposited to the Dummy Bank (${dummyBankName}). Other deposit accounts are not allowed for this workflow.`,
-        });
-      }
-
-      // Force-set deposit bank to Dummy Bank regardless of client payload
-      req.body.PBankID = dummyBankId;
-      req.body.PBankName = dummyBankName;
-    }
 
     // Enforce: a payment can only be made against an Approved Expense Booking.
     // Skipped for Contract-linked payments — the frontend's Contract picker
@@ -745,13 +993,30 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // resolveInvoiceLinkedTds/resolveTds both throw a 400 (via .status) when
     // TDS is due but nothing was selected — caught below like every other
     // validation error in this handler.
+    //
+    // A payment settling a Journal Voucher's credit line (JVLineId) is a
+    // third case, same as invoice-linked: TDS (if any) was already withheld
+    // as its own liability leg when the JV itself was posted — the party's
+    // JV credit line is already net of TDS. Re-running the fresh-TDS
+    // threshold check here resolved to the same party head and demanded a
+    // TDS be selected all over again, which would then double-deduct TDS in
+    // this payment's own GL split on top of what the JV already withheld.
     const isInvoiceLinkedForTds = !!PExpenseRef && !ContractId;
-    const companyIdForTds = parseInt(PCompany, 10) || null;
+    const isJvLinkedForTds = !!JVLineId;
+    // A merged payment (migration 501) is the same case as invoice-linked —
+    // every one of its invoices already had its own TDS withheld as its own
+    // liability leg when THAT invoice was posted, individually. Re-running
+    // fresh-TDS resolution against the shared supplier here would demand a
+    // TDS be selected all over again and then double-deduct it.
+    const isMergedForTds = !!mergedLinks;
+    const companyIdForTds = await resolvePaymentCompanyId(pool, PCompany);
     const finYearIdForTds = await resolveFinYearId(pool, PDate);
     let tdsSnapshot;
     try {
       const { resolveInvoiceLinkedTds, resolveTds } = require("../services/tds");
-      if (isInvoiceLinkedForTds) {
+      if (isJvLinkedForTds || isMergedForTds) {
+        tdsSnapshot = { eligible: false, thresholdMet: false, tdsId: null, tdsAmount: 0, tdsNature: null, tdsName: null, tdsPercentage: null };
+      } else if (isInvoiceLinkedForTds) {
         tdsSnapshot = await resolveInvoiceLinkedTds(pool, sql, {
           expenseRef: PExpenseRef,
           companyId: companyIdForTds,
@@ -860,6 +1125,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("BounceCharge", sql.Decimal(18, 2), BounceCharge ? parseFloat(BounceCharge) : null)
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
       .input("PPartyId", sql.Int, partyId ? parseInt(partyId, 10) : null)
+      .input("JVLineId", sql.Int, JVLineId ? parseInt(JVLineId, 10) : null)
       .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply ? 1 : 0)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
@@ -877,7 +1143,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, PFinYearId, ParentDocNo, RootExBDocNo,
-          ReplacesPaymentId, BounceCharge, ContractId, PPartyId, OASkipAutoApply,
+          ReplacesPaymentId, BounceCharge, ContractId, PPartyId, JVLineId, OASkipAutoApply,
           PCreatedAt, PCreatedBy, PApprovedBy, Status,
           TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount
         )
@@ -889,7 +1155,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @PFinYearId, @ParentDocNo, @RootExBDocNo,
-          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @OASkipAutoApply,
+          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @JVLineId, @OASkipAutoApply,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status,
           @TDSId, @TDSNature, @TDSName, @TDSPercentage, @TDSAmount
         )
@@ -902,8 +1168,18 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       await replaceAllocations(() => pool.request(), sql, "NewPayment", newId, expenseHeadAllocations);
     }
 
-    // Sync bill status on the referenced expense booking
-    if (PExpenseRef) await _syncBillStatus(pool, PExpenseRef);
+    if (mergedLinks && newId) {
+      await replaceLinks(() => pool.request(), sql, newId, mergedLinks);
+    }
+
+    // Sync bill status on the referenced expense booking(s) — a merged
+    // payment has no single PExpenseRef, so every one of its invoices
+    // needs its own sync instead of just one.
+    if (mergedLinks) {
+      for (const l of mergedLinks) await _syncBillStatus(pool, l.eDocNo);
+    } else if (PExpenseRef) {
+      await _syncBillStatus(pool, PExpenseRef);
+    }
 
     // NOTE: On Account hooks (excess credit / OA debit) fire on APPROVE, not here.
     // A Pending payment has not moved funds yet, so recording OA at creation would
@@ -958,6 +1234,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
 
 // ── PUT /:id — Update payment ─────────────────────────────────────────────────
 router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(paymentBodySchema), async (req, res) => {
+  if (!(await assertPaymentProjectAllowed(req, res, req.body))) return;
   const { id } = req.params;
   const {
     PPaymentName,
@@ -1001,6 +1278,19 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const pool = getPool();
     const beforeSnapshot = await snapshotRow(pool, "dbo.NewPayment", "PPaymentID", id);
     const wasApproved = beforeSnapshot?.Status === "Approved";
+    const wasRejected = beforeSnapshot?.Status === "Rejected";
+
+    // Editing an already-Approved payment must go back through approval —
+    // this UPDATE never touched Status before, so an edited-Approved
+    // payment silently stayed Approved with no re-approval and no GL
+    // reversal. Mirrors journalVoucher.js's wasApproved handling. Two
+    // possible SourceTypes ("NewPayment" auto-post, "PaymentPosting"
+    // manual) — reverse both, only one will ever actually have rows.
+    if (wasApproved) {
+      const { reversePostingBySource } = require("../services/generalLedger");
+      await reversePostingBySource(pool, "NewPayment", id);
+      await reversePostingBySource(pool, "PaymentPosting", id);
+    }
 
     // A cancelled payment's GL posting was already reversed and the invoice
     // recomputed on that assumption (see routes/chequeCancellation.js) —
@@ -1010,6 +1300,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     if (beforeSnapshot?.Status === "Cancelled") {
       return res.status(400).json({ error: "This payment's cheque was cancelled and cannot be edited." });
     }
+
+    await assertProjectVisibleToCompany(pool, PProject, PCompany);
 
     const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocationsPut.length > 0) {
@@ -1121,6 +1413,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshotPut.tdsPercentage)
       .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshotPut.tdsAmount).query(`
         UPDATE dbo.NewPayment SET
+          ${wasApproved ? "Status               = 'Pending'," : ""}
           PPaymentName         = @PPaymentName,
           PRemarks             = @PRemarks,
           PMode                = @PMode,
@@ -1184,7 +1477,34 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       }
     }
 
-    res.json({ message: "Payment updated successfully" });
+    // A corrected, previously-Rejected payment goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("payments", id, "Pending", userEmail, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[payments] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Payment updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: wasApproved
+        ? "Payment updated — previous GL posting reversed, sent back for approval"
+        : resubmitted
+          ? "Payment updated and re-submitted for approval"
+          : "Payment updated successfully",
+      reopenedForApproval: wasApproved,
+      resubmitted,
+    });
   } catch (err) {
     if (
       (err.number === 2601 || err.number === 2627) &&
@@ -1195,7 +1515,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       });
     }
     console.error("PAYMENT UPDATE ERROR:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -1249,6 +1569,19 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
       }
     }
 
+    // Reverse whatever GL this payment posted (cheque clearance, bounce
+    // charges, or a loan-repayment leg — see vendorLedger.js's join, which
+    // is the exact set of SourceTypes ever keyed to a NewPayment's
+    // PPaymentID) before hard-deleting it. Previously skipped, so a deleted
+    // payment's GeneralLedgerEntry rows survived with IsReversed=0 forever —
+    // every ledger/report reading off that table (Vendor Ledger Report
+    // included) kept counting a payment that no longer existed. Same fix
+    // already applied to loanSanction.js's DELETE.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    for (const sourceType of ["NewPayment", "PaymentPosting", "BounceChargePosting", "LoanRepayment"]) {
+      await reversePostingBySource(pool, sourceType, id);
+    }
+
     const result = await pool
       .request()
       .input("PPaymentID", sql.Int, id)
@@ -1268,7 +1601,8 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
 
 // ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
 router.put("/:id/submit", requirePageRight("new-payment", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -1292,8 +1626,13 @@ router.put("/:id/submit", requirePageRight("new-payment", "edit"), async (req, r
 });
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
-router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -1334,12 +1673,50 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       }
     }
 
+    // Same completeness gate as the brokerage one above, for a CRM Refund
+    // payout — this NewPayment is created with PMode/PBankName deliberately
+    // blank (see crmRefunds.js finance-approve, "finance to complete payment
+    // details") exactly like a brokerage payout, but had no equivalent check
+    // here: a refund could be approved with no payment mode recorded at all.
+    // One CrmRefund has exactly one payout voucher (FinanceNewPaymentId),
+    // so there's no "other submitted tranche" concept to cap against —
+    // just confirm this voucher's own amount hasn't drifted from the
+    // refund's NetAmount.
+    const refundGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
+      SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmRefundId,
+             r.NetAmount
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.CrmRefund r ON r.Id = np.SourceCrmRefundId
+      WHERE np.PPaymentID = @PPaymentID
+    `);
+    const refundRow = refundGate.recordset[0];
+    if (refundRow?.SourceCrmRefundId) {
+      if (!refundRow.PDate || !String(refundRow.PMode || "").trim() || !normalizeBankId(refundRow.PBankID)) {
+        return res.status(400).json({
+          error: "Complete refund payment date, payment mode, and bank before approval.",
+        });
+      }
+      const netAmount = Number(refundRow.NetAmount) || 0;
+      if (netAmount > 0 && Number(refundRow.PAmount || 0) > netAmount + 0.01) {
+        return res.status(400).json({
+          error: `Refund payment exceeds the refund's net amount of ₹${netAmount.toLocaleString("en-IN")}`,
+        });
+      }
+    }
+
+    // A CRM Refund's payout voucher runs its own single-level workflow
+    // ("crm-refund-payment") instead of the multi-module Payments bundle —
+    // matches Received Payments' single-step approval pattern, per explicit
+    // instruction. refundGate above already fetched SourceCrmRefundId.
+    const approveModule = refundRow?.SourceCrmRefundId ? "crm-refund-payment" : "payments";
     const result = await transition(
-      "payments",
+      approveModule,
       id,
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
 
     // Sync EMI installment if this payment is for an EMI ref
@@ -1414,7 +1791,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
@@ -1440,7 +1817,10 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
               .input("ref", sql.NVarChar(200), paymentReferenceForBrokerage(approvedRow))
               .input("notes", sql.NVarChar(sql.MAX), `Finance payment ${approvedRow.DocNo || id} approved`)
               .input("pid", sql.Int, id)
-              .input("cb", sql.Int, req.user?.id || null)
+              // req.user?.id is always undefined — the JWT payload's field
+              // is userId (see users.js's login route), same bug found and
+              // fixed in materialIssues.js's POST / CreatedBy.
+              .input("cb", sql.Int, req.user?.userId ?? req.user?.id ?? null)
               .query(`
                 INSERT INTO dbo.CrmBrokerPayment
                   (BrokerageId, Amount, PaidDate, PaymentMode, TransactionRef, Notes, SourceNewPaymentId, CreatedBy, CreatedAt)
@@ -1467,11 +1847,29 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
         }
       }
 
+      // CRM Refund payout: this NewPayment IS the customer refund disbursement.
+      // Approving it means the cash has moved — mark the CrmRefund Paid, consume
+      // its held/on-account source, and post the forfeiture GL leg. Non-fatal.
+      if (approvedRow?.SourceCrmRefundId) {
+        try {
+          const { markCrmRefundPaid } = require("./crmRefunds");
+          await markCrmRefundPaid(
+            pool,
+            approvedRow.SourceCrmRefundId,
+            id,
+            req.user?.email || req.user?.name || null,
+          );
+          await bumpCacheVersion("crm-refunds");
+        } catch (refundErr) {
+          console.warn("[new-payment] CRM refund paid-sync failed (non-fatal):", refundErr.message);
+        }
+      }
+
       // ── On Account hooks: fire on APPROVE (funds have actually moved) ──────
       if (approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
         try {
           const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
-          const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+          const partyTypeLabel = { S: "Supplier", V: "Vendor", C: "Contractor", A: "Customer" };
           const party = await resolvePartyFromRef(pool, approvedRef);
           if (party?.partyId) {
             // Read invoice AFTER syncBillStatus so ERemainingAmount is current
@@ -1509,7 +1907,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
                     .input("AdjRefDocNo", sql.NVarChar(100), finalDocNo)
                     .input("CompanyId",   sql.Int,           eb.ECompanyId ?? null)
                     .input("ProjectId",   sql.Int,           eb.ProjectId ?? null)
-                    .input("Notes",       sql.NVarChar(500), `OA auto-applied ₹${applyAmt} to ${approvedRef} via ${finalDocNo}`)
+                    .input("Notes",       sql.NVarChar(500), `OA auto-applied ₹${applyAmt.toFixed(2)} to ${approvedRef} via ${finalDocNo}`)
                     .input("CreatedBy",   sql.NVarChar(150), req.user?.email || "system")
                     .query(`
                       INSERT INTO dbo.OnAccountLedger
@@ -1540,7 +1938,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
                   .input("RefId",     sql.Int,           id)
                   .input("CompanyId", sql.Int,           eb.ECompanyId ?? null)
                   .input("ProjectId", sql.Int,           eb.ProjectId ?? null)
-                  .input("Notes",     sql.NVarChar(500), `Excess ₹${excess} from ${finalDocNo} on invoice ${approvedRef}`)
+                  .input("Notes",     sql.NVarChar(500), `Excess ₹${excess.toFixed(2)} from ${finalDocNo} on invoice ${approvedRef}`)
                   .input("CreatedBy", sql.NVarChar(150), req.user?.email || "system")
                   .query(`
                     INSERT INTO dbo.OnAccountLedger
@@ -1575,7 +1973,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
               .input("PartyId", sql.Int, approvedRow.PPartyId)
               .query(`SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @PartyId`);
             if (partyRes.recordset.length) {
-              const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+              const partyTypeLabel = { S: "Supplier", V: "Vendor", C: "Contractor", A: "Customer" };
               const partyType = partyRes.recordset[0].LHeadType;
               const payAmt = parseFloat(approvedRow.PAmount) || 0;
               const bounceAmt = parseFloat(approvedRow.BounceCharge ?? 0);
@@ -1624,20 +2022,29 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
 });
 
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
-router.put("/:id/reject", requirePageRight("new-payment", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+router.put("/:id/reject", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const { note } = req.body;
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
+    // Same module split as /:id/approve — a CRM Refund payout voucher uses
+    // its own single-level workflow, not the Payments bundle.
+    const pool = getPool();
+    const src = await pool.request().input("id", sql.Int, id)
+      .query("SELECT SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @id");
+    const rejectModule = src.recordset[0]?.SourceCrmRefundId ? "crm-refund-payment" : "payments";
+
     const result = await transition(
-      "payments",
+      rejectModule,
       id,
       "Rejected",
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await Promise.all([
       bumpCacheVersion("new-payment"),
@@ -1661,8 +2068,9 @@ router.get("/:id", async (req, res) => {
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT
         np.*,
+        COALESCE(pcu.name, np.PCreatedBy)                  AS CreatedByName,
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
-        COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
+        COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
         COALESCE(
           CASE
             WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
@@ -1706,6 +2114,10 @@ router.get("/:id", async (req, res) => {
         ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
       LEFT JOIN dbo.enterprise po_proj
         ON po_proj.id = po.ProjectId AND po_proj.business_type = 'P'
+      -- Same direct np.PProject fallback as the list query above, for
+      -- CRM-sourced payouts with no ExpenseBooking/PO linkage.
+      LEFT JOIN dbo.enterprise np_proj
+        ON np_proj.id = TRY_CAST(np.PProject AS INT) AND np_proj.business_type = 'P'
       LEFT JOIN dbo.GoodsReceiptNotes grn_eb
         ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
       LEFT JOIN dbo.AccountHeadMaster grn_sup ON grn_sup.LHeadId = grn_eb.SupplierID
@@ -1715,12 +2127,29 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
       LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadName = np.PBankName AND ahm.LHeadType = 'B'
+      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
       WHERE np.PPaymentID = @id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Payment not found" });
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("[new-payment/:id]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/linked-invoices — merge breakdown for a merged payment ───────────
+// Empty array for a normal, single-invoice (or no-invoice) payment — only a
+// payment created via "Merge invoices" (migration 501) has any rows here.
+router.get("/:id/linked-invoices", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const links = await getLinks(pool, sql, id);
+    res.json(links);
+  } catch (err) {
+    console.error("Payment linked-invoices error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1734,7 +2163,11 @@ router.post("/recalculate-balances", async (req, res) => {
     const refs = await pool.request().query(`
       SELECT DISTINCT PExpenseRef FROM dbo.NewPayment
       WHERE PExpenseRef IS NOT NULL AND PExpenseRef <> ''
+      UNION
+      SELECT DISTINCT EDocNo FROM dbo.PaymentExpenseBookingLink
     `);
+    // UNION takes its column name from the first SELECT, so every row
+    // (PExpenseRef-sourced or EDocNo-sourced) comes back under PExpenseRef.
     const expenseRefs = refs.recordset.map((r) => r.PExpenseRef);
     let updated = 0;
     for (const ref of expenseRefs) {
@@ -1878,6 +2311,7 @@ router.get(/^\/chain\/(.+)$/, async (req, res) => {
           eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType,
           eb.ETotalPaid, eb.ERemainingAmount, eb.EBillStatus,
           ISNULL(eb.TDSAmount, 0) AS TDSAmount,
+          eb.ECostCenter,
           COALESCE(proj.name, eb.EProjectName, '') AS ProjectName,
           eb.EName AS PartyName,
           grn.TotalAmount AS GrnTotalAmount
@@ -2217,7 +2651,7 @@ router.get("/:id/posting", async (req, res) => {
     // Payment row + bank ledger
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PDate, np.PAmount, np.PMode, np.PExpenseRef,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.JVLineId,
              np.TDSId, np.TDSNature, np.TDSName, np.TDSPercentage, np.TDSAmount,
              bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
              np.Status
@@ -2257,29 +2691,53 @@ router.get("/:id/posting", async (req, res) => {
     // system-generated placeholder (there isn't one; every vendor has
     // their own ledger). The row label stays generic; only the LHeadId
     // determines which specific account the posting actually lands in.
-    const { resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
+    const { resolvePaymentSupplierHeadId, getCashInHandBankId } = require("../services/generalLedger");
     const resolvedSupplierId = await resolvePaymentSupplierHeadId(pool, pmt);
+    // For any payment not resolved via an invoice/ExpenseBooking above —
+    // a direct/on-account payment (PPartyId), or one settling a Journal
+    // Voucher's credit line (JVLineId, migration 417) — supplierName is
+    // still null at this point even though resolvedSupplierId already
+    // points at a real, named party. Falling back to "Supplier / Creditor
+    // A/c" then showed a generic label on the Payment Chain view instead
+    // of the actual party name the money actually posted against (e.g. a
+    // salary/wages JV settled by payment, debited straight to the named
+    // employee/contractor head, not a generic creditor bucket).
+    if (!supplierName && resolvedSupplierId) {
+      const headRes = await pool.request().input("Id", sql.Int, resolvedSupplierId).query(`
+        SELECT ISNULL(DisplayName, LHeadName) AS name FROM dbo.AccountHeadMaster WHERE LHeadId = @Id
+      `);
+      supplierName = headRes.recordset[0]?.name ?? null;
+    }
     // Mirrors postPaymentApproval in services/generalLedger.js: for an
     // invoice-linked payment, pmt.TDSAmount is only an inherited display
     // snapshot (see resolveInvoiceLinkedTds in services/tds.js) — TDS was
     // already withheld as its own liability leg when the INVOICE was
-    // posted, so this payment's own GL split must not re-deduct it.
-    const tdsAmount = pmt.PExpenseRef ? 0 : Number(pmt.TDSAmount) || 0;
+    // posted, so this payment's own GL split must not re-deduct it. Same
+    // for a payment settling a Journal Voucher line (JVLineId) — TDS (if
+    // any) was already withheld when the JV itself was posted.
+    const tdsAmount = (pmt.PExpenseRef || pmt.JVLineId) ? 0 : Number(pmt.TDSAmount) || 0;
 
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
-    // Bank field for Cash) — Cash-in-Hand (migration 339) stands in for the
-    // bank/credit leg instead of leaving it unresolved.
+    // Bank field for Cash) — the seeded Cash in Hand bank (migration 418)
+    // stands in for the bank/credit leg instead of leaving it unresolved.
     let bankAccount = pmt.PBankID
       ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null }
       : null;
     if (!bankAccount && pmt.PMode === "Cash") {
-      const cashHeadId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
-      if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash-in-Hand A/c", code: null };
+      const cashHeadId = await getCashInHandBankId(pool, parseInt(pmt.PCompany, 10) || null).catch(() => null);
+      if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash in Hand", code: "CASH-IN-HAND" };
     }
 
     const accounts = {
+      // Plain party name when one resolved — matches how a Journal
+      // Voucher's own posting display names its ledgers (e.g. "Pinaki
+      // Chandra", not "Supplier/Creditor Payable — Pinaki Chandra"), and
+      // is no longer assuming every resolved party is literally a
+      // Supplier/Creditor (a JV-settling payment can debit any head, e.g.
+      // an employee paid for salary & wages). Only falls back to the
+      // generic label when no name could be resolved at all.
       supplier: resolvedSupplierId
-        ? { id: resolvedSupplierId, label: supplierName ? `Supplier/Creditor Payable — ${supplierName}` : "Supplier / Creditor A/c", code: null }
+        ? { id: resolvedSupplierId, label: supplierName || "Supplier / Creditor A/c", code: null }
         : null,
       bank: bankAccount,
       // TDS (migration 304) — only present when this payment actually
@@ -2352,28 +2810,62 @@ router.post("/:id/post-to-gl", async (req, res) => {
   try {
     const pool = getPool();
     const userEmail = req.user?.email || req.user?.upn || "system";
-    const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
+    const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, getCashInHandBankId } = require("../services/generalLedger");
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.JVLineId,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
-             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
+             -- A merged payment (migration 501) has no single PExpenseRef to
+             -- join ExpenseBooking through — fall back to its first merged
+             -- invoice's own Company/Project (every merged invoice shares
+             -- the same one, enforced at merge time).
+             COALESCE(eb.ECompanyId, ebLink.ECompanyId) AS CompanyId,
+             COALESCE(TRY_CAST(eb.EProjectName AS INT), TRY_CAST(ebLink.EProjectName AS INT)) AS ProjectId
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      OUTER APPLY (
+        SELECT TOP 1 eb2.ECompanyId, eb2.EProjectName
+        FROM dbo.PaymentExpenseBookingLink pel
+        JOIN dbo.ExpenseBooking eb2 ON eb2.Eid = pel.ExpenseBookingId
+        WHERE pel.PPaymentID = np.PPaymentID
+        ORDER BY pel.LinkId
+      ) ebLink
       WHERE np.PPaymentID = @PPaymentID
     `);
     if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
     const pmt = pmtRes.recordset[0];
+    const mergedLinks = await getLinks(pool, sql, pmtId);
 
     // Already posted?
     const alreadyPosted = await pool.request().input("SrcId", sql.Int, pmtId)
       .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='PaymentPosting' AND SourceId=@SrcId AND IsReversed=0`);
     if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This payment has already been posted to GL." });
 
+    // This route (SourceType='PaymentPosting') is the authoritative posting
+    // path for a payment — postPaymentApproval (SourceType='NewPayment',
+    // fires automatically on approval) independently guards against
+    // re-entry the same way, but neither ever checked for the OTHER's
+    // posting, so a payment that auto-posted on approval and was later run
+    // through this manual "Post to GL" action got double-posted under two
+    // different accounting treatments (same bug class as GRN/GRNPosting and
+    // ExpenseBooking/InvoicePosting). Reverse any stale NewPayment posting
+    // for this payment before superseding it here, so PaymentPosting always
+    // wins going forward.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(pool, "NewPayment", pmtId);
+
     const amount = parseFloat(pmt.PAmount) || 0;
     if (amount <= 0) return res.status(400).json({ error: "No amount to post." });
-    const tdsAmount = parseFloat(pmt.TDSAmount) || 0;
+    // Mirrors postPaymentApproval in services/generalLedger.js: for an
+    // invoice-linked payment, pmt.TDSAmount is only an inherited display
+    // snapshot (see resolveInvoiceLinkedTds in services/tds.js) — TDS was
+    // already withheld as its own liability leg when the INVOICE was
+    // posted, so this route's own GL split must not re-deduct it here too.
+    // This route previously skipped that guard, so a manual "Post to GL" on
+    // an invoice-linked payment double-withheld the TDS amount. Same for a
+    // payment settling a Journal Voucher line (JVLineId).
+    const tdsAmount = (pmt.PExpenseRef || pmt.JVLineId || mergedLinks.length > 0) ? 0 : parseFloat(pmt.TDSAmount) || 0;
     if (tdsAmount > amount) {
       return res.status(422).json({ error: `TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — re-save the payment before posting.` });
     }
@@ -2385,10 +2877,14 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const isCash = pmt.PMode === "Cash";
     let bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
-    // Bank field for Cash) — Cash-in-Hand (migration 339) stands in for the
-    // bank leg instead of hard-failing for lack of one.
+    // Bank field for Cash) — the seeded Cash in Hand bank (migration 418)
+    // stands in for the bank leg instead of hard-failing for lack of one.
     if (!bankId && isCash) {
-      bankId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
+      // Prefer the payment's own PCompany (always set) over the
+      // ExpenseBooking-joined CompanyId above (NULL for a JV/PPartyId
+      // payment with no linked invoice) — a cash payment's own company is
+      // whose physical cash-in-hand actually shrinks.
+      bankId = await getCashInHandBankId(pool, parseInt(pmt.PCompany, 10) || pmt.CompanyId || null, userEmail).catch(() => null);
     }
 
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });
@@ -2408,8 +2904,18 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // the credit side splits into Bank/Cash-in-Hand (net of TDS) + TDS Payable.
     const narrationRef = pmt.PExpenseRef ? `${pmt.DocNo} (${pmt.PExpenseRef})` : pmt.DocNo;
     const bankNarration = isCash ? "Cash-in-Hand" : `Bank (${pmt.PBankName || pmt.PMode})`;
+    // "Merge invoices into one payment" (migration 501) — one Dr-Supplier
+    // leg PER merged invoice (so the GL stays traceable to each invoice's
+    // own amount) instead of one lump line, same split postPaymentApproval
+    // uses when this payment auto-posts on approval instead of through this
+    // manual route.
     const legs = [
-      { lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` },
+      ...(mergedLinks.length > 0
+        ? mergedLinks.map((l) => ({
+            lHeadId: supplierId, debit: l.allocatedAmount, credit: 0,
+            narration: `Payment: ${pmt.DocNo} (${l.eDocNo}) — Supplier/Creditor`,
+          }))
+        : [{ lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` }]),
       { lHeadId: bankId,     debit: 0, credit: amount - tdsAmount, narration: `Payment: ${narrationRef} — ${bankNarration}` },
       ...(tdsAmount > 0
         ? [{ lHeadId: tdsPayableId, debit: 0, credit: tdsAmount, narration: `Payment: ${narrationRef} — TDS Payable` }]

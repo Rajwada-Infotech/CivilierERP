@@ -18,6 +18,7 @@ import {
   Home,
   Settings,
   Layers,
+  Map,
   Hash,
   ReceiptIndianRupee,
   CreditCard,
@@ -45,6 +46,8 @@ import {
   GitBranch,
   XCircle,
   Percent,
+  Wrench,
+  Handshake,
 } from "lucide-react";
 import {
   Bank,
@@ -63,6 +66,8 @@ import {
   Profile,
   Logout,
   MoneyRecive,
+  Cpu,
+  ShoppingCart,
 } from "iconsax-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -78,6 +83,8 @@ import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
 import { buildFinanceNavItems } from "./sidebars/FinanceSidebar";
 import { materialNavItems } from "./sidebars/MaterialSidebar";
+import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
+import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
 import { followupNavItems } from "./sidebars/FollowupSidebar";
 import { buildAdminNavItems } from "./sidebars/AdminSidebar";
 import { dbaNavItems } from "./sidebars/DbaSidebar";
@@ -85,7 +92,7 @@ import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
-import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
+import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
@@ -149,6 +156,14 @@ const MODULE_META: Record<
     label: "Material",
     route: MODULE_DASHBOARD_ROUTES.material,
   },
+  "fixed-asset": {
+    h: 45,
+    s: 93,
+    l: 47,
+    icon: Cpu,
+    label: "Fixed Asset",
+    route: MODULE_DASHBOARD_ROUTES["fixed-asset"],
+  },
   loan: {
     h: 142,
     s: 71,
@@ -188,6 +203,22 @@ const MODULE_META: Record<
     icon: Message2,
     label: "Ticket",
     route: MODULE_DASHBOARD_ROUTES.ticket,
+  },
+  sales: {
+    h: 271,
+    s: 91,
+    l: 65,
+    icon: ShoppingCart,
+    label: "Sales",
+    route: MODULE_DASHBOARD_ROUTES.sales,
+  },
+  maintenance: {
+    h: 84,
+    s: 81,
+    l: 35,
+    icon: Wrench,
+    label: "Maintenance",
+    route: MODULE_DASHBOARD_ROUTES.maintenance,
   },
   records: {
     h: 347,
@@ -241,7 +272,7 @@ const financeSetupItems: SetupItem[] = [
   },
   {
     icon: Truck,
-    label: "Suppliers",
+    label: "Vendors",
     path: "/masters/suppliers",
     color: "text-blue-400",
     pageKey: "supplier-master",
@@ -259,6 +290,13 @@ const financeSetupItems: SetupItem[] = [
     path: "/masters/banks",
     color: "text-emerald-500",
     pageKey: "bank-master",
+  },
+  {
+    icon: Handshake,
+    label: "Partners",
+    path: "/masters/partners",
+    color: "text-orange-500",
+    pageKey: "partner-master",
   },
   {
     icon: Calendar,
@@ -385,16 +423,28 @@ const fixedAssetSetupItems: SetupItem[] = [
     color: "text-yellow-500",
     pageKey: "depreciation-setup",
   },
+  {
+    icon: Hash,
+    label: "ID Template Master",
+    path: "/fixed-asset/id-template-master",
+    color: "text-yellow-500",
+    pageKey: "id-template-master",
+  },
+];
+
+const maintenanceSetupItems: SetupItem[] = [
+  {
+    icon: Receipt,
+    label: "Charge Head",
+    path: "/masters/charge-head",
+    color: "text-slate-500",
+    pageKey: "charge-head-master",
+  },
 ];
 
 const followupSetupItems: SetupItem[] = [
-  {
-    icon: ClipboardList,
-    label: "Task Master",
-    path: "/followup/setup/task-master",
-    color: "text-teal-500",
-    pageKey: "task-master",
-  },
+  // "Task Master" moved into the Follow-Up module sidebar (followupNavItems)
+  // — kept out of the Setup sheet so it isn't listed twice on mobile.
   {
     icon: Users,
     label: "Department Master",
@@ -421,10 +471,10 @@ const followupSetupItems: SetupItem[] = [
 const engineeringSetupItems: SetupItem[] = [
   {
     icon: Activity,
-    label: "Activity Master",
-    path: "/masters/activity",
+    label: "Engineering Activity Master",
+    path: "/masters/engineering-activity",
     color: "text-orange-400",
-    pageKey: "activity-master",
+    pageKey: "engineering-activity-master",
   },
   {
     icon: GitBranch,
@@ -489,6 +539,13 @@ const crmSetupItems: SetupItem[] = [
     path: "/crm/setup/unit-master",
     color: "text-orange-500",
     pageKey: "followup-unit-master",
+  },
+  {
+    icon: Map,
+    label: "Plot Master",
+    path: "/crm/setup/plot-master",
+    color: "text-emerald-500",
+    pageKey: "crm-auto-project-setup",
   },
   {
     icon: Layers,
@@ -575,20 +632,20 @@ const adminSetupItems: SetupItem[] = [
   },
 ];
 
-// Activity Master is the shared Engineering master (no separate Civil Work
-// DPR-specific one) — this just gives quick access to it from this module.
 const civilWorkDprSetupItems: SetupItem[] = [
   {
     icon: ClipboardList,
-    label: "Activity",
+    label: "Activity Master",
     path: "/masters/activity",
     color: "text-cyan-500",
+    pageKey: "activity-master",
   },
   {
     icon: DoorOpen,
-    label: "Room Master",
+    label: "Flat Master",
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
+    pageKey: "civilworkdpr-room-master",
   },
 ];
 
@@ -666,6 +723,8 @@ export const MobileNav: React.FC = () => {
       };
     if (activeModule === "crm")
       return { items: crmSetupItems, label: "CRM", available: true };
+    if (activeModule === "maintenance")
+      return { items: maintenanceSetupItems, label: "Maintenance", available: true };
     return { items: [] as SetupItem[], label: "", available: false };
   })();
 
@@ -722,6 +781,10 @@ export const MobileNav: React.FC = () => {
     switch (activeModule) {
       case "material":
         return adaptItems(materialNavItems as DesktopNavItem[]);
+      case "fixed-asset":
+        return adaptItems(fixedAssetNavItems as DesktopNavItem[]);
+      case "maintenance":
+        return adaptItems(maintenanceNavItems as DesktopNavItem[]);
       case "finance":
         return adaptItems(
           buildFinanceNavItems(overdueCount) as DesktopNavItem[],
@@ -737,7 +800,9 @@ export const MobileNav: React.FC = () => {
       case "records":
         return adaptItems(recordsNavItems as DesktopNavItem[]);
       case "civilworkdpr":
-        return adaptItems(civilWorkDprNavItems as DesktopNavItem[]);
+        // Static 0 here — same precedent as buildAdminNavItems(0) above;
+        // this badge isn't wired to a live poll on mobile.
+        return adaptItems(buildCivilWorkDprNavItems(0) as DesktopNavItem[]);
       case "sales-automation":
         return adaptItems(salesAutomationNavItems as DesktopNavItem[]);
       case "crm":
@@ -806,6 +871,7 @@ export const MobileNav: React.FC = () => {
     midnight: "#2dd4bf",
     root: "#f59e0b",
     glass: "#fb7185",
+    bw: "#111111",
   };
 
   const tabs: Array<{ id: "nav" | "setup" | "theme"; label: string }> = [
@@ -943,7 +1009,7 @@ export const MobileNav: React.FC = () => {
                 <p className="font-heading font-semibold text-xs text-foreground truncate leading-tight">
                   {currentUser?.name}
                 </p>
-                <p className="text-[11px] text-muted-foreground truncate leading-tight">
+                <p className="text-[0.6875rem] text-muted-foreground truncate leading-tight">
                   {currentUser?.email}
                 </p>
               </div>
@@ -1005,7 +1071,7 @@ export const MobileNav: React.FC = () => {
                         navigate(meta.route);
                         setOpen(false);
                       }}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg flex-shrink-0 transition-all duration-200 text-[11px] font-heading font-medium border"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg flex-shrink-0 transition-all duration-200 text-[0.6875rem] font-heading font-medium border"
                       style={
                         isActive
                           ? {
@@ -1044,7 +1110,7 @@ export const MobileNav: React.FC = () => {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className="flex-1 py-1.5 rounded-md text-[11px] font-heading font-medium transition-all text-center"
+                    className="flex-1 py-1.5 rounded-md text-[0.6875rem] font-heading font-medium transition-all text-center"
                     style={
                       activeTab === tab.id
                         ? {
@@ -1103,11 +1169,11 @@ export const MobileNav: React.FC = () => {
                   </div>
 
                   {navItems.length > 0 ? (
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
+                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
                       {isAdminPage ? "Admin" : `${activeMod.label} Module`}
                     </p>
                   ) : !activeModule && !isAdminPage ? (
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
+                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
                       Select a module above to get started
                     </p>
                   ) : null}
@@ -1217,7 +1283,7 @@ export const MobileNav: React.FC = () => {
                                       {child.label}
                                     </span>
                                     {!!child.count && (
-                                      <span className="text-[10px] bg-destructive text-destructive-foreground px-1.5 py-0.5 rounded-full font-medium">
+                                      <span className="text-[0.625rem] bg-destructive text-destructive-foreground px-1.5 py-0.5 rounded-full font-medium">
                                         {child.count}
                                       </span>
                                     )}
@@ -1294,12 +1360,14 @@ export const MobileNav: React.FC = () => {
                     <>
                       <div className="flex items-center gap-2 mb-2 px-1">
                         <Settings size={13} className="text-muted-foreground" />
-                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
+                        <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
                           {setupConfig.label} Setup
                         </p>
                       </div>
                       <div className="grid grid-cols-3 gap-1.5">
-                        {setupConfig.items.map(
+                        {setupConfig.items
+                          .filter((it) => !it.pageKey || canAccessPage(it.pageKey))
+                          .map(
                           ({ icon: Icon, label, path, color }, i) => {
                             const active = location.pathname === path;
                             return (
@@ -1327,7 +1395,7 @@ export const MobileNav: React.FC = () => {
                                 >
                                   <Icon size={15} className={color} />
                                 </div>
-                                <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
+                                <span className="text-[0.625rem] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
                                   {label.replace(/ Master$/, "")}
                                 </span>
                               </button>
@@ -1352,7 +1420,7 @@ export const MobileNav: React.FC = () => {
               {/* ── Theme tab ───────────────────────────────────────────────────── */}
               {activeTab === "theme" && (
                 <div className="px-4 pt-2">
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
                     Colour theme
                   </p>
                   <div className="grid grid-cols-1 gap-2">
@@ -1415,7 +1483,7 @@ export const MobileNav: React.FC = () => {
                           </div>
                           {isSelected && (
                             <span
-                              className="text-[10px] font-heading px-2 py-1 rounded-lg"
+                              className="text-[0.625rem] font-heading px-2 py-1 rounded-lg"
                               style={{ background: `${bg}22`, color: bg }}
                             >
                               Active

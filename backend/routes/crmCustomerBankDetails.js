@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -6,7 +7,8 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { maybeAutoCreateAgreement, requireActiveBooking, isLegalWorkStarted } = require("../services/crmWorkflowGuards");
+const { maybeAutoCreateAgreement, requireApprovedBooking, isLegalWorkStarted } = require("../services/crmWorkflowGuards");
+const { isMilestoneOneCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { CRM_APPROVER_ROLES } = require("../services/approvalService");
 
 router.use(authMiddleware);
@@ -43,7 +45,18 @@ async function requireAssignedOrApprover(req, res, pool, { bookingId, applicatio
 router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = ["b.IsActive = 1", `b.Status = '${CrmStatus.APPROVED}'`];
+    // Not paginated — Pending/Complete counts are computed client-side from
+    // the full set (see CrmCustomerBankDetails.tsx), same reasoning as
+    // CrmDemands. Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
@@ -57,8 +70,6 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
           NULLIF(LTRIM(RTRIM(ISNULL(d.AccountNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.IfscCode, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.AccountHolderName, ''))), '') IS NOT NULL AND
-          NULLIF(LTRIM(RTRIM(ISNULL(d.NomineeName, ''))), '') IS NOT NULL AND
-          NULLIF(LTRIM(RTRIM(ISNULL(d.NomineeRelation, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.PanNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.AadhaarNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.Occupation, ''))), '') IS NOT NULL AND
@@ -68,10 +79,11 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       LEFT JOIN dbo.CrmCustomerBankDetail d ON d.BookingId = b.Id
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       OUTER APPLY (
         SELECT TOP 1 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = b.Id ORDER BY CallDate DESC, CreatedAt DESC
       ) wc
-      WHERE b.IsActive = 1 AND b.Status = '${CrmStatus.APPROVED}'
+      WHERE ${conds.join(" AND ")}
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -84,7 +96,8 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
 router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bid = parseInt(req.params.bookingId);
+    const bid = parseId(req.params.bookingId);
+    if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     // FinancingType and Milestone-1 payment status live outside
     // CrmCustomerBankDetail (on CrmBooking/CrmPaymentMilestone) but the
     // dialog needs both — Milestone 1 to decide whether the form should even
@@ -92,6 +105,13 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     // Milestone1PendingApproval: money has been submitted for Milestone 1 and
     // is sitting in Finance's approval queue — surfaced so staff see "awaiting
     // Finance approval" instead of reading a locked form as simply stuck.
+    // Milestone1AwaitingAdjustment: Finance HAS approved a payment against
+    // Milestone 1, but it landed in On Account (required flow: Payment -> On
+    // Account -> Demand -> On Account Adjustment -> Settlement) and hasn't
+    // been explicitly applied to the milestone yet — approval alone no longer
+    // settles it. Surfaced so staff aren't told "wait for approval" when
+    // approval already happened and the real next step is an On Account
+    // Adjustment.
     const bookingRow = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT b.FinancingType,
              (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status,
@@ -101,10 +121,27 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
                JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
                WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
                  AND rp.RPStatus = '${CrmStatus.PENDING}'
-             ) THEN 1 ELSE 0 END AS BIT) AS Milestone1PendingApproval
+             ) THEN 1 ELSE 0 END AS BIT) AS Milestone1PendingApproval,
+             CAST(CASE WHEN EXISTS (
+               SELECT 1 FROM dbo.CrmOnAccountPayment oap
+               JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = oap.SourceReceivedPaymentId
+               JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
+               WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+                 AND oap.Amount > oap.AppliedAmount
+             ) THEN 1 ELSE 0 END AS BIT) AS Milestone1AwaitingAdjustment,
+             -- The real ledger sweep (Status='Paid') only fires automatically
+             -- once the WHOLE booking is funded (see
+             -- autoApplyOnAccountIfFullyFunded in crmPayments.js) — but this
+             -- form's gate is about "has the customer's money genuinely
+             -- arrived for Milestone 1", which is true the moment on-account
+             -- covers Milestone 1's own amount, so the shortfall shown is
+             -- against that, not the whole booking.
+             (SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Due,
+             ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS OnAccountAvailable
       FROM dbo.CrmBooking b WHERE b.Id = @bid
     `);
     const bookingExtra = bookingRow.recordset[0] || {};
+    bookingExtra.Milestone1VirtuallyCovered = await isMilestoneOneCoveredByOnAccount(pool, bid);
 
     const result = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT d.*, vu.name AS BookingStageVerifiedByName
@@ -148,28 +185,17 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bid = parseInt(req.params.bookingId);
+    const bid = parseId(req.params.bookingId);
+    if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
     const actor = actorId(req);
 
     if (!(await requireAssignedOrApprover(req, res, pool, { bookingId: bid }))) return;
 
-    const activeErr = await requireActiveBooking(pool, bid);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-
-    // The frontend already refuses to save unless Milestone 1 (Booking
-    // Amount) is Paid — bookingAmountPaid check in CrmCustomerBankDetails.tsx
-    // — but that was client-side only. Anyone calling this endpoint directly
-    // (a stale tab, a race between two staff members, a future frontend
-    // change that forgets to re-check) could write KYC data before the
-    // booking amount was actually paid. Mirror the same rule here, server-
-    // side, using the identical Milestone1Status subquery GET already uses.
-    const m1 = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
-    `);
-    if (m1.recordset[0]?.Status !== CrmStatus.PAID) {
-      return res.status(400).json({ error: "Booking Amount (Milestone 1) must be paid before Bank/KYC details can be saved" });
-    }
+    // No workflow gates here (business decision 2026-09-15): Bank/KYC
+    // details can be captured at any time regardless of booking-approval or
+    // payment status. Only requireAssignedOrApprover (who may edit) still
+    // applies — that's an access-control check, not a workflow gate.
 
     // Financing Type (Self-funded / Loan-financed) lives on CrmBooking, not
     // CrmCustomerBankDetail — it's a simple declaration, not sensitive KYC
@@ -209,8 +235,11 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 
     const fields = {
       bank: b.BankName || null, branch: b.BranchName || null, acc: b.AccountNo || null, ifsc: b.IfscCode || null,
-      holder: b.AccountHolderName || null, nname: b.NomineeName || null, nrel: b.NomineeRelation || null,
-      ndob: b.NomineeDob || null, ncon: b.NomineeContact || null, naddr: b.NomineeAddress || null,
+      holder: b.AccountHolderName || null,
+      // Nominee capture was removed from the CRM — these stay bound as NULL so
+      // the existing ISNULL(@nname, NomineeName) upserts simply never touch the
+      // Nominee* columns (the DB columns are kept, just no longer written).
+      nname: null, nrel: null, ndob: null, ncon: null, naddr: null,
       pan: b.PanNo || null, aadh: b.AadhaarNo || null,
       occ: b.Occupation || null, inc: b.AnnualIncome != null && b.AnnualIncome !== "" ? parseFloat(b.AnnualIncome) : null,
       cheque: b.ChequeNo || null, chqdate: b.ChequeDate || null, tref: b.TransactionRef || null,
@@ -225,90 +254,101 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     if (fields.ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(fields.ifsc))
       return res.status(400).json({ error: "IFSC code must be in the format ABCD0123456 (4 letters, 0, 6 alphanumeric)" });
     if (fields.ifsc) fields.ifsc = fields.ifsc.toUpperCase();
-    if (fields.ncon && !/^\d{10}$/.test(fields.ncon))
-      return res.status(400).json({ error: "Nominee contact must be exactly 10 digits" });
     if (fields.acc && fields.acc.length > 20 && !/^\d+$/.test(fields.acc))
       return res.status(400).json({ error: "Account number must be numeric" });
 
-    if (existing.recordset.length) {
-      await pool.request()
+    // The bank-detail upsert and the KYC sync back onto CrmCustomer describe
+    // one save — wrapped so a failure between them can't leave the
+    // centralized Customer record's PAN/Aadhaar/Occupation/Income out of
+    // sync with what was just saved here.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (existing.recordset.length) {
+        await tx.request()
+          .input("bid", sql.Int, bid)
+          .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
+          .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
+          .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
+          .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
+          .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
+          .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
+          .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
+          .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
+          .input("tref", sql.NVarChar(200), fields.tref)
+          .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("ub", sql.Int, actor)
+          .query(`
+            UPDATE dbo.CrmCustomerBankDetail SET
+              BankName = ISNULL(@bank, BankName), BranchName = ISNULL(@branch, BranchName),
+              AccountNo = ISNULL(@acc, AccountNo), IfscCode = ISNULL(@ifsc, IfscCode),
+              AccountHolderName = ISNULL(@holder, AccountHolderName),
+              NomineeName = ISNULL(@nname, NomineeName), NomineeRelation = ISNULL(@nrel, NomineeRelation),
+              NomineeDob = ISNULL(@ndob, NomineeDob), NomineeContact = ISNULL(@ncon, NomineeContact),
+              NomineeAddress = ISNULL(@naddr, NomineeAddress),
+              PanNo = ISNULL(@pan, PanNo), AadhaarNo = ISNULL(@aadh, AadhaarNo),
+              Occupation = ISNULL(@occ, Occupation), AnnualIncome = ISNULL(@inc, AnnualIncome),
+              ChequeNo = ISNULL(@cheque, ChequeNo), ChequeDate = ISNULL(@chqdate, ChequeDate),
+              TransactionRef = ISNULL(@tref, TransactionRef),
+              Notes = ISNULL(@notes, Notes), UpdatedBy = @ub, UpdatedAt = SYSDATETIME(),
+              -- This is a later, separate edit surface (the final standalone
+              -- Bank & KYC page) than the Booking-tab verify action below —
+              -- whatever was verified at the Booking stage no longer matches
+              -- once this save changes the row, so that verification is stale
+              -- and must be cleared, not left claiming a row it no longer describes.
+              BookingStageVerifiedAt = NULL, BookingStageVerifiedBy = NULL
+            WHERE BookingId = @bid
+          `);
+      } else {
+        await tx.request()
+          .input("bid", sql.Int, bid)
+          .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
+          .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
+          .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
+          .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
+          .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
+          .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
+          .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
+          .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
+          .input("tref", sql.NVarChar(200), fields.tref)
+          .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("cb", sql.Int, actor)
+          .query(`
+            INSERT INTO dbo.CrmCustomerBankDetail
+              (BookingId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
+               NomineeName, NomineeRelation, NomineeDob, NomineeContact, NomineeAddress,
+               PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes, CreatedBy, CreatedAt)
+            VALUES (@bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @cb, SYSDATETIME())
+          `);
+      }
+
+      // Sync KYC fields back to the centralized Customer record so the
+      // data remains consistent across the ERP.
+      await tx.request()
         .input("bid", sql.Int, bid)
-        .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
-        .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
-        .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
-        .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
-        .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
-        .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
-        .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
-        .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
-        .input("tref", sql.NVarChar(200), fields.tref)
-        .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("ub", sql.Int, actor)
+        .input("pan", sql.NVarChar(20), fields.pan)
+        .input("aadh", sql.NVarChar(20), fields.aadh)
+        .input("occ", sql.NVarChar(100), fields.occ)
+        .input("inc", sql.Decimal(18,2), fields.inc)
         .query(`
-          UPDATE dbo.CrmCustomerBankDetail SET
-            BankName = ISNULL(@bank, BankName), BranchName = ISNULL(@branch, BranchName),
-            AccountNo = ISNULL(@acc, AccountNo), IfscCode = ISNULL(@ifsc, IfscCode),
-            AccountHolderName = ISNULL(@holder, AccountHolderName),
-            NomineeName = ISNULL(@nname, NomineeName), NomineeRelation = ISNULL(@nrel, NomineeRelation),
-            NomineeDob = ISNULL(@ndob, NomineeDob), NomineeContact = ISNULL(@ncon, NomineeContact),
-            NomineeAddress = ISNULL(@naddr, NomineeAddress),
-            PanNo = ISNULL(@pan, PanNo), AadhaarNo = ISNULL(@aadh, AadhaarNo),
-            Occupation = ISNULL(@occ, Occupation), AnnualIncome = ISNULL(@inc, AnnualIncome),
-            ChequeNo = ISNULL(@cheque, ChequeNo), ChequeDate = ISNULL(@chqdate, ChequeDate),
-            TransactionRef = ISNULL(@tref, TransactionRef),
-            Notes = ISNULL(@notes, Notes), UpdatedBy = @ub, UpdatedAt = SYSDATETIME(),
-            -- This is a later, separate edit surface (the final standalone
-            -- Bank & KYC page) than the Booking-tab verify action below —
-            -- whatever was verified at the Booking stage no longer matches
-            -- once this save changes the row, so that verification is stale
-            -- and must be cleared, not left claiming a row it no longer describes.
-            BookingStageVerifiedAt = NULL, BookingStageVerifiedBy = NULL
-          WHERE BookingId = @bid
+          UPDATE c SET
+            c.PanNo = ISNULL(@pan, c.PanNo),
+            c.AadhaarNo = ISNULL(@aadh, c.AadhaarNo),
+            c.Occupation = ISNULL(@occ, c.Occupation),
+            c.AnnualIncome = ISNULL(@inc, c.AnnualIncome)
+          FROM dbo.CrmCustomer c
+          JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
+          JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id
+          WHERE b.Id = @bid
         `);
-    } else {
-      await pool.request()
-        .input("bid", sql.Int, bid)
-        .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
-        .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
-        .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
-        .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
-        .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
-        .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
-        .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
-        .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
-        .input("tref", sql.NVarChar(200), fields.tref)
-        .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("cb", sql.Int, actor)
-        .query(`
-          INSERT INTO dbo.CrmCustomerBankDetail
-            (BookingId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
-             NomineeName, NomineeRelation, NomineeDob, NomineeContact, NomineeAddress,
-             PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes, CreatedBy, CreatedAt)
-          VALUES (@bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @cb, SYSDATETIME())
-        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
 
     // Auto-flow: saved details are the other agreement-prep prerequisite —
     // fire the auto-create check (no-op if the welcome call isn't done yet).
     await maybeAutoCreateAgreement(pool, bid, actor);
-
-    // Sync KYC fields back to the centralized Customer record so the
-    // data remains consistent across the ERP.
-    await pool.request()
-      .input("bid", sql.Int, bid)
-      .input("pan", sql.NVarChar(20), fields.pan)
-      .input("aadh", sql.NVarChar(20), fields.aadh)
-      .input("occ", sql.NVarChar(100), fields.occ)
-      .input("inc", sql.Decimal(18,2), fields.inc)
-      .query(`
-        UPDATE c SET
-          c.PanNo = ISNULL(@pan, c.PanNo),
-          c.AadhaarNo = ISNULL(@aadh, c.AadhaarNo),
-          c.Occupation = ISNULL(@occ, c.Occupation),
-          c.AnnualIncome = ISNULL(@inc, c.AnnualIncome)
-        FROM dbo.CrmCustomer c
-        JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
-        JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id
-        WHERE b.Id = @bid
-      `);
 
     res.json({ success: true });
   } catch (e) {
@@ -324,7 +364,8 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 router.get("/application/:applicationId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const aid = parseInt(req.params.applicationId);
+    const aid = parseId(req.params.applicationId);
+    if (aid === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, aid).query(`
       SELECT d.*, vu.name AS BookingStageVerifiedByName
       FROM dbo.CrmCustomerBankDetail d
@@ -361,7 +402,8 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
 router.put("/application/:applicationId", requirePageRight("crm-customer-bank-details", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const aid = parseInt(req.params.applicationId);
+    const aid = parseId(req.params.applicationId);
+    if (aid === null) return res.status(400).json({ error: "Invalid applicationId" });
     const b = req.body;
     const actor = actorId(req);
 
@@ -380,9 +422,9 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     // conflict this route pair is prone to.
     const linkedBooking = await pool.request().input("aid", sql.Int, aid)
       .query("SELECT Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
-    const linkedBookingId = linkedBooking.recordset[0]?.Id || null;
-    if (linkedBookingId) {
-      const activeErr = await requireActiveBooking(pool, linkedBookingId);
+    const linkedBookingId = linkedBooking.recordset[0]?.Id != null ? linkedBooking.recordset[0].Id : null;
+    if (linkedBookingId != null) {
+      const activeErr = await requireApprovedBooking(pool, linkedBookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
       // Same real freeze point as the Booking-keyed endpoint — this comment
       // above already said these two endpoints were SUPPOSED to freeze
@@ -399,8 +441,11 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
 
     const fields = {
       bank: b.BankName || null, branch: b.BranchName || null, acc: b.AccountNo || null, ifsc: b.IfscCode || null,
-      holder: b.AccountHolderName || null, nname: b.NomineeName || null, nrel: b.NomineeRelation || null,
-      ndob: b.NomineeDob || null, ncon: b.NomineeContact || null, naddr: b.NomineeAddress || null,
+      holder: b.AccountHolderName || null,
+      // Nominee capture was removed from the CRM — these stay bound as NULL so
+      // the existing ISNULL(@nname, NomineeName) upserts simply never touch the
+      // Nominee* columns (the DB columns are kept, just no longer written).
+      nname: null, nrel: null, ndob: null, ncon: null, naddr: null,
       pan: b.PanNo || null, aadh: b.AadhaarNo || null,
       occ: b.Occupation || null, inc: b.AnnualIncome != null && b.AnnualIncome !== "" ? parseFloat(b.AnnualIncome) : null,
       cheque: b.ChequeNo || null, chqdate: b.ChequeDate || null, tref: b.TransactionRef || null,
@@ -415,8 +460,6 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     if (fields.ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(fields.ifsc))
       return res.status(400).json({ error: "IFSC code must be in the format ABCD0123456 (4 letters, 0, 6 alphanumeric)" });
     if (fields.ifsc) fields.ifsc = fields.ifsc.toUpperCase();
-    if (fields.ncon && !/^\d{10}$/.test(fields.ncon))
-      return res.status(400).json({ error: "Nominee contact must be exactly 10 digits" });
 
     // VerifyBookingStage is only ever sent (true) by the Booking-tab "Save
     // Bank/KYC Details" button (CrmBookingDetail.tsx) — that's the one
@@ -428,68 +471,98 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     // verification would keep pointing at data that's since changed.
     const verify = b.VerifyBookingStage === true;
 
-    if (existing.recordset.length) {
-      await pool.request()
+    // Same atomicity concern as the Booking-keyed PUT above: the bank-detail
+    // upsert and the Customer-record KYC sync must land together.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (existing.recordset.length) {
+        await tx.request()
+          .input("aid", sql.Int, aid)
+          .input("bid", sql.Int, linkedBookingId)
+          .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
+          .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
+          .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
+          .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
+          .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
+          .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
+          .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
+          .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
+          .input("tref", sql.NVarChar(200), fields.tref)
+          .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("ub", sql.Int, actor)
+          .input("verify", sql.Bit, verify)
+          .query(`
+            UPDATE dbo.CrmCustomerBankDetail SET
+              -- Backfill BookingId if a Booking now exists but this row still
+              -- predates it (createCrmBookingRecord only backfills once, at
+              -- booking-creation time — this covers every save afterward, so
+              -- the Booking-side "Bank Details" tab, which reads by BookingId,
+              -- can actually find data saved from the Application side later).
+              BookingId = ISNULL(BookingId, @bid),
+              BankName = ISNULL(@bank, BankName), BranchName = ISNULL(@branch, BranchName),
+              AccountNo = ISNULL(@acc, AccountNo), IfscCode = ISNULL(@ifsc, IfscCode),
+              AccountHolderName = ISNULL(@holder, AccountHolderName),
+              NomineeName = ISNULL(@nname, NomineeName), NomineeRelation = ISNULL(@nrel, NomineeRelation),
+              NomineeDob = ISNULL(@ndob, NomineeDob), NomineeContact = ISNULL(@ncon, NomineeContact),
+              NomineeAddress = ISNULL(@naddr, NomineeAddress),
+              PanNo = ISNULL(@pan, PanNo), AadhaarNo = ISNULL(@aadh, AadhaarNo),
+              Occupation = ISNULL(@occ, Occupation), AnnualIncome = ISNULL(@inc, AnnualIncome),
+              ChequeNo = ISNULL(@cheque, ChequeNo), ChequeDate = ISNULL(@chqdate, ChequeDate),
+              TransactionRef = ISNULL(@tref, TransactionRef),
+              Notes = ISNULL(@notes, Notes), UpdatedBy = @ub, UpdatedAt = SYSDATETIME(),
+              BookingStageVerifiedAt = CASE WHEN @verify = 1 THEN SYSDATETIME() ELSE NULL END,
+              BookingStageVerifiedBy = CASE WHEN @verify = 1 THEN @ub ELSE NULL END
+            WHERE ApplicationId = @aid
+          `);
+      } else {
+        await tx.request()
+          .input("aid", sql.Int, aid)
+          .input("bid", sql.Int, linkedBookingId)
+          .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
+          .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
+          .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
+          .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
+          .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
+          .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
+          .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
+          .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
+          .input("tref", sql.NVarChar(200), fields.tref)
+          .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("cb", sql.Int, actor)
+          .input("vat", sql.DateTime2, verify ? new Date() : null)
+          .input("vby", sql.Int, verify ? actor : null)
+          .query(`
+            INSERT INTO dbo.CrmCustomerBankDetail
+              (ApplicationId, BookingId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
+               NomineeName, NomineeRelation, NomineeDob, NomineeContact, NomineeAddress,
+               PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes,
+               BookingStageVerifiedAt, BookingStageVerifiedBy, CreatedBy, CreatedAt)
+            VALUES (@aid, @bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @vat, @vby, @cb, SYSDATETIME())
+          `);
+      }
+
+      // Sync KYC fields back to the centralized Customer record so the
+      // data remains consistent across the ERP.
+      await tx.request()
         .input("aid", sql.Int, aid)
-        .input("bid", sql.Int, linkedBookingId)
-        .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
-        .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
-        .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
-        .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
-        .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
-        .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
-        .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
-        .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
-        .input("tref", sql.NVarChar(200), fields.tref)
-        .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("ub", sql.Int, actor)
-        .input("verify", sql.Bit, verify)
+        .input("pan", sql.NVarChar(20), fields.pan)
+        .input("aadh", sql.NVarChar(20), fields.aadh)
+        .input("occ", sql.NVarChar(100), fields.occ)
+        .input("inc", sql.Decimal(18,2), fields.inc)
         .query(`
-          UPDATE dbo.CrmCustomerBankDetail SET
-            -- Backfill BookingId if a Booking now exists but this row still
-            -- predates it (createCrmBookingRecord only backfills once, at
-            -- booking-creation time — this covers every save afterward, so
-            -- the Booking-side "Bank Details" tab, which reads by BookingId,
-            -- can actually find data saved from the Application side later).
-            BookingId = ISNULL(BookingId, @bid),
-            BankName = ISNULL(@bank, BankName), BranchName = ISNULL(@branch, BranchName),
-            AccountNo = ISNULL(@acc, AccountNo), IfscCode = ISNULL(@ifsc, IfscCode),
-            AccountHolderName = ISNULL(@holder, AccountHolderName),
-            NomineeName = ISNULL(@nname, NomineeName), NomineeRelation = ISNULL(@nrel, NomineeRelation),
-            NomineeDob = ISNULL(@ndob, NomineeDob), NomineeContact = ISNULL(@ncon, NomineeContact),
-            NomineeAddress = ISNULL(@naddr, NomineeAddress),
-            PanNo = ISNULL(@pan, PanNo), AadhaarNo = ISNULL(@aadh, AadhaarNo),
-            Occupation = ISNULL(@occ, Occupation), AnnualIncome = ISNULL(@inc, AnnualIncome),
-            ChequeNo = ISNULL(@cheque, ChequeNo), ChequeDate = ISNULL(@chqdate, ChequeDate),
-            TransactionRef = ISNULL(@tref, TransactionRef),
-            Notes = ISNULL(@notes, Notes), UpdatedBy = @ub, UpdatedAt = SYSDATETIME(),
-            BookingStageVerifiedAt = CASE WHEN @verify = 1 THEN SYSDATETIME() ELSE NULL END,
-            BookingStageVerifiedBy = CASE WHEN @verify = 1 THEN @ub ELSE NULL END
-          WHERE ApplicationId = @aid
+          UPDATE c SET
+            c.PanNo = ISNULL(@pan, c.PanNo),
+            c.AadhaarNo = ISNULL(@aadh, c.AadhaarNo),
+            c.Occupation = ISNULL(@occ, c.Occupation),
+            c.AnnualIncome = ISNULL(@inc, c.AnnualIncome)
+          FROM dbo.CrmCustomer c
+          JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
+          WHERE a.Id = @aid
         `);
-    } else {
-      await pool.request()
-        .input("aid", sql.Int, aid)
-        .input("bid", sql.Int, linkedBookingId)
-        .input("bank", sql.NVarChar(200), fields.bank).input("branch", sql.NVarChar(200), fields.branch)
-        .input("acc", sql.NVarChar(50), fields.acc).input("ifsc", sql.NVarChar(20), fields.ifsc)
-        .input("holder", sql.NVarChar(200), fields.holder).input("nname", sql.NVarChar(200), fields.nname)
-        .input("nrel", sql.NVarChar(50), fields.nrel).input("ndob", sql.Date, fields.ndob)
-        .input("ncon", sql.NVarChar(20), fields.ncon).input("naddr", sql.NVarChar(500), fields.naddr)
-        .input("pan", sql.NVarChar(20), fields.pan).input("aadh", sql.NVarChar(20), fields.aadh)
-        .input("occ", sql.NVarChar(100), fields.occ).input("inc", sql.Decimal(18,2), fields.inc)
-        .input("cheque", sql.NVarChar(50), fields.cheque).input("chqdate", sql.Date, fields.chqdate)
-        .input("tref", sql.NVarChar(200), fields.tref)
-        .input("notes", sql.NVarChar(sql.MAX), fields.notes).input("cb", sql.Int, actor)
-        .input("vat", sql.DateTime2, verify ? new Date() : null)
-        .input("vby", sql.Int, verify ? actor : null)
-        .query(`
-          INSERT INTO dbo.CrmCustomerBankDetail
-            (ApplicationId, BookingId, BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
-             NomineeName, NomineeRelation, NomineeDob, NomineeContact, NomineeAddress,
-             PanNo, AadhaarNo, Occupation, AnnualIncome, ChequeNo, ChequeDate, TransactionRef, Notes,
-             BookingStageVerifiedAt, BookingStageVerifiedBy, CreatedBy, CreatedAt)
-          VALUES (@aid, @bid, @bank, @branch, @acc, @ifsc, @holder, @nname, @nrel, @ndob, @ncon, @naddr, @pan, @aadh, @occ, @inc, @cheque, @chqdate, @tref, @notes, @vat, @vby, @cb, SYSDATETIME())
-        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
 
     // Same auto-flow the Booking-keyed PUT above fires — without this, a
@@ -499,25 +572,6 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     if (linkedBookingId) {
       await maybeAutoCreateAgreement(pool, linkedBookingId, actor);
     }
-
-    // Sync KYC fields back to the centralized Customer record so the
-    // data remains consistent across the ERP.
-    await pool.request()
-      .input("aid", sql.Int, aid)
-      .input("pan", sql.NVarChar(20), fields.pan)
-      .input("aadh", sql.NVarChar(20), fields.aadh)
-      .input("occ", sql.NVarChar(100), fields.occ)
-      .input("inc", sql.Decimal(18,2), fields.inc)
-      .query(`
-        UPDATE c SET
-          c.PanNo = ISNULL(@pan, c.PanNo),
-          c.AadhaarNo = ISNULL(@aadh, c.AadhaarNo),
-          c.Occupation = ISNULL(@occ, c.Occupation),
-          c.AnnualIncome = ISNULL(@inc, c.AnnualIncome)
-        FROM dbo.CrmCustomer c
-        JOIN dbo.CrmApplication a ON a.CustomerId = c.Id
-        WHERE a.Id = @aid
-      `);
 
     res.json({ success: true });
   } catch (e) {

@@ -32,7 +32,10 @@ export const dbaNavItems: NavItem[] = [
   {
     label: "Logs",
     icon: Receipt21,
-    children: [{ label: "Payment Logs", path: "/dba/payment-logs" }],
+    children: [
+      { label: "Payment Logs", path: "/dba/payment-logs" },
+      { label: "GL Posting Failures", path: "/dba/gl-posting-failures" },
+    ],
   },
   {
     label: "Reminders",

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -63,6 +63,7 @@ import {
   type ColumnDef,
   type ExportColumn,
 } from "@/components/ui/DataTable";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface AccountGroup {
@@ -125,23 +126,27 @@ const EMPTY: FormState = {
 };
 
 // ─── Export Columns ─────────────────────────────────────────────────────────
-const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "Company", accessor: "companyName" },
-  { header: "Bank Name", accessor: "bankName" },
-  { header: "Branch", accessor: "branch" },
-  { header: "Account No", accessor: "accountNo" },
-  { header: "IFSC", accessor: "ifsc" },
-  { header: "Account Type", accessor: "accountType" },
-  { header: "Bank Type", accessor: "bankType" },
-  { header: "Holder Name", accessor: "holderName" },
-  { header: "Opening Balance", accessor: "openingBalance" },
-  {
-    header: "Group",
-    accessor: (r) => (r.BLBelongsTo != null ? String(r.BLBelongsTo) : "—"),
-  },
-  { header: "Address", accessor: "address" },
-  { header: "Status", accessor: (r) => (r.BActive ? "Active" : "Inactive") },
-];
+// Group is built per-render (see buildExportColumns below) — it needs to
+// resolve BLBelongsTo (an AccountGroup id) to its name via the accountGroups
+// list, which only exists inside the component.
+function buildExportColumns(accountGroups: AccountGroup[]): ExportColumn[] {
+  const groupName = (id: unknown) =>
+    id != null ? (accountGroups.find((g) => g._id === String(id))?.name ?? "—") : "—";
+  return [
+    { header: "Company", accessor: "BCompanyName" },
+    { header: "Bank Name", accessor: "BName" },
+    { header: "Branch", accessor: "BBranch" },
+    { header: "Account No", accessor: "BAccountNumber" },
+    { header: "IFSC", accessor: "BIfscCode" },
+    { header: "Account Type", accessor: "BAccountType" },
+    { header: "Bank Type", accessor: "BBankType" },
+    { header: "Holder Name", accessor: "BAccountHolderName" },
+    { header: "Opening Balance", accessor: "BOpeningBalance" },
+    { header: "Group", accessor: (r) => groupName(r.BLBelongsTo) },
+    { header: "Address", accessor: "BAddress" },
+    { header: "Status", accessor: (r) => (r.BStatus ? "Active" : "Inactive") },
+  ];
+}
 
 // ─── CSV template / import column mapping ─────────────────────────────────────
 // Single source of truth for both the downloadable template and the importer,
@@ -213,7 +218,7 @@ const inputCls =
 const bankTypeBadge: Record<string, string> = {
   Nationalized: "bg-blue-500/10 border-blue-500/20 text-blue-600",
   Private: "bg-violet-500/10 border-violet-500/20 text-violet-600",
-  "Co-operative": "bg-amber-500/10 border-amber-500/20 text-amber-600",
+  "Co-operative": "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
   Foreign: "bg-cyan-500/10 border-cyan-500/20 text-cyan-600",
   "Regional Rural": "bg-green-500/10 border-green-500/20 text-green-600",
 };
@@ -296,7 +301,7 @@ function buildColumns(
           bankTypeBadge[v] ?? "bg-muted border-border text-muted-foreground";
         return (
           <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${cls}`}
+            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${cls}`}
           >
             {v}
           </span>
@@ -343,7 +348,7 @@ function buildColumns(
           <div className="flex items-center justify-start gap-2 w-full min-w-[120px]">
             {deleteId === id ? (
               <>
-                <span className="text-[11px] text-muted-foreground mr-1">
+                <span className="text-[0.6875rem] text-muted-foreground mr-1">
                   Confirm?
                 </span>
                 <button
@@ -361,7 +366,7 @@ function buildColumns(
               </>
             ) : (
               <>
-                <button
+                <button data-row-view
                   onClick={() => onView(bank)}
                   className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
                   title="View details"
@@ -371,7 +376,7 @@ function buildColumns(
                 {canPrint && (
                   <button
                     onClick={() => onPrint(bank)}
-                    className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                    className="p-1 rounded text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                     title="Print"
                   >
                     <Printer size={15} />
@@ -408,7 +413,7 @@ function buildColumns(
 const BankMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const rights = usePageRights("bank-master");
 
   const {
@@ -993,7 +998,7 @@ const BankMaster: React.FC = () => {
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Bank" : "Add Bank"}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are
                 required
               </p>
@@ -1007,7 +1012,7 @@ const BankMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Landmark size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Basic Information
                 </p>
               </div>
@@ -1057,7 +1062,7 @@ const BankMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <CreditCard size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Account Details
                 </p>
               </div>
@@ -1112,7 +1117,7 @@ const BankMaster: React.FC = () => {
                       className={`${inputCls} pl-8 font-mono tracking-widest uppercase ${errors.ifsc ? "border-red-400" : ""}`}
                     />
                     {form.ifsc.length === 11 && IFSC_REGEX.test(form.ifsc) && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded">
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded">
                         ✓
                       </span>
                     )}
@@ -1222,7 +1227,7 @@ const BankMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <MapPin size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Address
                 </p>
               </div>
@@ -1246,11 +1251,11 @@ const BankMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Building2 size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Tag Project(s)
                 </p>
               </div>
-              <p className="text-[11px] text-muted-foreground -mt-1">
+              <p className="text-[0.6875rem] text-muted-foreground -mt-1">
                 Optional — leave empty and this bank stays in the shared pool every untagged Project draws from.
                 Tag it to one or more Projects and it becomes the ONLY bank offered for those Projects' work — it
                 disappears from every other Project's bank selection, including ones with no tags of their own.
@@ -1261,7 +1266,7 @@ const BankMaster: React.FC = () => {
 
               <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
                 <div>
-                  <label className="text-[11px] text-muted-foreground block mb-1">Company</label>
+                  <label className="text-[0.6875rem] text-muted-foreground block mb-1">Company</label>
                   <TreeDropdown
                     variant="flat"
                     value={form.companyName}
@@ -1273,7 +1278,7 @@ const BankMaster: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
                   <div>
-                    <label className="text-[11px] text-muted-foreground block mb-1">Project</label>
+                    <label className="text-[0.6875rem] text-muted-foreground block mb-1">Project</label>
                     <select
                       value={tagProjectId}
                       onChange={(e) => {
@@ -1304,7 +1309,7 @@ const BankMaster: React.FC = () => {
                     type="button"
                     onClick={handleAddTaggedProject}
                     disabled={!tagProjectId}
-                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed h-[34px]"
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed h-[34px]"
                   >
                     <Plus size={13} /> Add
                   </button>
@@ -1366,7 +1371,7 @@ const BankMaster: React.FC = () => {
 
           {/* Card footer — actions */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">
                   Ready to save
@@ -1460,7 +1465,7 @@ const BankMaster: React.FC = () => {
               exportConfig={rights.canExport ? {
                 title: "Bank Master",
                 filename: "bank-master",
-                columns: EXPORT_COLUMNS,
+                columns: buildExportColumns(accountGroups),
               } : undefined}
               rowClassName={(row) =>
                 editingId === String(row.original.BId) ? "bg-primary/5" : ""
@@ -1530,7 +1535,7 @@ const BankMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRow && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRow(null)}
@@ -1585,7 +1590,7 @@ const BankMaster: React.FC = () => {
                 },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     {label}
                   </p>
                   <p
@@ -1596,7 +1601,7 @@ const BankMaster: React.FC = () => {
                 </div>
               ))}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -1630,7 +1635,7 @@ const BankMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

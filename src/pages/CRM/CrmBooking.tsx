@@ -8,12 +8,13 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import {
   Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2,
   Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat, Building2,
-  AlertTriangle, Trash2,
+  AlertTriangle, Trash2, Lock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -29,11 +30,16 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { CrmBookingDetail } from "./CrmBookingDetail";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
+import { DateInput } from "@/components/ui/date-input";
 
 const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
 const SA_LEADS_API = "/api/sa/leads";
 const UNIT_API = "/api/unit-master";
+const PLOT_API = "/api/plot-master";
 const PLAN_API = "/api/crm/payment-plans";
 const PROJECT_BANK_API = "/api/crm/project-banks";
 const BANK_MASTER_API = "/api/bank-master";
@@ -45,9 +51,9 @@ const TOKEN_TYPES = ["Percentage", "Amount"];
 // Shared field styling for the New Booking dialog's restructured 2-column
 // layout — same amber-focus-ring convention as the New Application wizard's
 // inputCls/labelCls (CrmApplication.tsx).
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40";
+const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-muted/30 focus:bg-background focus:outline-none focus:ring-2 focus:ring-sky-500/30";
 const inputClsDisabled = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed";
-const labelCls = "text-xs text-muted-foreground block mb-1";
+const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
 
 const statusColor: Record<string, string> = {
   Pending:   "text-orange-600 bg-orange-50 border-orange-200",
@@ -70,7 +76,7 @@ const workflowStageLabel: Record<string, string> = {
 // requires picking a real Application, same as before — this is not a
 // freeform booking with no Application behind it.
 const EMPTY_FORM = {
-  ApplicationId: "", UnitId: "", ProjectName: "", UnitNo: "", BlockName: "",
+  ApplicationId: "", UnitIds: [] as string[], PlotIds: [] as string[], ProjectName: "", UnitNo: "", BlockName: "",
   UnitType: "", AreaSqFt: "", RatePerSqFt: "", TotalValue: "",
   TokenType: "Percentage", TokenValue: "", PaymentPlanId: "",
   BookingDate: "", PaymentMode: "", AssignedTo: "", Notes: "",
@@ -80,6 +86,9 @@ const EMPTY_FORM = {
 
 async function fetchUnits(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchPlots(): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${PLOT_API}?available=1`); return r.ok ? r.json() : []; } catch { return []; }
 }
 // Needed to resolve a tagged plan's fixed Booking Amount — Booking is no
 // longer typed per booking, it's decided when the plan itself was created
@@ -113,6 +122,30 @@ async function fetchBookings(applicationId?: string): Promise<any[]> {
     if (!res.ok) return [];
     return res.json();
   } catch { return []; }
+}
+
+const PAGE_SIZE = 20;
+interface BookingListFilters {
+  search: string;
+  status: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+// Main-list fetch: server-side search/status/Company/Project/Block +
+// pagination. Kept entirely separate from fetchBookings() above, which stays
+// exactly as-is for the applicationId-scoped deep-link/legacy callers.
+async function fetchBookingsList(filters: BookingListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ includeCancelled: "1", page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.status !== "All") params.set("status", filters.status);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  const res = await fetchWithAuth(`${API}?${params}`);
+  if (!res.ok) return { rows: [], total: 0 };
+  const data = await res.json();
+  return { rows: data.rows || [], total: data.total || 0 };
 }
 // Which real company bank account this booking's token payment lands in —
 // scoped to the selected unit's project (falls back to the open bank list if
@@ -149,20 +182,42 @@ function getNextStep(b: any): NextStep {
   // HasWelcomeCall means Outcome = 'Welcomed' specifically (see crmBookings.js
   // BOOKING_SELECT) -- a logged call with any other outcome must NOT satisfy
   // this, since that's not what unblocks Agreement auto-creation either.
-  if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-amber-500 border-amber-200 bg-amber-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
-  if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
+  if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-sky-500 border-sky-200 bg-sky-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
+  if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
+  // Milestone 1 (Booking Amount) must actually be Paid before Agreement prep
+  // can succeed (validateAgreementPreparationPrerequisites in
+  // crmWorkflowGuards.js hard-blocks on exactly this) — checked here too so
+  // this chip never points staff at an Agreement page that will reject the
+  // booking as ineligible. No separate "already has an agreement" carve-out
+  // needed: a booking that already has one necessarily cleared this already.
+  if (!b.AgreementId && b.Milestone1Status !== CrmStatus.PAID && !b.Milestone1VirtuallyCovered) {
+    return { label: "Payments", color: "text-sky-700 border-sky-200 bg-sky-50", path: `/crm/payments?bookingId=${b.Id}` };
+  }
   // Agreement sub-stages: draft → senior approval → customer approval → date negotiation → date approval → executed
   if (!b.AgreementId || b.SeniorApprovalStatus !== CrmStatus.APPROVED || b.CustomerApprovalStatus !== CrmStatus.APPROVED) {
-    return { label: "Agreement", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+    return { label: "Agreement", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
   if (!b.AgreementDate) {
-    return { label: "Agreement Date", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+    return { label: "Agreement Date", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
   if (b.DateApprovalStatus !== CrmStatus.APPROVED) {
-    return { label: "Date Approval", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+    return { label: "Date Approval", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
-if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
-  return null; // every gated step is complete
+  if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
+  // Post-agreement lifecycle — mirrors GET /:id/lifecycle's own step order
+  // exactly (Agreement Registered -> NOC / Handover -> Sale Deed -> Registry
+  // -> Mutation). Without this the chip declared "All Steps Complete" the
+  // moment payments+agreement cleared, long before the booking's actual
+  // journey (possession, sale deed, registry) had even started.
+  if (!b.AgreementRegistered) {
+    return { label: "Agreement Registration", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
+  }
+  if (!b.NocIssued) return { label: "NOC", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/noc?bookingId=${b.Id}` };
+  if (!b.HandoverDone) return { label: "Handover", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/handover` };
+  if (!b.SalesDeedDone) return { label: "Sale Deed", color: "text-sky-700 border-sky-200 bg-sky-50", path: `/crm/sales-deed?bookingId=${b.Id}` };
+  if (!b.RegistryDone) return { label: "Registry", color: "text-sky-700 border-sky-200 bg-sky-50", path: `/crm/sales-deed?bookingId=${b.Id}&tab=Registry` };
+  if (!b.MutationDone) return { label: "Mutation", color: "text-sky-800 border-sky-200 bg-sky-50", path: `/crm/mutation?bookingId=${b.Id}` };
+  return null; // every gated step, all the way through Mutation, is complete
 }
 
 const CrmBooking: React.FC = () => {
@@ -176,14 +231,17 @@ const CrmBooking: React.FC = () => {
   const canRequestCancellation = canDoAction("crm-cancellations", "create");
   const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
   const viewFilter = sp.get("view") || "";
 
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM, ApplicationId: appFilter });
   const [saving, setSaving] = useState(false);
@@ -200,11 +258,26 @@ const CrmBooking: React.FC = () => {
     navigate(`/crm/bookings?view=${id}`, { replace: true });
   };
 
-  const { data: bookings = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-bookings", appFilter],
-    queryFn: () => fetchBookings(appFilter || undefined),
+  const listFilters: BookingListFilters = useMemo(
+    () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, statusFilter, cpb]
+  );
+
+  // The applicationId-scoped deep-link mode (?applicationId=X) keeps using
+  // the original unpaginated, unfiltered fetch exactly as before — it's
+  // fetching "the booking(s) for this one application," not a page of the
+  // main list. Only the main list (no appFilter) goes through the new
+  // server-side search/status/Company/Project/Block + pagination path.
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-bookings", appFilter, listFilters, page],
+    queryFn: async () => {
+      if (appFilter) return { rows: await fetchBookings(appFilter), total: 0 };
+      return fetchBookingsList(listFilters, page);
+    },
     staleTime: 30_000,
   });
+  const bookings = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
 
   // Deep-link support: /crm/bookings?applicationId=X (from "View Booking"
   // elsewhere in the app) opens that booking's detail modal directly in
@@ -215,7 +288,22 @@ const CrmBooking: React.FC = () => {
   // Nominee page's own deep link).
   React.useEffect(() => {
     if (viewFilter && !deepLinkOpened) {
-      setViewingBookingId(parseInt(viewFilter, 10));
+      const viewId = parseInt(viewFilter, 10);
+      // 0 is a real booking Id (CrmBooking's identity got reseeded to 0 by
+      // the same corruption already fixed for CrmCustomer/other tables —
+      // see migration 441 and its siblings) — only genuinely non-numeric
+      // input (?view=abc, negative) should be treated as invalid.
+      if (Number.isInteger(viewId) && viewId >= 0) {
+        // Valid id — open the detail panel.
+        setViewingBookingId(viewId);
+      } else {
+        // ?view=abc or a negative id — the detail panel will never open
+        // (viewingBookingId stays null, so {viewingBookingId != null && …}
+        // is falsy), which means the onClose handler that normally clears
+        // the URL will never run. Actively navigate to the clean URL here
+        // so the stale bad param doesn't sit in the address bar forever.
+        navigate("/crm/bookings", { replace: true });
+      }
       setDeepLinkOpened(true);
       return;
     }
@@ -226,6 +314,7 @@ const CrmBooking: React.FC = () => {
   const { data: apps = [] } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 5 * 60_000 });
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
+  const { data: plots = [] } = useQuery({ queryKey: ["plot-master"], queryFn: fetchPlots, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans-active"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
 
   // The plan actually tagged to this booking (via the Application) — its
@@ -245,14 +334,15 @@ const CrmBooking: React.FC = () => {
     setForm((f) => f.BookingAmount === planAmt ? f : { ...f, BookingAmount: planAmt });
   }, [selectedPlan]);
 
-  const selectedUnitProjectId: number | undefined = useMemo(
-    () => (units as any[]).find((u: any) => String(u.Id) === form.UnitId)?.ProjectId,
-    [units, form.UnitId],
+  const selectedAssetProjectId: number | undefined = useMemo(
+    () => (units as any[]).find((u: any) => String(u.Id) === form.UnitIds[0])?.ProjectId
+      || (plots as any[]).find((p: any) => String(p.Id) === form.PlotIds[0])?.ProjectId,
+    [units, plots, form.UnitIds, form.PlotIds],
   );
   const { data: projectBanks = [] } = useQuery({
-    queryKey: ["crm-booking-project-banks", selectedUnitProjectId],
-    queryFn: () => fetchProjectBanks(selectedUnitProjectId),
-    enabled: dialogOpen && !!selectedUnitProjectId,
+    queryKey: ["crm-booking-project-banks", selectedAssetProjectId],
+    queryFn: () => fetchProjectBanks(selectedAssetProjectId),
+    enabled: dialogOpen && !!selectedAssetProjectId,
   });
   const { data: allBanks = [] } = useQuery({
     queryKey: ["bank-master-dropdown"],
@@ -265,10 +355,10 @@ const CrmBooking: React.FC = () => {
   // back further to the raw, unfiltered bank list here would silently
   // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
   // the raw list when this unit's Project isn't known yet.
-  const bankOptions = selectedUnitProjectId ? projectBanks : allBanks;
+  const bankOptions = selectedAssetProjectId ? projectBanks : allBanks;
   React.useEffect(() => {
     if (projectBanks.length === 1) {
-      setForm((f) => f.DepositBankId ? f : { ...f, DepositBankId: String(projectBanks[0].BId) });
+      // (no deposit bank auto-pick — Accounts assigns it before approval)
     }
   }, [projectBanks]);
 
@@ -281,9 +371,15 @@ const CrmBooking: React.FC = () => {
     // system-wide, not scoped to this page's filters) is the reliable
     // source — same fields CrmApplication.tsx's own unit picker now uses.
     return (units as any[]).filter((u: any) =>
-      u.IsActive && (!(u.LockBookingNo || u.LockHoldId) || String(u.Id) === form.UnitId)
+      u.IsActive && (!(u.LockBookingNo || u.LockHoldId) || form.UnitIds.includes(String(u.Id)))
     );
-  }, [units, form.UnitId]);
+  }, [units, form.UnitIds]);
+
+  const availablePlots = useMemo(() => (
+    (plots as any[]).filter((p: any) =>
+      !(p.LockBookingNo || p.LockApplicationNo || p.LockHoldId) || form.PlotIds.includes(String(p.Id))
+    )
+  ), [plots, form.PlotIds]);
 
   // The selected Application's own PreferredUnitId — auto-fetched and locked
   // here just like its other fields, since it's already been decided. Only
@@ -297,9 +393,21 @@ const CrmBooking: React.FC = () => {
     [apps, form.ApplicationId]
   );
   const appPreferredUnitId: number | undefined = selectedApp?.PreferredUnitId;
-  const appPreferredUnitAvailable = appPreferredUnitId != null
-    && (availableUnits as any[]).some((u: any) => u.Id === appPreferredUnitId);
-  const unitLockedFromApp = !!appPreferredUnitId && appPreferredUnitAvailable;
+  const appPreferredUnitIds = useMemo(() => {
+    const primary = selectedApp?.PreferredUnitId != null ? String(selectedApp.PreferredUnitId) : null;
+    const saved = String(selectedApp?.PreferredUnitIdsCsv || "").split(",").filter(Boolean);
+    return primary ? [primary, ...saved.filter((id) => id !== primary)] : saved;
+  }, [selectedApp]);
+  const appPreferredUnitAvailable = appPreferredUnitIds.length > 0
+    && appPreferredUnitIds.every((id) => (availableUnits as any[]).some((u: any) => String(u.Id) === id));
+  const unitLockedFromApp = appPreferredUnitIds.length > 0 && appPreferredUnitAvailable;
+  const appPreferredPlotIds = useMemo(
+    () => String(selectedApp?.PreferredPlotIdsCsv || "").split(",").filter(Boolean),
+    [selectedApp],
+  );
+  const appPreferredPlotsAvailable = appPreferredPlotIds.length > 0
+    && appPreferredPlotIds.every((id) => (availablePlots as any[]).some((p: any) => String(p.Id) === id));
+  const plotLockedFromApp = appPreferredPlotIds.length > 0 && appPreferredPlotsAvailable;
 
   // Everything the Application already captured (rate, token, booking
   // amount, payment mode, assignee, plan, brokerage, notes) is auto-fetched
@@ -310,21 +418,30 @@ const CrmBooking: React.FC = () => {
   // should be re-typed or drift from what was already approved.
   const handleApplicationSelect = (applicationId: string) => {
     const app = (apps as any[]).find((a: any) => String(a.Id) === applicationId);
-    const appUnit = app?.PreferredUnitId
-      ? (units as any[]).find((u: any) => u.Id === app.PreferredUnitId)
-      : null;
-    const area = appUnit?.AreaSqFt != null ? String(appUnit.AreaSqFt) : "";
+    const plotIds = String(app?.PreferredPlotIdsCsv || "").split(",").filter(Boolean);
+    const appPlots = (plots as any[]).filter((p: any) => plotIds.includes(String(p.Id)));
+    const primaryId = app?.PreferredUnitId != null ? String(app.PreferredUnitId) : null;
+    const savedIds = String(app?.PreferredUnitIdsCsv || "").split(",").filter(Boolean);
+    const unitIds = primaryId ? [primaryId, ...savedIds.filter((id) => id !== primaryId)] : savedIds;
+    const appUnits = (units as any[]).filter((u: any) => unitIds.includes(String(u.Id)));
+    const appUnit = appUnits.find((u: any) => String(u.Id) === primaryId) || appUnits[0] || null;
+    const isPlotApplication = plotIds.length > 0;
+    const selectedAssets = isPlotApplication ? appPlots : appUnits;
+    const primaryAsset = isPlotApplication ? appPlots[0] : appUnit;
+    const combinedArea = selectedAssets.reduce((total: number, asset: any) => total + (parseFloat(asset.AreaSqFt) || 0), 0);
+    const area = combinedArea > 0 ? String(combinedArea) : "";
     const rate = app?.RatePerSqFt != null ? String(app.RatePerSqFt) : "";
     const areaNum = parseFloat(area);
     const rateNum = parseFloat(rate);
     setForm((f) => ({
       ...f,
       ApplicationId: applicationId,
-      UnitId: appUnit ? String(appUnit.Id) : "",
-      UnitNo: appUnit?.UnitName || "",
-      ProjectName: appUnit?.ProjectName || "",
-      BlockName: appUnit?.BlockName || "",
-      UnitType: appUnit?.UnitType || "",
+      UnitIds: isPlotApplication ? [] : unitIds,
+      PlotIds: isPlotApplication ? plotIds : [],
+      UnitNo: selectedAssets.map((asset: any) => asset.PlotName || asset.UnitName).join(", ") || "",
+      ProjectName: primaryAsset?.ProjectName || "",
+      BlockName: primaryAsset?.BlockName || "",
+      UnitType: isPlotApplication ? "Plot" : (appUnit?.UnitType || ""),
       AreaSqFt: area,
       RatePerSqFt: rate,
       TotalValue: !isNaN(areaNum) && !isNaN(rateNum) ? String(Math.round(areaNum * rateNum)) : "",
@@ -341,24 +458,45 @@ const CrmBooking: React.FC = () => {
     }));
   };
 
-  const handleUnitSelect = (unitId: string) => {
-    const u = (units as any[]).find((x: any) => String(x.Id) === unitId);
-    const area = u?.AreaSqFt != null ? String(u.AreaSqFt) : "";
+  const handleUnitsChange = (nextIds: string[]) => {
+    const selectedUnits = (units as any[]).filter((u: any) => nextIds.includes(String(u.Id)));
+    const primary = selectedUnits[0] || null;
+    
+    // Multi-unit pricing: combined area is the sum of all selected units
+    const combinedArea = selectedUnits.reduce((acc, u) => acc + (parseFloat(u.AreaSqFt) || 0), 0);
+    const areaStr = combinedArea > 0 ? String(combinedArea) : "";
+    
     const rate = parseFloat(form.RatePerSqFt);
-    const areaNum = parseFloat(area);
+    
     setForm((f) => ({
       ...f,
-      UnitId: unitId,
-      UnitNo: u?.UnitName || f.UnitNo,
-      ProjectName: u?.ProjectName || f.ProjectName,
-      BlockName: u?.BlockName || f.BlockName,
-      UnitType: u?.UnitType || "",
-      AreaSqFt: area,
-      // PaymentPlanId comes from the Application (mandatory there) — a Unit
-      // no longer has a single "default" plan, only 1+ tagged plans, so
-      // there's nothing to fall back to here.
+      UnitIds: nextIds,
+      PlotIds: [],
+      UnitNo: selectedUnits.map((u: any) => u.UnitName).join(", ") || f.UnitNo,
+      ProjectName: primary?.ProjectName || f.ProjectName,
+      BlockName: primary?.BlockName || f.BlockName,
+      UnitType: primary?.UnitType || "",
+      AreaSqFt: areaStr,
       PaymentPlanId: f.PaymentPlanId,
-      TotalValue: !isNaN(areaNum) && !isNaN(rate) ? String(Math.round(areaNum * rate)) : f.TotalValue,
+      TotalValue: !isNaN(combinedArea) && combinedArea > 0 && !isNaN(rate) ? String(Math.round(combinedArea * rate)) : (nextIds.length === 0 ? "" : f.TotalValue),
+    }));
+  };
+
+  const handlePlotsChange = (nextIds: string[]) => {
+    const selectedPlots = (plots as any[]).filter((p: any) => nextIds.includes(String(p.Id)));
+    const primary = selectedPlots[0] || null;
+    const combinedArea = selectedPlots.reduce((acc, p) => acc + (parseFloat(p.AreaSqFt) || 0), 0);
+    const rate = parseFloat(form.RatePerSqFt);
+    setForm((f) => ({
+      ...f,
+      UnitIds: [],
+      PlotIds: nextIds,
+      UnitNo: selectedPlots.map((p: any) => p.PlotName).join(", ") || f.UnitNo,
+      ProjectName: primary?.ProjectName || f.ProjectName,
+      BlockName: primary?.BlockName || f.BlockName,
+      UnitType: "Plot",
+      AreaSqFt: combinedArea > 0 ? String(combinedArea) : "",
+      TotalValue: combinedArea > 0 && !isNaN(rate) ? String(Math.round(combinedArea * rate)) : (nextIds.length === 0 ? "" : f.TotalValue),
     }));
   };
 
@@ -374,43 +512,45 @@ const CrmBooking: React.FC = () => {
     }));
   };
 
-  const filtered = useMemo(() => {
-    return (bookings as any[]).filter((b: any) => {
-      const s = !search || b.ApplicantName?.toLowerCase().includes(search.toLowerCase())
-        || b.BookingNo?.includes(search) || b.UnitNo?.includes(search);
-      const st = statusFilter === "All" || b.Status === statusFilter;
-      return s && st;
-    });
-  }, [bookings, search, statusFilter]);
+  const isPlotBooking = form.PlotIds.length > 0 || appPreferredPlotIds.length > 0;
+
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
   const handleSave = async () => {
     if (!form.ApplicationId) { toast.error("Please select an Application"); return; }
-    if (!form.UnitId)  { toast.error("A unit must be selected from Unit Master"); return; }
-    if (bankOptions.length > 0 && !form.DepositBankId) { toast.error("Select which company bank this booking's token payment landed in"); return; }
+    if (form.UnitIds.length === 0 && form.PlotIds.length === 0) { toast.error("Select at least one unit or plot"); return; }
+    // DepositBankId/DepositBankName were never persisted or read anywhere in
+    // the actual booking-creation path (createCrmBookingRecord in
+    // crmEntityCreation.js) — CrmBooking has no such columns at all. This
+    // block required staff to pick a value that was then silently
+    // discarded end-to-end. The real deposit-bank concept lives at the
+    // Payment/Receipt level (crmPayments.js), recorded when the token
+    // payment is actually receipted, not at booking creation.
     setSaving(true);
     try {
-      const bankName = form.DepositBankId
-        ? (bankOptions as any[]).find((b: any) => String(b.BId) === form.DepositBankId)?.BName
-        : undefined;
       const res = await fetchWithAuth(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
           ApplicationId: parseInt(form.ApplicationId),
-          UnitId:        parseInt(form.UnitId),
+          UnitIds:       form.UnitIds.map(id => parseInt(id)),
+          PlotIds:       form.PlotIds.map(id => parseInt(id)),
           AreaSqFt:      form.AreaSqFt    || null,
           RatePerSqFt:   form.RatePerSqFt || null,
           TotalValue:    form.TotalValue   || null,
           TokenValue:    form.TokenValue   || null,
-          PaymentPlanId: form.PaymentPlanId || null,
+          PaymentPlanId: isPlotBooking ? null : (form.PaymentPlanId || null),
           AssignedTo:    form.AssignedTo   || null,
           BookingAmount: form.BookingAmount || null,
           BrokerId:      form.BrokerId || null,
           BrokerageRatePercent: form.BrokerageRatePercent || null,
           BrokeragePaymentPlan: form.BrokerId ? (form.BrokeragePaymentPlan || "OneTime") : "OneTime",
-          DepositBankId: form.DepositBankId || null,
-          DepositBankName: bankName || null,
+          // no deposit bank from CRM — Accounts assigns it before approval
+          DepositBankId: null,
+          DepositBankName: null,
         }),
       });
       const data = await res.json();
@@ -486,7 +626,7 @@ const CrmBooking: React.FC = () => {
   const bookingColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "BookingNo", header: "Booking No", size: 115,
       cell: (i) => (
-        <button onClick={() => openBooking(i.row.original.Id)} className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
+        <button onClick={() => openBooking(i.row.original.Id)} className="font-mono text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline">
           {i.row.original.BookingNo}
         </button>
       ) },
@@ -516,8 +656,12 @@ const CrmBooking: React.FC = () => {
         const storedGrand = Number(b.GrandTotal ?? 0);
         const grand = storedGrand > 0 ? storedGrand : (Number(b.TotalValue || 0) + Number(b.UnitGstAmount || 0) + Number(b.ParkingTotal || 0) + Number(b.ExtraChargesTotal || 0));
         const cleared = Number(b.TotalCleared ?? 0);
-        const mrOnAcc = Math.max(0, Number(b.MRReceivedTotal ?? 0) - cleared);
-        const onAcc = mrOnAcc + Number(b.ApprovedOnAccount ?? 0);
+        // ApprovedOnAccount (CrmOnAccountPayment) is the sole source of
+        // truth for "held, not yet applied" — every approved CRM payment
+        // lands there. Adding CrmMoneyReceipt's total on top double-counted
+        // the same money (that table gets a row for the same approved
+        // payment as a separate receipt document).
+        const onAcc = Number(b.ApprovedOnAccount ?? 0);
         const outstanding = Math.max(0, grand - cleared - onAcc);
         const clearedPct = grand > 0 ? Math.min(100, Math.round((cleared / grand) * 100)) : 0;
         const onAccPct = grand > 0 ? Math.min(100 - clearedPct, Math.round((onAcc / grand) * 100)) : 0;
@@ -525,7 +669,7 @@ const CrmBooking: React.FC = () => {
           <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
             <div className="font-semibold">{fmt(grand)}</div>
             {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
-              <div className="text-[10px] text-muted-foreground">
+              <div className="text-[0.625rem] text-muted-foreground">
                 Unit {fmt(b.TotalValue)}
                 {b.UnitGstAmount > 0 && ` + Unit GST ${fmt(b.UnitGstAmount)}`}
                 {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
@@ -538,10 +682,10 @@ const CrmBooking: React.FC = () => {
                   <div className="h-full bg-emerald-500 transition-all" style={{ width: `${clearedPct}%` }} />
                   <div className="h-full bg-blue-400 transition-all" style={{ width: `${onAccPct}%` }} />
                 </div>
-                <div className="flex gap-2 text-[9px]">
+                <div className="flex gap-2 text-[0.5625rem]">
                   {cleared > 0 && <span className="text-emerald-600">✓ {fmt(cleared)}</span>}
                   {onAcc > 0 && <span className="text-blue-600">⬡ {fmt(onAcc)}</span>}
-                  {outstanding > 0 && <span className="text-amber-600">○ {fmt(outstanding)}</span>}
+                  {outstanding > 0 && <span className="text-sky-600">○ {fmt(outstanding)}</span>}
                 </div>
               </div>
             )}
@@ -550,8 +694,20 @@ const CrmBooking: React.FC = () => {
       } },
     { accessorKey: "BookingAmount", header: "Booking Amt", size: 110,
       cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">{fmt(i.row.original.BookingAmount)}</span> },
-    { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+    { accessorKey: "Status", header: "Status", size: 110,
+      cell: (i) => {
+        const b = i.row.original;
+        return (
+          <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[b.Status] || ""}`}>{b.Status}</span>
+            {b.IsFrozen && (
+              <div className="flex items-center gap-1 text-[0.625rem] font-medium text-red-600 dark:text-red-400">
+                <Lock size={10} /> Frozen
+              </div>
+            )}
+          </div>
+        );
+      } },
     { accessorKey: "BookingDate", header: "Date", size: 95,
       cell: (i) => (
         <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
@@ -590,7 +746,7 @@ const CrmBooking: React.FC = () => {
                 <span className="text-xs text-muted-foreground">Ready for Marketing Head Approval</span>
               ) : (
                 <button onClick={() => openBooking(b.Id)}
-                  className="text-xs px-2 py-1 rounded-md border text-amber-600 border-amber-200 bg-amber-50 font-medium flex items-center gap-1">
+                  className="text-xs px-2 py-1 rounded-md border text-sky-600 border-sky-200 bg-sky-50 font-medium flex items-center gap-1">
                   Review Checklist Incomplete <ChevronRight size={12} />
                 </button>
               )
@@ -608,6 +764,8 @@ const CrmBooking: React.FC = () => {
             {/* Non-sequential utility actions — not part of the linear
                 flow, so they live in an overflow menu instead of competing
                 with the one active step. */}
+            {/* Row click opens this (see data-row-view in main.tsx) */}
+            <button type="button" data-row-view onClick={() => openBooking(b.Id)} aria-label="View details" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">
@@ -616,38 +774,35 @@ const CrmBooking: React.FC = () => {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem onClick={() => openBooking(b.Id)} className="gap-2">
-                  <Eye size={14} className="text-muted-foreground" /> View Details / Invoice / Attachments
+                   View Details / Invoice / Attachments
                 </DropdownMenuItem>
                 {(welcomeCallReached || bankDetailsReached || agreementReached || paymentsReached) && (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-[11px] font-medium text-muted-foreground">Jump to Stage</DropdownMenuLabel>
+                    <DropdownMenuLabel className="text-[0.6875rem] font-medium text-muted-foreground">Jump to Stage</DropdownMenuLabel>
                   </>
                 )}
                 {welcomeCallReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)} className="gap-2">
-                    <Phone size={14} className="text-amber-500" /> Welcome Call
+                    <Phone size={14} className="text-sky-500" /> Welcome Call
                   </DropdownMenuItem>
                 )}
                 {bankDetailsReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)} className="gap-2">
-                    <Landmark size={14} className="text-amber-600" /> Bank Details
+                    <Landmark size={14} className="text-sky-600" /> Bank Details
                   </DropdownMenuItem>
                 )}
                 {agreementReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)} className="gap-2">
-                    <FileSignature size={14} className="text-orange-500" /> Agreement
+                    <FileSignature size={14} className="text-sky-500" /> Agreement
                   </DropdownMenuItem>
                 )}
                 {paymentsReached && (
                   <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)} className="gap-2">
-                    <IndianRupee size={14} className="text-amber-600" /> Payments
+                    <IndianRupee size={14} className="text-sky-600" /> Payments
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)} className="gap-2">
-                  <MessageSquare size={14} className="text-amber-700 dark:text-amber-400" /> Communication
-                </DropdownMenuItem>
-                {b.Status !== CrmStatus.CANCELLED && (canRequestCancellation || canEdit) && (
+                {b.Status !== CrmStatus.CANCELLED && b.DeedStatus !== "Registered" && (canRequestCancellation || canEdit) && (
                   <>
                     <DropdownMenuSeparator />
                     {(canRequestCancellation || canEdit) && (
@@ -655,7 +810,7 @@ const CrmBooking: React.FC = () => {
                         <AlertTriangle size={14} /> Request Cancellation
                       </DropdownMenuItem>
                     )}
-                    {canEdit && (
+                    {canEdit && !b.IsPlotSale && (
                     <DropdownMenuItem onClick={() => { setUnitChangeBooking(b); setUnitChangeNewId(""); setUnitChangeReason(""); }} className="gap-2 text-rose-600 focus:text-rose-600">
                       <Repeat size={14} /> Change Unit
                     </DropdownMenuItem>
@@ -679,14 +834,14 @@ const CrmBooking: React.FC = () => {
 
   const glassStyle: React.CSSProperties = {
     background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    border: isDark ? "1px solid rgba(14,165,233,0.15)" : "1px solid rgba(14,165,233,0.18)",
     backdropFilter: "blur(16px) saturate(150%)",
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
     boxShadow: isDark
       ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+      : "0 4px 24px rgba(14,165,233,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
   };
-  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+  const borderColor = isDark ? "rgba(14,165,233,0.15)" : "rgba(14,165,233,0.12)";
 
   usePageRights("crm-bookings");
 
@@ -701,7 +856,7 @@ const CrmBooking: React.FC = () => {
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           {canEdit && (
             <button onClick={() => { setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); setDialogOpen(true); }}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
               <Plus size={14} /> New Booking
             </button>
           )}
@@ -715,12 +870,13 @@ const CrmBooking: React.FC = () => {
         <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
           <div className="relative flex-1 min-w-48">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, booking no, unit..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+              placeholder="Search name, booking no, unit... (Enter to search)"
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
           </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-amber-500/40">
+          <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
+            <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-sky-500/40">
               <SelectValue placeholder="All Statuses" />
             </SelectTrigger>
             <SelectContent>
@@ -728,16 +884,18 @@ const CrmBooking: React.FC = () => {
               {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
         </div>
 
         <DataTable
-          data={filtered}
+          data={bookings}
           columns={bookingColumns}
           searchable={false}
           loading={isLoading}
           emptyMessage="No bookings found"
           className="border-0"
         />
+        {!appFilter && <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />}
       </div>
 
       {/* New Booking Dialog — manual fallback, still requires a real Application.
@@ -746,10 +904,10 @@ const CrmBooking: React.FC = () => {
           screen without an inner scroller, matching the New Application
           wizard's Step 1 convention. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); } }}>
-        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-3">
+        <DialogContent accent="crm" className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-3">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="flex items-center gap-2 text-base font-heading font-bold">
-              <Building2 size={16} className="text-amber-500" /> New Booking
+              <Building2 size={16} className="text-sky-500" /> New Booking
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
@@ -772,36 +930,56 @@ const CrmBooking: React.FC = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               {/* ── LEFT: Unit / Project + Pricing ── */}
               <div className="rounded-lg border border-border p-2.5 space-y-2.5">
-                <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Unit / Project</p>
+                <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">{isPlotBooking ? "Plot / Project" : "Unit / Project"}</p>
                 <div>
                   <label className={labelCls}>
-                    Unit * {unitLockedFromApp ? "(from Application — already selected)" : "(from Unit Master — mandatory)"}
+                    {isPlotBooking ? "Plot" : "Unit"} * {(unitLockedFromApp || plotLockedFromApp) ? "(from Application — already selected)" : `(from ${isPlotBooking ? "Plot" : "Unit"} Master — mandatory)`}
                   </label>
-                  {unitLockedFromApp ? (
+                  {(unitLockedFromApp || plotLockedFromApp) ? (
                     <input type="text" readOnly disabled
                       value={`${form.ProjectName} — ${form.BlockName} — ${form.UnitNo}`}
                       className={inputClsDisabled} />
                   ) : (
                     <>
-                      <Select value={form.UnitId || undefined} onValueChange={handleUnitSelect}>
-                        <SelectTrigger className={inputCls}>
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                        <SelectContent className="max-w-[min(90vw,420px)]">
-                          {(availableUnits as any[]).map((u: any) => (
-                            <SelectItem key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {isPlotBooking ? (
+                        <MultiSelectDropdown
+                          options={(availablePlots as any[]).map((p: any) => ({
+                            id: String(p.Id),
+                            label: `${p.ProjectName} — ${p.BlockName} — ${p.PlotName}`,
+                            group: p.BlockName
+                          }))}
+                          value={form.PlotIds}
+                          onChange={handlePlotsChange}
+                          placeholder="Select plots"
+                          searchPlaceholder="Search plots..."
+                          itemNoun="plot"
+                        />
+                      ) : (
+                        <Select value={form.UnitIds[0] || undefined} onValueChange={(id) => handleUnitsChange([id])}>
+                          <SelectTrigger className={inputCls}>
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                          <SelectContent className="max-w-[min(90vw,420px)]">
+                            {(availableUnits as any[]).map((u: any) => (
+                              <SelectItem key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                       {appPreferredUnitId != null && !appPreferredUnitAvailable && (
-                        <p className="text-[11px] text-amber-600 mt-1">
+                        <p className="text-[0.6875rem] text-sky-600 mt-1">
                           This Application's preferred unit is no longer available — select a different one.
+                        </p>
+                      )}
+                      {appPreferredPlotIds.length > 0 && !appPreferredPlotsAvailable && (
+                        <p className="text-[0.6875rem] text-sky-600 mt-1">
+                          This Application's preferred plot is no longer available — select a different one.
                         </p>
                       )}
                     </>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   <div>
                     <label className={labelCls}>Project</label>
                     <input type="text" value={form.ProjectName} readOnly disabled
@@ -821,7 +999,7 @@ const CrmBooking: React.FC = () => {
                       className={inputClsDisabled} />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   <div>
                     <label className={labelCls}>Inclusive Saleable Area (sq ft)</label>
                     <input type="text" value={form.AreaSqFt} readOnly disabled
@@ -843,7 +1021,7 @@ const CrmBooking: React.FC = () => {
                   </div>
                 </div>
                 {form.TotalValue && (
-                  <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-[11px] text-emerald-700">
+                  <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-[0.6875rem] text-emerald-700">
                     Milestone payment schedule (7 stages) will be auto-generated from total value of ₹{Number(form.TotalValue).toLocaleString("en-IN")}
                   </div>
                 )}
@@ -851,11 +1029,11 @@ const CrmBooking: React.FC = () => {
 
               {/* ── RIGHT: Booking / Payment ── */}
               <div className="rounded-lg border border-border p-2.5 space-y-2.5">
-                <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-amber-600 dark:text-amber-400">Booking & Payment</p>
+                <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">Booking & Payment</p>
                 <div className="grid grid-cols-1 sm:grid-cols-[1.3fr_1fr_0.9fr] gap-2.5">
                   <div>
                     <label className={labelCls}>Booking Date</label>
-                    <input type="date" value={form.BookingDate}
+                    <DateInput value={form.BookingDate}
                       onChange={(e) => setForm((f) => ({ ...f, BookingDate: e.target.value }))}
                       className={inputCls} />
                   </div>
@@ -885,14 +1063,16 @@ const CrmBooking: React.FC = () => {
                   </div>
                 </div>
                 <div>
-                  <label className={labelCls}>Payment Plan (from the Application — not editable here)</label>
+                  <label className={labelCls}>{isPlotBooking ? "Payment Schedule" : "Payment Plan (from the Application — not editable here)"}</label>
                   <input type="text" readOnly disabled
-                    value={selectedPlan?.PlanName
-                      || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
-                      || "Default 7-stage split"}
+                    value={isPlotBooking
+                      ? "No payment plan — Booking Amount, then the balance"
+                      : (selectedPlan?.PlanName
+                        || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
+                        || "Default 7-stage split")}
                     className={inputClsDisabled} />
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className={labelCls}>Payment Mode</label>
                     {form.ApplicationId && form.PaymentMode ? (
@@ -909,31 +1089,22 @@ const CrmBooking: React.FC = () => {
                     )}
                   </div>
                   <div>
-                    <label className={labelCls}>
-                      Deposited To{bankOptions.length > 0 ? " *" : ""}
-                    </label>
-                    <Select value={form.DepositBankId || undefined} onValueChange={(v) => setForm((f) => ({ ...f, DepositBankId: v }))}>
-                      <SelectTrigger className={inputCls}>
-                        <SelectValue placeholder="— Select bank —" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(bankOptions as any[]).map((b: any) => (
-                          <SelectItem key={b.BId} value={String(b.BId)}>{b.BName}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <label className={labelCls}>Deposited To</label>
+                    <p className="text-[0.6875rem] text-muted-foreground pt-2">Assigned by Accounts on the Received Payment before approval.</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className={labelCls}>
-                      Booking Amount (₹) {selectedPlan ? "(Plan)" : ""}
+                      Booking Amount (₹) {!isPlotBooking && selectedPlan ? "(Plan)" : ""}
                     </label>
+                    {/* A plot sale has no plan: the amount typed here is the
+                        Booking milestone, the rest is the Balance. */}
                     <input type="number" value={form.BookingAmount}
                       onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))}
-                      readOnly={!!selectedPlan} disabled={!!selectedPlan}
-                      placeholder={selectedPlan ? undefined : "From Payment Plan"}
-                      className={selectedPlan ? inputClsDisabled : inputCls} />
+                      readOnly={!isPlotBooking && !!selectedPlan} disabled={!isPlotBooking && !!selectedPlan}
+                      placeholder={isPlotBooking ? "Leave empty for one full payment" : selectedPlan ? undefined : "From Payment Plan"}
+                      className={!isPlotBooking && selectedPlan ? inputClsDisabled : inputCls} />
                   </div>
                   <div>
                     <label className={labelCls}>Assigned To</label>
@@ -969,8 +1140,8 @@ const CrmBooking: React.FC = () => {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
               Cancel
             </button>
-            <button onClick={handleSave} disabled={saving || (bankOptions.length > 0 && !form.DepositBankId)}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
+            <button onClick={handleSave} disabled={saving}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
               {saving ? "Creating..." : "Create Booking"}
             </button>
           </div>
@@ -993,23 +1164,23 @@ const CrmBooking: React.FC = () => {
           still read the old id while deepLinkOpened had already flipped
           back to false, matching the effect's condition and reopening the
           same card immediately after it closed. */}
-      {viewingBookingId && (
+      {viewingBookingId != null && (
         <CrmBookingDetail
           bookingId={viewingBookingId}
           onClose={() => {
             setViewingBookingId(null);
-            // Previously only cleared ?applicationId= — a booking opened via
-            // ?view=X (row click, or a shared link) left that param stuck in
-            // the address bar after closing, silently reopening the same
-            // card on the next visit/refresh.
-            if (appFilter || viewFilter) navigate("/crm/bookings", { replace: true });
+            // Always clear any ?view= / ?applicationId= param so the URL is
+            // clean after closing — previously conditioned on appFilter ||
+            // viewFilter which meant ?view=0 (an invalid id that never opened
+            // the panel) was never cleaned up since the close path never ran.
+            navigate("/crm/bookings", { replace: true });
           }}
         />
       )}
 
       {unitChangeBooking && (
         <Dialog open onOpenChange={(o) => !o && setUnitChangeBooking(null)}>
-          <DialogContent className="max-w-md">
+          <DialogContent accent="crm" className="max-w-md">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2">
                 <Repeat size={16} className="text-rose-500" /> Change Unit — {unitChangeBooking.BookingNo}
@@ -1052,3 +1223,6 @@ const CrmBooking: React.FC = () => {
 };
 
 export default CrmBooking;
+
+
+

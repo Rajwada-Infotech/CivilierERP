@@ -4,6 +4,7 @@ import { CheckCheck, Megaphone } from "lucide-react";
 import { useSaNotifications } from "@/hooks/useSaNotifications";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 function timeAgo(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -28,7 +29,7 @@ export const SaNotificationBell: React.FC = () => {
     if (n.refId) {
       if (n.refType === "lead") navigate("/sales-automation/leads");
       else if (n.refType === "crm_cancellation") navigate("/crm/cancellations");
-      else if (n.refType === "crm_booking_amendment") navigate("/crm/dashboard");
+      else if (n.refType === "crm_booking_amendment") navigate("/crm/booking-amendments");
       else if (n.refType === "crm_service_ticket") navigate("/crm/service-tickets");
       else if (n.refType === "crm_handover") navigate("/crm/handover");
       else if (n.refType?.startsWith("crm_")) navigate("/crm/dashboard");
@@ -56,7 +57,7 @@ export const SaNotificationBell: React.FC = () => {
         />
         {unreadCount > 0 && (
           <span className="absolute top-1.5 right-1.5 flex h-4 min-w-[16px]">
-            <span className="relative inline-flex rounded-full h-4 min-w-[16px] px-0.5 bg-orange-600 text-[10px] font-bold text-white items-center justify-center border-2 border-background">
+            <span className="relative inline-flex rounded-full h-4 min-w-[16px] px-0.5 bg-orange-600 text-[0.625rem] font-bold text-white items-center justify-center border-2 border-background">
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           </span>
@@ -66,7 +67,7 @@ export const SaNotificationBell: React.FC = () => {
       {open && (
         <>
           {/* backdrop */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <BodyPortal><div className="fixed inset-0 z-40" onClick={() => setOpen(false)} /></BodyPortal>
           <div className="absolute right-0 top-full mt-3 z-50 w-80 rounded-2xl border border-border bg-popover shadow-xl overflow-hidden">
             {/* header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
@@ -74,7 +75,7 @@ export const SaNotificationBell: React.FC = () => {
                 <Megaphone size={14} className="text-orange-500" />
                 <span className="text-sm font-heading font-semibold text-foreground">Notifications</span>
                 {unreadCount > 0 && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-500">
+                  <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-500">
                     {unreadCount} new
                   </span>
                 )}
@@ -82,7 +83,7 @@ export const SaNotificationBell: React.FC = () => {
               {unreadCount > 0 && (
                 <button
                   onClick={markAllRead}
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
                   title="Mark all read"
                 >
                   <CheckCheck size={13} /> All read
@@ -106,8 +107,8 @@ export const SaNotificationBell: React.FC = () => {
                     )}
                     <div className={!n.isRead ? "" : "pl-4"}>
                       <p className="text-xs font-medium text-foreground leading-snug">{n.title}</p>
-                      {n.body && <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{n.body}</p>}
-                      <p className="text-[10px] text-muted-foreground mt-1">{timeAgo(n.createdAt)}</p>
+                      {n.body && <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-snug">{n.body}</p>}
+                      <p className="text-[0.625rem] text-muted-foreground mt-1">{timeAgo(n.createdAt)}</p>
                     </div>
                   </div>
                 </button>

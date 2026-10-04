@@ -23,6 +23,7 @@ import {
   type ShortCloseDocType,
   type ShortCloseCandidate,
 } from "@/api/shortCloseApi";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const fmtQty = (n: number) =>
   n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
@@ -165,7 +166,7 @@ export default function ShortClose() {
                 }}
                 className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border transition-all ${
                   docType === dt
-                    ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm"
+                    ? "btn-module text-white border-transparent shadow-sm"
                     : "border-border text-muted-foreground hover:bg-muted"
                 }`}
               >
@@ -181,7 +182,7 @@ export default function ShortClose() {
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+              <label className="block text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                 Financial Year
               </label>
               <select
@@ -199,7 +200,7 @@ export default function ShortClose() {
               </select>
             </div>
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+              <label className="block text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                 Company
               </label>
               <select
@@ -219,7 +220,7 @@ export default function ShortClose() {
               </select>
             </div>
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+              <label className="block text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                 Project
               </label>
               <select
@@ -239,7 +240,7 @@ export default function ShortClose() {
               <button
                 onClick={handleSearch}
                 disabled={isFetching}
-                className="w-full h-9 inline-flex items-center justify-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all disabled:opacity-50"
+                className="w-full h-9 inline-flex items-center justify-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs rounded-lg btn-module transition-all disabled:opacity-50"
               >
                 {isFetching ? (
                   <Loader2 size={13} className="animate-spin" />
@@ -283,7 +284,7 @@ export default function ShortClose() {
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="bg-muted/30 text-[10px] uppercase tracking-widest text-muted-foreground">
+                    <tr className="bg-muted/30 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                       <th className="px-3 py-2.5 text-left w-8">
                         <input
                           type="checkbox"
@@ -352,7 +353,7 @@ export default function ShortClose() {
 
       {/* ── Confirmation dialog ── */}
       {confirmOpen && (
-        <div
+        <BodyPortal><div
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           onClick={(e) => {
             if (e.target === e.currentTarget && !processMutation.isPending)
@@ -390,7 +391,7 @@ export default function ShortClose() {
             </div>
 
             <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+              <label className="block text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                 Remarks (optional)
               </label>
               <textarea
@@ -422,7 +423,7 @@ export default function ShortClose() {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </MaterialShell>
     </>

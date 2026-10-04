@@ -83,6 +83,7 @@ function TextField({ value, onChangeText, placeholder, keyboardType, disabled }:
 function validateForm(f: FormState): string | null {
   if (!f.companyId) return "Company is required.";
   if (!f.projectId) return "Project is required.";
+  if (!f.poId) return "A Purchase Order must be selected.";
   if (!f.vehicleNo.trim()) return "Vehicle number is required.";
   if (!f.entryTime) return "Entry time is required.";
   return null;
@@ -158,11 +159,17 @@ export function VehicleInOutFormModal({
   );
 
   const filteredPOs = useMemo(() => allPOs.filter((po) => {
-    if (!["Approved", "Pending", "Received"].includes(po.Status)) return false;
+    // Always keep whatever PO is currently selected on the form — even if
+    // its status has since moved on — so editing an existing entry never
+    // finds its own PO silently missing from the list.
+    if (form.poId && String(po.PurchaseOrderID) === form.poId) return true;
+    // "Pending" means awaiting approval, not yet approved — goods can't be
+    // received against a PO nobody's signed off on yet.
+    if (!["Approved", "Received"].includes(po.Status)) return false;
     if (form.companyId && String(po.CompanyId ?? "") !== form.companyId) return false;
     if (form.projectId && String(po.ProjectId ?? "") !== form.projectId) return false;
     return true;
-  }), [allPOs, form.companyId, form.projectId]);
+  }), [allPOs, form.companyId, form.projectId, form.poId]);
 
   const { data: poItemsRemaining = [], isFetching: loadingPOItems } = useQuery<POItemRemaining[]>({
     queryKey: ["veh-po-items-remaining", form.poId, editingId],
@@ -357,7 +364,7 @@ export function VehicleInOutFormModal({
             <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 6, marginBottom: 10 }}>
               Purchase Order &amp; Supplier
             </Text>
-            <PickerRow label="Purchase Order" value={form.poNumber} placeholder="No PO linked" onPress={() => setPicker("po")} />
+            <PickerRow label="Purchase Order" value={form.poNumber} placeholder="Select a PO…" onPress={() => setPicker("po")} />
             <PickerRow label="Supplier" value={form.supplierName} onPress={() => setPicker("supplier")} disabled={!!form.poId} />
 
             {!!form.poId && (

@@ -20,14 +20,14 @@ function Field({
   icon: React.ElementType;
   value: string;
   onChange: (v: string) => void;
-  options: { id: string | number; label: string }[];
+  options: { id: string | number; label: string; linkedAlias?: string | null }[];
   disabled: boolean;
   loading: boolean;
   placeholder: string;
 }) {
   return (
     <div className="flex flex-col gap-0.5 flex-1 min-w-[130px]">
-      <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+      <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
         <Icon size={9} /> {label}
       </span>
       <select
@@ -42,8 +42,13 @@ function Field({
       >
         <option value="">{loading ? "Loading…" : disabled ? "—" : placeholder}</option>
         {options.map((o) => (
-          <option key={o.id} value={o.id}>
+          // A room already claimed by another chain (one room = one chain,
+          // enforced server-side too) shows up but can't be picked — better
+          // than letting the user fill in the whole form and only finding
+          // out on save.
+          <option key={o.id} value={o.id} disabled={!!o.linkedAlias}>
             {o.label}
+            {o.linkedAlias ? ` — already linked to "${o.linkedAlias}"` : ""}
           </option>
         ))}
       </select>

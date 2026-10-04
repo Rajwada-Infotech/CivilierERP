@@ -8,7 +8,7 @@ import {
 } from "@/components/finance/FinanceShell";
 import { useRecords, type UnifiedRecord } from "@/hooks/useRecords";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -63,6 +63,7 @@ import {
   fetchPersonalVaultFile,
   type PersonalVaultFolder,
 } from "@/api/personalVaultApi";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -205,7 +206,7 @@ function ActionButtons({
           {selected ? <CheckSquare size={15} className="text-primary" /> : <Square size={15} />}
         </button>
       )}
-      <button
+      <button data-row-view
         onClick={(e) => {
           e.stopPropagation();
           handleAction("preview");
@@ -222,7 +223,7 @@ function ActionButtons({
           handleAction("download");
         }}
         disabled={loading !== null}
-        className="p-1.5 rounded-md hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+        className="p-1.5 rounded-md hover:bg-[#ffe2021a] transition-colors disabled:opacity-50"
         style={{ color: "#f59e0b" }}
         title={`Download ${record.filename}`}
       >
@@ -371,7 +372,7 @@ function FolderCard({
           </button>
           {menuOpen && (
             <>
-              <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }} />
+              <BodyPortal><div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }} /></BodyPortal>
               <div className="absolute right-0 top-full mt-1 w-44 rounded-lg border border-border bg-popover shadow-lg z-20 overflow-hidden py-1">
                 {menuItems.map((mi) => (
                   <button
@@ -412,7 +413,7 @@ function FolderCard({
           </p>
         )}
       </div>
-      <div className="flex items-center justify-between w-full text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between w-full text-[0.6875rem] text-muted-foreground">
         <span>
           {count} file{count !== 1 ? "s" : ""}
         </span>
@@ -449,7 +450,7 @@ function FileRow({
       </span>
       {record.pendingDeletion && (
         <span
-          className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-destructive/10 text-destructive border border-destructive/20 whitespace-nowrap"
+          className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-destructive/10 text-destructive border border-destructive/20 whitespace-nowrap"
           title="The source document was deleted — this file is auto-purged after a 7-day grace period"
         >
           Deleted · purges in {record.purgeAt ? daysUntil(record.purgeAt) : "?"}d
@@ -600,7 +601,7 @@ function VaultUnlockPanel({
             <button
               onClick={handleUnlock}
               disabled={busy || !password}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-60"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-heading font-semibold btn-module text-white transition-all disabled:opacity-60"
             >
               {busy ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
               Unlock
@@ -608,14 +609,14 @@ function VaultUnlockPanel({
           </div>
           <button
             onClick={() => setForgotOpen(true)}
-            className="text-[11px] text-muted-foreground hover:text-primary underline underline-offset-2 mt-1"
+            className="text-[0.6875rem] text-muted-foreground hover:text-primary underline underline-offset-2 mt-1"
           >
             Forgot password?
           </button>
         </>
       ) : (
         <div className="flex flex-col items-center gap-2 mt-1 w-64">
-          <p className="text-[11px] text-muted-foreground text-center">
+          <p className="text-[0.6875rem] text-muted-foreground text-center">
             Verify your account password to reset this folder's password.
           </p>
           <PasswordInput
@@ -638,7 +639,7 @@ function VaultUnlockPanel({
             <button
               onClick={handleReset}
               disabled={busy}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-60"
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white transition-all disabled:opacity-60"
             >
               {busy ? <Loader2 size={13} className="animate-spin" /> : "Reset"}
             </button>
@@ -704,7 +705,7 @@ function VaultSetPasswordDialog({
             placeholder={hasPassword ? "New password (blank to remove)" : "New password"}
           />
           {hasPassword && (
-            <p className="text-[11px] text-muted-foreground">Leave blank and save to remove password protection.</p>
+            <p className="text-[0.6875rem] text-muted-foreground">Leave blank and save to remove password protection.</p>
           )}
         </div>
         <div className="flex justify-end gap-2 pt-4 border-t border-border mt-2">
@@ -717,7 +718,7 @@ function VaultSetPasswordDialog({
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-60"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white transition-all disabled:opacity-60"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : "Save"}
           </button>
@@ -1094,7 +1095,7 @@ function NewFolderDialog({
         </DialogHeader>
         <div className="space-y-4 pt-1">
           <div>
-            <label className="block text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className="block text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
               Folder Name
             </label>
             <input
@@ -1104,12 +1105,12 @@ function NewFolderDialog({
               placeholder="e.g. XYZ Vault"
               className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
             />
-            <p className="text-[11px] text-muted-foreground mt-1">
+            <p className="text-[0.6875rem] text-muted-foreground mt-1">
               Private to you — unrelated to any project record. Any file type is accepted.
             </p>
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className="block text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
               Password <span className="normal-case text-muted-foreground/60">(optional)</span>
             </label>
             <PasswordInput
@@ -1117,12 +1118,12 @@ function NewFolderDialog({
               onChange={setPassword}
               placeholder="Leave blank for no password"
             />
-            <p className="text-[11px] text-muted-foreground mt-1">
+            <p className="text-[0.6875rem] text-muted-foreground mt-1">
               Protect this folder — you'll need it (or your account password to reset) to open it later.
             </p>
           </div>
           <div>
-            <label className="block text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            <label className="block text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
               Files
             </label>
             <input
@@ -1132,7 +1133,7 @@ function NewFolderDialog({
               className="w-full text-xs text-muted-foreground file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-primary file:text-primary-foreground file:text-xs file:font-heading file:font-semibold file:cursor-pointer"
             />
             {files.length > 0 && (
-              <p className="text-[11px] text-muted-foreground mt-1.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-1.5">
                 {files.length} file{files.length !== 1 ? "s" : ""} selected ·{" "}
                 {formatFileSize(files.reduce((s, f) => s + f.size, 0))}
               </p>
@@ -1149,7 +1150,7 @@ function NewFolderDialog({
           <button
             onClick={handleCreate}
             disabled={saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-60"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white transition-all disabled:opacity-60"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
             {saving ? "Uploading…" : "Create Folder"}
@@ -1169,7 +1170,7 @@ export default function Records() {
   const [search, setSearch] = useState("");
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const counts = useMemo(() => {
     const byModule: Record<string, number> = {};
@@ -1245,7 +1246,7 @@ export default function Records() {
             )}
             <button
               onClick={refreshRecords}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-amber-500/30 hover:bg-amber-500/10 transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-amber-500/30 hover:bg-[#ffe2021a] transition-colors"
               style={{ color: "#fbbf24" }}
             >
               <RefreshCw size={13} />

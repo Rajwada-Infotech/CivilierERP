@@ -3,6 +3,12 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, ebProjectPredicate, ebProjectIdSql, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a debit note whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT project_id AS ProjectId FROM dbo.DebitNote WHERE id = @id"));
+// /for-invoice/:billId — the invoice's own project.
+router.param("billId", projectParamGuard(`SELECT ${ebProjectIdSql("eb")} AS ProjectId FROM dbo.ExpenseBooking eb WHERE eb.Eid = @id`));
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -11,7 +17,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
 const { syncBillStatus } = require("../utils/syncBillStatus");
 const { reverseDebitNotePosting } = require("../services/generalLedger");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
 const { buildGrnGstData } = require("../utils/buildGrnGstData");
 const { applyBillingTermsToAmount } = require("../utils/billingTerms");
 
@@ -130,7 +136,7 @@ router.get("/invoices-for-party/:partyId", requirePageRight("debit-note", "view"
         ON eb.ESourceType = 'WO' AND wo.Id = TRY_CAST(eb.ESourceId AS INT)
       WHERE (${INVOICE_PARTY_MATCH})
         AND eb.EDocNo IS NOT NULL
-        AND eb.EStatus = 'Approved'
+        AND eb.EStatus = 'Approved'${ebProjectPredicate(req.projectScope, "eb")}
       ORDER BY ECreatedAt DESC
     `);
 
@@ -219,7 +225,7 @@ router.get("/", requirePageRight("debit-note", "view"), cache("debit-note", 120)
       LEFT JOIN dbo.enterprise pr ON pr.id = dn.project_id
       LEFT JOIN dbo.AccountHeadMaster party ON party.LHeadId = dn.supplier_id
       LEFT JOIN dbo.ExpenseBooking eb ON eb.Eid = dn.bill_id
-      ${companyId ? "WHERE dn.company_id = @companyId" : ""}
+      ${companyId ? "WHERE dn.company_id = @companyId" : "WHERE 1=1"}${projectPredicate(req.projectScope, "dn.project_id")}
       ORDER BY dn.id DESC
     `);
 
@@ -330,6 +336,7 @@ async function replaceItems(pool, debitNoteId, items) {
 // value-only for a direct/TOD invoice) ───────────────────────────────────────
 router.post("/", requirePageRight("debit-note", "create"), async (req, res) => {
   const { company_id, project_id, party_id, party_type, bill_id, DebitDate, Reason, DebitAmount, items } = req.body;
+  if (!assertProjectAllowed(req, res, project_id)) return;
 
   const company_id_val = toInt(company_id);
   const project_id_val = toInt(project_id);
@@ -426,6 +433,7 @@ router.put("/:id", requirePageRight("debit-note", "edit"), async (req, res) => {
   if (!id) return res.status(400).json({ error: "Invalid id" });
 
   const { company_id, project_id, party_id, party_type, bill_id, DebitDate, Reason, DebitAmount, items } = req.body;
+  if (!assertProjectAllowed(req, res, project_id)) return;
 
   const company_id_val = toInt(company_id);
   const project_id_val = toInt(project_id);
@@ -451,6 +459,7 @@ router.put("/:id", requirePageRight("debit-note", "edit"), async (req, res) => {
     // one must be rejected first, an Approved one has no amendment path
     // yet for Debit Note. Only Draft/Rejected records reach the UPDATE below.
     await guardEdit("debit-note", id);
+    const wasRejected = (await getRecordStatus("debit-note", id)) === "Rejected";
 
     const check = await validatePartyAndInvoice(pool, { party_id: party_id_val, party_type: partyType, bill_id: bill_id_val });
     if (check.error) return res.status(400).json({ error: check.error });
@@ -493,7 +502,30 @@ router.put("/:id", requirePageRight("debit-note", "edit"), async (req, res) => {
     await replaceItems(pool, id, okItems);
 
     await bumpCacheVersion("debit-note");
-    res.json({ message: "Debit note updated" });
+
+    // A corrected, previously-Rejected debit note goes straight back into
+    // the approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("debit-note", id, "Pending", userEmail(req), req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[debitNote] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Debit note updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: resubmitted ? "Debit note updated and re-submitted for approval" : "Debit note updated",
+      resubmitted,
+    });
   } catch (err) {
     console.error("[debitNote] PUT /:id:", err.message);
     res.status(400).json({ error: err.message || "Internal server error" });
@@ -514,11 +546,16 @@ router.put("/:id/submit", requirePageRight("debit-note", "edit"), async (req, re
 });
 
 // ─── PUT /:id/approve — Pending → Approved (posts GL) ────────────────────────
-router.put("/:id/approve", requirePageRight("debit-note", "edit"), async (req, res) => {
+// No requirePageRight gate here (or on /:id/reject below) — transition()
+// is the real authority on who can approve/reject (role whitelist,
+// approval-inbox edit right, or named workflow approver from Approval
+// Setup). requirePageRight used to 403 a named approver before transition()
+// ever got a chance to say yes, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
-    const result = await transition("debit-note", id, "Approved", userEmail(req), req.user?.role);
+    const result = await transition("debit-note", id, "Approved", userEmail(req), req.user?.role, null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("debit-note");
     res.json({ message: "Debit note approved", ...result });
   } catch (err) {
@@ -527,12 +564,12 @@ router.put("/:id/approve", requirePageRight("debit-note", "edit"), async (req, r
 });
 
 // ─── PUT /:id/reject — Pending → Rejected ────────────────────────────────────
-router.put("/:id/reject", requirePageRight("debit-note", "edit"), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const { note } = req.body;
-    const result = await transition("debit-note", id, "Rejected", userEmail(req), req.user?.role, note || null);
+    const result = await transition("debit-note", id, "Rejected", userEmail(req), req.user?.role, note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("debit-note");
     res.json({ message: "Debit note rejected", ...result });
   } catch (err) {

@@ -172,7 +172,7 @@ export const getProjects = async (): Promise<ProjectOption[]> => {
 };
 
 export const getSuppliers = async (): Promise<NameOption[]> => {
-  const raw = await fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json().catch(() => []));
+  const raw = await fetchWithAuth("/api/account-head/options?type=S,V").then((r) => r.json().catch(() => []));
   return normalizeArray<any>(raw).map((s) => ({ id: String(s.id), name: s.label ?? "" }));
 };
 

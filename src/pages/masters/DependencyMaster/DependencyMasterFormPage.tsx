@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, GitBranch, Loader2, CheckCircle2, Circle } from "lucide-react";
+import { ArrowLeft, GitBranch, Loader2, CheckCircle2, Circle, Copy } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
@@ -13,6 +13,7 @@ import { AliasInput } from "./components/AliasInput";
 import { ScopeToggle } from "./components/ScopeToggle";
 import { ActivityLadder } from "./components/ActivityLadder";
 import { ActivityPickerModal } from "./components/ActivityPickerModal";
+import { CopyChainModal } from "./components/CopyChainModal";
 import { DependencyReviewPanel } from "./components/DependencyReviewPanel";
 
 const STEPS = ["Task Scope", "Alias", "Work Type", "Activity Chain"] as const;
@@ -29,6 +30,7 @@ export default function DependencyMasterFormPage() {
   const qc = useQueryClient();
   usePageRights("dependency-master");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [copyModalOpen, setCopyModalOpen] = useState(false);
 
   const { data: editing, isLoading: loadingEditing } = useQuery({
     queryKey: ["dependency-master-detail", editingId],
@@ -83,14 +85,14 @@ export default function DependencyMasterFormPage() {
           {/* ── Main column — the 4 fillable steps ─────────────────────── */}
           <div className="space-y-5 min-w-0">
             <div>
-              <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+              <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
                 1. Task Scope
               </p>
               <ScopeSelector cascade={form.cascade} />
             </div>
 
             <div>
-              <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+              <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
                 2. Alias
               </p>
               <AliasInput
@@ -103,7 +105,7 @@ export default function DependencyMasterFormPage() {
 
             {form.toggleActive && (
               <div>
-                <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
+                <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
                   3. Work Type
                 </p>
                 <ScopeToggle active={form.toggleActive} value={form.workType} onChange={form.setWorkType} />
@@ -111,9 +113,20 @@ export default function DependencyMasterFormPage() {
             )}
 
             <div>
-              <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
-                4. Activity Chain
-              </p>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60">
+                  4. Activity Chain
+                </p>
+                {!editingId && form.ladderActive && (
+                  <button
+                    type="button"
+                    onClick={() => setCopyModalOpen(true)}
+                    className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-primary hover:text-primary/80 transition-colors"
+                  >
+                    <Copy size={11} /> Copy from existing chain
+                  </button>
+                )}
+              </div>
               <ActivityLadder
                 active={form.ladderActive}
                 rungs={form.ladder.rungs}
@@ -127,7 +140,7 @@ export default function DependencyMasterFormPage() {
           {/* ── Side column — step tracker + live review, sticky ───────── */}
           <div className="lg:sticky lg:top-4 space-y-4">
             <div className="rounded-xl border border-border p-4">
-              <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-2.5">
+              <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-2.5">
                 Progress
               </p>
               <ol className="space-y-2">
@@ -176,12 +189,20 @@ export default function DependencyMasterFormPage() {
       <ActivityPickerModal
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onPick={(activityId, activityName) => {
-          form.ladder.add(activityId, activityName, form.workType);
+        onPick={(picks) => {
+          form.ladder.addMany(picks, form.workType);
           setPickerOpen(false);
         }}
         excludeIds={form.ladder.rungs.map((r) => r.activityId)}
       />
+
+      {!editingId && (
+        <CopyChainModal
+          open={copyModalOpen}
+          onClose={() => setCopyModalOpen(false)}
+          onCopy={(activities) => form.ladder.reset(activities)}
+        />
+      )}
     </>
   );
 }

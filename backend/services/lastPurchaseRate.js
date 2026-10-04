@@ -74,4 +74,87 @@ async function getLastPurchaseRate(pool, projectId, itemId) {
   return null;
 }
 
-module.exports = { getLastPurchaseRate };
+// Company-scoped variant — checks the item's most recent purchase rate
+// across EVERY project owned by the given company, not just one specific
+// project. Used by Inter-Company Stock Transfer, which values a transfer at
+// "what the sending COMPANY paid" (its cost basis as a whole), not just
+// what its one sending project happened to pay — a company with several
+// projects may have bought the same item more recently under a sibling
+// project's PO/GRN.
+async function getLastPurchaseRateByCompany(pool, companyId, itemId) {
+  const grnResult = await pool
+    .request()
+    .input("CompanyId", sql.Int, companyId)
+    .input("ItemId", sql.NVarChar(100), String(itemId)).query(`
+      SELECT TOP 1
+        item.rate    AS Rate,
+        item.gstPct  AS GstPct,
+        grn.DocNo    AS SourceDocNo,
+        grn.GRNDate  AS SourceDate
+      FROM dbo.GoodsReceiptNotes grn
+      JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+      JOIN dbo.enterprise proj ON proj.id = po.ProjectId AND proj.business_type = 'P'
+      CROSS APPLY OPENJSON(grn.GRNItems)
+        WITH (
+          itemId NVARCHAR(100) '$.itemId',
+          rate   DECIMAL(18, 4) '$.rate',
+          gstPct DECIMAL(5, 2)  '$.gstPct'
+        ) item
+      WHERE proj.company_id = @CompanyId
+        AND item.itemId = @ItemId
+        AND item.rate > 0
+      ORDER BY grn.GRNDate DESC, grn.GRNID DESC
+    `);
+
+  const grnRow = grnResult.recordset[0];
+  if (grnRow) {
+    // GRN row found — use its gstPct if stored, else fall back to item master
+    let gstPct = Number(grnRow.GstPct || 0);
+    if (!gstPct) {
+      const im = await pool.request().input("ItemId", sql.NVarChar(100), String(itemId))
+        .query("SELECT ISNULL(M_CGST,0)+ISNULL(M_SGST,0) AS TotalGst FROM dbo.ItemMaster WHERE M_ItemId = @ItemId");
+      gstPct = Number(im.recordset[0]?.TotalGst || 0);
+    }
+    return {
+      rate: Number(grnRow.Rate),
+      gstPct,
+      sourceDocNo: grnRow.SourceDocNo,
+      sourceDate: grnRow.SourceDate,
+    };
+  }
+
+  const poResult = await pool
+    .request()
+    .input("CompanyId", sql.Int, companyId)
+    .input("ItemId", sql.NVarChar(100), String(itemId)).query(`
+      SELECT TOP 1
+        poi.Rate AS Rate,
+        po.DocNo AS SourceDocNo,
+        po.PODate AS SourceDate
+      FROM dbo.PurchaseOrderItems poi
+      JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+      JOIN dbo.enterprise proj ON proj.id = po.ProjectId AND proj.business_type = 'P'
+      WHERE proj.company_id = @CompanyId
+        AND poi.ItemId = @ItemId
+        AND poi.Rate > 0
+      ORDER BY poi.CreatedAt DESC, poi.PurchaseOrderID DESC
+    `);
+
+  const poRow = poResult.recordset[0];
+  if (poRow) {
+    // PO path — fall back to item master for GST %
+    const im = await pool.request().input("ItemId", sql.NVarChar(100), String(itemId))
+      .query("SELECT ISNULL(M_CGST,0)+ISNULL(M_SGST,0) AS TotalGst FROM dbo.ItemMaster WHERE M_ItemId = @ItemId");
+    const gstPct = Number(im.recordset[0]?.TotalGst || 0);
+    return {
+      rate: Number(poRow.Rate),
+      gstPct,
+      sourceDocNo: poRow.SourceDocNo,
+      sourceDate: poRow.SourceDate,
+    };
+  }
+
+  return null;
+}
+
+module.exports = { getLastPurchaseRate, getLastPurchaseRateByCompany };

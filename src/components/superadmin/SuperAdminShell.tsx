@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Crown } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface SuperAdminShellProps {
   title: string;
@@ -25,7 +25,7 @@ export const SuperAdminShell: React.FC<SuperAdminShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {

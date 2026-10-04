@@ -94,7 +94,7 @@ export const AuthProvider = ({
 }) => {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
-      const stored = localStorage.getItem("user");
+      const stored = sessionStorage.getItem("user");
       if (!stored) return null;
       const parsed = JSON.parse(stored);
       // Patch stale sessions missing required fields (pre-fix logins)
@@ -110,7 +110,7 @@ export const AuthProvider = ({
       parsed.id = String(parsed.id);
       return parsed;
     } catch {
-      localStorage.removeItem("user");
+      sessionStorage.removeItem("user");
       return null;
     }
   });
@@ -123,7 +123,7 @@ export const AuthProvider = ({
     const privilegedRoles = ["super_admin", "admin", "dba"];
     if (!privilegedRoles.includes(currentUser.role)) return;
 
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     if (!token) return;
 
     // Use currentUser.id as the dep so a new object reference from an avatar
@@ -175,7 +175,7 @@ export const AuthProvider = ({
     if (avatarHydratedRef.current === currentUser.id) return;
     avatarHydratedRef.current = currentUser.id;
 
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     if (!token) return;
 
     fetch(`/api/user-profile/${currentUser.id}/profile`, {
@@ -188,7 +188,7 @@ export const AuthProvider = ({
         setCurrentUser((prev) => {
           if (!prev) return prev;
           const updated = { ...prev, avatarUrl };
-          localStorage.setItem("user", JSON.stringify(updated));
+          sessionStorage.setItem("user", JSON.stringify(updated));
           return updated;
         });
       })
@@ -214,7 +214,7 @@ export const AuthProvider = ({
     if (!currentUser?.id || PRIVILEGED.includes(currentUser.role)) return;
 
     const fetchRights = () => {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       if (!token) return;
       fetch("/api/user-rights/my", {
         headers: { Authorization: `Bearer ${token}` },
@@ -225,7 +225,7 @@ export const AuthProvider = ({
           setCurrentUser((prev) => {
             if (!prev) return prev;
             const updated = { ...prev, pagePermissions: result.rightsJson };
-            localStorage.setItem("user", JSON.stringify(updated));
+            sessionStorage.setItem("user", JSON.stringify(updated));
             return updated;
           });
         })
@@ -277,12 +277,13 @@ export const AuthProvider = ({
       // fresh login (not a page refresh within an existing session), so the
       // reminders popup shows once per login rather than once per page load.
       sessionStorage.setItem("__just_logged_in", "1");
-      // JWT is stored in localStorage, so it is XSS-accessible. This is an
-      // accepted SPA tradeoff here, mitigated by short token TTL, Redis
-      // blacklist on logout, and brute-force lockout on auth routes. Revisit if
-      // httpOnly cookies or SSR become viable for this app.
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(userWithInitials));
+      // sessionStorage, not localStorage — isolated per tab, so logging in as
+      // a different user in another tab never clobbers this tab's session
+      // (each tab now needs its own login; closing a tab logs it out). Still
+      // XSS-accessible like localStorage was — mitigated by short token TTL,
+      // Redis blacklist on logout, and brute-force lockout on auth routes.
+      sessionStorage.setItem("token", data.token);
+      sessionStorage.setItem("user", JSON.stringify(userWithInitials));
 
       // Connect the socket with the freshly-issued token so it authenticates
       // immediately rather than waiting for the lazy connectSocket() call inside
@@ -306,7 +307,7 @@ export const AuthProvider = ({
               ...userWithInitials,
               pagePermissions: rightsData.rightsJson,
             };
-            localStorage.setItem("user", JSON.stringify(updated));
+            sessionStorage.setItem("user", JSON.stringify(updated));
             setCurrentUser(updated);
           } else {
             setCurrentUser(userWithInitials);
@@ -364,10 +365,10 @@ export const AuthProvider = ({
       onLogoutSuccess?.(currentUser);
     }
 
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem("currentSessionId");
-    localStorage.removeItem("activeModule");
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("user");
+    sessionStorage.removeItem("currentSessionId");
+    sessionStorage.removeItem("activeModule");
     sessionStorage.removeItem("__auth_redirecting");
     // Tear down the socket *after* clearing the token so no further
     // authenticated requests can be made over the old connection.
@@ -395,7 +396,7 @@ export const AuthProvider = ({
   );
 
   const deleteUser = useCallback(async (id: string) => {
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     try {
       const res = await fetch(`/api/users/${id}`, {
         method: "DELETE",
@@ -414,7 +415,7 @@ export const AuthProvider = ({
 
   const toggleUserStatus = useCallback(
     async (id: string) => {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       // Find current state first so we can send the correct value
       const user = users.find((u) => u.id === id);
       if (!user) return;
@@ -446,7 +447,7 @@ export const AuthProvider = ({
   // Update user page permissions - persist to DB then local state
   const updateUserPagePermissions = useCallback(
     async (userId: string, permissions: PagePermission[]) => {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
 
       try {
         const res = await fetch(`/api/users/${userId}/permissions`, {
@@ -478,7 +479,7 @@ export const AuthProvider = ({
       if (currentUser?.id === userId) {
         const updatedUser = { ...currentUser, pagePermissions: permissions };
         setCurrentUser(updatedUser);
-        localStorage.setItem("user", JSON.stringify(updatedUser));
+        sessionStorage.setItem("user", JSON.stringify(updatedUser));
       }
     },
     [currentUser],
@@ -506,7 +507,7 @@ export const AuthProvider = ({
         name,
         initials: AuthUtils.getInitials(name),
       };
-      localStorage.setItem("user", JSON.stringify(updated));
+      sessionStorage.setItem("user", JSON.stringify(updated));
       return updated;
     });
   }, []);
@@ -515,7 +516,7 @@ export const AuthProvider = ({
     setCurrentUser((prev) => {
       if (!prev) return prev;
       const updated = { ...prev, avatarUrl };
-      localStorage.setItem("user", JSON.stringify(updated));
+      sessionStorage.setItem("user", JSON.stringify(updated));
       return updated;
     });
   }, []);
@@ -524,7 +525,7 @@ export const AuthProvider = ({
     setCurrentUser((prev) => {
       if (!prev) return prev;
       const updated = { ...prev, showLoginReminders };
-      localStorage.setItem("user", JSON.stringify(updated));
+      sessionStorage.setItem("user", JSON.stringify(updated));
       return updated;
     });
   }, []);

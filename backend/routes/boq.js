@@ -1,8 +1,13 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectRawAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a BOQ whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.BOQ WHERE BoqID = @id"));
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -15,7 +20,13 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 
-router.use(checkPermissionForMethod("Engineering", "BOQ"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Engineering", "BOQ")(req, res, next);
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -195,6 +206,7 @@ router.get("/", cache("boq", 300), async (req, res) => {
     const status = (req.query.status || "").toString().trim();
     // Always scope to the requested company — no cross-company list allowed
     const where = ["b.CompanyId = @companyId"];
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
 
     if (search) {
       where.push(`(
@@ -332,6 +344,7 @@ router.get("/:id", async (req, res) => {
 
 // ── POST /  (Create) ──────────────────────────────────────────────────────────
 router.post("/", requirePageRight("boq", "create"), async (req, res) => {
+  if (!(await assertProjectRawAllowed(req, res, req.body?.ProjectId))) return;
   const {
     BoqNo: boqNoFromClient,
     BoqDate,
@@ -456,7 +469,9 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
 router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (!(await assertProjectRawAllowed(req, res, req.body?.ProjectId))) return;
   const {
     BoqNo,
     BoqDate,
@@ -495,6 +510,14 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.BOQ", "BoqID", id)
       : null;
+    // Editing an already-Approved BOQ must go back through approval —
+    // ignore whatever status the client sent (the form submits the
+    // record's own current status, i.e. "Approved", which used to just
+    // stay Approved with no re-approval since the resubmit check below
+    // only fires for Draft/Rejected). Mirrors journalVoucher.js's
+    // wasApproved handling. BOQ doesn't post to GL directly, so no
+    // reversal needed.
+    const effectiveStatus = wasApproved ? "Pending" : Status || "Draft";
     const uomMap = await buildUomMap(pool);
     transaction = pool.transaction();
     await transaction.begin();
@@ -508,7 +531,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
       .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
       .input("Description", sql.NVarChar(sql.MAX), Description || null)
       .input("TotalAmount", sql.Decimal(18, 2), totalAmount)
-      .input("Status", sql.NVarChar(50), Status || "Draft")
+      .input("Status", sql.NVarChar(50), effectiveStatus)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
       .input("DocNo", sql.NVarChar(100), DocNo || null)
@@ -536,7 +559,12 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     await transaction.commit();
     await bumpCacheVersion("boq");
 
-    // Re-submit to Pending if record was reverted to Draft (e.g. after edit)
+    // Re-submit to Pending if record was reverted to Draft (e.g. after edit).
+    // For a genuinely Rejected record, transition()'s Pending branch writes a
+    // fresh Level=0 marker, which restarts approval at level 1 regardless of
+    // what was approved before the rejection (see approvalService.js's
+    // currentCycleCutoffSql).
+    let resubmitted = false;
     try {
       const currentStatus = await (async () => {
         const pool = getPool();
@@ -549,6 +577,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
       if (currentStatus === "Draft" || currentStatus === "Rejected") {
         await transition("boq", id, "Pending", req.user?.email, req.user?.role);
         await bumpCacheVersion("boq");
+        resubmitted = true;
       }
     } catch (e) {
       console.warn("[BOQ auto-submit on update]", e.message);
@@ -572,7 +601,15 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
       }
     }
 
-    res.json({ message: "BOQ updated successfully" });
+    res.json({
+      message: wasApproved
+        ? "BOQ updated — sent back for approval"
+        : resubmitted
+          ? "BOQ updated and re-submitted for approval"
+          : "BOQ updated successfully",
+      reopenedForApproval: wasApproved,
+      resubmitted,
+    });
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
@@ -586,7 +623,8 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
 router.delete("/:id", requirePageRight("boq", "delete"), async (req, res) => {
   let transaction;
   try {
-    const boqID = parseInt(req.params.id, 10);
+    const boqID = parseId(req.params.id);
+    if (!boqID) return res.status(400).json({ error: "Invalid id" });
     const pool = getPool();
 
     // Block deletion if this BOQ is linked to any Work Order
@@ -643,7 +681,8 @@ router.delete("/:id", requirePageRight("boq", "delete"), async (req, res) => {
 
 // Unified transition endpoint used by the BOQ preview panel
 router.post("/:id/transition", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const { action } = req.body;
   try {
     const userEmail = requireUserEmail(req, res);
@@ -653,7 +692,7 @@ router.post("/:id/transition", async (req, res) => {
       action === "approve" ? "Approved" :
       action === "reject" ? "Rejected" : null;
     if (!targetStatus) return res.status(400).json({ error: `Unknown action: ${action}` });
-    const result = await transition("boq", id, targetStatus, userEmail, req.user?.role, req.body.note || null);
+    const result = await transition("boq", id, targetStatus, userEmail, req.user?.role, req.body.note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("boq");
     res.json({ message: `BOQ ${action}d`, ...result });
   } catch (err) {
@@ -662,7 +701,8 @@ router.post("/:id/transition", async (req, res) => {
 });
 
 router.put("/:id/submit", requirePageRight("boq", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -681,7 +721,8 @@ router.put("/:id/submit", requirePageRight("boq", "edit"), async (req, res) => {
 });
 
 router.put("/:id/approve", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -691,6 +732,8 @@ router.put("/:id/approve", async (req, res) => {
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ approved", ...result });
@@ -702,7 +745,8 @@ router.put("/:id/approve", async (req, res) => {
 });
 
 router.put("/:id/reject", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const { note } = req.body;
   try {
     const userEmail = requireUserEmail(req, res);
@@ -714,6 +758,7 @@ router.put("/:id/reject", async (req, res) => {
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ rejected", ...result });

@@ -108,7 +108,12 @@ export function MaterialRequestFormModal({
 
   useEffect(() => {
     if (!visible || editingId != null) return;
-    fetchDocTypes("MR").then((types) => { if (types[0]) setDocTypeId(types[0].TypeOfDocId); });
+    // Unhandled here used to crash the whole app on open — this call fires
+    // the moment the New Material Request modal appears, with nothing else
+    // catching a rejection (a network blip, or a 403 for a role without
+    // document-type rights). docTypeId just stays null on failure — the
+    // backend still accepts the request without it.
+    fetchDocTypes("MR").then((types) => { if (types[0]) setDocTypeId(types[0].TypeOfDocId); }).catch(() => setDocTypeId(null));
   }, [visible, editingId]);
 
   useEffect(() => {

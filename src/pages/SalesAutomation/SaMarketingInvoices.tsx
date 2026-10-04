@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { fmtIstIso } from "@/lib/istTime";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -130,7 +131,7 @@ const SaMarketingInvoices: React.FC = () => {
       ApprovalStatus: i.ApprovalStatus ?? "Pending",
       ApprovalNotes: i.ApprovalNotes ?? "",
       ApproverName: i.ApproverName ?? "",
-      ApprovedAt: i.ApprovedAt ? String(i.ApprovedAt).slice(0, 16).replace("T", " ") : "",
+      ApprovedAt: i.ApprovedAt ? fmtIstIso(i.ApprovedAt) : "",
     }));
   }, [invoices]);
 
@@ -149,26 +150,22 @@ const SaMarketingInvoices: React.FC = () => {
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toPayload(event.record)) });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to add invoice");
-        toast.success("Invoice added!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toPayload(event.record)) });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to update invoice");
-        toast.success("Invoice updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to delete invoice");
-        toast.success("Invoice deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["sa-marketing-invoices"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toPayload(event.record)) });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to add invoice");
+      toast.success("Invoice added!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(toPayload(event.record)) });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to update invoice");
+      toast.success("Invoice updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to delete invoice");
+      toast.success("Invoice deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["sa-marketing-invoices"] });
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading invoices...</div>;
@@ -192,13 +189,13 @@ const SaMarketingInvoices: React.FC = () => {
           rowActions={(row) => {
             const status = String(row.ApprovalStatus ?? "Pending");
             if (status === "Approved") {
-              return <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600">Approved</span>;
+              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600">Approved</span>;
             }
             if (status === "Rejected") {
-              return <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-500">Rejected</span>;
+              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-red-500/10 text-red-500">Rejected</span>;
             }
             if (!canDoAction("sa-marketing-invoices", "edit")) {
-              return <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-yellow-500/10 text-yellow-600">Pending</span>;
+              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-yellow-500/10 text-yellow-600">Pending</span>;
             }
             return (
               <>

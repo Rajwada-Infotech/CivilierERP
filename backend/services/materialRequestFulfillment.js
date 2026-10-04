@@ -4,19 +4,23 @@
  * backend/services/materialRequestFulfillment.js
  *
  * Computes how much of a Material Request's line items have already been
- * converted into Purchase Orders, and keeps the MR header Status in sync
- * with that math. Shared by materialRequests.js (read-only pending-summary
- * endpoints) and purchaseOrders.js (create/delete side-effects).
+ * converted into Purchase Orders or Inter-Company Stock Transfers, and
+ * keeps the MR header Status in sync with that math. Shared by
+ * materialRequests.js (read-only pending-summary endpoints),
+ * purchaseOrders.js and interCompanyTransfer.js (create/delete side-effects).
  *
  * A PO's own Status of 'Deleted'/'Rejected' doesn't count against the MR —
  * everything else (Draft/Pending/Approved/Received/...) does, since the
- * material has been committed to a supplier either way.
+ * material has been committed to a supplier either way. Same idea for an
+ * ICT: only 'Rejected' (ICT has no 'Deleted' status) is excluded — a
+ * Draft/Pending ICT already reserves the quantity so a second ICT or PO
+ * can't also claim it, same as a not-yet-approved PO already does.
  */
 
 const { sql } = require("../db");
 
-// Per MR line item: requested vs. already-ordered (across all non-voided
-// POs that were created from this MR item) vs. what's still pending.
+// Per MR line item: requested vs. already-consumed (across all non-voided
+// POs and ICTs that were created from this MR item) vs. what's still pending.
 async function getMRItemFulfillment(pool, mrId) {
   const r = await pool.request().input("MRId", sql.Int, mrId).query(`
     SELECT
@@ -27,6 +31,14 @@ async function getMRItemFulfillment(pool, mrId) {
         JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
         WHERE poi.MRItemId = mri.MRItemId
           AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
+      ), 0)
+      +
+      ISNULL((
+        SELECT SUM(icti.Quantity)
+        FROM dbo.InterCompanyTransferItems icti
+        JOIN dbo.InterCompanyTransfer ict ON ict.ICTId = icti.ICTId
+        WHERE icti.MRItemId = mri.MRItemId
+          AND ISNULL(ict.Status, '') NOT IN ('Rejected')
       ), 0) AS OrderedQty
     FROM dbo.MaterialRequestItems mri
     WHERE mri.MRId = @MRId

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/payments";
 
@@ -76,10 +77,27 @@ function fmtDate(v?: string | null) {
 // filter, which meant the summary strip's OTHER counts silently collapsed
 // to 0 whenever a filter was active (e.g. filtering to "Demanded" made the
 // backend compute pendingCount from an already-Demanded-only row set).
-async function fetchDemands(search: string): Promise<{ demands: DemandRow[] }> {
+interface DemandListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+// NOTE on scale: this endpoint is still fetched in full (view=all), not
+// paginated — each row is a MILESTONE, bucketed into 4 tabs and grouped into
+// per-booking cards entirely client-side (see `tabbed` below). Naively
+// paginating the raw milestone rows would silently split a booking's
+// milestones across pages and break both the grouping and the tab counts.
+// Company/Project/Block narrows the set server-side (same as every other
+// page), which is the scalability lever that actually applies here without
+// a larger redesign of the tab/group model itself.
+async function fetchDemands(filters: DemandListFilters): Promise<{ demands: DemandRow[] }> {
   const q = new URLSearchParams();
   q.set("view", "all");
-  if (search) q.set("search", search);
+  if (filters.search) q.set("search", filters.search);
+  if (filters.companyId) q.set("companyId", filters.companyId);
+  if (filters.projectId) q.set("projectId", filters.projectId);
+  if (filters.blockId) q.set("blockId", filters.blockId);
   const res = await fetchWithAuth(`${API}/demands?${q}`);
   if (!res.ok) throw new Error("Failed to load demands");
   return res.json();
@@ -99,10 +117,10 @@ function classify(m: DemandRow): TabKey | null {
 
 function MilestoneStatusBadge({ status }: { status: DemandStatus }) {
   if (status === CrmStatus.PAID)
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"><CheckCircle2 className="w-3 h-3" /> Cleared</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"><CheckCircle2 className="w-3 h-3" /> Cleared</span>;
   if (status === CrmStatus.DEMANDED)
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400"><Send className="w-3 h-3" /> Demanded</span>;
-  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400"><Clock className="w-3 h-3" /> Not Raised</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400"><Send className="w-3 h-3" /> Demanded</span>;
+  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400"><Clock className="w-3 h-3" /> Not Raised</span>;
 }
 
 function ProgressBar({ paid, due }: { paid: number; due: number }) {
@@ -143,7 +161,7 @@ function MilestoneRow({
           <span className="font-medium truncate">{m.MilestoneName}</span>
           <MilestoneStatusBadge status={m.DemandStatus} />
         </div>
-        <div className="flex items-center gap-3 mt-0.5 text-[11px] text-card-foreground/60 flex-wrap">
+        <div className="flex items-center gap-3 mt-0.5 text-[0.6875rem] text-card-foreground/60 flex-wrap">
           {m.Percent != null && <span>{m.Percent}%</span>}
           <span className="flex items-center gap-1">
             <CalendarClock className="w-3 h-3" />
@@ -164,21 +182,21 @@ function MilestoneRow({
 
       <div className="shrink-0 text-right w-28">
         <div className="font-semibold">{fmt(balance)}</div>
-        <div className="text-[10px] text-card-foreground/50">{fmt(m.AmountPaid)} of {fmt(m.AmountDue)}</div>
+        <div className="text-[0.625rem] text-card-foreground/50">{fmt(m.AmountPaid)} of {fmt(m.AmountDue)}</div>
       </div>
 
       <div className="shrink-0 w-20">
         {!canEdit ? null : m.DemandStatus === CrmStatus.PENDING && balance > 0 ? (
           <button
             onClick={(e) => { e.stopPropagation(); onRaise(m); }}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 font-semibold w-full justify-center"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[0.6875rem] btn-module text-white rounded-lg font-semibold w-full justify-center"
           >
             <Send className="w-3 h-3" /> Raise
           </button>
         ) : m.DemandStatus === CrmStatus.DEMANDED ? (
           <button
             onClick={(e) => { e.stopPropagation(); onUndo(m); }}
-            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] border border-border rounded-lg hover:bg-muted text-foreground/70 hover:text-foreground w-full justify-center"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[0.6875rem] border border-border rounded-lg hover:bg-muted text-foreground/70 hover:text-foreground w-full justify-center"
           >
             <Undo2 className="w-3 h-3" /> Undo
           </button>
@@ -215,9 +233,9 @@ function BookingCard({
             <span className="font-mono text-sm font-bold text-blue-400">{group.bookingNo}</span>
             <span className="text-xs text-card-foreground/40">·</span>
             <span className="text-sm font-medium truncate">{group.applicantName}</span>
-            <span className="text-[11px] text-card-foreground/50">({group.milestones.length} milestone{group.milestones.length !== 1 ? "s" : ""} in this view)</span>
+            <span className="text-[0.6875rem] text-card-foreground/50">({group.milestones.length} milestone{group.milestones.length !== 1 ? "s" : ""} in this view)</span>
           </div>
-          <div className="flex items-center gap-3 mt-0.5 text-[11px] text-card-foreground/60 flex-wrap">
+          <div className="flex items-center gap-3 mt-0.5 text-[0.6875rem] text-card-foreground/60 flex-wrap">
             <span className="flex items-center gap-1"><Building2 className="w-3 h-3" /> {group.projectName}</span>
             <span>Unit {group.unitNo}</span>
             {group.mobile && <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {group.mobile}</span>}
@@ -227,7 +245,7 @@ function BookingCard({
 
         <div className="shrink-0 text-right">
           <div className="text-sm font-bold">{fmt(balance)}</div>
-          <div className="text-[10px] text-card-foreground/50">{fmt(group.tabPaid)} / {fmt(group.tabDue)}</div>
+          <div className="text-[0.625rem] text-card-foreground/50">{fmt(group.tabPaid)} / {fmt(group.tabDue)}</div>
           <div className="w-24 mt-1">
             <ProgressBar paid={group.tabPaid} due={group.tabDue} />
           </div>
@@ -257,6 +275,7 @@ const CrmDemands: React.FC = () => {
   const { canDoAction } = useAuth();
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [activeTab, setActiveTab] = useState<TabKey>("overdue");
   const [density, setDensity] = useState<"grouped" | "compact">("grouped");
   const [raiseRow, setRaiseRow] = useState<DemandRow | null>(null);
@@ -274,9 +293,13 @@ const CrmDemands: React.FC = () => {
   // poking at pagePermissions' internal shape myself.
   const canEdit = canDoAction("crm-payments", "edit");
 
+  const listFilters: DemandListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
   const { data, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-demands", search],
-    queryFn: () => fetchDemands(search),
+    queryKey: ["crm-demands", listFilters],
+    queryFn: () => fetchDemands(listFilters),
     placeholderData: (prev) => prev,
     staleTime: 30_000,
   });
@@ -418,7 +441,7 @@ const CrmDemands: React.FC = () => {
           {canEdit && (
             <button
               onClick={() => setBulkOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium btn-module text-white rounded-lg "
             >
               <Zap size={14} /> Raise All
             </button>
@@ -431,7 +454,7 @@ const CrmDemands: React.FC = () => {
           tab/filter happens to be active. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-xl border border-border bg-card p-3.5">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Total Outstanding</p>
+          <p className="text-[0.625rem] font-medium text-muted-foreground uppercase tracking-wide mb-1">Total Outstanding</p>
           <p className="text-xl font-bold">{fmt(totalOutstanding)}</p>
           <p className="text-xs text-muted-foreground">{tabbed.pending.count + tabbed.demanded.count + tabbed.overdue.count} milestones</p>
         </div>
@@ -444,7 +467,7 @@ const CrmDemands: React.FC = () => {
               onClick={() => setActiveTab(key)}
               className={`text-left rounded-xl border p-3.5 transition-all hover:shadow-md ${activeTab === key ? `ring-2 ${cfg.ring}` : "border-border bg-card"}`}
             >
-              <p className={`text-[10px] font-medium uppercase tracking-wide mb-1 flex items-center gap-1 ${cfg.color}`}><cfg.icon className="w-3 h-3" /> {cfg.label}</p>
+              <p className={`text-[0.625rem] font-medium uppercase tracking-wide mb-1 flex items-center gap-1 ${cfg.color}`}><cfg.icon className="w-3 h-3" /> {cfg.label}</p>
               <p className={`text-xl font-bold ${cfg.color}`}>{tabbed[key].count}</p>
               <p className="text-xs text-muted-foreground">{fmt(tabbed[key].amount)}</p>
             </button>
@@ -469,6 +492,7 @@ const CrmDemands: React.FC = () => {
           <button onClick={() => { setSearch(""); setSearchInput(""); }}
             className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Clear</button>
         )}
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
         <div className="ml-auto flex items-center gap-1 rounded-lg border border-border p-0.5">
           <button
             onClick={() => setDensity("grouped")}
@@ -499,7 +523,7 @@ const CrmDemands: React.FC = () => {
               }`}
             >
               <cfg.icon className="w-3.5 h-3.5" /> {cfg.label}
-              <span className="text-[10px] opacity-70">({t.count})</span>
+              <span className="text-[0.625rem] opacity-70">({t.count})</span>
             </button>
           );
         })}
@@ -542,7 +566,7 @@ const CrmDemands: React.FC = () => {
 
       {/* Raise Demand Dialog */}
       <Dialog open={!!raiseRow} onOpenChange={(o) => { if (!o) { setRaiseRow(null); setRaiseNotes(""); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle>Raise Payment Demand</DialogTitle></DialogHeader>
           {raiseRow && (
             <div className="space-y-3">
@@ -580,7 +604,7 @@ const CrmDemands: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setRaiseRow(null); setRaiseNotes(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleRaise} disabled={raising}
-              className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="flex items-center gap-1.5 px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               <Send className="w-3.5 h-3.5" /> {raising ? "Raising…" : "Raise Demand"}
             </button>
           </div>
@@ -606,7 +630,7 @@ const CrmDemands: React.FC = () => {
       </AlertDialog>
       {/* Bulk Raise Dialog */}
       <Dialog open={bulkOpen} onOpenChange={(o) => { if (!o) { setBulkOpen(false); setBulkProject(""); setBulkMilestone(""); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Zap size={16} /> Raise All Eligible Demands</DialogTitle></DialogHeader>
           <div className="space-y-3 text-sm">
             <p className="text-xs text-muted-foreground">
@@ -633,7 +657,7 @@ const CrmDemands: React.FC = () => {
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
               />
             </div>
-            <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+            <div className="rounded-md bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 px-3 py-2 text-xs text-sky-700 dark:text-sky-400 flex items-center gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
               This action raises demands in bulk. Already-raised or paid milestones are skipped automatically.
             </div>
@@ -642,7 +666,7 @@ const CrmDemands: React.FC = () => {
             <button onClick={() => { setBulkOpen(false); setBulkProject(""); setBulkMilestone(""); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleBulkRaise} disabled={bulkRunning}
-              className="flex items-center gap-1.5 px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="flex items-center gap-1.5 px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               <Zap className="w-3.5 h-3.5" /> {bulkRunning ? "Raising…" : "Raise All"}
             </button>
           </div>

@@ -3,8 +3,229 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const logger = require("../logger");
-const { getPool } = require("../db");
+const { getPool, sql } = require("../db");
+const { projectPredicate } = require("../services/projectScope");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const {
+  MODULE_MAP,
+  MODULE_APPROVER_ROLE_OVERRIDES,
+  APPROVER_ROLES,
+  getWorkflow,
+  resolveCurrentLevel,
+  hasApprovalInboxEditRight,
+} = require("../services/approvalService");
+
+// ── Per-record visibility filter ────────────────────────────────────────────
+// Before this, GET / returned every Pending row in the system to anyone
+// holding "approval-inbox: view" — a Material Request waiting on its named
+// Level-2 approvers (say, two specific people picked in Approval Setup) was
+// just as visible to everyone else with that page right, with nothing
+// showing which level it was actually on or who was meant to act next.
+//
+// This mirrors transition()'s own per-level gate (approvalService.js) so a
+// record shows up for:
+//  - admin / super_admin (oversight — they can always see everything),
+//  - whoever is actually allowed to act on the level it's CURRENTLY on: the
+//    role(s)/specific user(s) named on that level in Approval Setup, or —
+//    for a level left uncustomised, or a module with no workflow configured
+//    at all — the module's existing default approver set (today's fallback
+//    behaviour, unchanged), or
+//  - anyone named on ANY OTHER level of the same workflow — see the
+//    isNamedOnWorkflow fallback below for why.
+//
+// currentLevel is computed live, on every request, by replaying this
+// record's ApprovalAuditLog against the workflow's CURRENT LevelDefs — there
+// is no stored snapshot of "what the workflow looked like when this record
+// was submitted". So when Approval Setup is edited (a level's named people
+// change, a level is added/removed, etc.) after older Pending records were
+// already partway through approval, those records' *existing* audit rows —
+// recorded under the OLD level layout — get replayed against the NEW one.
+// That can land currentLevel on a level nobody currently reads as "them"
+// (their audit entry now satisfies a level they were never really acting as
+// under today's config), or even past the last level entirely, even though
+// the record's DB Status is still genuinely Pending. Only non-admin viewers
+// ever hit this path (admins bypass it above), so the mismatch is invisible
+// until someone who isn't admin/super_admin — a director, say — reports
+// their inbox is missing older items while new ones (submitted after the
+// reconfiguration, with clean audit history) show up fine. That's exactly
+// this bug: found 2026-09-22 after report of directors (Prashant, Parvin,
+// Bikash) not seeing older Pending MR/PO/JV/etc entries.
+//
+// Fix: don't gate visibility on ONLY the (possibly stale) resolved level —
+// anyone named anywhere in the module's workflow is one of its legitimate
+// approvers and should still be able to see a record that's stuck or
+// mis-resolved, even if they can't act on it from the wrong level. The
+// actual approve/reject gate in transition() is untouched and still checks
+// the real current level — this only widens what shows up in the list.
+function isNamedOnLevel(levelDef, role, viewerUserId) {
+  const hasRoles = Array.isArray(levelDef?.roles) && levelDef.roles.length > 0;
+  const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
+  if (!hasRoles && !hasUsers) return null; // uncustomised — caller falls back
+  const roleMatch = hasRoles && levelDef.roles.map((r) => String(r).toLowerCase()).includes(role);
+  const userMatch = hasUsers && viewerUserId != null && levelDef.userIds.includes(viewerUserId);
+  return roleMatch || userMatch;
+}
+
+// Returns { visible, canAct, currentLevel?, totalLevels? } rather than a
+// plain boolean — canAct=false means "shown for awareness (named somewhere
+// on this workflow) but this isn't their level yet, so a click on Approve
+// will correctly 403 from transition()'s own per-level gate". The inbox UI
+// uses this to label those rows instead of presenting a live-looking
+// Approve button that's guaranteed to fail. Real production example this
+// was built against: a 2-level Material Request rule (Level 1: Super
+// Admin/Amit, Level 2: Super Admin/Bikash/Parvin) where only 1 of 9 Pending
+// MRs had been approved past Level 1 — before this, Level-2-only approvers
+// correctly couldn't act on the other 8 yet, but also couldn't see them
+// coming, which read as "the inbox is missing records" (2026-09-22).
+async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) {
+  const role = (viewerRole || "").toLowerCase();
+  if (role === "admin" || role === "super_admin") return { visible: true, canAct: true };
+
+  // Work Allocation's per-engineer confirmation isn't a document approval by
+  // a manager — it's one specific engineer confirming their own task
+  // assignment. Visible ONLY to that engineer (matched by userId), never by
+  // role or Approval Setup workflow — there's no meaningful way to "name" a
+  // whichever-engineer-happens-to-be-on-this-row approver in Approval Setup.
+  if (item.Module === "work-allocation-engineer") {
+    const visible = viewerUserId != null && Number(item.AssigneeUserId) === Number(viewerUserId);
+    return { visible, canAct: visible };
+  }
+
+  // Civil Work DPR's per-assignment Approval Setup (ApprovalLevelsJson,
+  // dependencyActivityAssignment.js) is its own separate, per-record
+  // workflow — not a dbo.ApprovalWorkflows entry, so it's not in MODULE_MAP
+  // and gets the same kind of special-cased, self-contained visibility
+  // check as work-allocation-engineer above rather than going through
+  // resolveCurrentLevel. Visible to whoever is named anywhere on the
+  // activity's levels (read-only if it's not their turn yet, matching the
+  // "isNamedOnWorkflow" fallback below); actionable only for the level
+  // that's actually next in line.
+  if (item.Module === "civilworkdpr-approval") {
+    const rungId = parseInt(item.RecordId, 10);
+    if (!Number.isFinite(rungId) || viewerUserId == null) return { visible: false, canAct: false };
+    try {
+      const pool = getPool();
+      const a = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Id, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+      );
+      if (!a.recordset.length) return { visible: false, canAct: false };
+      let levels = [];
+      try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
+      if (!levels.length) return { visible: false, canAct: false };
+
+      const approvalsRes = await pool.request().input("aid", sql.Int, a.recordset[0].Id).query(
+        "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+      );
+      const approvals = approvalsRes.recordset;
+      const satisfied = (level) => {
+        const approvedIds = new Set(approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)));
+        if (level.mode === "any") return level.userIds.some((id) => approvedIds.has(Number(id)));
+        return level.userIds.length > 0 && level.userIds.every((id) => approvedIds.has(Number(id)));
+      };
+      const currentLevel = levels.find((l) => !satisfied(l));
+      if (!currentLevel) return { visible: false, canAct: false }; // fully cleared — shouldn't normally still appear
+
+      const named = currentLevel.userIds.map(Number).includes(Number(viewerUserId));
+      const namedAnywhere = levels.some((l) => l.userIds.map(Number).includes(Number(viewerUserId)));
+      return { visible: named || namedAnywhere, canAct: named };
+    } catch (err) {
+      logger.warn({ rungId, err: err.message }, "approval-inbox: civilworkdpr-approval visibility check failed");
+      return { visible: false, canAct: false };
+    }
+  }
+
+  const map = MODULE_MAP[item.Module];
+  const fallbackRoles = MODULE_APPROVER_ROLE_OVERRIDES[item.Module] || APPROVER_ROLES;
+  const fallbackVisible = async () =>
+    fallbackRoles.includes(role) || (await hasApprovalInboxEditRight(viewerUserId));
+
+  // Modules the aggregator lists but that aren't in the shared MODULE_MAP
+  // (e.g. received-payment, crm-money-receipts — they never went through
+  // approvalService.js's level engine) keep today's page-right-only
+  // visibility; there's no per-level data to filter on.
+  if (!map) return { visible: true, canAct: true };
+
+  const workflow = workflowCache.get(item.Module);
+  if (!workflow || !workflow.LevelDefs?.length) {
+    const visible = await fallbackVisible();
+    return { visible, canAct: visible };
+  }
+
+  const isNamedOnWorkflow = workflow.LevelDefs.some(
+    (l) => isNamedOnLevel(l, role, viewerUserId) === true,
+  );
+
+  const tableName = map.table.replace("dbo.", "");
+  const recordId = parseInt(item.RecordId, 10);
+  const totalLevels = workflow.Levels || workflow.LevelDefs.length;
+  const currentLevel = await resolveCurrentLevel(tableName, recordId, totalLevels, workflow.LevelDefs, null, { module: item.Module });
+  if (currentLevel > totalLevels) {
+    // Audit history reads as "fully approved" but the aggregator only ever
+    // selects Pending rows — a genuine Status/computed-level mismatch (see
+    // comment above), not "nothing to show". Surface it to this module's
+    // named approvers rather than silently dropping it for everyone.
+    if (isNamedOnWorkflow) {
+      logger.warn(
+        { module: item.Module, recordId, currentLevel, totalLevels, viewerUserId },
+        "approval-inbox: Pending record resolved past its final level — stale audit history vs current workflow config",
+      );
+    }
+    return { visible: isNamedOnWorkflow, canAct: false, currentLevel, totalLevels };
+  }
+
+  const levelDef = workflow.LevelDefs[currentLevel - 1];
+  if (!levelDef) {
+    const visible = await fallbackVisible();
+    return { visible, canAct: visible };
+  }
+
+  const matched = isNamedOnLevel(levelDef, role, viewerUserId);
+  // Level left uncustomised — no named roles or people — falls back to the
+  // module's default approver set, exactly like transition()'s own gate does.
+  if (matched === null) {
+    const visible = await fallbackVisible();
+    return { visible, canAct: visible };
+  }
+  if (matched) return { visible: true, canAct: true, currentLevel, totalLevels };
+
+  // Not a match on the level it currently resolved to, but this viewer IS
+  // named somewhere else on the same workflow (normal staged-approval
+  // waiting, OR the stale-audit mismatch described above). Show it — read-
+  // only from their vantage point; transition() still enforces the real
+  // current level for the actual approve/reject action — rather than let it
+  // vanish for one of this module's own approvers.
+  return { visible: isNamedOnWorkflow, canAct: false, currentLevel, totalLevels };
+}
+
+async function filterVisibleToViewer(items, req) {
+  const viewerRole = req.user?.role;
+  const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+
+  // Resolve each distinct module's workflow once, sequentially, before
+  // filtering — items.map + Promise.all below runs every row concurrently,
+  // so lazily populating the cache inside isVisibleToViewer would just race
+  // (every row for the same module would see an empty cache at once and all
+  // issue their own identical getWorkflow() query).
+  const workflowCache = new Map();
+  const distinctModules = [...new Set(items.map((i) => i.Module))];
+  for (const mod of distinctModules) {
+    workflowCache.set(mod, await getWorkflow(mod));
+  }
+
+  const results = await Promise.all(
+    items.map((item) => isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache)),
+  );
+  const out = [];
+  items.forEach((item, i) => {
+    const r = results[i];
+    if (!r.visible) return;
+    // _canAct is only attached when it's actually informative (false) —
+    // omitted entirely for the common case so existing consumers/tests that
+    // don't know about it are unaffected.
+    out.push(r.canAct === false ? { ...item, _canAct: false, _currentLevel: r.currentLevel, _totalLevels: r.totalLevels } : item);
+  });
+  return out;
+}
 
 // This router previously had no page-level check at all — every other route
 // file in this codebase gates with requirePageRight, but this one relied
@@ -20,23 +241,64 @@ router.use(requirePageRight("approval-inbox", "view"));
 
 // NULL placeholders so every UNION ALL branch has the same column count.
 // Only the expense-booking branch populates GrnTotalAmount, GrnBasicAmount,
-// and BillingTermsData.
+// and BillingTermsData; only journal-voucher populates JournalVoucherSummary;
+// only work-allocation-engineer (dead — see its own isVisibleToViewer
+// comment) and civilworkdpr-approval populate RungId; nothing currently
+// populates AssigneeUserId. ProjectName is overridden per-module below
+// (via .replace() on this constant, same pattern as the two variants right
+// after it) wherever that module's table actually resolves to a project —
+// purchase-orders, work-orders, goods-receipt, expense-booking,
+// material-requests, vehicle-in-out, material-issues,
+// material-issue-return, debit-note; everything else (payments, CRM
+// modules, ...) has no single project to show and stays NULL here.
 const NULL_EXTRA = `
   CAST(NULL AS DECIMAL(18,2)) AS GrnTotalAmount,
   CAST(NULL AS DECIMAL(18,2)) AS GrnBasicAmount,
   CAST(NULL AS NVARCHAR(MAX)) AS BillingTermsData,
   CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
   CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
-  CAST(NULL AS NVARCHAR(255)) AS ToGodownName,`;
+  CAST(NULL AS NVARCHAR(255)) AS ToGodownName,
+  CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,
+  CAST(NULL AS INT) AS AssigneeUserId,
+  CAST(NULL AS INT) AS RungId,
+  CAST(0 AS BIT) AS NeedsReview,
+  CAST(NULL AS NVARCHAR(255)) AS ProjectName,`;
 
-router.get("/", async (req, res) => {
-  try {
-    const pool = getPool();
-    const { module } = req.query;
+// Swaps in a real ProjectName expression for a module whose table (or a
+// table it already joins) resolves to a project — see NULL_EXTRA's own
+// comment above.
+const withProjectName = (base, expr) =>
+  base.replace(
+    "CAST(NULL AS NVARCHAR(255)) AS ProjectName,",
+    `${expr} AS ProjectName,`,
+  );
 
-    const queries = [];
+// Received Payment variant: a CRM payment (CrmBookingId set) is entered in
+// CRM WITHOUT a deposit bank — Accounts fills the bank on the Received
+// Payment page first. Until then it can't be approved (receivedPayment.js
+// PUT /:id/approve refuses), so the inbox shows "Review" instead of Approve.
+const NULL_EXTRA_RECEIVED_PAYMENT = NULL_EXTRA.replace(
+  "CAST(0 AS BIT) AS NeedsReview",
+  "CAST(CASE WHEN CrmBookingId IS NOT NULL AND RPDepositBankId IS NULL THEN 1 ELSE 0 END AS BIT) AS NeedsReview",
+);
 
-    if (!module || module === "purchase-orders") {
+// Populates RungId with the real rung id instead of NULL — the only field
+// this module's row needs beyond the shared shape, since its Reference
+// already carries the activity's name/chain.
+const NULL_EXTRA_CIVILWORKDPR_APPROVAL = NULL_EXTRA.replace(
+  "CAST(NULL AS INT) AS RungId,",
+  "daa.DependencyMasterActivityId AS RungId,",
+);
+
+// Builds the per-module SELECT list (optionally scoped to one module) shared
+// by both GET / (the full inbox) and GET /count (the badge) — a single
+// source of truth for "what counts as pending" so the two can never drift,
+// and so the badge count can be run through the exact same per-viewer
+// visibility filter as the list itself instead of a separate raw aggregate.
+function buildInboxQueries(module, projectScope = null) {
+  const queries = [];
+
+  if (!module || module === "purchase-orders") {
       queries.push(`
         SELECT
           'purchase-orders'                    AS Module,
@@ -44,11 +306,11 @@ router.get("/", async (req, res) => {
           CAST(PurchaseOrderID AS NVARCHAR)    AS RecordId,
           PurchaseOrderNo                      AS Reference,
           PODate                               AS RecordDate,
-          Status,
+          dbo.PurchaseOrders.Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
           CAST(NULL AS NVARCHAR)               AS SupplierName,
           TotalAmount                          AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "pr_po.name")}
           CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
           ISNULL(CAST(ApprovedBy AS NVARCHAR(255)), '')  AS ApprovedBy,
           ISNULL(CAST(ApprovedAt AS NVARCHAR), '')       AS ApprovedAt,
@@ -56,7 +318,8 @@ router.get("/", async (req, res) => {
           ISNULL(CAST(RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
           UpdatedAt                            AS LastModified
         FROM dbo.PurchaseOrders
-        WHERE Status = 'Pending'
+        LEFT JOIN dbo.enterprise pr_po ON pr_po.id = dbo.PurchaseOrders.ProjectId
+        WHERE dbo.PurchaseOrders.Status = 'Pending'
       `);
     }
 
@@ -65,14 +328,14 @@ router.get("/", async (req, res) => {
         SELECT
           'work-orders'                        AS Module,
           'Work Order'                         AS ModuleLabel,
-          CAST(Id AS NVARCHAR)                 AS RecordId,
+          CAST(dbo.WorkOrderHeader.Id AS NVARCHAR)     AS RecordId,
           DocumentNumber                       AS Reference,
           DocumentDate                         AS RecordDate,
-          Status,
+          dbo.WorkOrderHeader.Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
           CAST(NULL AS NVARCHAR)               AS SupplierName,
           TotalAmount                          AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "pr_wo.name")}
           CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
           ISNULL(CAST(ApprovedBy AS NVARCHAR(255)), '')  AS ApprovedBy,
           ISNULL(CAST(ApprovedAt AS NVARCHAR), '')       AS ApprovedAt,
@@ -80,7 +343,8 @@ router.get("/", async (req, res) => {
           ISNULL(CAST(RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
           UpdatedAt                            AS LastModified
         FROM dbo.WorkOrderHeader
-        WHERE Status = 'Pending'
+        LEFT JOIN dbo.enterprise pr_wo ON pr_wo.id = dbo.WorkOrderHeader.ProjectId
+        WHERE dbo.WorkOrderHeader.Status = 'Pending'
       `);
     }
 
@@ -90,7 +354,10 @@ router.get("/", async (req, res) => {
           'payments'                           AS Module,
           'Payment'                            AS ModuleLabel,
           CAST(PPaymentID AS NVARCHAR)         AS RecordId,
-          PPaymentName                         AS Reference,
+          -- CRM Refund / Brokerage payouts (SourceCrmRefundId / SourceCrmBrokerageId)
+          -- were showing the generic "CRM Refund"/"CRM Brokerage" name here instead
+          -- of the actual voucher DocNo every other module in this inbox uses.
+          ISNULL(DocNo, PPaymentName)          AS Reference,
           PDate                                AS RecordDate,
           ISNULL(Status, 'Draft')              AS Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
@@ -104,7 +371,37 @@ router.get("/", async (req, res) => {
           ''                                   AS RejectionNote,
           CAST(NULL AS DATETIME2)              AS LastModified
         FROM dbo.NewPayment
-        WHERE Status = 'Pending'
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NULL
+      `);
+    }
+
+    // A CRM Refund's payout voucher is the same dbo.NewPayment row shape as
+    // any other payment, but runs its own single-level workflow ("crm-refund-
+    // payment" — see approvalService.js) instead of the multi-module Payments
+    // bundle. Split into its own query block (same table, own Module tag) so
+    // the level/role/visibility computation below resolves the workflow that
+    // actually governs it — same pattern as crm-refunds vs crm-refunds-finance.
+    if (!module || module === "crm-refund-payment") {
+      queries.push(`
+        SELECT
+          'crm-refund-payment'                 AS Module,
+          'CRM Refund Payment'                 AS ModuleLabel,
+          CAST(PPaymentID AS NVARCHAR)         AS RecordId,
+          ISNULL(DocNo, PPaymentName)          AS Reference,
+          PDate                                AS RecordDate,
+          ISNULL(Status, 'Draft')              AS Status,
+          CAST(NULL AS NVARCHAR)               AS ContractorName,
+          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          PAmount                              AS Amount,
+          ${NULL_EXTRA}
+          CAST(PCreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ISNULL(CAST(PApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ''                                   AS RejectionNote,
+          CAST(NULL AS DATETIME2)              AS LastModified
+        FROM dbo.NewPayment
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NOT NULL
       `);
     }
 
@@ -120,7 +417,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                           AS ContractorName,
           ISNULL(RPCustomerName, RPReceivedFrom)           AS SupplierName,
           RPAmount                                        AS Amount,
-          ${NULL_EXTRA}
+          ${NULL_EXTRA_RECEIVED_PAYMENT}
           CAST(RPCreatedBy AS NVARCHAR(255))              AS CreatedBy,
           ISNULL(CAST(RPApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
           ISNULL(CAST(RPApprovedAt AS NVARCHAR), '')      AS ApprovedAt,
@@ -150,6 +447,11 @@ router.get("/", async (req, res) => {
           grn.SourceTransferDocNo                   AS SourceTransferDocNo,
           fg.GodownName                             AS FromGodownName,
           tg.GodownName                             AS ToGodownName,
+          CAST(NULL AS NVARCHAR(MAX))               AS JournalVoucherSummary,
+          CAST(NULL AS INT)                         AS AssigneeUserId,
+          CAST(NULL AS INT)                         AS RungId,
+          CAST(0 AS BIT)                         AS NeedsReview,
+          grnpr.name                                AS ProjectName,
           CAST(ISNULL(po.PurchaseOrderNo, '') AS NVARCHAR(255)) AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -187,6 +489,7 @@ router.get("/", async (req, res) => {
         FROM dbo.GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
         LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+        LEFT JOIN dbo.enterprise grnpr ON grnpr.id = po.ProjectId
         LEFT JOIN dbo.StockTransfers st ON st.TransferID = grn.SourceTransferID
         LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
         LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
@@ -232,6 +535,11 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
           CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
           CAST(NULL AS NVARCHAR(255)) AS ToGodownName,
+          CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,
+          CAST(NULL AS INT)           AS AssigneeUserId,
+          CAST(NULL AS INT)           AS RungId,
+          CAST(0 AS BIT)                         AS NeedsReview,
+          ebpr.name                   AS ProjectName,
           CAST(ISNULL(u_created.name, CAST(eb.ECreatedBy AS NVARCHAR(255))) AS NVARCHAR(255))  AS CreatedBy,
           CAST(ISNULL(u_approved.name, '') AS NVARCHAR(255))                                    AS ApprovedBy,
           ''                       AS ApprovedAt,
@@ -245,6 +553,7 @@ router.get("/", async (req, res) => {
           ON ahm_eb.LHeadId = grn_eb.SupplierID
         LEFT JOIN dbo.users u_created  ON u_created.id = eb.ECreatedBy
         LEFT JOIN dbo.users u_approved ON u_approved.id = eb.EApprovedBy
+        LEFT JOIN dbo.enterprise ebpr ON ebpr.id = TRY_CAST(eb.EProjectName AS INT)
         WHERE eb.EStatus = 'Pending'
           AND NOT (
             ISNULL(eb.ESourceType, '') = 'GRN'
@@ -323,7 +632,7 @@ router.get("/", async (req, res) => {
             COALESCE(co.name, '')
           ) AS NVARCHAR(512))                   AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))          AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "pr.name")}
           CAST(mr.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                   AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -334,6 +643,34 @@ router.get("/", async (req, res) => {
         LEFT JOIN dbo.enterprise co ON co.id = mr.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = mr.ProjectId
         WHERE mr.Status = 'Pending'
+      `);
+    }
+
+    if (!module || module === "stock-transfers") {
+      queries.push(`
+        SELECT
+          'stock-transfers'                    AS Module,
+          'Stock Transfer'                     AS ModuleLabel,
+          CAST(st.TransferID AS NVARCHAR)      AS RecordId,
+          st.DocNo                             AS Reference,
+          st.TransferDate                      AS RecordDate,
+          st.Status,
+          CAST(fg.GodownName AS NVARCHAR(255)) AS ContractorName,
+          CAST(CONCAT(
+            COALESCE(fg.GodownName, ''), N' → ', COALESCE(tg.GodownName, '')
+          ) AS NVARCHAR(512))                  AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))          AS Amount,
+          ${NULL_EXTRA}
+          CAST(st.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
+          ''                                   AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ISNULL(CAST(st.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(st.UpdatedAt, st.CreatedAt)   AS LastModified
+        FROM dbo.StockTransfers st
+        LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
+        LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
+        WHERE st.Status = 'Pending'
       `);
     }
 
@@ -349,7 +686,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                 AS ContractorName,
           ISNULL(v.SupplierName, v.VehicleNo)    AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))            AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "vpr.name")}
           CAST(v.CreatedBy AS NVARCHAR(255))     AS CreatedBy,
           ''                                     AS ApprovedBy,
           ''                                     AS ApprovedAt,
@@ -357,6 +694,7 @@ router.get("/", async (req, res) => {
           ''                                     AS RejectionNote,
           v.UpdatedAt                            AS LastModified
         FROM dbo.VehicleInOut v
+        LEFT JOIN dbo.enterprise vpr ON vpr.id = v.ProjectID
         WHERE v.Status = 'Pending'
       `);
     }
@@ -373,7 +711,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                                         AS ContractorName,
           ISNULL(mi.IssuedTo, ISNULL(p.name, mi.Reason))                AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))                                    AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "p.name")}
           CAST(mi.CreatedBy AS NVARCHAR(255))                            AS CreatedBy,
           ''                                                             AS ApprovedBy,
           ''                                                             AS ApprovedAt,
@@ -383,6 +721,32 @@ router.get("/", async (req, res) => {
         FROM dbo.MaterialIssues mi
         LEFT JOIN dbo.enterprise p ON p.id = mi.ProjectId
         WHERE ISNULL(mi.Status, 'Pending') = 'Pending'
+      `);
+    }
+
+    if (!module || module === "material-issue-return") {
+      queries.push(`
+        SELECT
+          'material-issue-return'                                        AS Module,
+          'Material Issue Return'                                        AS ModuleLabel,
+          CAST(ir.ReturnId AS NVARCHAR)                                   AS RecordId,
+          ISNULL(ir.DocNo, CONCAT('IRN#', CAST(ir.ReturnId AS NVARCHAR))) AS Reference,
+          ir.ReturnDate                                                   AS RecordDate,
+          ISNULL(ir.Status, 'Pending')                                    AS Status,
+          CAST(NULL AS NVARCHAR)                                         AS ContractorName,
+          ISNULL(mi.DocNo, ISNULL(p.name, ir.Reason))                    AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))                                     AS Amount,
+          ${withProjectName(NULL_EXTRA, "p.name")}
+          CAST(ir.CreatedBy AS NVARCHAR(255))                             AS CreatedBy,
+          ''                                                              AS ApprovedBy,
+          ''                                                              AS ApprovedAt,
+          ''                                                              AS RejectedBy,
+          ''                                                              AS RejectionNote,
+          ISNULL(ir.UpdatedAt, ir.CreatedAt)                             AS LastModified
+        FROM dbo.MaterialIssueReturn ir
+        LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
+        LEFT JOIN dbo.enterprise p ON p.id = ir.ProjectId
+        WHERE ISNULL(ir.Status, 'Pending') = 'Pending'
       `);
     }
 
@@ -404,6 +768,11 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR(100))                  AS SourceTransferDocNo,
           fg.GodownName                                 AS FromGodownName,
           tg.GodownName                                 AS ToGodownName,
+          CAST(NULL AS NVARCHAR(MAX))                  AS JournalVoucherSummary,
+          CAST(NULL AS INT)                            AS AssigneeUserId,
+          CAST(NULL AS INT)                            AS RungId,
+          CAST(0 AS BIT)                         AS NeedsReview,
+          CAST(NULL AS NVARCHAR(255))                  AS ProjectName,
           CAST(so.CreatedBy AS NVARCHAR(255))          AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -459,12 +828,43 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                AS ContractorName,
           CAST(NULL AS NVARCHAR)                AS SupplierName,
           (SELECT SUM(DebitAmount) FROM dbo.JournalVoucherLines WHERE JVID = jv.JVID) AS Amount,
-          ${NULL_EXTRA}
+          CAST(NULL AS DECIMAL(18,2))           AS GrnTotalAmount,
+          CAST(NULL AS DECIMAL(18,2))           AS GrnBasicAmount,
+          CAST(NULL AS NVARCHAR(MAX))           AS BillingTermsData,
+          CAST(NULL AS NVARCHAR(100))           AS SourceTransferDocNo,
+          CAST(NULL AS NVARCHAR(255))           AS FromGodownName,
+          CAST(NULL AS NVARCHAR(255))           AS ToGodownName,
+          -- One "AccountHead Dr/Cr ₹Amount" segment per line, so the inbox
+          -- row can show exactly which heads this JV moves money between
+          -- without a second round trip — same account-head join every other
+          -- JV screen already uses (journalVoucher.js), just aggregated here.
+          (
+            SELECT STRING_AGG(
+              CONCAT(
+                ISNULL(ahm.DisplayName, ahm.LHeadName),
+                CASE WHEN l.DebitAmount IS NOT NULL THEN ' Dr ' ELSE ' Cr ' END,
+                FORMAT(ISNULL(l.DebitAmount, l.CreditAmount), 'N2')
+              ),
+              ' | '
+            ) WITHIN GROUP (ORDER BY l.SortOrder)
+            FROM dbo.JournalVoucherLines l
+            JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = l.LHeadId
+            WHERE l.JVID = jv.JVID
+          )                                    AS JournalVoucherSummary,
+          CAST(NULL AS INT)                     AS AssigneeUserId,
+          CAST(NULL AS INT)                     AS RungId,
+          CAST(0 AS BIT)                         AS NeedsReview,
+          CAST(NULL AS NVARCHAR(255))           AS ProjectName,
           CAST(jv.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
           ''                                    AS RejectedBy,
-          ISNULL(CAST(jv.Narration AS NVARCHAR(MAX)), '') AS RejectionNote,
+          -- JournalVoucher has no RejectionNote column of its own (rejection
+          -- reasons live in ApprovalAuditLog, not surfaced here) — this used
+          -- to read jv.Narration instead, which meant every pending JV's own
+          -- narration/description showed up mislabeled as a "Rejection Note"
+          -- in the inbox, even though it was never rejected.
+          ''                                    AS RejectionNote,
           ISNULL(jv.UpdatedAt, jv.CreatedAt)    AS LastModified
         FROM dbo.JournalVoucher jv
         WHERE jv.Status = 'Pending'
@@ -481,8 +881,8 @@ router.get("/", async (req, res) => {
           ict.TransferDate                      AS RecordDate,
           ict.Status,
           sp.name                               AS ContractorName,
-          rp.name                                AS SupplierName,
-          ict.TotalAmount                       AS Amount,
+          rp.name                               AS SupplierName,
+          ISNULL(ict.TotalAmountInclGst, ict.TotalAmount) AS Amount,
           ${NULL_EXTRA}
           CAST(ict.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
           ''                                     AS ApprovedBy,
@@ -496,6 +896,7 @@ router.get("/", async (req, res) => {
         WHERE ict.Status = 'Pending'
       `);
     }
+
 
     if (!module || module === "fund-transfer") {
       queries.push(`
@@ -514,7 +915,20 @@ router.get("/", async (req, res) => {
           ''                                      AS ApprovedBy,
           ''                                      AS ApprovedAt,
           ''                                      AS RejectedBy,
-          ISNULL(CAST(ft.Narration AS NVARCHAR(MAX)), '') AS RejectionNote,
+          -- Was ft.Narration — the transfer's own free-text description, not
+          -- a rejection reason, so every pending (never-rejected) transfer's
+          -- narration showed up mislabeled as a "Rejection Note" in the
+          -- inbox. Same bug class already fixed for journal-voucher below;
+          -- actual rejection reasons live in ApprovalAuditLog like every
+          -- other module here.
+          ISNULL((
+            SELECT TOP 1 Note
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'FundTransfer'
+              AND RecordId = ft.FTId
+              AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                                  AS RejectionNote,
           ft.CreatedAt                            AS LastModified
         FROM dbo.FundTransfer ft
         LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
@@ -522,6 +936,16 @@ router.get("/", async (req, res) => {
         WHERE ft.Status = 'Pending'
       `);
     }
+
+    // NOTE: "work-allocation-engineer" used to populate here — one Approval
+    // Inbox row per assigned engineer, per assignment, for that engineer to
+    // individually confirm their own task (dbo.DependencyActivityEngineer's
+    // Approved flag). Removed: assigning engineers now starts work
+    // immediately (see dependencyActivityAssignment.js's POST /:rungId), and
+    // who gets to approve the finished work is instead a per-assignment
+    // list (ApprovalLevelsJson, set on that same assignment) — enforced
+    // wherever that approve action itself lives (Work Reporting), not
+    // surfaced through this shared inbox.
 
     // Applications no longer have their own approve/reject cycle — they
     // stay Pending permanently once Submitted, and all real review/approval
@@ -753,7 +1177,7 @@ router.get("/", async (req, res) => {
           CAST(NULL AS NVARCHAR)                AS ContractorName,
           CONCAT(ISNULL(party.LHeadName, ''), ' — ', ISNULL(eb.EDocNo, '')) AS SupplierName,
           dn.TotalAmount                        AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "dnpr.name")}
           CAST(ISNULL(u.name, CAST(dn.created_by AS NVARCHAR(255))) AS NVARCHAR(255)) AS CreatedBy,
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
@@ -764,6 +1188,7 @@ router.get("/", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster party ON party.LHeadId = dn.supplier_id
         LEFT JOIN dbo.ExpenseBooking eb ON eb.Eid = dn.bill_id
         LEFT JOIN dbo.users u ON u.id = dn.created_by
+        LEFT JOIN dbo.enterprise dnpr ON dnpr.id = TRY_CAST(eb.EProjectName AS INT)
         WHERE ISNULL(dn.Status, 'Draft') = 'Pending' AND dn.is_active = 1
       `);
     }
@@ -792,13 +1217,175 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "crm-booking-amendment") {
+      queries.push(`
+        SELECT
+          'crm-booking-amendment'               AS Module,
+          'Booking Amendment'                   AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                AS RecordId,
+          CONCAT(b.BookingNo, ' – ', r.ChangeType, ' ', r.Action) AS Reference,
+          r.RequestedAt                         AS RecordDate,
+          r.Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          a.ApplicantName                       AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))           AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(u_req.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
+          ISNULL(CAST(u_rev.name AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(r.ReviewedAt AS NVARCHAR), '')    AS ApprovedAt,
+          ''                                    AS RejectedBy,
+          ISNULL(CAST(r.ReviewNotes AS NVARCHAR(MAX)), '') AS RejectionNote,
+          r.RequestedAt                         AS LastModified
+        FROM dbo.CrmBookingAmendmentRequest r
+        JOIN dbo.CrmBooking b     ON b.Id = r.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.Users u_req ON u_req.id = r.RequestedBy
+        LEFT JOIN dbo.Users u_rev ON u_rev.id = r.ReviewedBy
+        WHERE r.Status = 'Pending'
+      `);
+    }
+
+    // Was missing entirely — CrmRefund already has a real Pending/Approve/
+    // Reject cycle (see crmRefunds.js PUT /:id/approve) using the same
+    // shared approvalService.js transition() every other CRM module here
+    // uses, but never got a branch in this aggregator, so refunds only ever
+    // surfaced via CrmRefunds.tsx's own inline ApprovalActions — invisible
+    // to the centralized cross-module inbox every sibling CRM module
+    // (cancellations, agreements, brokerage, NOC, booking amendments) is in.
+    if (!module || module === "crm-refunds") {
+      queries.push(`
+        SELECT
+          'crm-refunds'                          AS Module,
+          'CRM Refund'                           AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                 AS RecordId,
+          r.RefundNo                             AS Reference,
+          r.CreatedAt                            AS RecordDate,
+          r.Status,
+          CAST(NULL AS NVARCHAR)                 AS ContractorName,
+          cu.CustomerName                        AS SupplierName,
+          r.GrossAmount                          AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
+          ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ''                                      AS RejectedBy,
+          ISNULL(CAST(r.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(r.UpdatedAt, r.CreatedAt)        AS LastModified
+        FROM dbo.CrmRefund r
+        JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
+        LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
+        WHERE r.Status = 'Pending'
+      `);
+    }
+
+    // Second, separate approval tier — same gap as crm-refunds above but for
+    // the Finance-side step (PUT /:id/finance-approve in crmRefunds.js),
+    // which only ever ran from CrmRefunds.tsx's own inline "Finance Approve"
+    // button. Kept as its own module (not folded into crm-refunds) because
+    // it's a genuinely different gate — CRM checker vs. Finance — exactly
+    // like crm-agreement-date is split out from crm-agreements.
+    if (!module || module === "crm-refunds-finance") {
+      queries.push(`
+        SELECT
+          'crm-refunds-finance'                  AS Module,
+          'CRM Refund (Finance)'                 AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                 AS RecordId,
+          r.RefundNo                             AS Reference,
+          r.CreatedAt                            AS RecordDate,
+          r.Status,
+          CAST(NULL AS NVARCHAR)                 AS ContractorName,
+          cu.CustomerName                        AS SupplierName,
+          r.NetAmount                            AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
+          ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ''                                      AS RejectedBy,
+          ISNULL(CAST(r.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(r.UpdatedAt, r.CreatedAt)        AS LastModified
+        FROM dbo.CrmRefund r
+        JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
+        LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
+        WHERE r.Status = 'FinancePending'
+      `);
+    }
+
+    // Civil Work DPR's per-assignment Approval Setup — an activity that's
+    // Completed and already passed Quality Check, now waiting on whichever
+    // levels were configured for it in Work Allocation (ApprovalLevelsJson,
+    // dependencyActivityAssignment.js). Status is always reported as the
+    // literal 'Pending' here regardless of the row's real DB status — from
+    // this inbox's perspective "awaiting this workflow" is all that matters,
+    // same as every other module's own Pending filter. RecordId is the
+    // RUNG id (not the assignment id) since that's what
+    // dependencyActivityAssignment.js's approve/reject routes key on.
+    // isVisibleToViewer above (not MODULE_MAP/resolveCurrentLevel) decides
+    // who actually sees each row — this query intentionally returns every
+    // candidate regardless of viewer.
+    if (!module || module === "civilworkdpr-approval") {
+      queries.push(`
+        SELECT
+          'civilworkdpr-approval'                        AS Module,
+          'Activity Approval'                            AS ModuleLabel,
+          CAST(daa.DependencyMasterActivityId AS NVARCHAR) AS RecordId,
+          CONCAT(dm.Alias, ' — ', am.activity_name)      AS Reference,
+          daa.UpdatedAt                                  AS RecordDate,
+          'Pending'                                      AS Status,
+          CAST(NULL AS NVARCHAR)                         AS ContractorName,
+          -- Feeds the row list's "Party" column and the review panel's
+          -- "Party" field — the engineer(s) actually doing the work reads
+          -- far more usefully there than daa.CreatedBy, which for an older
+          -- activity is often a migration/backfill script, not a person.
+          (
+            SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+            FROM dbo.DependencyActivityEngineer dae
+            JOIN dbo.users u ON u.id = dae.EngineerId
+            WHERE dae.AssignmentId = daa.Id
+          )                                               AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))                    AS Amount,
+          ${NULL_EXTRA_CIVILWORKDPR_APPROVAL}
+          CAST(daa.CreatedBy AS NVARCHAR(255))           AS CreatedBy,
+          ''                                              AS ApprovedBy,
+          ''                                              AS ApprovedAt,
+          ''                                              AS RejectedBy,
+          ''                                              AS RejectionNote,
+          daa.UpdatedAt                                  AS LastModified
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        WHERE daa.IsCurrent = 1${projectPredicate(projectScope, "dm.ProjectId")}
+          AND daa.Status = 'COMPLETED'
+          -- No longer requires ApprovalLevelsJson to be configured — a
+          -- Completed, QC-passed activity with no approval setup still
+          -- needs an explicit approval (handleApproveLevel's no-levels
+          -- branch, super_admin only) before it can show Approved, so it
+          -- belongs in this inbox too. isVisibleToViewer's own
+          -- civilworkdpr-approval check still hides these from anyone but
+          -- super_admin when there are no named levels to be on.
+          AND (
+            SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc
+            WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC
+          ) = 'APPROVED'
+      `);
+    }
+
+  return queries;
+}
+
+router.get("/", async (req, res) => {
+  try {
+    const pool = getPool();
+    const queries = buildInboxQueries(req.query.module, req.projectScope);
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
       queries.join(" UNION ALL ") + " ORDER BY LastModified DESC";
     const result = await pool.request().query(fullQuery);
 
-    res.json(result.recordset);
+    res.json(await filterVisibleToViewer(result.recordset, req));
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox error");
     res.status(500).json({
@@ -810,40 +1397,22 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/approval-inbox/count — lightweight badge count
+// GET /api/approval-inbox/count — lightweight badge count.
+// Runs the exact same query + visibility filter as GET / and returns just
+// the length — previously a separate raw SQL aggregate that counted every
+// Pending row system-wide, which meant the badge (unlike the list once
+// filterVisibleToViewer landed there) still showed a count that included
+// records the viewer had no part in and couldn't act on.
 router.get("/count", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT
-        (SELECT COUNT(*) FROM dbo.PurchaseOrders      WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.WorkOrderHeader    WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.NewPayment         WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ReceivedPayment    WHERE RPStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending'
-          AND NOT (ISNULL(ESourceType,'') = 'GRN' AND ISNULL(ERemarks,'') LIKE 'Auto-created for remaining items from GRN%')) +
-        (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.MaterialRequests   WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.SaleOrders         WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.VehicleInOut       WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.FundTransfer       WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt     WHERE Status = 'Pending' AND ReceivedPaymentId IS NULL) +
-        (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1 AND ReadyForApprovalAt IS NOT NULL) +
-        (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE DateApprovalStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending' AND IsLocked = 0) +
-        (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.Contract           WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.DebitNote          WHERE ISNULL(Status,'Draft') = 'Pending' AND is_active = 1)
-      AS TotalPending
-    `);
-    res.json({ count: result.recordset[0].TotalPending ?? 0 });
+    const queries = buildInboxQueries(undefined, req.projectScope);
+    if (queries.length === 0) return res.json({ count: 0 });
+
+    const fullQuery = queries.join(" UNION ALL ");
+    const result = await pool.request().query(fullQuery);
+    const visible = await filterVisibleToViewer(result.recordset, req);
+    res.json({ count: visible.length });
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox count error");
     res.json({ count: 0 });
@@ -851,4 +1420,8 @@ router.get("/count", async (req, res) => {
 });
 
 module.exports = router;
+// Exported for testing only — see backend/test/approvalInboxVisibility.test.js.
+module.exports.isVisibleToViewer = isVisibleToViewer;
+module.exports.isNamedOnLevel = isNamedOnLevel;
+module.exports.filterVisibleToViewer = filterVisibleToViewer;
 

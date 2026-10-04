@@ -1,4 +1,5 @@
 import { formatINR } from "@/utils/formatCurrency";
+import { printStatusLabel } from "@/utils/printStatus";
 import type { ExportColumn } from "@/lib/export";
 
 // ─── Payment mode styling ───────────────────────────────────────────────────
@@ -28,7 +29,7 @@ export const MODE_STYLE: Record<
     dot: "bg-violet-500",
   },
   Card: {
-    ring: "ring-amber-500/30 bg-amber-500/10",
+    ring: "ring-amber-500/30 bg-[#ffe2021a]",
     text: "text-amber-600 dark:text-amber-400",
     dot: "bg-amber-500",
   },
@@ -46,6 +47,11 @@ export const MODE_STYLE: Record<
     ring: "ring-pink-500/30 bg-pink-500/10",
     text: "text-pink-600 dark:text-pink-400",
     dot: "bg-pink-500",
+  },
+  "Demand Draft": {
+    ring: "ring-teal-500/30 bg-teal-500/10",
+    text: "text-teal-600 dark:text-teal-400",
+    dot: "bg-teal-500",
   },
 };
 
@@ -92,7 +98,7 @@ export const EXPORT_COLUMNS: ExportColumn[] = [
   // the real, currently-shown status — the raw `status` field is only the
   // underlying approval state (Approved/Pending/Rejected), which is why a
   // cancelled or bounced cheque still exported as "Approved" before.
-  { header: "Status", accessor: (r: any) => r.displayStatus || r.status || "—" },
+  { header: "Status", accessor: (r: any) => printStatusLabel(r.displayStatus || r.status) || "—" },
   { header: "Paid To", accessor: "paidTo" },
   { header: "Mode", accessor: "mode" },
   { header: "Date", accessor: "date" },

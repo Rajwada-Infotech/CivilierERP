@@ -5,8 +5,9 @@ import { toast } from "sonner";
 import {
   Plus, ArrowLeft, Search, Building2, Package, Calendar, FileText, Hash,
   Check, X, Boxes, User, ChevronsUpDown, Loader2, ImagePlus, UserRound,
-  Eye, Pencil, Trash2, AlertTriangle, ArrowLeftRight,
+  Eye, Pencil, Trash2, AlertTriangle, ArrowLeftRight, Camera,
 } from "lucide-react";
+import { CameraCaptureModal } from "@/components/CameraCaptureModal";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +26,7 @@ import {
   updateAssignment, deleteAssignment,
   type AssignableAsset, type AssignmentListItem, type AssignmentDetail,
 } from "@/api/fixedAssetAssignmentApi";
+import { DateInput } from "@/components/ui/date-input";
 
 function ensureArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -178,7 +180,7 @@ function FAItemCodeCombobox({
                       <span className="flex flex-col min-w-0">
                         <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{a.FAItemCode}</span>
                         <span className="text-xs truncate">{a.AssetName}{a.AssetCategory ? ` (${a.AssetCategory})` : ""}</span>
-                        <span className="text-[11px] text-muted-foreground truncate">{a.CurrentCustodianName ? `Currently with ${a.CurrentCustodianName}` : "Not yet assigned"}</span>
+                        <span className="text-[0.6875rem] text-muted-foreground truncate">{a.CurrentCustodianName ? `Currently with ${a.CurrentCustodianName}` : "Not yet assigned"}</span>
                       </span>
                     </CommandItem>
                   ))}
@@ -225,6 +227,7 @@ export default function FixedAssetAssignment() {
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [form, setForm] = useState<FormState>(emptyForm(activeFinYear));
   const [userImage, setUserImage] = useState<string | null>(null);
+  const [camOpen, setCamOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingId, setViewingId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -284,7 +287,7 @@ export default function FixedAssetAssignment() {
         companyId: String(d.CompanyId || ""),
         projectId: String(d.ProjectId || ""),
         finYear:   d.FinYear || "",
-        assetId:   String(d.AssetId || ""),
+        assetId:   String(d.AssetId != null ? d.AssetId : ""),
         userId:    String(d.UserId || ""),
         responsibleUserId: String(d.ResponsibleUserId || ""),
         remarks:   d.Remarks || "",
@@ -397,7 +400,7 @@ export default function FixedAssetAssignment() {
     if (!form.userId)    return toast.error("User is required");
     if (!form.responsibleUserId) return toast.error("Responsible User is required");
 
-    if (editingId) {
+    if (editingId != null) {
       updateMut.mutate({
         id: editingId,
         data: {
@@ -449,7 +452,7 @@ export default function FixedAssetAssignment() {
               <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               <Check size={13} /> {saving ? "Saving…" : editingId ? "Update Assignment" : "Save Assignment"}
             </button>
           </div>
@@ -482,7 +485,7 @@ export default function FixedAssetAssignment() {
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Assignment Date *</label>
-                <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}>Financial Year *</label>
@@ -503,9 +506,9 @@ export default function FixedAssetAssignment() {
                   <div className="flex items-center justify-between gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/[0.04] px-3 py-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">{editAsset?.name || "—"}</p>
-                      <p className="text-[11px] font-mono text-yellow-600 dark:text-yellow-400 truncate">{editAsset?.code || "—"}</p>
+                      <p className="text-[0.6875rem] font-mono text-yellow-600 dark:text-yellow-400 truncate">{editAsset?.code || "—"}</p>
                     </div>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">Cannot be changed</span>
+                    <span className="shrink-0 text-[0.6875rem] text-muted-foreground">Cannot be changed</span>
                   </div>
                 ) : (
                   <>
@@ -517,7 +520,7 @@ export default function FixedAssetAssignment() {
                     />
                     {!loadingAssets && scopedAssets.length === 0 && (
                       <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1.5">
-                        No Fixed Asset Records found{form.companyId ? " for the selected company/project" : ""}. Create one in Fixed Asset Depreciation Tag first.
+                        No FA Item Codes available{form.companyId ? " for the selected company/project" : ""}. New Assignment is one-time per code — once a code has been assigned it moves between users through User-Wise Asset Transfer, not another assignment.
                       </p>
                     )}
                   </>
@@ -537,7 +540,7 @@ export default function FixedAssetAssignment() {
                   </div>
                 )}
                 {editIsAuto && (
-                  <p className="text-[11px] text-muted-foreground mt-1">Set by the linked Asset Transfer — edit the transfer to change it.</p>
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">Set by the linked Asset Transfer — edit the transfer to change it.</p>
                 )}
               </div>
               <div>
@@ -548,7 +551,7 @@ export default function FixedAssetAssignment() {
                   onChange={(id) => setField("responsibleUserId", id)}
                   placeholder="Search responsible user…"
                 />
-                <p className="text-[11px] text-muted-foreground mt-1">Person responsible for overseeing / monitoring this asset — separate from the assigned User.</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-1">Person responsible for overseeing / monitoring this asset — separate from the assigned User.</p>
               </div>
             </div>
           </div>
@@ -564,17 +567,23 @@ export default function FixedAssetAssignment() {
                 </div>
               )}
               <div className="space-y-1.5">
-                <label className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all cursor-pointer">
-                  <ImagePlus size={13} /> {userImage ? "Change Image" : "Upload Image"}
-                  <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
-                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => setCamOpen(true)}
+                    className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg btn-module text-white hover:shadow transition-all">
+                    <Camera size={13} /> {userImage ? "Retake with Camera" : "Capture with Camera"}
+                  </button>
+                  <label className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all cursor-pointer">
+                    <ImagePlus size={13} /> {userImage ? "Change Image" : "Upload Image"}
+                    <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+                  </label>
+                </div>
                 {userImage && (
                   <button type="button" onClick={() => setUserImage(null)}
                     className="block text-xs text-muted-foreground hover:text-destructive transition-colors">
                     Remove image
                   </button>
                 )}
-                <p className="text-[11px] text-muted-foreground">Optional — JPEG/PNG/WebP, under 400 KB.</p>
+                <p className="text-[0.6875rem] text-muted-foreground">Optional — capture live or upload JPEG/PNG/WebP, under 400 KB.</p>
               </div>
             </div>
           </div>
@@ -584,12 +593,25 @@ export default function FixedAssetAssignment() {
             <input type="text" value={form.remarks} onChange={(e) => setField("remarks", e.target.value)}
               placeholder="Optional remarks…" className={inputCls} />
           </div>
+
+          {camOpen && (
+            <CameraCaptureModal
+              onClose={() => setCamOpen(false)}
+              onCapture={(dataUrl) => {
+                if (dataUrl.length > 550_000) {
+                  toast.error("Captured photo is too large — try again in better light");
+                  return;
+                }
+                setUserImage(dataUrl);
+              }}
+            />
+          )}
         </div>
 
         {/* ── preview ── */}
         <div className="bg-card border border-border rounded-xl overflow-hidden h-fit shadow-lg shadow-black/5 dark:shadow-black/20">
           <div className="bg-gradient-to-br from-yellow-500 via-amber-500 to-yellow-700 p-4 text-white">
-            <p className="text-[10px] uppercase tracking-wide text-white/70 mb-1.5">Draft Assignment</p>
+            <p className="text-[0.625rem] uppercase tracking-wide text-white/70 mb-1.5">Draft Assignment</p>
             <div className="flex items-center gap-2.5">
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 shrink-0">
                 <UserRound size={16} />
@@ -604,7 +626,7 @@ export default function FixedAssetAssignment() {
                 <UserAvatar id={selectedUser.id} name={selectedUser.name} avatarUrl={selectedUser.avatar_url} size={28} />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold truncate">{selectedUser.name}</p>
-                  <p className="text-[11px] text-muted-foreground">Assigned To</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">Assigned To</p>
                 </div>
               </div>
             )}
@@ -641,7 +663,7 @@ export default function FixedAssetAssignment() {
       action={
         rights.canCreate && (
           <button onClick={goToCreate}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
             <Plus size={13} /> New Assignment
           </button>
         )
@@ -685,7 +707,7 @@ export default function FixedAssetAssignment() {
               <p className="text-sm">No assignments found</p>
               {rights.canCreate && (
                 <button onClick={goToCreate}
-                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
                   <Plus size={13} /> Add First Assignment
                 </button>
               )}
@@ -714,7 +736,7 @@ export default function FixedAssetAssignment() {
                       <td className="px-4 py-3 font-mono text-xs">
                         {a.DocNo || "—"}
                         {a.SourceTransferId && (
-                          <span className="mt-1 flex items-center gap-1 text-[10px] font-sans font-medium text-sky-600 dark:text-sky-400" title="Auto-created from a User-Wise Asset Transfer">
+                          <span className="mt-1 flex items-center gap-1 text-[0.625rem] font-sans font-medium text-sky-600 dark:text-sky-400" title="Auto-created from a User-Wise Asset Transfer">
                             <ArrowLeftRight size={10} /> {a.SourceTransferDocNo || "Transfer"}
                           </span>
                         )}
@@ -722,7 +744,7 @@ export default function FixedAssetAssignment() {
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(a.DocDate)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium truncate">{a.AssetName || "—"}</p>
-                        <p className="text-[11px] text-muted-foreground font-mono truncate">{a.AssetCode || "—"}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">{a.AssetCode || "—"}</p>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{a.FAItemCode || "—"}</td>
                       <td className="px-4 py-3">
@@ -748,7 +770,7 @@ export default function FixedAssetAssignment() {
                       <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">{a.Remarks || "—"}</td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => setViewingId(a.AssignmentId)} title="View"
+                          <button data-row-view="hide" onClick={() => setViewingId(a.AssignmentId)} title="View"
                             className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
                             <Eye size={14} />
                           </button>
@@ -805,7 +827,7 @@ export default function FixedAssetAssignment() {
                   <UserAvatar id={viewDetail.UserId} name={viewDetail.UserName || "?"} avatarUrl={viewDetail.UserAvatar} size={32} />
                   <div className="min-w-0">
                     <p className="text-sm font-semibold truncate">{viewDetail.UserName || "—"}</p>
-                    <p className="text-[11px] text-muted-foreground">Assigned To</p>
+                    <p className="text-[0.6875rem] text-muted-foreground">Assigned To</p>
                   </div>
                 </div>
                 {viewDetail.ResponsibleUserName && (
@@ -813,7 +835,7 @@ export default function FixedAssetAssignment() {
                     <UserAvatar id={viewDetail.ResponsibleUserId || 0} name={viewDetail.ResponsibleUserName} avatarUrl={viewDetail.ResponsibleUserAvatar} size={32} />
                     <div className="min-w-0">
                       <p className="text-sm font-semibold truncate">{viewDetail.ResponsibleUserName}</p>
-                      <p className="text-[11px] text-muted-foreground">Responsible User</p>
+                      <p className="text-[0.6875rem] text-muted-foreground">Responsible User</p>
                     </div>
                   </div>
                 )}
@@ -857,7 +879,7 @@ export default function FixedAssetAssignment() {
               <p className="font-semibold text-sm">Delete this assignment?</p>
             </div>
             <p className="text-xs text-muted-foreground">
-              The assignment record will be removed from history. The asset's current holder is
+              This permanently removes it and cannot be undone. The asset's current holder is
               re-set to its most recent remaining assignment.
             </p>
             <div className="flex gap-2 justify-end pt-1">

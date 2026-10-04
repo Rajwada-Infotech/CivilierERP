@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { fmtIstIso } from "@/lib/istTime";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -7,6 +8,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/lead-distribution";
 const RULES_API = "/api/sa/distribution-rules";
@@ -152,19 +154,19 @@ const SaLeadDistribution: React.FC = () => {
       cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
     { accessorKey: "Mobile", header: "Mobile", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
     { accessorKey: "PlatformName", header: "Source", size: 110,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.PlatformName || "�"}</span> },
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.PlatformName || "—"}</span> },
     { accessorKey: "CampaignName", header: "Campaign", size: 130,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.CampaignName || "�"}</span> },
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.CampaignName || "—"}</span> },
     { accessorKey: "DateGenerated", header: "Date", size: 100,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.DateGenerated ? String(i.row.original.DateGenerated).slice(0, 10) : "�"}</span> },
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.DateGenerated ? String(i.row.original.DateGenerated).slice(0, 10) : "—"}</span> },
     ...(method === "Manual" ? [{
       id: "assignTo", header: "Assign To", size: 130, enableSorting: false,
       cell: (i: any) => (
-        <select value={assignments[i.row.original.Id] || ""} onChange={(e) => setAssignments((a) => ({ ...a, [i.row.original.Id]: parseInt(e.target.value) }))}
+        <SearchableNativeSelect value={assignments[i.row.original.Id] || ""} onChange={(e) => setAssignments((a) => ({ ...a, [i.row.original.Id]: parseInt(e.target.value) }))}
           className="text-xs border border-border rounded px-2 py-1 bg-background">
           <option value="">Select</option>
           {eligibleUsers.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
-        </select>
+        </SearchableNativeSelect>
       ),
     } as ColumnDef<any, unknown>] : []),
   ];
@@ -175,14 +177,14 @@ const SaLeadDistribution: React.FC = () => {
     { accessorKey: "CustomerName", header: "Customer", size: 150,
       cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
     { accessorKey: "FromUserName", header: "From", size: 120,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.FromUserName || "�"}</span> },
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.FromUserName || "—"}</span> },
     { accessorKey: "ToUserName", header: "To", size: 120,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.ToUserName || "�"}</span> },
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.ToUserName || "—"}</span> },
     { accessorKey: "Level", header: "Level", size: 80,
       cell: (i) => <span className="text-muted-foreground">L{i.row.original.Level}</span> },
     { accessorKey: "Method", header: "Method", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
     { accessorKey: "DistributedAt", header: "Date", size: 140,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.DistributedAt ? String(i.row.original.DistributedAt).slice(0, 16).replace("T", " ") : "�"}</span> },
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.DistributedAt ? fmtIstIso(i.row.original.DistributedAt) : "—"}</span> },
   ];
 
   return (
@@ -209,7 +211,7 @@ const SaLeadDistribution: React.FC = () => {
                 <div className="flex gap-2">
                   {([1, 2] as const).map((l) => (
                     <button key={l} onClick={() => { setLevel(l); setSelectedLeads([]); }}
-                      className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${level === l ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${level === l ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
                       Level {l} {l === 1 ? "(Admin ? TL)" : "(TL ? SP)"}
                     </button>
                   ))}
@@ -220,14 +222,14 @@ const SaLeadDistribution: React.FC = () => {
                 <div className="flex gap-2">
                   {(["Equal", "Percentage", "Manual"] as const).map((m) => (
                     <button key={m} onClick={() => setMethod(m)}
-                      className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${method === m ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${method === m ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
                       {m}
                     </button>
                   ))}
                 </div>
               </div>
               <button onClick={handleDistribute} disabled={!selectedLeads.length}
-                className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors">
+                className="px-4 py-2 rounded-md btn-module text-white text-sm font-medium disabled:opacity-40 transition-colors">
                 Distribute {selectedLeads.length ? `(${selectedLeads.length})` : ""}
               </button>
               {canAutoDistribute && (
@@ -256,7 +258,7 @@ const SaLeadDistribution: React.FC = () => {
                     ))}
                   </div>
                   <p className={`text-xs font-medium ${pctOk ? "text-emerald-600" : "text-amber-500"}`}>
-                    Total: {pctTotal}% {pctOk ? "?" : `� must equal 100%`}
+                    Total: {pctTotal}% {pctOk ? "✓" : `— must equal 100%`}
                   </p>
                 </div>
               );
@@ -304,7 +306,7 @@ const SaLeadDistribution: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">L{r.Level}</span>
                         <span className="text-sm font-medium text-foreground">{r.ScopeType === "Global" ? "Global" : r.ScopeType === "Campaign" ? `Campaign: ${r.ScopeCampaignName || r.ScopeId}` : `Team Lead: ${r.ScopeTeamLeadName || r.ScopeId}`}</span>
-                        <span className="text-xs text-muted-foreground">� {r.Method}</span>
+                        <span className="text-xs text-muted-foreground">— {r.Method}</span>
                       </div>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${r.IsActive ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"}`}>{r.IsActive ? "Active" : "Inactive"}</span>
                     </div>
@@ -357,11 +359,11 @@ const SaLeadDistribution: React.FC = () => {
                 </div>
                 {newRule.members.map((m, i) => (
                   <div key={i} className="flex items-center gap-2 mb-2">
-                    <select value={m.UserId} onChange={(e) => setNewRule((r) => { const ms = [...r.members]; ms[i] = { ...ms[i], UserId: parseInt(e.target.value) }; return { ...r, members: ms }; })}
+                    <SearchableNativeSelect value={m.UserId} onChange={(e) => setNewRule((r) => { const ms = [...r.members]; ms[i] = { ...ms[i], UserId: parseInt(e.target.value) }; return { ...r, members: ms }; })}
                       className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background">
                       <option value={0}>Select user</option>
                       {users.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
-                    </select>
+                    </SearchableNativeSelect>
                     <input type="number" min={0} max={100} value={m.Weight}
                       onChange={(e) => setNewRule((r) => { const ms = [...r.members]; ms[i] = { ...ms[i], Weight: parseFloat(e.target.value) || 0 }; return { ...r, members: ms }; })}
                       className="w-20 text-sm border border-border rounded px-2 py-1.5 bg-background" placeholder="Weight" />

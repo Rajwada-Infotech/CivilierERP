@@ -36,6 +36,7 @@ import {
   Bell,
 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
@@ -43,7 +44,7 @@ const inp =
 const ACTION_COLORS: Record<string, string> = {
   view: "bg-blue-500/10 text-blue-500 border-blue-400/30",
   create: "bg-emerald-500/10 text-emerald-500 border-emerald-400/30",
-  edit: "bg-amber-500/10 text-amber-500 border-amber-400/30",
+  edit: "bg-[#ffe2021a] text-amber-500 border-amber-400/30",
   delete: "bg-red-500/10 text-red-500 border-red-400/30",
   export: "bg-purple-500/10 text-purple-500 border-purple-400/30",
 };
@@ -72,7 +73,7 @@ const ACTIVITY_COLUMNS = [
     accessorKey: "Resource",
     header: "Module",
     cell: ({ getValue }: any) => (
-      <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
+      <span className="text-[0.625rem] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
         {(getValue() as string) ?? "—"}
       </span>
     ),
@@ -244,7 +245,7 @@ export default function UserProfile() {
         heroMesh="radial-gradient(ellipse at 20% 50%, #1f2937 0%, transparent 55%), radial-gradient(ellipse at 80% 20%, #111827 0%, transparent 50%), radial-gradient(ellipse at 55% 80%, #0f172a 0%, transparent 50%), linear-gradient(135deg, #0a0e16 0%, #111827 50%, #0a0e16 100%)"
         accentColor="slate"
         roleBadge={
-          <span className="inline-flex items-center gap-1 text-[10px] font-heading font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+          <span className="inline-flex items-center gap-1 text-[0.625rem] font-heading font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
             {profile?.roleName ?? currentUser?.role ?? "user"}
           </span>
         }
@@ -297,7 +298,7 @@ export default function UserProfile() {
                     </div>
                     <button
                       onClick={() => setAvatarModalOpen(true)}
-                      className="mb-0.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted hover:bg-muted/80 text-[11px] font-heading font-semibold text-muted-foreground hover:text-foreground transition-all"
+                      className="mb-0.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted hover:bg-muted/80 text-[0.6875rem] font-heading font-semibold text-muted-foreground hover:text-foreground transition-all"
                     >
                       <Camera size={11} />
                       Change Photo
@@ -307,11 +308,11 @@ export default function UserProfile() {
                     <p className="text-sm font-heading font-bold text-foreground">
                       {displayName}
                     </p>
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-[0.6875rem] text-muted-foreground">
                       {profile?.email ?? currentUser?.email}
                     </p>
                     <div className="pt-1">
-                      <span className="text-[10px] font-heading px-2 py-0.5 rounded-full border bg-muted border-border text-muted-foreground">
+                      <span className="text-[0.625rem] font-heading px-2 py-0.5 rounded-full border bg-muted border-border text-muted-foreground">
                         {profile?.roleName ??
                           currentUser?.role ??
                           "Standard User"}
@@ -333,7 +334,7 @@ export default function UserProfile() {
                       Status
                     </span>
                     <span
-                      className={`inline-flex items-center gap-1 text-[10px] font-heading px-2 py-0.5 rounded-full border ${
+                      className={`inline-flex items-center gap-1 text-[0.625rem] font-heading px-2 py-0.5 rounded-full border ${
                         profile?.discontinue
                           ? "bg-red-500/10 text-red-500 border-red-400/30"
                           : "bg-emerald-500/10 text-emerald-500 border-emerald-400/30"
@@ -390,7 +391,7 @@ export default function UserProfile() {
                 ) : (
                   <div className="space-y-4 max-w-md">
                     <div>
-                      <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
+                      <label className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
                         Full Name
                       </label>
                       <input
@@ -400,7 +401,7 @@ export default function UserProfile() {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
+                      <label className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
                         Email (read-only)
                       </label>
                       <input
@@ -413,7 +414,7 @@ export default function UserProfile() {
                       <button
                         onClick={() => updateMutation.mutate()}
                         disabled={updateMutation.isPending}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-all"
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg btn-module text-white text-sm font-semibold disabled:opacity-50 transition-all"
                       >
                         {updateMutation.isPending ? (
                           <Loader2 size={13} className="animate-spin" />
@@ -541,13 +542,13 @@ export default function UserProfile() {
                         {actions.map((a) => (
                           <span
                             key={a}
-                            className={`text-[9px] font-heading uppercase tracking-wider px-2 py-0.5 rounded-full border ${ACTION_COLORS[a] ?? "bg-muted text-muted-foreground border-border"}`}
+                            className={`text-[0.5625rem] font-heading uppercase tracking-wider px-2 py-0.5 rounded-full border ${ACTION_COLORS[a] ?? "bg-muted text-muted-foreground border-border"}`}
                           >
                             {a}
                           </span>
                         ))}
                         {actions.length === 0 && (
-                          <span className="text-[10px] text-muted-foreground">
+                          <span className="text-[0.625rem] text-muted-foreground">
                             View only
                           </span>
                         )}
@@ -576,7 +577,7 @@ export default function UserProfile() {
                       {(perm.actions ?? []).map((a: string) => (
                         <span
                           key={a}
-                          className={`text-[9px] font-heading uppercase tracking-wider px-2 py-0.5 rounded-full border ${ACTION_COLORS[a] ?? "bg-muted text-muted-foreground border-border"}`}
+                          className={`text-[0.5625rem] font-heading uppercase tracking-wider px-2 py-0.5 rounded-full border ${ACTION_COLORS[a] ?? "bg-muted text-muted-foreground border-border"}`}
                         >
                           {a}
                         </span>
@@ -617,7 +618,7 @@ export default function UserProfile() {
 
       {/* ── Avatar Upload Modal ───────────────────────────────────────────── */}
       {avatarModalOpen && (
-        <div
+        <BodyPortal><div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
           onClick={(e) => {
@@ -719,7 +720,7 @@ export default function UserProfile() {
                 <button
                   onClick={handleAvatarSave}
                   disabled={!avatarPreview || avatarUploadMutation.isPending}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-all"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg btn-module text-white text-sm font-semibold disabled:opacity-40 transition-all"
                 >
                   {avatarUploadMutation.isPending ? (
                     <Loader2 size={13} className="animate-spin" />
@@ -746,7 +747,7 @@ export default function UserProfile() {
               </div>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

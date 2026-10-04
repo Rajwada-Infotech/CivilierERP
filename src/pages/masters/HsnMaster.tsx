@@ -295,38 +295,26 @@ const HsnMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await addHsn(toPayload(event.record));
-        toast.success("HSN saved!");
-        await queryClient.invalidateQueries({ queryKey: ["hsn"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await addHsn(toPayload(event.record));
+      toast.success("HSN saved!");
+      await queryClient.invalidateQueries({ queryKey: ["hsn"] });
     }
     if (event.action === "update") {
-      try {
-        await updateHsn(event.id, toPayload(event.record));
-        toast.success("HSN updated!");
-        await queryClient.invalidateQueries({ queryKey: ["hsn"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateHsn(event.id, toPayload(event.record));
+      toast.success("HSN updated!");
+      await queryClient.invalidateQueries({ queryKey: ["hsn"] });
     }
     if (event.action === "delete") {
-      try {
-        await deleteHsn(event.id);
-        toast.success("HSN deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["hsn"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteHsn(event.id);
+      toast.success("HSN deleted!");
+      await queryClient.invalidateQueries({ queryKey: ["hsn"] });
     }
   };
 
   const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
     status: (value) => (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${value ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
       >
         <span
           className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value ? "bg-emerald-500" : "bg-red-500"}`}
@@ -354,7 +342,7 @@ const HsnMaster: React.FC = () => {
       ),
     isSac: (value) =>
       value ? (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border bg-violet-500/10 border-violet-500/20 text-violet-600">
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border bg-violet-500/10 border-violet-500/20 text-violet-600">
           SAC
         </span>
       ) : (
@@ -422,7 +410,7 @@ const HsnMaster: React.FC = () => {
                 const isSac = !!formData.isSac;
                 return (
                   <div>
-                    <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                       {isSac ? "SAC Code" : "HSN Code"}
                       <span className="text-destructive ml-0.5">*</span>
                     </label>
@@ -560,7 +548,7 @@ const HsnMaster: React.FC = () => {
             <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
               <button
                 onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
               >
                 Close
               </button>

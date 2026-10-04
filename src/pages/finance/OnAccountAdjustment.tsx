@@ -90,10 +90,10 @@ function PartyTypePill({ code }: { code: string }) {
   const cls = code === "S"
     ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
     : code === "A"
-    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+    ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20"
     : "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20";
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${cls}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${cls}`}>
       {label}
     </span>
   );
@@ -185,7 +185,7 @@ function AdjustDialog({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bw-modal-topmost" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className="relative z-10 w-full max-w-3xl rounded-2xl border border-border bg-card shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col"
@@ -214,7 +214,7 @@ function AdjustDialog({
               ₹{done.applied.toLocaleString("en-IN")} adjusted against <span className="font-mono text-foreground">{selectedDoc}</span>
             </p>
             <div className="mt-2 w-full rounded-xl border border-border bg-muted/20 px-4 py-3 flex items-center justify-between text-xs">
-              <span className="text-muted-foreground uppercase tracking-wide text-[10px]">Remaining On A/C Balance</span>
+              <span className="text-muted-foreground uppercase tracking-wide text-[0.625rem]">Remaining On A/C Balance</span>
               <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{formatINR(done.remaining)}</span>
             </div>
             <Button size="sm" variant="outline" onClick={onClose} className="mt-2">Close</Button>
@@ -233,7 +233,7 @@ function AdjustDialog({
             <div className="space-y-4">
             {/* Invoice selector */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <label className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                 Select Invoice / Contract
               </label>
               {loading ? (
@@ -265,7 +265,7 @@ function AdjustDialog({
                         >
                           <div>
                             <p className="font-mono text-xs text-primary">{inv.docNo}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                            <p className="text-[0.625rem] text-muted-foreground mt-0.5">
                               {inv.billStatus ?? "Unknown"} · Remaining {formatINR(inv.remaining)}
                             </p>
                           </div>
@@ -306,7 +306,7 @@ function AdjustDialog({
 
             {/* Amount to adjust */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <label className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                 Amount to Adjust
               </label>
               <input
@@ -332,7 +332,7 @@ function AdjustDialog({
                 internal transfer (Dr Payable / Cr On Account) — no bank or
                 cheque is ever touched. */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <label className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                 Mode <span className="normal-case font-normal text-muted-foreground/70">(label only — no bank involved)</span>
               </label>
               <div className="flex flex-wrap gap-1.5">
@@ -341,7 +341,7 @@ function AdjustDialog({
                     key={m}
                     type="button"
                     onClick={() => setMode(m)}
-                    className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${
+                    className={`px-2.5 py-1.5 rounded-lg border text-[0.6875rem] font-medium transition-all ${
                       mode === m
                         ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-sm"
                         : "border-border text-muted-foreground hover:bg-muted/40 hover:border-border/80"
@@ -556,7 +556,7 @@ export default function OnAccountAdjustment() {
                     >
                       <div className="min-w-0 w-36">
                         <p className="text-xs font-medium truncate">{p.PartyName}</p>
-                        <p className="text-[10px] text-muted-foreground">{p.PartyType}</p>
+                        <p className="text-[0.625rem] text-muted-foreground">{p.PartyType}</p>
                       </div>
                       <BalanceBar value={live} max={maxBalance} />
                       <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
@@ -622,11 +622,11 @@ export default function OnAccountAdjustment() {
                           <p className="text-sm font-semibold truncate">{entry.PartyName}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <PartyTypePill code={entry.PartyTypeCode} />
-                            <span className="font-mono text-[10px] text-blue-600 dark:text-blue-400">{entry.PaymentDocNo || "—"}</span>
+                            <span className="font-mono text-[0.625rem] text-blue-600 dark:text-blue-400">{entry.PaymentDocNo || "—"}</span>
                           </div>
                         </div>
                         {entry.Source === "CRM" ? (
-                          <span className="shrink-0 text-[10px] text-muted-foreground italic px-2 py-1">
+                          <span className="shrink-0 text-[0.625rem] text-muted-foreground italic px-2 py-1">
                             Apply via CRM
                           </span>
                         ) : rights.canEdit ? (
@@ -639,11 +639,11 @@ export default function OnAccountAdjustment() {
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                         <div>
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Date</p>
+                          <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Date</p>
                           <p>{fmtDate(entry.PaymentDate)}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                          <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">
                             {entry.Source === "CRM" ? "Booking" : "Invoice Ref"}
                           </p>
                           <p className="font-mono text-muted-foreground truncate">
@@ -654,7 +654,7 @@ export default function OnAccountAdjustment() {
                         </div>
                       </div>
                       {entry.Source === "CRM" && (entry.CrmProjectName || entry.CrmApplicantName) && (
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           {entry.CrmApplicantName}{entry.CrmProjectName ? ` · ${entry.CrmProjectName}` : ""}
                         </p>
                       )}
@@ -691,13 +691,13 @@ export default function OnAccountAdjustment() {
                       )}
                       <div className="flex items-center justify-between pt-1 border-t border-border">
                         <div>
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">On A/C Amt (Overpaid)</p>
+                          <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">On A/C Amt (Overpaid)</p>
                           <p className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                             <ArrowUpCircle size={13} className="shrink-0" />{formatINR(entry.ExcessAmount)}
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Party Balance</p>
+                          <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Party Balance</p>
                           <p className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">{formatINR(live)}</p>
                         </div>
                       </div>
@@ -712,7 +712,7 @@ export default function OnAccountAdjustment() {
                   <thead>
                     <tr className="border-b border-border bg-muted/20">
                       {["Party", "Payment Voucher", "Date", "Invoice / Booking", "Net Payable", "Total Paid", "On A/C Amt", "Party Balance", ""].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
+                        <th key={h} className="px-4 py-3 text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -738,7 +738,7 @@ export default function OnAccountAdjustment() {
                                   {entry.CrmBookingNo || "—"}{entry.CrmUnitNo ? ` · ${entry.CrmUnitNo}` : ""}
                                 </span>
                                 {(entry.CrmApplicantName || entry.CrmProjectName) && (
-                                  <span className="text-[10px] text-muted-foreground/80 truncate max-w-[160px]">
+                                  <span className="text-[0.625rem] text-muted-foreground/80 truncate max-w-[160px]">
                                     {entry.CrmApplicantName}{entry.CrmProjectName ? ` · ${entry.CrmProjectName}` : ""}
                                   </span>
                                 )}
@@ -760,7 +760,7 @@ export default function OnAccountAdjustment() {
                           </td>
                           <td className="px-4 py-3 text-xs tabular-nums text-right text-emerald-600 dark:text-emerald-400 font-medium">
                             {entry.Source === "CRM" ? (
-                              <span className="text-[10px] text-muted-foreground font-normal normal-case tracking-normal">
+                              <span className="text-[0.625rem] text-muted-foreground font-normal normal-case tracking-normal">
                                 {entry.CrmNextMilestoneName ?? "All milestones paid"}
                               </span>
                             ) : (entry.InvoiceTotalPaid ?? entry.PaymentAmount) != null
@@ -776,7 +776,7 @@ export default function OnAccountAdjustment() {
                           </td>
                           <td className="px-4 py-3">
                             {entry.Source === "CRM" ? (
-                              <span className="text-[10px] text-muted-foreground italic opacity-0 group-hover:opacity-100 transition-opacity">
+                              <span className="text-[0.625rem] text-muted-foreground italic opacity-0 group-hover:opacity-100 transition-opacity">
                                 Apply via CRM
                               </span>
                             ) : rights.canEdit ? (

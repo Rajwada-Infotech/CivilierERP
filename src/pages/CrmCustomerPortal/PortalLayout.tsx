@@ -3,13 +3,14 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Building2, FileText, CreditCard, HardHat, LifeBuoy, IdCard,
-  LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers, FolderOpen,
+  LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers,
 } from "lucide-react";
 import { fetchMe, fetchApplications, fetchTimeline } from "./portalApi";
 import {
-  INK, VIOLET_DEEP, VIOLET, VIOLET_LIGHT, GOLD, GOLD_SOFT, PORCELAIN, SURFACE_ALT, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
-  applyPortalAccent, getStoredPortalAccent, applyPortalMode, getStoredPortalMode,
+  INK, VIOLET_DEEP, VIOLET, VIOLET_LIGHT, GOLD, GOLD_SOFT, PORCELAIN, SURFACE, SURFACE_ALT, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
+  applyPortalAccent, getStoredPortalAccent, applyPortalMode, getStoredPortalMode, StatusPill,
 } from "./portalTheme";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const NAV_GROUPS: { label: string; items: { to: string; label: string; icon: any }[] }[] = [
   { label: "Overview", items: [
@@ -17,7 +18,6 @@ const NAV_GROUPS: { label: string; items: { to: string; label: string; icon: any
   ]},
   { label: "My Property", items: [
     { to: "/crm-client-portal/booking", label: "My Booking", icon: Building2 },
-    { to: "/crm-client-portal/documents", label: "Documents", icon: FolderOpen },
     { to: "/crm-client-portal/construction", label: "Construction", icon: HardHat },
   ]},
   { label: "Finance", items: [
@@ -53,14 +53,6 @@ function ApplicationSelector({
   onSelect: (id: number) => void;
   me: any;
 }) {
-  const stageColor: Record<string, string> = {
-    Draft: "text-slate-500 bg-slate-100",
-    Pending: "text-blue-600 bg-blue-50",
-    Approved: "text-green-600 bg-green-50",
-    Rejected: "text-red-600 bg-red-50",
-    Cancelled: "text-orange-600 bg-orange-50",
-    Expired: "text-slate-400 bg-slate-50",
-  };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6" style={{ background: PORCELAIN }}>
@@ -82,7 +74,6 @@ function ApplicationSelector({
         {/* Application cards */}
         <div className="space-y-3">
           {applications.map((app: any) => {
-            const statusCls = stageColor[app.BookingStatus || app.ApplicationStatus] || "text-slate-500 bg-slate-100";
             const stage = app.BookingStatus
               ? `Booking · ${app.BookingStatus}`
               : `Application · ${app.ApplicationStatus || "Draft"}`;
@@ -116,9 +107,7 @@ function ApplicationSelector({
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusCls}`}>
-                      {stage}
-                    </span>
+                    <StatusPill status={app.BookingStatus || app.ApplicationStatus || "Draft"} label={stage} />
                     <ChevronRight size={16} style={{ color: TEXT_FAINT }} />
                   </div>
                 </div>
@@ -131,6 +120,23 @@ function ApplicationSelector({
           You can switch between applications at any time from the sidebar.
         </p>
       </div>
+    </div>
+  );
+}
+
+function PortalSkeleton() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      <div className="mb-8">
+        <div className="h-3 w-24 rounded-full mb-3" style={{ background: SURFACE_ALT }} />
+        <div className="h-8 w-64 rounded-lg" style={{ background: SURFACE_ALT }} />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="h-32 rounded-2xl" style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }} />
+        <div className="h-32 rounded-2xl" style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }} />
+        <div className="h-32 rounded-2xl" style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }} />
+      </div>
+      <div className="h-64 rounded-2xl" style={{ background: SURFACE, border: `1px solid ${HAIRLINE}` }} />
     </div>
   );
 }
@@ -220,7 +226,7 @@ const PortalLayout: React.FC = () => {
         <Icon size={16} className="shrink-0" />
         <span className="flex-1">{label}</span>
         {!!count && (
-          <span className="text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1"
+          <span className="text-[0.625rem] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1"
             style={{ background: GOLD, color: INK }}>
             {count}
           </span>
@@ -248,7 +254,7 @@ const PortalLayout: React.FC = () => {
           </div>
           <div className="min-w-0">
             <p className="text-base font-semibold text-white leading-tight truncate" style={serif}>CivilierERP</p>
-            <p className="text-[10px] tracking-[0.12em] uppercase leading-tight" style={{ color: GOLD }}>Customer Record</p>
+            <p className="text-[0.625rem] tracking-[0.12em] uppercase leading-tight" style={{ color: GOLD }}>Customer Record</p>
           </div>
         </div>
 
@@ -271,7 +277,7 @@ const PortalLayout: React.FC = () => {
         <nav className="relative z-10 flex-1 px-3 py-5 space-y-5 overflow-y-auto">
           {NAV_GROUPS.map((group) => (
             <div key={group.label}>
-              <p className="px-3 mb-1.5 text-[10px] font-semibold tracking-[0.16em] uppercase" style={{ color: "rgba(201,162,39,0.65)" }}>
+              <p className="px-3 mb-1.5 text-[0.625rem] font-semibold tracking-[0.16em] uppercase" style={{ color: "rgba(201,162,39,0.65)" }}>
                 {group.label}
               </p>
               <div className="space-y-0.5">
@@ -288,7 +294,7 @@ const PortalLayout: React.FC = () => {
         {/* Record Card */}
         <div className="relative z-10 px-3 pb-4">
           <div className="rounded-xl p-3.5" style={{ background: "rgba(255,255,255,0.05)", border: `1px solid ${GOLD}55` }}>
-            <p className="text-[9px] font-semibold tracking-[0.18em] uppercase mb-2" style={{ color: GOLD }}>Record Holder</p>
+            <p className="text-[0.5625rem] font-semibold tracking-[0.18em] uppercase mb-2" style={{ color: GOLD }}>Record Holder</p>
             <div className="flex items-center gap-2.5 mb-2">
               <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
                 style={{ background: GOLD_SOFT, color: GOLD, border: `1px solid ${GOLD}55` }}>
@@ -297,7 +303,7 @@ const PortalLayout: React.FC = () => {
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-white truncate" style={serif}>{me?.Name || "…"}</p>
                 {selectedApp && (
-                  <p className="text-[10px] truncate" style={{ ...mono, color: "rgba(233,225,250,0.55)" }}>
+                  <p className="text-[0.625rem] truncate" style={{ ...mono, color: "rgba(233,225,250,0.55)" }}>
                     {selectedApp.ApplicationNo}
                   </p>
                 )}
@@ -316,13 +322,24 @@ const PortalLayout: React.FC = () => {
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 py-3" style={{ background: SIDEBAR_BG }}>
         <button onClick={() => setMobileOpen(true)} className="text-white p-1"><Menu size={20} /></button>
         <span className="text-sm font-semibold text-white" style={serif}>CivilierERP</span>
-        <div className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold"
-          style={{ background: GOLD_SOFT, color: GOLD, border: `1px solid ${GOLD}55` }}>
-          {initials(me?.Name)}
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Bell size={18} className="text-white/80" />
+            {totalAlerts > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 text-[0.5625rem] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5"
+                style={{ background: GOLD, color: INK }}>
+                {totalAlerts}
+              </span>
+            )}
+          </div>
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-[0.625rem] font-bold"
+            style={{ background: GOLD_SOFT, color: GOLD, border: `1px solid ${GOLD}55` }}>
+            {initials(me?.Name)}
+          </div>
         </div>
       </div>
       {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-50 flex">
+        <BodyPortal><div className="lg:hidden fixed inset-0 z-50 flex">
           <div className="w-72 flex flex-col relative overflow-hidden" style={{ background: SIDEBAR_BG }}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
               <span className="text-sm font-semibold text-white" style={serif}>Menu</span>
@@ -342,7 +359,7 @@ const PortalLayout: React.FC = () => {
             <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
               {NAV_GROUPS.map((group) => (
                 <div key={group.label}>
-                  <p className="px-3 mb-1 text-[10px] font-semibold tracking-[0.16em] uppercase" style={{ color: "rgba(201,162,39,0.65)" }}>{group.label}</p>
+                  <p className="px-3 mb-1 text-[0.625rem] font-semibold tracking-[0.16em] uppercase" style={{ color: "rgba(201,162,39,0.65)" }}>{group.label}</p>
                   {group.items.map(({ to, label, icon: Icon }) => (
                     <NavLink key={to} to={to} onClick={() => setMobileOpen(false)}>
                       {({ isActive }) => navLinkContent(to, label, Icon, isActive)}
@@ -357,7 +374,7 @@ const PortalLayout: React.FC = () => {
             </nav>
           </div>
           <div className="flex-1 bg-black/40" onClick={() => setMobileOpen(false)} />
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* ── Main content ── */}
@@ -372,7 +389,7 @@ const PortalLayout: React.FC = () => {
           <div className="relative">
             <Bell size={17} style={{ color: VIOLET_LIGHT }} />
             {totalAlerts > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5"
+              <span className="absolute -top-1.5 -right-1.5 text-[0.5625rem] font-bold rounded-full min-w-[15px] h-[15px] flex items-center justify-center px-0.5"
                 style={{ background: GOLD, color: INK }}>
                 {totalAlerts}
               </span>
@@ -382,9 +399,7 @@ const PortalLayout: React.FC = () => {
 
         <div className="flex-1 max-w-5xl w-full mx-auto p-5 lg:p-8">
           {isLoading ? (
-            <div className="min-h-[60vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>
-              Loading your portal…
-            </div>
+            <PortalSkeleton />
           ) : showSelector ? (
             <ApplicationSelector
               applications={applications!}
@@ -396,19 +411,9 @@ const PortalLayout: React.FC = () => {
               No active applications found.
             </div>
           ) : !timeline && !tlError ? (
-            // An application is selected but its own timeline query (fetched
-            // separately, keyed off selectedApplicationId) hasn't resolved yet.
-            // Every page below the Outlet (PortalOverview, PortalBooking,
-            // PortalAgreement, PortalPayments, ...) destructures `timeline`
-            // from context and reads straight off it (e.g. timeline.agreement)
-            // with no null-guard of its own — rendering the Outlet before this
-            // query settles crashed the whole portal on every application
-            // switch, not just the first load.
-            <div className="min-h-[60vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>
-              Loading your application details…
-            </div>
+            <PortalSkeleton />
           ) : (
-            <Suspense fallback={<div className="min-h-[40vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>Loading…</div>}>
+            <Suspense fallback={<PortalSkeleton />}>
               <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />
             </Suspense>
           )}

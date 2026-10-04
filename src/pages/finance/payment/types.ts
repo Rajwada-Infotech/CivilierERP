@@ -15,9 +15,17 @@ export interface DbPayment {
   PProject: string | null;
   PProjectName?: string | null;
   PCompany: string | null;
+  // Resolved company name (see newPayment.js: ISNULL(ec.name, np.PCompany)) —
+  // PCompany itself is often just the raw enterprise id as text (set that
+  // way by CRM-sourced payouts like Brokerage/Refund), which never matches
+  // a company dropdown option by label.
+  PCompanyName?: string | null;
   PSupplierName?: string | null;
   PSupplierContact?: string | null;
   PExpenseRef: string | null;
+  // Journal Voucher this payment settles (JVLineId, migration 417) —
+  // resolved server-side to the JV's own doc number for display.
+  JVNo?: string | null;
   DocNo?: string | null;
   ParentDocNo?: string | null;
   RootExBDocNo?: string | null;
@@ -51,6 +59,15 @@ export interface BankOption {
   ifscCode?: string | null;
   branch?: string | null;
   accountType?: string | null;
+  // Which company this bank is tagged to (AccountHeadMaster.BCompanyName) —
+  // null/empty means shared across every company. Used to scope the Bank
+  // dropdown to the payment's selected company, same convention
+  // ReceivedPayment.tsx already uses.
+  companyName?: string | null;
+  // AccountHeadMaster.LHeadCode — used to reliably pick out sentinel heads
+  // like the seeded "Cash in Hand" bank (LHeadCode='CASH-IN-HAND') without
+  // matching on a display label that could be renamed.
+  code?: string | null;
 }
 
 export interface CardOption {
@@ -87,7 +104,18 @@ export interface ExpenseOption {
   expenseBookingId?: number;
   docNo?: string;
   projectName?: string;
+  /** Raw numeric project id (not just its display name) — the "merge
+   *  invoices into one payment" picker groups candidates by exact project
+   *  match, since two differently-named projects could collide on an
+   *  identical display string. */
+  projectId?: number | null;
   supplierName?: string;
+  /** Resolved supplier/contractor LHeadId behind supplierName — GRN's
+   *  supplier, the PO/WO's own SupplierID, WorkDone's contractor, or the
+   *  booking's direct LHeadId, whichever applies (see expenseBooking.js's
+   *  /options route). Used to group "same supplier" candidates for the
+   *  "merge invoices into one payment" picker. */
+  supplierId?: number | null;
   partyName?: string;
   partyId?: number | null;
   amount?: number;
@@ -142,6 +170,7 @@ export interface GRNRef {
 export interface PaymentRecord {
   id: string;
   paymentName: string;
+  createdByName?: string;
   // A genuine remarks/notes field, distinct from paymentName ("Payment
   // Purpose") — stored as PRemarks on dbo.NewPayment.
   notes: string;
@@ -157,6 +186,10 @@ export interface PaymentRecord {
   projectSite: string;
   expenseRef: string;
   expenseId: string;
+  // Journal Voucher doc number this payment settles, if any (see JVNo on
+  // DbPayment) — shown as its own chip in the list where expenseRef would
+  // otherwise be blank.
+  jvNo: string | null;
   docNo: string;
   parentDocNo: string;
   rootExBDocNo: string;
@@ -206,6 +239,26 @@ export interface PaymentRecord {
   tdsName: string | null;
   tdsPercentage: number | null;
   tdsAmount: number;
+  // Journal Voucher credit line this payment settles (migration 417) — set
+  // when picked from the Payment form's "Journal Vouchers" tab. Stored as
+  // JVLineId on NewPayment; resolves the same LHeadId into partyId below.
+  jvLineId: number | null;
+  // "Merge invoices into one payment" (migration 501) — when non-empty,
+  // this payment settles ALL of these ExpenseBooking invoices at once
+  // (full remaining balance each) instead of the single expenseRef above.
+  // Populated by ExpenseBookingPicker's merge mode; the ids and total are
+  // re-validated server-side regardless.
+  mergedInvoices: MergedInvoiceSelection[];
+}
+
+/** One invoice folded into a "merge invoices" payment — see
+ *  PaymentRecord.mergedInvoices and ExpenseBookingPicker's onMergeConfirm. */
+export interface MergedInvoiceSelection {
+  expenseBookingId: number;
+  docNo: string;
+  /** This invoice's own due amount (gross − TDS − already paid), full
+   *  settlement — merging never partially pays a subset. */
+  amount: number;
 }
 
 export const PAYMENT_MODES = [

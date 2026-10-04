@@ -9,6 +9,8 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/lead-activities";
 const ACTIVITY_TYPES = ["Call", "WhatsApp", "Email", "Meeting", "Note", "SMS", "SiteVisit"];
@@ -100,10 +102,10 @@ const SaLeadActivities: React.FC = () => {
       <div className="space-y-5">
         {canDoAction("sa-lead-activities", "create") && (
           <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-6 gap-3 rounded-lg border border-border p-4 bg-background">
-            <select value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
+            <SearchableNativeSelect value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
               <option value="">Select lead</option>
               {leads.map((l: any) => <option key={l.Id} value={l.Id}>{l.LeadUid} - {l.CustomerName}</option>)}
-            </select>
+            </SearchableNativeSelect>
             <select value={form.ActivityType} onChange={(e) => setForm({ ...form, ActivityType: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
               {ACTIVITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
@@ -112,9 +114,9 @@ const SaLeadActivities: React.FC = () => {
               <option value="Inbound">Inbound</option>
             </select>
             <input value={form.Outcome} onChange={(e) => setForm({ ...form, Outcome: e.target.value })} placeholder="Outcome" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <input type="date" value={form.NextFollowupDate} onChange={(e) => setForm({ ...form, NextFollowupDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
+            <DateInput value={form.NextFollowupDate} onChange={(e) => setForm({ ...form, NextFollowupDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <textarea value={form.Summary} onChange={(e) => setForm({ ...form, Summary: e.target.value })} placeholder="Conversation summary" className="md:col-span-5 min-h-20 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <button className="inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium">
+            <button className="inline-flex items-center justify-center gap-2 self-center h-10 rounded-md btn-module text-white px-4 text-sm font-medium shadow-sm">
               <Plus size={15} /> Log
             </button>
           </form>

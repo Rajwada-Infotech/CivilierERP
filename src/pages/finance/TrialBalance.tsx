@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, Fragment } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -36,6 +37,7 @@ import {
   X,
   Target,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,8 +85,21 @@ interface TBTransaction {
   sourceType: string | null;
   sourceId: number | null;
   invoiceNo: string | null;
+  docNo: string | null;
+  mode: string | null;
   payment: { id: number; docNo: string | null; mode: string | null; status: string | null } | null;
   costCenter: { id: number; code: string | null; name: string | null } | null;
+  fixedAsset: {
+    assetId: number;
+    assetCode: string | null;
+    assetName: string | null;
+    faItemCode: string | null;
+    finYear: string | null;
+  } | null;
+  // GRN-sourced legs only — the items that actually made up this leg's
+  // bucketed total, e.g. "Fixed Assets A/c" broken back down into CP PLUS
+  // DVR 8CH, CP PLUS BULLET CAMERA, etc. with each item's own amount.
+  items: { itemName: string; amount: number }[] | null;
 }
 
 interface TBTransactionsResponse {
@@ -125,6 +140,7 @@ interface Option {
   belongs_to?: string;
   company_id?: number;
   enterprise_id?: number;
+  tagged_company_ids?: string | null;
 }
 
 interface FinYearRow {
@@ -354,7 +370,7 @@ function TBRow({
             className={`text-sm leading-tight ${
               node.isGroup
                 ? node.level === 0
-                  ? "font-heading font-bold text-foreground tracking-wide uppercase text-[11px]"
+                  ? "font-heading font-bold text-foreground tracking-wide uppercase text-[0.6875rem]"
                   : "font-heading font-semibold text-foreground/90 text-xs uppercase tracking-wide"
                 : "text-foreground/80 text-xs"
             }`}
@@ -363,17 +379,17 @@ function TBRow({
           </span>
 
           {node.code && (
-            <span className="text-[10px] font-mono text-muted-foreground/50">
+            <span className="text-[0.625rem] font-mono text-muted-foreground/50">
               {node.code}
             </span>
           )}
           {!node.isGroup && node.type && (
-            <span className="text-[9px] font-heading uppercase tracking-wider text-muted-foreground/40">
+            <span className="text-[0.5625rem] font-heading uppercase tracking-wider text-muted-foreground/40">
               {TYPE_LABEL[node.type] ?? node.type}
             </span>
           )}
           {!node.isGroup && !hasAnyValue && (
-            <span className="text-[10px] text-muted-foreground/35 italic ml-0.5">
+            <span className="text-[0.625rem] text-muted-foreground/35 italic ml-0.5">
               no transactions
             </span>
           )}
@@ -412,7 +428,7 @@ function TBRow({
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-primary/15 bg-primary/8">
               <Receipt size={13} className="text-primary shrink-0" />
               <span className="text-xs font-heading font-semibold text-primary">{node.name}</span>
-              <span className="text-[10px] text-muted-foreground/60 ml-1">
+              <span className="text-[0.625rem] text-muted-foreground/60 ml-1">
                 {node.type ? (TYPE_LABEL[node.type] ?? node.type) : ""} · transactions in period
               </span>
               <button
@@ -435,12 +451,13 @@ function TBRow({
               <div className="overflow-x-auto max-h-72">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-card/95 backdrop-blur-sm z-10">
-                    <tr className="border-b border-border text-left text-muted-foreground uppercase text-[10px] tracking-wide">
+                    <tr className="border-b border-border text-left text-muted-foreground uppercase text-[0.625rem] tracking-wide">
                       <th className="px-3 py-2">Voucher No.</th>
                       <th className="px-3 py-2">Date</th>
                       <th className="px-3 py-2">Source / Entry</th>
                       <th className="px-3 py-2">Invoice No.</th>
                       <th className="px-3 py-2">Mode</th>
+                      <th className="px-3 py-2">Fixed Asset</th>
                       <th className="px-3 py-2">Cost Centre</th>
                       <th className="px-3 py-2 text-right">Debit</th>
                       <th className="px-3 py-2 text-right">Credit</th>
@@ -453,55 +470,95 @@ function TBRow({
                       const isPending = (t as any).status !== "posted" && !(t as any).entryId;
                       const badge = st === "newpayment"      ? { label: "Payment",    cls: "bg-blue-500/10 text-blue-500" }
                                   : st === "receivedpayment" ? { label: "Received",   cls: "bg-emerald-500/10 text-emerald-600" }
-                                  : st === "expensebooking"  ? { label: "Expense Bkg",cls: "bg-amber-500/10 text-amber-600" }
-                                  : st === "invoiceposting"  ? { label: "Invoice",    cls: "bg-amber-500/10 text-amber-600" }
+                                  : st === "expensebooking"  ? { label: "Expense Bkg",cls: "bg-[#ffe2021a] text-amber-600" }
+                                  : st === "invoiceposting"  ? { label: "Invoice",    cls: "bg-[#ffe2021a] text-amber-600" }
                                   : st === "grn" || st === "grnposting" ? { label: "GRN", cls: "bg-violet-500/10 text-violet-500" }
                                   : st === "journalvoucher"  ? { label: "JV",         cls: "bg-rose-500/10 text-rose-500" }
                                   : st === "onaccountledger" ? { label: "On Account", cls: "bg-cyan-500/10 text-cyan-600" }
                                   : { label: t.sourceType ?? "Entry", cls: "bg-muted text-muted-foreground" };
 
                       const ref = (t as any).sourceRef as { id: number; docNo: string; type: string } | null;
-                      const displayDoc = (t as any).docNo || t.voucherNo || (ref?.docNo) || "—";
+                      const displayDoc = t.docNo || t.voucherNo || (ref?.docNo) || "—";
                       // Every row with a resolvable source (a linked
-                      // payment, or a sourceId the switch in openSourceEntry
-                      // knows how to open) drills through — not just
-                      // payments.
+                      // payment, or a sourceId) is clickable to open the
+                      // GL entry detail dialog — not just payments.
                       const isClickable = (st === "newpayment" && !!t.payment) || !!t.sourceId;
 
                       return (
+                        <Fragment key={t.entryId ?? `direct-${ti}`}>
                         <tr
-                          key={t.entryId ?? `direct-${ti}`}
                           onClick={(e) => { e.stopPropagation(); if (isClickable) onOpenSource(t); }}
-                          className={`border-b border-border/30 ${isPending ? "opacity-70 bg-muted/20" : ""} ${isClickable ? "cursor-pointer hover:bg-primary/8" : ""}`}
+                          className={`border-b ${t.items && t.items.length > 0 ? "border-border/0" : "border-border/30"} ${isPending ? "opacity-70 bg-muted/20" : ""} ${isClickable ? "cursor-pointer hover:bg-primary/8" : ""}`}
                         >
-                          <td className="px-3 py-1.5 font-mono text-[11px]">{t.voucherNo || "—"}</td>
+                          <td className="px-3 py-1.5 font-mono text-[0.6875rem]">{t.voucherNo || "—"}</td>
                           <td className="px-3 py-1.5 whitespace-nowrap">{t.date ? fmtDate(t.date) : "—"}</td>
                           <td className="px-3 py-1.5">
                             <span className="inline-flex items-center gap-1.5 flex-wrap">
-                              <span className={`text-[9px] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded font-medium ${badge.cls}`}>
+                              <span className={`text-[0.5625rem] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded font-medium ${badge.cls}`}>
                                 {badge.label}
                               </span>
                               {isPending && (
-                                <span className="text-[9px] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded font-medium bg-yellow-500/10 text-yellow-600">
+                                <span className="text-[0.5625rem] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded font-medium bg-yellow-500/10 text-yellow-600">
                                   Pending
                                 </span>
                               )}
-                              <span className={`font-mono text-[11px] ${isClickable ? "text-primary underline" : "text-foreground/70"}`}>
+                              <span className={`font-mono text-[0.6875rem] ${isClickable ? "text-primary underline" : "text-foreground/70"}`}>
                                 {displayDoc}
                               </span>
                             </span>
                           </td>
-                          <td className="px-3 py-1.5 text-[11px]">{t.invoiceNo || "—"}</td>
-                          <td className="px-3 py-1.5 text-[11px]">{(t as any).mode || t.payment?.mode || "—"}</td>
-                          <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                          <td className="px-3 py-1.5 text-[0.6875rem]">{t.invoiceNo || "—"}</td>
+                          <td className="px-3 py-1.5 text-[0.6875rem]">{t.mode || t.payment?.mode || "—"}</td>
+                          <td className="px-3 py-1.5 text-[0.6875rem] text-muted-foreground">
+                            {t.fixedAsset ? (
+                              <span
+                                title={[
+                                  t.fixedAsset.assetCode,
+                                  t.fixedAsset.assetName,
+                                  t.fixedAsset.finYear,
+                                ].filter(Boolean).join(" · ")}
+                              >
+                                {t.fixedAsset.faItemCode || t.fixedAsset.assetCode || `Asset #${t.fixedAsset.assetId}`}
+                                {t.fixedAsset.finYear ? (
+                                  <span className="text-muted-foreground/60"> · {t.fixedAsset.finYear}</span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 text-[0.6875rem] text-muted-foreground">
                             {t.costCenter
                               ? `${t.costCenter.code ?? ""}${t.costCenter.code ? " - " : ""}${t.costCenter.name ?? ""}`
                               : "—"}
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums text-rose-400">{t.debit ? fmt(t.debit) : "—"}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">{t.credit ? fmt(t.credit) : "—"}</td>
-                          <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[160px] text-[11px]">{t.narration || "—"}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[160px] text-[0.6875rem]">{t.narration || "—"}</td>
                         </tr>
+                        {/* Item-level breakdown — this leg's bucketed total
+                            split back out by the item that actually earned
+                            each share, so e.g. Fixed Assets A/c shows CP
+                            PLUS DVR 8CH / CP PLUS BULLET CAMERA separately
+                            instead of one lumped GRN figure. */}
+                        {t.items && t.items.length > 0 && (
+                          <tr className="border-b border-border/30">
+                            <td colSpan={10} className="px-3 pb-2 pt-0">
+                              <div className="ml-4 rounded-lg border border-border/40 bg-muted/10 overflow-hidden">
+                                {t.items.map((it, ii) => (
+                                  <div
+                                    key={ii}
+                                    className={`flex items-center justify-between px-3 py-1.5 text-[0.6875rem] ${ii > 0 ? "border-t border-border/30" : ""}`}
+                                  >
+                                    <span className="text-foreground/80">{it.itemName}</span>
+                                    <span className="font-mono tabular-nums text-muted-foreground">₹{fmt(it.amount)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       );
                     })}
                   </tbody>
@@ -552,7 +609,7 @@ function CostCentrePanel({
           <p className="text-sm font-bold font-heading leading-none">
             {data.costCenter.code} - {data.costCenter.name}
           </p>
-          <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+          <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
             Cost Centre
           </p>
         </div>
@@ -560,7 +617,7 @@ function CostCentrePanel({
           <p className="text-sm font-bold font-heading leading-none text-rose-400">
             {fmt(data.totals.debit)}
           </p>
-          <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+          <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
             Total Debit
           </p>
         </div>
@@ -568,7 +625,7 @@ function CostCentrePanel({
           <p className="text-sm font-bold font-heading leading-none text-emerald-400">
             {fmt(data.totals.credit)}
           </p>
-          <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+          <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
             Total Credit
           </p>
         </div>
@@ -577,7 +634,7 @@ function CostCentrePanel({
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[760px]">
           <thead>
-            <tr className="border-b border-border bg-muted/30 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+            <tr className="border-b border-border bg-muted/30 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
               <th className="px-4 py-2">Voucher No.</th>
               <th className="px-3 py-2">Date</th>
               <th className="px-3 py-2">Account</th>
@@ -602,7 +659,7 @@ function CostCentrePanel({
                     "—"
                   )}
                   {t.docNo && t.docNo !== t.poNo && (
-                    <span className="block text-[10px] text-muted-foreground font-mono">
+                    <span className="block text-[0.625rem] text-muted-foreground font-mono">
                       {t.docNo}
                     </span>
                   )}
@@ -646,7 +703,7 @@ function FilterSelect({
 }) {
   return (
     <div className="flex flex-col gap-0.5 w-full sm:min-w-[140px] sm:w-auto">
-      <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+      <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
         <Icon size={9} /> {label}
       </span>
       <div className="relative">
@@ -694,9 +751,9 @@ function ModeTab({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-heading font-semibold tracking-wide transition-all border ${
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[0.6875rem] font-heading font-semibold tracking-wide transition-all border ${
         active
-          ? "bg-primary text-white border-primary shadow-sm"
+          ? "btn-module text-white border-primary shadow-sm"
           : "bg-background text-muted-foreground border-border hover:text-foreground hover:bg-muted"
       }`}
     >
@@ -723,14 +780,13 @@ function DateField({
     <div className={`flex items-center h-8 rounded-lg border text-xs overflow-hidden ${
       highlight ? "border-primary/50 ring-1 ring-primary/20" : "border-border"
     } bg-background`}>
-      <span className={`flex items-center gap-1 px-2 h-full border-r text-[9px] font-heading uppercase tracking-wider whitespace-nowrap select-none ${
+      <span className={`flex items-center gap-1 px-2 h-full border-r text-[0.5625rem] font-heading uppercase tracking-wider whitespace-nowrap select-none ${
         highlight ? "border-primary/30 text-primary/70 bg-primary/5" : "border-border text-muted-foreground/60 bg-muted/40"
       }`}>
         <CalendarDays size={10} />
         {label}
       </span>
-      <input
-        type="date"
+      <DateInput
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="h-full px-2 text-xs bg-transparent text-foreground focus:outline-none [&::-webkit-calendar-picker-indicator]:opacity-40 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
@@ -743,6 +799,7 @@ function DateField({
 
 export default function TrialBalance() {
   const rights = usePageRights("trial-balance");
+  const navigate = useNavigate();
   // ── filter mode ───────────────────────────────────────────────────────────
   const [filterMode, setFilterMode] = useState<FilterMode>("fy");
 
@@ -779,16 +836,19 @@ export default function TrialBalance() {
   const [search, setSearch] = useState("");
   const [hideEmpty, setHideEmpty] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
-  const navigate = useNavigate();
 
   // ── drill-down (Level 2: entity transactions) ───────────────────────────
   const [drillNode, setDrillNode] = useState<TBNode | null>(null);
   const [drillData, setDrillData] = useState<TBTransactionsResponse | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
 
-  // ── Level 3: payment detail dialog ───────────────────────────────────────
-  const [payDetail, setPayDetail] = useState<Record<string, any> | null>(null);
-  const [payDetailLoading, setPayDetailLoading] = useState(false);
+  // ── Level 3: GL entry detail dialog — shows the exact posted leg the user
+  // clicked (voucher no., date, debit/credit, narration, this account) using
+  // only the fields already on the drill-down row itself. Deliberately does
+  // NOT navigate to the source document's own page (Invoice/GRN/JV/Payment
+  // forms) — clicking a Trial Balance row should show what actually posted
+  // to this account, not pull up an unrelated editable form.
+  const [glEntryDetail, setGlEntryDetail] = useState<TBTransaction | null>(null);
 
   // ── Cost Centre view — replaces the account tree when a cost centre is
   // selected, showing individual PO/GRN/Invoice postings instead of an
@@ -884,7 +944,7 @@ export default function TrialBalance() {
   function handleCompanyChange(id: number | null, opt: Option | null) {
     setSelCompany(opt);
     const filteredProjects = id
-      ? allProjects.filter((p) => p.company_id === id)
+      ? allProjects.filter((p) => projectBelongsToCompany(p, id))
       : selEnterprise
         ? allProjects.filter((p) =>
             allCompanies
@@ -957,58 +1017,39 @@ export default function TrialBalance() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filterMode, from, to, asOn, selCompany, selProject, selCostCenter],
+    [drillNode, filterMode, from, to, asOn, selCompany, selProject, selCostCenter],
   );
 
-  // Level 3 — open detail dialog for a transaction row.
-  const openSourceEntry = useCallback(async (t: TBTransaction) => {
-    const srcType = (t.sourceType ?? "").toUpperCase();
-    const payId = t.payment?.id ?? (srcType === "NEWPAYMENT" ? t.sourceId : null);
+  // Level 3 — open the source document's own real view (the same rich
+  // detail dialog its own page already renders for ?view=<id> — GRN.tsx,
+  // JournalVoucher.tsx, Payment.tsx, etc. all already support this deep
+  // link), not a generic GL-leg summary. A generic card answers "what did
+  // this entry post" but strips every field that isn't a GL column — the
+  // full ledger table, status, narration, linked documents — which is
+  // usually exactly what someone drilling into an account is after.
+  //
+  // Only source types with a page confirmed to support ?view= are routed
+  // this way; anything else still falls back to the GL-leg card below so a
+  // click never silently does nothing.
+  const SOURCE_TYPE_ROUTES: Record<string, string> = {
+    journalvoucher: "/journal-voucher",
+    newpayment: "/payments",
+    receivedpayment: "/received-payments",
+    expensebooking: "/material/expense-booking",
+    invoiceposting: "/material/expense-booking",
+    grn: "/material/grn",
+    grnposting: "/material/grn",
+  };
 
-    if (payId) {
-      // Payment: fetch full detail and show inline dialog
-      setPayDetail(null);
-      setPayDetailLoading(true);
-      try {
-        const res = await fetchWithAuth(`/api/new-payment/${payId}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setPayDetail(await res.json());
-      } catch {
-        setPayDetail({ _error: true });
-      } finally {
-        setPayDetailLoading(false);
-      }
+  const openSourceEntry = useCallback((t: TBTransaction) => {
+    const st = (t.sourceType ?? "").toLowerCase();
+    const route = SOURCE_TYPE_ROUTES[st];
+    const id = st === "newpayment" ? (t.payment?.id ?? t.sourceId) : t.sourceId;
+    if (route && id) {
+      navigate(`${route}?view=${id}`);
       return;
     }
-
-    if (!t.sourceId) return;
-
-    // Every source type navigates straight to that document's own real
-    // detail/form view via its ?view= deep link — same pattern across the
-    // board (Invoice/Expense Booking used to open its own inline preview
-    // popup here instead, which was one extra step short of ever reaching
-    // the real form). srcType here is t.sourceType.toUpperCase() straight
-    // from GeneralLedgerEntry.SourceType (see backend/routes/trialBalance.js).
-    switch (srcType) {
-      case "EXPENSEBOOKING":
-      case "INVOICEPOSTING":
-        navigate(`/material/expense-booking?view=${t.sourceId}`); break;
-      case "RECEIVEDPAYMENT":
-      case "RECEIPT":
-        navigate(`/received-payments?view=${t.sourceId}`); break;
-      case "PURCHASE_ORDER":
-      case "PO":
-        navigate(`/purchase-orders?view=${t.sourceId}`); break;
-      case "GRN":
-      case "GRNPOSTING":
-        navigate(`/material/grn?view=${t.sourceId}`); break;
-      case "JOURNAL":
-      case "JV":
-      case "JOURNALVOUCHER":
-        navigate(`/journal-voucher?view=${t.sourceId}`); break;
-      default:
-        break;
-    }
+    setGlEntryDetail(t);
   }, [navigate]);
 
   // ── export/refresh disabled? ──────────────────────────────────────────────
@@ -1283,7 +1324,7 @@ export default function TrialBalance() {
             <div className="flex flex-col gap-2">
               {/* Mode tabs row */}
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/50 shrink-0 mr-0.5">
+                <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/50 shrink-0 mr-0.5">
                   Period:
                 </span>
                 <ModeTab active={filterMode === "fy"}    onClick={() => switchMode("fy")}    icon={Calendar}      label="FY" />
@@ -1310,7 +1351,7 @@ export default function TrialBalance() {
                       <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     </div>
                     {selectedFY && (
-                      <span className="text-[10px] text-muted-foreground/60">
+                      <span className="text-[0.625rem] text-muted-foreground/60">
                         {fmtDate(toDateStr(selectedFY.FStartDate))} – {fmtDate(toDateStr(selectedFY.FEndDate))}
                       </span>
                     )}
@@ -1359,29 +1400,29 @@ export default function TrialBalance() {
             {/* Viewing chips */}
             {(selEnterprise || selCompany || selProject || selCostCenter || periodLabel()) && (
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] text-muted-foreground">Viewing:</span>
+                <span className="text-[0.625rem] text-muted-foreground">Viewing:</span>
                 {selEnterprise && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
                     <Building size={9} /> {selEnterprise.label}
                   </span>
                 )}
                 {selCompany && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
                     <Briefcase size={9} /> {selCompany.label}
                   </span>
                 )}
                 {selProject && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
                     <FolderKanban size={9} /> {selProject.label}
                   </span>
                 )}
                 {selCostCenter && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
                     <Target size={9} /> {selCostCenter.label}
                   </span>
                 )}
                 {periodLabel() && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-heading">
                     <CalendarDays size={9} /> {periodLabel()}
                   </span>
                 )}
@@ -1417,7 +1458,7 @@ export default function TrialBalance() {
                     >
                       {value}
                     </p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                    <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
                       {label}
                     </p>
                   </div>
@@ -1478,18 +1519,18 @@ export default function TrialBalance() {
                       <span className={`text-xs leading-tight flex-1 ${
                         node.isGroup
                           ? node.level === 0
-                            ? "font-bold font-heading uppercase tracking-wide text-foreground text-[11px]"
-                            : "font-semibold font-heading uppercase tracking-wide text-foreground/90 text-[11px]"
+                            ? "font-bold font-heading uppercase tracking-wide text-foreground text-[0.6875rem]"
+                            : "font-semibold font-heading uppercase tracking-wide text-foreground/90 text-[0.6875rem]"
                           : "text-foreground/80"
                       }`}>
                         {node.name}
                       </span>
                       {node.code && (
-                        <span className="text-[10px] font-mono text-muted-foreground/40 shrink-0">{node.code}</span>
+                        <span className="text-[0.625rem] font-mono text-muted-foreground/40 shrink-0">{node.code}</span>
                       )}
                     </div>
                     {/* Values grid: 3 cols × 2 rows (Dr/Cr per section) */}
-                    <div className="grid grid-cols-3 gap-x-2 pl-5 text-[10px] tabular-nums">
+                    <div className="grid grid-cols-3 gap-x-2 pl-5 text-[0.625rem] tabular-nums">
                       <span className="text-muted-foreground/50 font-heading uppercase tracking-wide">Opening</span>
                       <span className="text-muted-foreground/50 font-heading uppercase tracking-wide">Txn</span>
                       <span className="text-muted-foreground/50 font-heading uppercase tracking-wide">Closing</span>
@@ -1517,7 +1558,7 @@ export default function TrialBalance() {
             {summary && !loading && visible.length > 0 && (
               <div className="px-3 py-3 bg-muted/40 border-t-2 border-border">
                 <p className="text-xs font-heading font-bold text-foreground uppercase tracking-wider mb-2">Grand Total</p>
-                <div className="grid grid-cols-3 gap-x-2 text-[10px] tabular-nums">
+                <div className="grid grid-cols-3 gap-x-2 text-[0.625rem] tabular-nums">
                   <span className="text-muted-foreground/50 font-heading uppercase">Opening</span>
                   <span className="text-muted-foreground/50 font-heading uppercase">Txn</span>
                   <span className="text-muted-foreground/50 font-heading uppercase">Closing</span>
@@ -1535,7 +1576,7 @@ export default function TrialBalance() {
                   </div>
                 </div>
                 {balanced && (
-                  <p className="mt-2 text-center text-[11px] font-heading text-emerald-500 font-semibold">
+                  <p className="mt-2 text-center text-[0.6875rem] font-heading text-emerald-500 font-semibold">
                     ✓ Books are balanced — Debit = Credit
                   </p>
                 )}
@@ -1550,7 +1591,7 @@ export default function TrialBalance() {
                 <tr className="border-b border-border bg-muted/30">
                   <th className="px-4 py-2 text-left w-[38%]">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                      <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                         Account / Description
                       </span>
                       <div className="relative">
@@ -1560,7 +1601,7 @@ export default function TrialBalance() {
                           placeholder="Search…"
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
-                          className="h-6 pl-6 pr-5 rounded-md text-[11px] bg-background border border-border text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 w-36"
+                          className="h-6 pl-6 pr-5 rounded-md text-[0.6875rem] bg-background border border-border text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-primary/30 w-36"
                         />
                         {search && (
                           <button onClick={() => setSearch("")} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -1572,19 +1613,19 @@ export default function TrialBalance() {
                   </th>
                   <th
                     colSpan={2}
-                    className="px-3 py-2 text-center text-[10px] font-heading uppercase tracking-widest text-muted-foreground border-l border-border/40"
+                    className="px-3 py-2 text-center text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground border-l border-border/40"
                   >
                     Opening Balance
                   </th>
                   <th
                     colSpan={2}
-                    className="px-3 py-2 text-center text-[10px] font-heading uppercase tracking-widest text-muted-foreground border-l border-border/40"
+                    className="px-3 py-2 text-center text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground border-l border-border/40"
                   >
                     Transactions
                   </th>
                   <th
                     colSpan={2}
-                    className="px-3 py-2 text-center text-[10px] font-heading uppercase tracking-widest text-muted-foreground border-l border-border/40"
+                    className="px-3 py-2 text-center text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground border-l border-border/40"
                   >
                     Closing Balance
                   </th>
@@ -1601,7 +1642,7 @@ export default function TrialBalance() {
                   ].map((h, i) => (
                     <th
                       key={i}
-                      className={`px-3 py-1.5 text-right text-[10px] font-heading font-medium tracking-wider ${h === "Debit" ? "text-rose-400" : "text-emerald-400"} ${i === 0 ? "border-l border-border/30" : ""} ${i === 1 || i === 3 ? "border-r border-border/30" : ""}`}
+                      className={`px-3 py-1.5 text-right text-[0.625rem] font-heading font-medium tracking-wider ${h === "Debit" ? "text-rose-400" : "text-emerald-400"} ${i === 0 ? "border-l border-border/30" : ""} ${i === 1 || i === 3 ? "border-r border-border/30" : ""}`}
                     >
                       {h}
                     </th>
@@ -1684,7 +1725,7 @@ export default function TrialBalance() {
                     <tr className="bg-emerald-500/5">
                       <td
                         colSpan={7}
-                        className="px-4 py-2 text-center text-[11px] font-heading text-emerald-500 font-semibold tracking-wide"
+                        className="px-4 py-2 text-center text-[0.6875rem] font-heading text-emerald-500 font-semibold tracking-wide"
                       >
                         ✓ Books are balanced — Debit = Credit
                       </td>
@@ -1699,8 +1740,12 @@ export default function TrialBalance() {
         </div>
       </FinanceShell>
 
-      {/* ── Level 3: Payment detail dialog ─────────────────────────────────── */}
-      <Dialog open={!!payDetail || payDetailLoading} onOpenChange={(o) => { if (!o) setPayDetail(null); }}>
+      {/* ── Level 3: GL entry detail dialog ──────────────────────────────────
+          Shows exactly what this leg posted — voucher, date, debit/credit,
+          narration, this account — built entirely from the drill-down row
+          already on screen. Deliberately does not navigate to the source
+          document's own editable form. */}
+      <Dialog open={!!glEntryDetail} onOpenChange={(o) => { if (!o) setGlEntryDetail(null); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <div className="flex items-center gap-3">
@@ -1709,77 +1754,78 @@ export default function TrialBalance() {
               </div>
               <div>
                 <DialogTitle className="font-heading text-base">
-                  {payDetailLoading ? "Loading…" : payDetail?.DocNo ?? "Payment Detail"}
+                  {glEntryDetail?.voucherNo || glEntryDetail?.docNo || "GL Entry"}
                 </DialogTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {payDetail?.Status ?? ""}
+                  {drillNode?.name ?? ""}
                 </p>
               </div>
             </div>
           </DialogHeader>
 
-          {payDetailLoading ? (
-            <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
-              <Loader2 size={16} className="animate-spin" /> Fetching payment…
-            </div>
-          ) : payDetail?._error ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">Could not load payment details.</div>
-          ) : payDetail ? (
+          {glEntryDetail && (
             <div className="space-y-4">
               {/* Amount highlight */}
               <div className="rounded-xl bg-primary/5 border border-primary/15 px-4 py-3 flex items-center justify-between">
-                <span className="text-xs text-muted-foreground font-heading uppercase tracking-wide">Amount Paid</span>
-                <span className="text-xl font-bold text-primary font-heading">{formatINR(Number(payDetail.PAmount) || 0)}</span>
+                <span className="text-xs text-muted-foreground font-heading uppercase tracking-wide">
+                  {glEntryDetail.debit > 0 ? "Debit" : "Credit"}
+                </span>
+                <span className="text-xl font-bold text-primary font-heading">
+                  {formatINR(glEntryDetail.debit > 0 ? glEntryDetail.debit : glEntryDetail.credit)}
+                </span>
               </div>
 
               {/* Detail grid */}
               <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-xs">
                 {[
-                  { label: "Payee / Supplier",  value: payDetail.PSupplierName || payDetail.PPaymentName },
-                  { label: "Payment Date",       value: payDetail.PDate ? fmtDate(String(payDetail.PDate).slice(0, 10)) : "—" },
-                  { label: "Mode",               value: payDetail.PMode || "—" },
-                  { label: "Bank",               value: payDetail.BankAccountName || payDetail.PBankName || "—" },
-                  { label: "Cheque / Ref No.",   value: payDetail.PChequeNo || "—" },
-                  { label: "Cheque Date",        value: payDetail.PChequeDate ? fmtDate(String(payDetail.PChequeDate).slice(0, 10)) : "—" },
-                  { label: "Company",            value: payDetail.PCompanyName || "—" },
-                  { label: "Project",            value: payDetail.PProjectName || "—" },
-                  { label: "Expense Booking",    value: payDetail.RefDoc || "—" },
-                  { label: "EB Date",            value: payDetail.EBDocDate ? fmtDate(String(payDetail.EBDocDate).slice(0, 10)) : "—" },
-                  { label: "Taxable Amount",     value: payDetail.TaxableAmount ? formatINR(Number(payDetail.TaxableAmount)) : "—" },
-                  { label: "Tax Amount",         value: payDetail.TaxAmount ? formatINR(Number(payDetail.TaxAmount)) : "—" },
+                  { label: "Account",       value: drillNode?.name },
+                  { label: "Date",          value: glEntryDetail.date ? fmtDate(glEntryDetail.date) : "—" },
+                  { label: "Voucher No.",   value: glEntryDetail.voucherNo || "—" },
+                  { label: "Source Type",   value: glEntryDetail.sourceType || "—" },
+                  { label: "Invoice No.",   value: glEntryDetail.invoiceNo || "—" },
+                  { label: "Mode",          value: glEntryDetail.mode || glEntryDetail.payment?.mode || "—" },
+                  {
+                    label: "Cost Centre",
+                    value: glEntryDetail.costCenter
+                      ? `${glEntryDetail.costCenter.code ?? ""}${glEntryDetail.costCenter.code ? " - " : ""}${glEntryDetail.costCenter.name ?? ""}`
+                      : "—",
+                  },
+                  {
+                    label: "Fixed Asset",
+                    value: glEntryDetail.fixedAsset
+                      ? (glEntryDetail.fixedAsset.faItemCode || glEntryDetail.fixedAsset.assetCode || `Asset #${glEntryDetail.fixedAsset.assetId}`)
+                      : "—",
+                  },
                 ].map(({ label, value }) => (
                   <div key={label}>
-                    <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">{label}</p>
+                    <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">{label}</p>
                     <p className="text-foreground font-medium truncate">{value || "—"}</p>
                   </div>
                 ))}
               </div>
 
-              {/* Description */}
-              {payDetail.EBDescription && (
+              {/* Narration */}
+              {glEntryDetail.narration && (
                 <div className="rounded-lg bg-muted/30 border border-border px-3 py-2">
-                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Description</p>
-                  <p className="text-xs text-foreground">{payDetail.EBDescription}</p>
+                  <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Narration</p>
+                  <p className="text-xs text-foreground">{glEntryDetail.narration}</p>
                 </div>
               )}
 
-              {/* Narration / remarks */}
-              {payDetail.PRemarks && (
-                <div className="rounded-lg bg-muted/30 border border-border px-3 py-2">
-                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Remarks</p>
-                  <p className="text-xs text-foreground">{payDetail.PRemarks}</p>
-                </div>
-              )}
-
-              {/* Card info */}
-              {payDetail.PCardNumber && (
-                <div className="rounded-lg bg-muted/30 border border-border px-3 py-2 text-xs">
-                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Card</p>
-                  <p>{payDetail.PCardHolderName} · {payDetail.PCardNetwork} ···· {String(payDetail.PCardNumber).slice(-4)}</p>
+              {/* Item breakdown, when this leg has one (GRN-sourced) */}
+              {glEntryDetail.items && glEntryDetail.items.length > 0 && (
+                <div className="rounded-lg bg-muted/30 border border-border overflow-hidden">
+                  <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 px-3 pt-2 pb-1">Items</p>
+                  {glEntryDetail.items.map((it, i) => (
+                    <div key={i} className={`flex items-center justify-between px-3 py-1.5 text-xs ${i > 0 ? "border-t border-border/30" : ""}`}>
+                      <span className="text-foreground/80">{it.itemName}</span>
+                      <span className="font-mono tabular-nums text-muted-foreground">{formatINR(it.amount)}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
-          ) : null}
+          )}
         </DialogContent>
       </Dialog>
 

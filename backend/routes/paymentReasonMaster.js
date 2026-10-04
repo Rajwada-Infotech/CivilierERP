@@ -200,6 +200,10 @@ router.get("/report", authMiddleware, async (req, res) => {
     }
     const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
+    // Same supplier-resolution chain as newPayment.js's own list/detail
+    // queries: an invoice-linked payment inherits the invoice's resolved
+    // supplier (GRN/PO source doc), a direct/TOD payment falls back to the
+    // party picked straight on the payment (PPartyId).
     const result = await request.query(`
       SELECT
         np.PPaymentID   AS id,
@@ -209,8 +213,27 @@ router.get("/report", authMiddleware, async (req, res) => {
         np.PAmount      AS Amount,
         np.PMode        AS Mode,
         np.PDate        AS Date,
-        np.DocNo        AS DocNo
+        np.DocNo        AS DocNo,
+        COALESCE(
+          CASE
+            WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+            WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+            ELSE grn2_sup.LHeadName
+          END,
+          party_head.LHeadName
+        )               AS VendorName
       FROM dbo.NewPayment np
+      LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.PurchaseOrders po
+        ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.GoodsReceiptNotes grn_eb
+        ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
+      LEFT JOIN dbo.AccountHeadMaster grn_sup ON grn_sup.LHeadId = grn_eb.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster po_sup ON po_sup.LHeadId = po.SupplierID
+      LEFT JOIN dbo.GoodsReceiptNotes grn2
+        ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
+      LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
       ${whereClause}
       ORDER BY np.PPaymentName ASC, np.PDate DESC
     `);

@@ -212,7 +212,11 @@ export function PurchaseOrderFormModal({
     if (existing.SourceMRId) setSourceMR({ id: existing.SourceMRId, docNo: existing.SourceMRDocNo || "" });
   }, [visible, editingId, existing]);
 
-  // Doc number preview — create mode only.
+  // Doc number preview — create mode only. Both calls used to be unhandled
+  // — a rejection from either (network blip, or a 403 on a doc-type-scoped
+  // right) crashed the whole app the moment this New Purchase Order modal
+  // opened. poDocTypeId/poDocNo just stay unset on failure — the backend
+  // still accepts the order without a preview.
   useEffect(() => {
     if (!visible || editingId != null) return;
     fetchDocTypes("PO").then((types) => {
@@ -220,9 +224,9 @@ export function PurchaseOrderFormModal({
       const preferred = filtered.find((dt) => (dt.DocNoPrefix ?? dt.Prefix) === "DPO") ?? filtered[0];
       if (preferred) {
         setPoDocTypeId(preferred.TypeOfDocId);
-        fetchNextDocNumber(preferred.TypeOfDocId, form.finYear || undefined).then(setPoDocNo);
+        fetchNextDocNumber(preferred.TypeOfDocId, form.finYear || undefined).then(setPoDocNo).catch(() => {});
       }
-    });
+    }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, editingId, form.finYear]);
 

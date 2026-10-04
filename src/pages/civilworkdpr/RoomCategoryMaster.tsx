@@ -4,6 +4,7 @@ import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Plus, Edit2, Trash2, RotateCcw, AlertTriangle, Tags } from "lucide-react";
@@ -11,7 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  getRoomCategories, createRoomCategory, updateRoomCategory, deleteRoomCategory,
+  getRoomCategories, createRoomCategory, updateRoomCategory, deleteRoomCategory, getRoomCategoryUsage, getRoomCategoryRenameCount,
   type RoomCategory,
 } from "@/api/roomCategoryMasterApi";
 
@@ -46,6 +47,22 @@ export default function RoomCategoryMaster() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["room-categories"] });
 
+  // Renaming the Alias can rename the category's existing rooms too.
+  const [renameRooms, setRenameRooms] = useState(true);
+  const aliasChanged = !!editing && form.alias.trim() !== "" && form.alias.trim() !== editing.alias;
+  const { data: renameCount } = useQuery({
+    queryKey: ["room-category-rename-count", editing?.id],
+    queryFn: () => getRoomCategoryRenameCount(editing!.id),
+    enabled: aliasChanged,
+  });
+
+  // Usage of the category being deactivated, for the confirm dialog.
+  const { data: deletingUsage, isLoading: loadingUsage } = useQuery({
+    queryKey: ["room-category-usage", deleting?.id],
+    queryFn: () => getRoomCategoryUsage(deleting!.id),
+    enabled: !!deleting,
+  });
+
   const handleSave = async () => {
     if (!form.categoryName.trim()) { toast.error("Category Name is required"); return; }
     if (!form.alias.trim()) { toast.error("Alias is required"); return; }
@@ -58,8 +75,9 @@ export default function RoomCategoryMaster() {
         isActive: form.isActive,
       };
       if (editing) {
-        await updateRoomCategory(editing.id, payload);
-        toast.success("Category updated");
+        const r = await updateRoomCategory(editing.id, { ...payload, renameRooms: aliasChanged && renameRooms });
+        toast.success(r.roomsRenamed ? `Category updated — ${r.roomsRenamed} room(s) renamed` : "Category updated");
+        if (r.roomsRenamed) invalidateRoomData(qc);
       } else {
         await createRoomCategory(payload);
         toast.success("Category created");
@@ -170,21 +188,21 @@ export default function RoomCategoryMaster() {
 
   return (
     <CivilWorkDprShell
-      title="Room Category Master"
+      title="Room Master"
       subtitle="Manage the room types used across every Unit's room composition"
       icon={Tags}
       action={
         rights.canCreate ? (
           <button
             onClick={openCreate}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 transition-opacity"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 transition-opacity"
           >
-            <Plus size={14} /> New Category
+            <Plus size={14} /> New Room Type
           </button>
         ) : undefined
       }
     >
-      <Breadcrumbs items={[{ label: "Civil Work DPR", path: "/civilworkdpr" }, { label: "Room Category Master" }]} />
+      <Breadcrumbs items={[{ label: "Civil Work DPR", path: "/civilworkdpr" }, { label: "Room Master" }]} />
 
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <DataTable columns={columns} data={categories} loading={isLoading} emptyMessage="No room categories found. Add one to get started." />
@@ -194,7 +212,7 @@ export default function RoomCategoryMaster() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit Room Category" : "New Room Category"}</DialogTitle>
+            <DialogTitle>{editing ? "Edit Room Type" : "New Room Type"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-1" onKeyDown={preventEnterSubmit}>
             <div className="space-y-1.5">
@@ -207,6 +225,12 @@ export default function RoomCategoryMaster() {
                 value={form.alias}
                 onChange={(e) => setForm((p) => ({ ...p, alias: e.target.value }))}
               />
+              {aliasChanged && (renameCount?.rooms ?? 0) > 0 && (
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={renameRooms} onChange={(e) => setRenameRooms(e.target.checked)} />
+                  Also rename {renameCount!.rooms} existing room(s) from "{editing!.alias}" to "{form.alias.trim()}" (Flat Master history stays attached)
+                </label>
+              )}
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -219,7 +243,7 @@ export default function RoomCategoryMaster() {
                 onChange={(e) => setForm((p) => ({ ...p, categoryName: e.target.value }))}
                 disabled={!!editing}
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 {editing
                   ? "Kept stable once set — only the Alias above should normally change."
                   : "Used internally; auto-uppercased. Renaming the Alias later never breaks anything already saved."}
@@ -236,15 +260,15 @@ export default function RoomCategoryMaster() {
                 onChange={(e) => setForm((p) => ({ ...p, sortOrder: e.target.value }))}
               />
             </div>
-            <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-              <div>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
+              <div className="min-w-0">
                 <p className="text-sm font-medium">Active</p>
                 <p className="text-xs text-muted-foreground">Inactive categories won't appear in the composition builder or Work Allocation</p>
               </div>
               <button
                 type="button"
                 onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${form.isActive ? "bg-emerald-500" : "bg-muted"}`}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none ${form.isActive ? "bg-emerald-500" : "bg-muted"}`}
               >
                 <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${form.isActive ? "translate-x-6" : "translate-x-1"}`} />
               </button>
@@ -259,7 +283,7 @@ export default function RoomCategoryMaster() {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                className="px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
               >
                 {saving ? "Saving…" : editing ? "Update" : "Create"}
               </button>
@@ -277,7 +301,12 @@ export default function RoomCategoryMaster() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
-            Deactivate <strong>{deleting?.alias}</strong>? Existing room compositions that already use it stay exactly as they are — this only hides it from new selections.
+            Deactivate <strong>{deleting?.alias}</strong>? It is only hidden from new selections — layouts, layout overrides and rooms that already use it keep it exactly as they are.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {loadingUsage ? "Checking where it is used…" : deletingUsage
+              ? `In use: ${deletingUsage.layouts} layout(s), ${deletingUsage.overrides} layout override(s), ${deletingUsage.rooms} room(s).`
+              : null}
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setDeleting(null)} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">

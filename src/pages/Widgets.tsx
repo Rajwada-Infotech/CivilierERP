@@ -7,7 +7,7 @@ import "leaflet/dist/leaflet.css";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   getWidgetCatalog,
   getWidgetsDashboard,
@@ -187,7 +187,7 @@ function MetricPicker({
     <div className="relative">
       <div className="flex items-center gap-1.5 mb-2">
         <Database size={11} className="text-muted-foreground/60" />
-        <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground/60">
+        <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground/60">
           Data Source
         </span>
       </div>
@@ -216,7 +216,7 @@ function MetricPicker({
       </div>
       {selected && (
         <span
-          className="inline-block mt-1.5 text-[9px] font-heading font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded-full"
+          className="inline-block mt-1.5 text-[0.5625rem] font-heading font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded-full"
           style={{
             color: MODULE_COLORS[selected.module] || DEFAULT_CATEGORY_COLOR,
             background: `${MODULE_COLORS[selected.module] || DEFAULT_CATEGORY_COLOR}14`,
@@ -248,7 +248,7 @@ function WidgetTile({
   onClick: () => void;
 }) {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.button
@@ -284,7 +284,7 @@ function WidgetTile({
           </div>
           {category && (
             <span
-              className="text-[9px] font-heading font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded-full shrink-0"
+              className="text-[0.5625rem] font-heading font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded-full shrink-0"
               style={{ color, background: `${color}14` }}
             >
               {category}
@@ -385,14 +385,14 @@ function BarChartWidget() {
           <div className="flex items-end gap-2 h-44">
             {items.map((d, i) => (
               <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-[0.625rem] text-muted-foreground">
                   {connected ? fmtVal(d.value) : d.value}
                 </span>
                 <div
                   className="w-full rounded-t-md bg-primary/70 hover:bg-primary transition-all"
                   style={{ height: `${Math.max(4, (d.value / max) * 140)}px` }}
                 />
-                <span className="text-[10px] text-muted-foreground">{d.label}</span>
+                <span className="text-[0.625rem] text-muted-foreground">{d.label}</span>
               </div>
             ))}
           </div>
@@ -755,7 +755,7 @@ function CalendarWidget() {
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
           <span
             key={i}
-            className="text-[10px] text-muted-foreground font-medium py-1"
+            className="text-[0.625rem] text-muted-foreground font-medium py-1"
           >
             {d}
           </span>
@@ -839,7 +839,7 @@ function ActivityFeedWidget() {
               <span className="font-semibold">{a.userName}</span>{" "}
               {a.event?.toLowerCase()}
             </p>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[0.625rem] text-muted-foreground">
               {fmtTime(a.createdAt)}
             </p>
           </div>
@@ -1097,7 +1097,7 @@ function MapViewWidget() {
                     <p>{[m.address, m.city, m.state].filter(Boolean).join(", ")}</p>
                   )}
                   {m.status && (
-                    <span className="inline-block mt-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
+                    <span className="inline-block mt-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-semibold">
                       {m.status}
                     </span>
                   )}
@@ -1108,7 +1108,7 @@ function MapViewWidget() {
         </MapContainer>
       </div>
       {geocoding && (
-        <p className="text-[10px] text-muted-foreground text-center">
+        <p className="text-[0.625rem] text-muted-foreground text-center">
           Resolving project addresses…
         </p>
       )}
@@ -1362,7 +1362,7 @@ function CalculatorWidget() {
                   className={`h-11 rounded-xl text-sm font-semibold transition-all active:scale-95
                   ${
                     isOp(btn)
-                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      ? "btn-module text-white "
                       : isFn(btn)
                         ? "bg-muted/60 hover:bg-muted"
                         : "bg-muted/30 hover:bg-muted/50"
@@ -1435,7 +1435,7 @@ function PendingVehicleInOutWidget() {
               <p className="text-sm font-bold text-amber-500">
                 {fmtNum(row.pendingQty)}
               </p>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-[0.625rem] text-muted-foreground">
                 of {fmtNum(row.totalOrdered)} pending
               </p>
             </div>
@@ -1611,7 +1611,7 @@ const Widgets = () => {
                   onClick={() => setActiveCategory(null)}
                   className={`px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ${
                     activeCategory === null
-                      ? "bg-primary text-primary-foreground border-primary"
+                      ? "btn-module text-white border-primary"
                       : "text-muted-foreground border-border hover:bg-muted/40"
                   }`}
                 >

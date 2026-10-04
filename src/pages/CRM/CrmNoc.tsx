@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { formatINR } from "@/utils/formatCurrency";
 import {
   Plus, AlertTriangle, CheckCircle2, Landmark, Pencil, Lock,
-  ShieldCheck, Building2, ArrowRight,
+  ShieldCheck, Building2, ArrowRight, Search,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
@@ -21,9 +21,11 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/noc";
-const NOC_TYPES = ["Organisation", "Bank"] as const;
 
 // ─── Status badge ──────────────────────────────────────────────────────────
 
@@ -38,7 +40,7 @@ function StatusBadge({ status }: { status: string }) {
   const c = STATUS_CFG[status] ?? STATUS_CFG.Pending;
   return (
     <span className={cn(
-      "inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[10px] font-semibold uppercase tracking-wider",
+      "inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[0.625rem] font-semibold uppercase tracking-wider",
       c.text,
     )}>
       <span className={cn("w-[3px] h-3 rounded-[1px]", c.bar)} />
@@ -52,7 +54,7 @@ function StatusBadge({ status }: { status: string }) {
 function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2 border-b border-border/60 last:border-0">
-      <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">{label}</span>
+      <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">{label}</span>
       <span className={cn("text-sm text-foreground text-right", mono && "font-mono")}>{value}</span>
     </div>
   );
@@ -75,9 +77,38 @@ async function fetchAll(type?: string, status?: string): Promise<any[]> {
   } catch { return []; }
 }
 
-async function fetchEligibleBookings(type: string): Promise<any[]> {
+const PAGE_SIZE = 20;
+interface NocListFilters {
+  type: string;
+  status: string;
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchNocList(filters: NocListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.type !== "All") params.set("type", filters.type);
+  if (filters.status !== "All") params.set("status", filters.status);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
   try {
-    const r = await fetchWithAuth(`${API}/eligible-bookings?type=${encodeURIComponent(type)}`);
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
+}
+
+// No type param here — NOC type is resolved per booking (see NocType on
+// each returned row), never chosen up front. Filtering this list by a
+// pre-selected type before the user has even picked a booking would hide
+// genuinely eligible bookings of the other type.
+async function fetchEligibleBookings(): Promise<any[]> {
+  try {
+    const r = await fetchWithAuth(`${API}/eligible-bookings`);
     return r.ok ? r.json() : [];
   } catch { return []; }
 }
@@ -92,11 +123,15 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
 
 // ─── Edit dialog for loan tracking / notes ─────────────────────────────────
 
+// Loan Sanction/Disbursement Status+Date used to be editable here too, but
+// they were a second, disconnected copy of what the Loan Tracking page
+// (CrmLoanDetail) already tracks — nothing in the workflow (resolveNocType,
+// checkLoanProcessingCleared, the lifecycle bar, the Sales Deed page) ever
+// read this copy, so a staff member filling it in here was writing to a
+// field the system quietly ignored while trusting the wrong number if it
+// ever drifted from the real one. Removed; see the Loan Tracking page for
+// actual loan status. Only Notes is editable here now.
 function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => void; onSaved: () => void }) {
-  const [lss, setLss]   = useState(noc.LoanSanctionStatus || "");
-  const [lsd, setLsd]   = useState(noc.LoanSanctionDate?.slice(0, 10) || "");
-  const [lds, setLds]   = useState(noc.LoanDisbursementStatus || "");
-  const [ldd, setLdd]   = useState(noc.LoanDisbursementDate?.slice(0, 10) || "");
   const [notes, setNotes] = useState(noc.Notes || "");
   const [saving, setSaving] = useState(false);
 
@@ -106,13 +141,7 @@ function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => voi
       const res = await fetchWithAuth(`${API}/${noc.Id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          LoanSanctionStatus: lss || null,
-          LoanSanctionDate: lsd || null,
-          LoanDisbursementStatus: lds || null,
-          LoanDisbursementDate: ldd || null,
-          Notes: notes || null,
-        }),
+        body: JSON.stringify({ Notes: notes || null }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("NOC details updated");
@@ -127,49 +156,11 @@ function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => voi
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-sm">
+      <DialogContent accent="crm" className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="font-heading">Edit NOC Details</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          {noc.NocType === "Bank" && (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Sanction Status</label>
-                  <select value={lss} onChange={(e) => setLss(e.target.value)}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="">—</option>
-                    <option>Sanctioned</option>
-                    <option>Pending</option>
-                    <option>Rejected</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Sanction Date</label>
-                  <input type="date" value={lsd} onChange={(e) => setLsd(e.target.value)}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Disbursement Status</label>
-                  <select value={lds} onChange={(e) => setLds(e.target.value)}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="">—</option>
-                    <option>Disbursed</option>
-                    <option>Partial</option>
-                    <option>Pending</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Disbursement Date</label>
-                  <input type="date" value={ldd} onChange={(e) => setLdd(e.target.value)}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
-              </div>
-            </>
-          )}
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Notes</label>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
@@ -180,7 +171,7 @@ function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => voi
           <button onClick={onClose}
             className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
           <button onClick={save} disabled={saving}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+            className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
             {saving ? "Saving…" : "Save"}
           </button>
         </div>
@@ -207,6 +198,13 @@ const CrmNoc: React.FC = () => {
   // Filter tabs
   const [typeFilter, setTypeFilter]     = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
   // Create dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -220,15 +218,21 @@ const CrmNoc: React.FC = () => {
   const [editNoc, setEditNoc] = useState<any>(null);
 
   // Data
-  const { data: nocs = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-noc", typeFilter, statusFilter],
-    queryFn: () => fetchAll(typeFilter, statusFilter),
+  const listFilters: NocListFilters = useMemo(
+    () => ({ type: typeFilter, status: statusFilter, search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [typeFilter, statusFilter, search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-noc", listFilters, page],
+    queryFn: () => fetchNocList(listFilters, page),
     staleTime: 30_000,
   });
+  const nocs = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
 
   const { data: eligibleBookings = [], isFetching: bkgFetching } = useQuery({
-    queryKey: ["crm-noc-eligible", form.NocType],
-    queryFn: () => fetchEligibleBookings(form.NocType),
+    queryKey: ["crm-noc-eligible"],
+    queryFn: fetchEligibleBookings,
     enabled: dialogOpen,
     staleTime: 0,
   });
@@ -279,24 +283,20 @@ const CrmNoc: React.FC = () => {
     setBankFieldsLocked(true);
   }, [form.NocType, context]);
 
-  const handleTypeChange = (t: string) => {
-    setForm((f) => ({ ...f, NocType: t }));
-    setBankFieldsLocked(true);
-  };
-
-  // When booking changes, auto-suggest NOC type based on HasLoan flag
+  // When booking changes, resolve NOC type from the booking's financing —
+  // never a manual choice, since a booking only ever has one NOC type.
   const handleBookingChange = (bookingId: string) => {
     setForm((f) => {
       const bk = (eligibleBookings as any[]).find((b: any) => String(b.Id) === bookingId);
-      const suggestedType = bk?.HasLoan ? "Bank" : "Organisation";
-      return { ...f, BookingId: bookingId, NocType: suggestedType };
+      const resolvedType = bk?.NocType || (bk?.HasLoan ? "Bank" : "Organisation");
+      return { ...f, BookingId: bookingId, NocType: resolvedType };
     });
     setBankFieldsLocked(true);
   };
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["crm-noc"] });
-    qc.invalidateQueries({ queryKey: ["crm-noc-eligible"] }); // prefix match — clears both Bank and Organisation entries
+    qc.invalidateQueries({ queryKey: ["crm-noc-eligible"] });
     qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
@@ -326,7 +326,7 @@ const CrmNoc: React.FC = () => {
   };
 
   const handleMarkIssued = async () => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setMarkingIssued(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/mark-issued`, { method: "PUT" });
@@ -416,7 +416,7 @@ const CrmNoc: React.FC = () => {
             {rights.canCreate && (
               <button
                 onClick={() => setDialogOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
+                className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg "
               >
                 <Plus size={14} /> Request NOC
               </button>
@@ -428,20 +428,28 @@ const CrmNoc: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <div className="flex rounded-lg border border-border overflow-hidden text-sm">
             {(["All", "Organisation", "Bank"] as const).map((t) => (
-              <button key={t} onClick={() => setTypeFilter(t)}
-                className={cn("px-3 py-1.5 transition-colors", typeFilter === t ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground")}>
+              <button key={t} onClick={() => updateFilter(setTypeFilter)(t)}
+                className={cn("px-3 py-1.5 transition-colors", typeFilter === t ? "btn-module text-white" : "hover:bg-muted text-muted-foreground")}>
                 {t}
               </button>
             ))}
           </div>
           <div className="flex rounded-lg border border-border overflow-hidden text-sm">
             {(["All", "Pending", "Approved", "Issued", "Rejected"] as const).map((s) => (
-              <button key={s} onClick={() => setStatusFilter(s)}
-                className={cn("px-3 py-1.5 transition-colors", statusFilter === s ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground")}>
+              <button key={s} onClick={() => updateFilter(setStatusFilter)(s)}
+                className={cn("px-3 py-1.5 transition-colors", statusFilter === s ? "btn-module text-white" : "hover:bg-muted text-muted-foreground")}>
                 {s}
               </button>
             ))}
           </div>
+          <div className="relative flex-1 min-w-48">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+              placeholder="Search customer, booking... (Enter to search)"
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+          </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
         </div>
 
         <DataTable
@@ -452,13 +460,14 @@ const CrmNoc: React.FC = () => {
           className="rounded-xl border border-border overflow-hidden bg-card"
           onRowClick={(row) => setDetailId(row.original.Id)}
         />
+        <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
         {/* ── Request dialog ────────────────────────────────────────────── */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-          <DialogContent className="max-w-md">
+          <DialogContent accent="crm" className="max-w-md">
             <DialogHeader>
               <DialogTitle className="font-heading text-base">Request NOC</DialogTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">One NOC per type — Bank (lender's charge released) + Organisation (developer no-dues)</p>
+              <p className="text-xs text-muted-foreground mt-0.5">A single NOC per booking — Bank (loan-financed) or Organisation (self-funded), decided automatically by how the booking is financed</p>
             </DialogHeader>
 
             <div className="space-y-4">
@@ -468,12 +477,12 @@ const CrmNoc: React.FC = () => {
                 {bkgFetching ? (
                   <p className="text-xs text-muted-foreground px-1 py-2">Loading eligible bookings…</p>
                 ) : (eligibleBookings as any[]).length === 0 ? (
-                  <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                  <div className="flex items-start gap-2 text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2.5">
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                    <span>No eligible bookings. Requires: AFS Registered at Sub-Registrar + no existing {form.NocType} NOC for the booking.</span>
+                    <span>No eligible bookings. Requires: AFS Registered at Sub-Registrar + no NOC already on file for the booking.</span>
                   </div>
                 ) : (
-                  <select value={form.BookingId}
+                  <SearchableNativeSelect value={form.BookingId}
                     onChange={(e) => handleBookingChange(e.target.value)}
                     className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
                     <option value="">Select booking…</option>
@@ -482,40 +491,34 @@ const CrmNoc: React.FC = () => {
                         {b.BookingNo} — {b.ApplicantName} · {b.UnitNo}{b.HasLoan ? " (Home Loan)" : ""}
                       </option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                 )}
               </div>
 
-              {/* Step 2 — NOC type (shown once booking selected) */}
+              {/* NOC type — resolved automatically from the booking's financing,
+                  never a free choice (this booking has exactly one NOC). */}
               {form.BookingId && (
                 <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">NOC Issued By *</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {NOC_TYPES.map((t) => (
-                      <button key={t} type="button" onClick={() => handleTypeChange(t)}
-                        className={cn(
-                          "flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors text-left",
-                          form.NocType === t
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border hover:bg-muted text-muted-foreground",
-                        )}>
-                        {t === "Bank" ? <Landmark size={14} /> : <Building2 size={14} />}
-                        <span>{t === "Bank" ? "Bank (Lender)" : "Organisation (Developer)"}</span>
-                      </button>
-                    ))}
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">NOC Issued By</label>
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-primary bg-primary/10 text-primary text-sm font-medium">
+                    {form.NocType === "Bank" ? <Landmark size={14} /> : <Building2 size={14} />}
+                    <span>{form.NocType === "Bank" ? "Bank (Lender)" : "Organisation (Developer)"}</span>
+                    <span className="ml-auto text-[0.6875rem] font-normal text-primary/70">
+                      {form.NocType === "Bank" ? "loan-financed booking" : "self-funded booking"}
+                    </span>
                   </div>
                 </div>
               )}
 
               {/* Booking context strip */}
               {form.BookingId && !contextLoading && context && (
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-[11px] space-y-1">
+                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-[0.6875rem] space-y-1">
                   <div className="font-semibold text-foreground text-xs">
                     {context.booking.ApplicantName}
                     <span className="text-muted-foreground font-normal"> · {context.booking.UnitNo}</span>
                   </div>
                   {context.agreement ? (
-                    <div className={cn("flex items-center gap-1.5", agreementRegistered ? "text-green-700" : "text-amber-700")}>
+                    <div className={cn("flex items-center gap-1.5", agreementRegistered ? "text-green-700" : "text-sky-700")}>
                       {agreementRegistered ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
                       {context.agreement.AgreementNo} — {context.agreement.Status}
                       {!agreementRegistered && <span className="font-medium ml-1">(Registered required)</span>}
@@ -540,7 +543,7 @@ const CrmNoc: React.FC = () => {
                       {bankFieldsLocked ? <><Pencil size={10} /> Edit</> : <><Lock size={10} /> Lock</>}
                     </button>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {[
                       { ph: "Bank Name",    val: form.BankName,      key: "BankName" },
                       { ph: "Loan A/C No.", val: form.LoanAccountNo, key: "LoanAccountNo" },
@@ -566,7 +569,7 @@ const CrmNoc: React.FC = () => {
                 className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleCreate} disabled={!canRequest || !rights.canCreate}
                 title={!agreementRegistered && form.BookingId ? "AFS must be Registered first" : undefined}
-                className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-5 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {saving ? "Requesting…" : "Request NOC"}
               </button>
             </div>
@@ -574,8 +577,8 @@ const CrmNoc: React.FC = () => {
         </Dialog>
 
         {/* ── Detail dialog ─────────────────────────────────────────────── */}
-        <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
-          <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
+        <Dialog open={detailId != null} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
+          <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden">
             {detail && (
               <>
                 <DialogHeader className="px-6 py-4 border-b border-border">
@@ -585,7 +588,7 @@ const CrmNoc: React.FC = () => {
                     </div>
                     <div className="min-w-0">
                       <DialogTitle className="text-sm font-semibold font-heading font-mono">{detail.NocNo}</DialogTitle>
-                      <DialogDescription className="text-[11px] mt-0.5">{detail.NocType} NOC</DialogDescription>
+                      <DialogDescription className="text-[0.6875rem] mt-0.5">{detail.NocType} NOC</DialogDescription>
                     </div>
                     <div className="ml-auto flex items-center gap-2">
                       <StatusBadge status={detail.Status} />
@@ -616,16 +619,6 @@ const CrmNoc: React.FC = () => {
                         <DetailRow label="Bank Name"     value={detail.BankName || "—"} />
                         <DetailRow label="Loan A/C No."  value={detail.LoanAccountNo || "—"} mono />
                         <DetailRow label="Loan Amount"   value={detail.LoanAmount ? formatINR(detail.LoanAmount) : "—"} mono />
-                        <DetailRow label="Sanction"      value={
-                          detail.LoanSanctionStatus
-                            ? `${detail.LoanSanctionStatus}${detail.LoanSanctionDate ? " · " + fmtDate(detail.LoanSanctionDate) : ""}`
-                            : "—"
-                        } />
-                        <DetailRow label="Disbursement"  value={
-                          detail.LoanDisbursementStatus
-                            ? `${detail.LoanDisbursementStatus}${detail.LoanDisbursementDate ? " · " + fmtDate(detail.LoanDisbursementDate) : ""}`
-                            : "—"
-                        } />
                       </>
                     )}
                     {detail.ApprovalDate && <DetailRow label="Approved"    value={fmtDate(detail.ApprovalDate)} />}
@@ -642,7 +635,7 @@ const CrmNoc: React.FC = () => {
                       </div>
                     ) : detail.Status === CrmStatus.APPROVED && rights.canEdit ? (
                       <button onClick={handleMarkIssued} disabled={markingIssued}
-                        className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                        className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium btn-module text-white rounded-lg hover:shadow-lg disabled:opacity-40 transition-colors">
                         <ArrowRight size={14} />
                         {markingIssued ? "Marking…" : "Mark as Issued"}
                       </button>

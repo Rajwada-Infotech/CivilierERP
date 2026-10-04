@@ -14,6 +14,7 @@ const { getPool, sql } = require("./db");
 const { normalizeRole } = require("./middleware/role");
 const { ALLOWED_ORIGINS } = require("./config/origins");
 const { redisGetStrict } = require("./redis");
+const { roomOf: activityThreadRoom, canUseThread } = require("./services/activityThread");
 const BLACKLIST_PREFIX = "bl:";
 async function isTokenBlacklisted(token) {
   try {
@@ -232,6 +233,32 @@ function initSocket(httpServer) {
         );
         if (typeof ack === "function") ack({ ok: false, error: "Join failed" });
       }
+    });
+
+    // Civil Work DPR activity comment thread — only that activity's
+    // allocated engineers, its approvers and super_admin may join.
+    socket.on("activity-thread:join", async (rungId, ack) => {
+      const id = Number(rungId);
+      if (!Number.isInteger(id) || id <= 0) {
+        if (typeof ack === "function") ack({ ok: false, error: "Invalid activity id" });
+        return;
+      }
+      try {
+        if (!(await canUseThread(socket.data.user, id))) {
+          if (typeof ack === "function") ack({ ok: false, error: "Access denied" });
+          return;
+        }
+        socket.join(activityThreadRoom(id));
+        if (typeof ack === "function") ack({ ok: true });
+      } catch (err) {
+        logger.warn({ event: "SOCKET_ACTIVITY_THREAD_JOIN_ERROR", socketId: socket.id, rungId: id, err }, "Activity thread join failed");
+        if (typeof ack === "function") ack({ ok: false, error: "Join failed" });
+      }
+    });
+
+    socket.on("activity-thread:leave", (rungId) => {
+      const id = Number(rungId);
+      if (Number.isInteger(id) && id > 0) socket.leave(activityThreadRoom(id));
     });
 
     socket.on("po:leave", (poId) => {

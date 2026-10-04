@@ -12,6 +12,7 @@ import {
 import { Field } from "./FormFields";
 import { fetchChequeLots, fetchChequeNumbers, deductChequeFromLot } from "../api";
 import type { PaymentRecord, ChequeLot } from "../types";
+import { DateInput } from "@/components/ui/date-input";
 
 interface ChequePanelProps {
   bankId: number | null;
@@ -46,6 +47,16 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
           set("chequeAccountNumber", first.AccountNumber || "");
           set("chequeIfsc", first.IFSCCode || "");
           set("chequeNo", "");
+        } else if (form.chequeLotId && !form.chequeAccountNumber) {
+          // A lot (and cheque number) was carried in from elsewhere — e.g. a
+          // loan's own sanction entry — without its account/IFSC. Backfill
+          // those once this bank's lots load, without touching the cheque
+          // number itself.
+          const matched = fetched.find((l) => l.CId === form.chequeLotId);
+          if (matched) {
+            set("chequeAccountNumber", matched.AccountNumber || "");
+            set("chequeIfsc", matched.IFSCCode || "");
+          }
         }
       })
       .catch(() => setLots([]))
@@ -112,7 +123,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
           Loading cheque lots…
         </div>
       ) : lots.length === 0 ? (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#ffe2021a] border border-amber-500/20 text-xs text-amber-600">
           <AlertTriangle size={12} />
           No active cheque lots found for this bank.
         </div>
@@ -129,7 +140,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 {activeLot?.ChequeLotNumber ?? "—"}
               </span>
               {activeLot?.RemainingCheques != null && (
-                <span className="ml-auto text-[11px] text-muted-foreground bg-primary/10 text-primary px-2 py-0.5 rounded-full font-heading">
+                <span className="ml-auto text-[0.6875rem] text-muted-foreground bg-primary/10 text-primary px-2 py-0.5 rounded-full font-heading">
                   {activeLot.RemainingCheques} remaining
                 </span>
               )}
@@ -140,7 +151,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
           {activeLot && (
             <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   Cheque Range
                 </p>
                 <p className="font-mono text-xs font-semibold text-foreground mt-0.5">
@@ -148,7 +159,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 </p>
               </div>
               <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   Account No.
                 </p>
                 <p className="font-mono text-xs text-foreground mt-0.5">
@@ -156,7 +167,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 </p>
               </div>
               <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   IFSC
                 </p>
                 <p className="font-mono text-xs text-foreground mt-0.5">
@@ -199,7 +210,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
               </div>
             </div>
             {lots.length > 1 && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 {lots.length} lots available for this bank — select one to load
                 its cheques.
               </p>
@@ -210,7 +221,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
           {activeLot && (
             <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   Cheque Range
                 </p>
                 <p className="font-mono text-xs font-semibold text-foreground mt-0.5">
@@ -218,7 +229,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 </p>
               </div>
               <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   Account No.
                 </p>
                 <p className="font-mono text-xs text-foreground mt-0.5">
@@ -226,7 +237,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 </p>
               </div>
               <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   IFSC
                 </p>
                 <p className="font-mono text-xs text-foreground mt-0.5">
@@ -276,7 +287,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
               {availableCheques.length === 0 &&
                 form.chequeLotId &&
                 !loadingCheques && (
-                  <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-1">
+                  <p className="text-[0.6875rem] text-amber-600 flex items-center gap-1 mt-1">
                     <AlertTriangle size={10} /> No available cheques left in
                     this lot.
                   </p>
@@ -297,8 +308,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                   size={13}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                 />
-                <input
-                  type="date"
+                <DateInput
                   value={form.chequeDate}
                   min={isPostDated ? new Date().toISOString().slice(0, 10) : undefined}
                   max={isPostDated ? undefined : new Date().toISOString().slice(0, 10)}

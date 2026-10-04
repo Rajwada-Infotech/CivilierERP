@@ -9,6 +9,8 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { DateTimeInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/lead-tasks";
 
@@ -121,21 +123,21 @@ const SaLeadTasks: React.FC = () => {
       <div className="space-y-5">
         {canDoAction("sa-lead-tasks", "create") && (
           <form onSubmit={createTask} className="grid grid-cols-1 md:grid-cols-6 gap-3 rounded-lg border border-border p-4 bg-background">
-            <select value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
+            <SearchableNativeSelect value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
               <option value="">Select lead</option>
               {leads.map((l: any) => <option key={l.Id} value={l.Id}>{l.LeadUid} - {l.CustomerName}</option>)}
-            </select>
+            </SearchableNativeSelect>
             <input value={form.Title} onChange={(e) => setForm({ ...form, Title: e.target.value })} placeholder="Task title" className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <select value={form.AssignedTo} onChange={(e) => setForm({ ...form, AssignedTo: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
+            <SearchableNativeSelect value={form.AssignedTo} onChange={(e) => setForm({ ...form, AssignedTo: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
               <option value="">Assign to me</option>
               {users.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
-            </select>
-            <input type="datetime-local" value={form.DueDate} onChange={(e) => setForm({ ...form, DueDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <select value={form.Priority} onChange={(e) => setForm({ ...form, Priority: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
+            </SearchableNativeSelect>
+            <DateTimeInput value={form.DueDate} onChange={(e) => setForm({ ...form, DueDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
+            <select value={form.Priority} onChange={(e) => setForm({ ...form, Priority: e.target.value })} className="self-center h-10 border border-border rounded-md bg-background px-3 text-sm">
               {["Low", "Normal", "High", "Urgent"].map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
             <textarea value={form.Description} onChange={(e) => setForm({ ...form, Description: e.target.value })} placeholder="Task notes" className="md:col-span-4 min-h-20 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <button className="md:col-span-1 inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium">
+            <button className="md:col-span-1 inline-flex items-center justify-center gap-2 self-center h-10 rounded-md btn-module text-white px-4 text-sm font-medium shadow-sm">
               <Plus size={15} /> Add
             </button>
           </form>

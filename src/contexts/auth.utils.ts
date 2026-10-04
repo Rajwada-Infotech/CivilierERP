@@ -218,10 +218,11 @@ export const getInitials = (name: string) =>
 
 export const ADMIN_ONLY_PAGES: PageKey[] = [
   "menu-rights", "widget-rights", "fin-year-rights",
-  "approval-setup", "post-approval-rights", "page-definitions",
+  "approval-setup", "post-approval-rights", "project-access", "page-definitions",
   "users", "role-master",
   "dba-control-panel", "dba-ads", "dba-reminders",
   "dba-payment-logs", "dba-dashboard", "dba-profile",
+  "dba-gl-posting-failures",
 ];
 
 // Updated to use centralized PRIVILEGED_ROLES

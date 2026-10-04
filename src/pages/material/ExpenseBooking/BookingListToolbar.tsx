@@ -2,6 +2,8 @@ import { useState } from "react";
 import { CalendarDays, Building2, FolderKanban, Hash, Truck, Filter, ChevronDown } from "lucide-react";
 import { CardTitle } from "@/components/ui/card";
 import { ALL_STATUSES } from "./constants";
+import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 interface OptionLike {
   id: number | string;
@@ -89,7 +91,7 @@ export function BookingListToolbar({
             key={s}
             type="button"
             onClick={() => onStatusFilterChange(s)}
-            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === s ? "bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-indigo-500/40"}`}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === s ? "btn-module text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-indigo-500/40"}`}
           >
             {s}
           </button>
@@ -104,10 +106,10 @@ export function BookingListToolbar({
         onClick={() => setShowFilters((v) => !v)}
         className="flex items-center justify-between gap-3 pt-3 border-t border-border/60"
       >
-        <span className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors">
+        <span className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors">
           <Filter size={11} /> More Filters
           {activeFilterCount > 0 && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-indigo-500 text-white">
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-indigo-500 text-white">
               {activeFilterCount} active
             </span>
           )}
@@ -120,7 +122,7 @@ export function BookingListToolbar({
                 e.stopPropagation();
                 clearAllFilters();
               }}
-              className="text-[11px] text-destructive/70 hover:text-destructive font-heading transition-colors cursor-pointer"
+              className="text-[0.6875rem] text-destructive/70 hover:text-destructive font-heading transition-colors cursor-pointer"
             >
               Clear all
             </span>
@@ -136,7 +138,7 @@ export function BookingListToolbar({
         <>
           <div className="flex flex-wrap items-end gap-4 pt-3 border-t border-border/60">
             <div className="space-y-1 mt-2">
-              <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 <CalendarDays size={10} /> Fin Year
               </label>
               <select
@@ -153,11 +155,10 @@ export function BookingListToolbar({
               </select>
             </div>
             <div className="space-y-1 mt-2">
-              <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 From
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={dateFrom}
                 max={dateTo || undefined}
                 onChange={(e) => onDateFromChange(e.target.value)}
@@ -165,11 +166,10 @@ export function BookingListToolbar({
               />
             </div>
             <div className="space-y-1 mt-2">
-              <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 To
               </label>
-              <input
-                type="date"
+              <DateInput
                 value={dateTo}
                 min={dateFrom || undefined}
                 onChange={(e) => onDateToChange(e.target.value)}
@@ -182,7 +182,7 @@ export function BookingListToolbar({
               Finance > Payment page. */}
           <div className="flex flex-wrap items-end gap-4 pt-3 border-t border-border/60">
             <div className="space-y-1 mt-2">
-              <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 <Building2 size={10} /> Company
               </label>
               <select
@@ -199,7 +199,7 @@ export function BookingListToolbar({
               </select>
             </div>
             <div className="space-y-1 mt-2">
-              <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 <FolderKanban size={10} /> Project
               </label>
               <select
@@ -216,7 +216,7 @@ export function BookingListToolbar({
               </select>
             </div>
             <div className="space-y-1 mt-2">
-              <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 <Hash size={10} /> Doc No
               </label>
               <input
@@ -228,10 +228,10 @@ export function BookingListToolbar({
               />
             </div>
             <div className="space-y-1 mt-2">
-              <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 <Truck size={10} /> Vendor
               </label>
-              <select
+              <SearchableNativeSelect
                 value={vendorFilter}
                 onChange={(e) => onVendorFilterChange(e.target.value)}
                 className="h-8 min-w-[160px] rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
@@ -242,7 +242,7 @@ export function BookingListToolbar({
                     {v.label}
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
           </div>
         </>

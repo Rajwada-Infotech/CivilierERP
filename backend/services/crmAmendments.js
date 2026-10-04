@@ -9,7 +9,7 @@ async function createAmendmentRequest(pool, { bookingId, changeType, action, tar
     .input("bid", sql.Int, bookingId)
     .input("ct", sql.NVarChar(30), changeType)
     .input("act", sql.NVarChar(20), action)
-    .input("tid", sql.Int, targetId || null)
+    .input("tid", sql.Int, targetId != null ? targetId : null)
     .input("pc", sql.NVarChar(sql.MAX), JSON.stringify(proposedChange || {}))
     .input("reason", sql.NVarChar(500), reason)
     .input("rb", sql.Int, requestedBy)

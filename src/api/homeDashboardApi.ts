@@ -320,13 +320,14 @@ export async function fetchHomeDashboard(
     hasFollowupAccess
       ? safeFetch<unknown>("/api/task-master/followup-board")
       : skip,
+    // Single-row SQL aggregate — replaces the old ?limit=500 row dump.
     hasSalesAccess
-      ? safeFetch<{ data: any[]; total: number }>("/api/sale-orders?limit=500")
+      ? safeFetch<{ total: number; approved: number; pendingApproval: number; thisMonthAmount: number; totalAmount: number }>(
+          "/api/home/sales-summary",
+        )
       : skip,
-    // Fetch active project count independently — engineering/dashboard is
-    // permission-gated so non-engineering users would always see 0 otherwise.
-    safeFetch<unknown>("/api/project-master"),
   ] as const;
+
 
   const adminRequest = isAdmin
     ? safeFetch<AdminDashboardData>("/api/admin-dashboard")
@@ -341,7 +342,6 @@ export async function fetchHomeDashboard(
     engineeringRes,
     followupBoardRes,
     saleOrdersRes,
-    projectMasterRes,
     adminRes,
   ] = await Promise.all([...baseRequests, adminRequest]);
 
@@ -378,26 +378,6 @@ export async function fetchHomeDashboard(
 
   const engRaw = engineeringRes.data as any;
 
-  // Compute active project count from the project-master list — this works for
-  // ALL roles because /api/project-master has no engineering permission gate.
-  // The engineering dashboard count is used when available (admins/engineers),
-  // otherwise we fall back to the project-master list.
-  const projectMasterList: any[] = (() => {
-    const d = projectMasterRes.data;
-    return Array.isArray(d)
-      ? d
-      : Array.isArray((d as any)?.data)
-        ? (d as any).data
-        : [];
-  })();
-  const activeProjectsFromMaster = projectMasterList.filter(
-    (p: any) =>
-      p.IsActive === 1 ||
-      p.isActive === true ||
-      p.discontinue === 0 ||
-      p.discontinue === false,
-  ).length;
-
   const engineering: EngineeringSummaryData | null = engRaw
     ? {
         workOrders: engRaw.workOrders ?? {
@@ -413,20 +393,15 @@ export async function fetchHomeDashboard(
           certifiedAmount: 0,
         },
         projects: {
-          total: engRaw.projects?.total ?? projectMasterList.length,
-          // Prefer engineering dashboard count; fall back to project-master list
-          active: engRaw.projects?.active ?? activeProjectsFromMaster,
+          total: engRaw.projects?.total ?? 0,
+          active: engRaw.projects?.active ?? 0,
         },
       }
     : {
-        // Engineering dashboard unreachable (permission gate) — still show project counts
         workOrders: { total: 0, open: 0, thisMonth: 0, totalValue: 0 },
         boq: { total: 0, approved: 0, totalValue: 0 },
         workDone: { total: 0, pending: 0, certifiedAmount: 0 },
-        projects: {
-          total: projectMasterList.length,
-          active: activeProjectsFromMaster,
-        },
+        projects: { total: 0, active: 0 },
       };
 
   // Helper to unwrap paginated or raw array responses
@@ -463,39 +438,16 @@ export async function fetchHomeDashboard(
       })),
   };
 
-  // ── Sales summary
-  const soList: any[] = (() => {
-    const d = saleOrdersRes.data;
-    return Array.isArray(d)
-      ? d
-      : Array.isArray((d as any)?.data)
-        ? (d as any).data
-        : [];
-  })();
-  const soNow = new Date();
-  // Use YYYY-MM prefix for safe UTC-safe month comparison
-  const soMonthPrefix = `${soNow.getFullYear()}-${String(soNow.getMonth() + 1).padStart(2, "0")}`;
+  // ── Sales summary — now a pre-aggregated scalar from /api/home/sales-summary
+  const soSummary = saleOrdersRes.data as any;
   const sales: SalesSummaryData = {
-    total: soList.length,
-    approved: soList.filter((o) =>
-      (o.Status ?? "").toLowerCase().includes("approved"),
-    ).length,
-    pendingApproval: soList.filter((o) =>
-      ["pending", "draft"].some((s) =>
-        (o.Status ?? "").toLowerCase().includes(s),
-      ),
-    ).length,
-    thisMonthAmount: soList
-      .filter((o) => {
-        const d = o.OrderDate ?? o.CreatedAt ?? "";
-        return typeof d === "string" ? d.startsWith(soMonthPrefix) : false;
-      })
-      .reduce((sum, o) => sum + (Number(o.TotalAmount) || 0), 0),
-    totalAmount: soList.reduce(
-      (sum, o) => sum + (Number(o.TotalAmount) || 0),
-      0,
-    ),
+    total:           soSummary?.total           ?? 0,
+    approved:        soSummary?.approved        ?? 0,
+    pendingApproval: soSummary?.pendingApproval ?? 0,
+    thisMonthAmount: soSummary?.thisMonthAmount ?? 0,
+    totalAmount:     soSummary?.totalAmount     ?? 0,
   };
+
 
   return {
     finance: normalizeFinanceDashboard(financeRes.data),

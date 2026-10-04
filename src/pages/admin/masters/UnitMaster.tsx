@@ -1,5 +1,6 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -15,17 +16,30 @@ import {
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
+import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 
 const API = "/api/unit-master";
 const DROPDOWN_API = "/api/business/dropdown";
 
-// Fixed vocabulary shared with every page that consumes Unit Master
-// (CrmBooking, etc.) so "Type of Unit" is picked once here and auto-fetched
-// everywhere the unit itself is selected — never re-typed per transaction.
-const UNIT_TYPES = [
-  "1 BHK", "1.5 BHK", "2 BHK", "2.5 BHK", "3 BHK", "3.5 BHK", "4 BHK", "4+ BHK",
-  "Studio", "Villa", "Plot", "Commercial", "Other",
-];
+// "Type of Unit" is picked once here and auto-fetched everywhere the unit
+// itself is selected (CrmBooking, etc.) — never re-typed per transaction.
+// The vocabulary is Unit Composition's layout types (dbo.RoomLayoutType),
+// the same list CRM Auto Setup uses, and only types with a defined room
+// layout can be newly picked: the unit's Room Master rows are built from it.
+// Injected as __layoutTypes through externalFormPatch below.
+
+// Unit add/edit also builds/adjusts the unit's Room Master rows from its
+// layout — the response's roomSync says what happened to them.
+type RoomSync = { layout: string | null; added: number; renamed: number; deactivated: number; keptWithWork: string[] } | null;
+function toastUnitSaved(base: string, roomSync: RoomSync) {
+  const parts: string[] = [];
+  if (roomSync?.added) parts.push(`${roomSync.added} room(s) added from the ${roomSync.layout} layout`);
+  if (roomSync?.deactivated) parts.push(`${roomSync.deactivated} room(s) no longer in the layout deactivated`);
+  toast.success(parts.length ? `${base} — ${parts.join(", ")}` : base);
+  if (roomSync?.keptWithWork?.length) {
+    toast.warning(`Kept ${roomSync.keptWithWork.join(", ")} — not in the new layout but has DPR work recorded against it.`);
+  }
+}
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function fetchUnits(): Promise<any[]> {
@@ -99,12 +113,15 @@ const fields: FieldDef[] = [
     name: "floorNo",
     label: "Floor No.",
     type: "number",
+    required: true,
   },
   {
     name: "unitType",
     label: "Type of Unit",
     type: "select",
-    options: UNIT_TYPES,
+    optionsProvider: (_data, _currentId, form) =>
+      unitTypeOptions(((form?.__layoutTypes as any) ?? []) as LayoutType[], form?.unitType as string | undefined)
+        .map((o) => ({ value: o.value, label: o.label })),
   },
   {
     name: "paymentPlanIds",
@@ -179,7 +196,7 @@ const fields: FieldDef[] = [
             )}
           </div>
           {hasAny ? (
-            <div className="grid grid-cols-3 gap-3 mt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-1">
               <div>
                 <div className="text-xs text-muted-foreground mb-0.5">Carpet</div>
                 <div className="font-medium tabular-nums">{fmt(carpet)}</div>
@@ -351,6 +368,12 @@ const UnitMaster: React.FC = () => {
   const companies = dropdownData?.companies ?? [];
   const projectsList = dropdownData?.projects ?? [];
 
+  const { data: layoutTypes = [] } = useQuery<LayoutType[]>({
+    queryKey: LAYOUT_TYPES_QUERY_KEY,
+    queryFn: getLayoutTypes,
+    staleTime: 60 * 1000,
+  });
+
   // Backend → frontend shape; also inject __blocks so optionsProvider can see them
   const mappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(units)) return [];
@@ -395,7 +418,7 @@ const UnitMaster: React.FC = () => {
         ? "Blocked"
         : item.LockBookingNo
           ? "Booked"
-          : item.LockHoldId
+          : item.LockHoldId != null
             ? "On Hold"
             : "Available",
       };
@@ -411,8 +434,9 @@ const UnitMaster: React.FC = () => {
       __blockPlanTags: blockPlanTags,
       __companies: companies,
       __projects: projectsList,
+      __layoutTypes: layoutTypes,
     }),
-    [allBlocks, allPaymentPlans, blockPlanTags, companies, projectsList],
+    [allBlocks, allPaymentPlans, blockPlanTags, companies, projectsList, layoutTypes],
   );
 
   const toPayload = (r: Record<string, any>) => ({
@@ -437,9 +461,10 @@ const UnitMaster: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toPayload(event.record)),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to add unit");
-      toast.success("Unit added!");
+        throw new Error(data.error || "Failed to add unit");
+      toastUnitSaved("Unit added!", data.roomSync ?? null);
     }
     if (event.action === "update") {
       const res = await fetchWithAuth(`${API}/${event.id}`, {
@@ -447,9 +472,10 @@ const UnitMaster: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toPayload(event.record)),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to update unit");
-      toast.success("Unit updated!");
+        throw new Error(data.error || "Failed to update unit");
+      toastUnitSaved("Unit updated!", data.roomSync ?? null);
     }
     if (event.action === "delete") {
       const res = await fetchWithAuth(`${API}/${event.id}`, {
@@ -460,6 +486,8 @@ const UnitMaster: React.FC = () => {
       toast.success("Unit deleted!");
     }
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
+    // Flat Master — a unit add/edit/delete builds/adjusts/removes its rooms.
+    invalidateRoomData(queryClient);
   };
 
   if (isLoading)
@@ -497,13 +525,13 @@ const UnitMaster: React.FC = () => {
         isRowLocked={(row) =>
           row.lockBookingNo
             ? `Booked (${row.lockBookingNo as string})`
-            : row.lockHoldId
+            : row.lockHoldId != null
               ? "On Hold"
               : null
         }
         // Inject __blocks + reset blockId when project changes
         externalFormPatch={blocksPatch}
-        externalFormPatchKey={`${allBlocks.length}:${allPaymentPlans.length}:${blockPlanTags.length}:${companies.length}:${projectsList.length}`}
+        externalFormPatchKey={`${allBlocks.length}:${allPaymentPlans.length}:${blockPlanTags.length}:${companies.length}:${projectsList.length}:${layoutTypes.map((t) => `${t.id}-${t.roomCount}`).join(",")}`}
         onFieldChange={(form, fieldName) => {
           if (fieldName === "companyId") {
             return { ...form, projectId: "", blockId: "" };
@@ -555,7 +583,7 @@ const UnitMaster: React.FC = () => {
           win.document.write(safeHtml`
             <html><head><title>Unit — ${row.unitName}</title>
             <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-            </head><body><h2>Unit Card</h2><table>
+            </head><body><h2>Unit Card</h2><div className="overflow-x-auto thin-scroll"><table>
               <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
               <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
               <tr><td>Unit Name</td><td>${row.unitName || "—"}</td></tr>
@@ -569,7 +597,7 @@ const UnitMaster: React.FC = () => {
               <tr><td>Base Price</td><td>${(() => { const r = parseFloat(row.ratePerSqFt as string); const s = parseFloat(row.superBuiltUpAreaSqFt as string); return !isNaN(r) && !isNaN(s) && r > 0 && s > 0 ? "₹ " + Math.round(r * s).toLocaleString("en-IN") : "—"; })()}</td></tr>
               <tr><td>Payment Plans</td><td>${row.paymentPlanNames || "—"}</td></tr>
               <tr><td>Status</td><td>${row.status || "—"}</td></tr>
-            </table></body></html>
+            </table></div></body></html>
           `);
           win.document.close();
           win.print();

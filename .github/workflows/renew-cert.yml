@@ -1,0 +1,46 @@
+# Renews the Let's Encrypt certificate for civiliererp.in on the EC2 box.
+#
+# Nothing else in the repo renews it: the certbot service in
+# docker-compose.yml is only an image with the cert folders mounted, with no
+# command or schedule of its own. Certbot only renews a certificate once it
+# is within 30 days of expiry, so running this weekly is safe: most runs just
+# report "not yet due" and change nothing, and the runs inside the last 30
+# days do the actual renewal and reload nginx so it picks up the new cert.
+#
+# Uses the same three repo secrets and box path as deploy.yml
+# (EC2_HOST, EC2_USER, EC2_SSH_KEY). A failed renewal fails the run, so it
+# shows up as a red X on the Actions tab.
+#
+# Scheduled workflows only run from the default branch (main).
+name: Renew SSL certificate
+
+on:
+  schedule:
+    - cron: "30 3 * * 1" # Mondays 03:30 UTC
+  workflow_dispatch:
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Renew certificate over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            # Absolute path, not ~ (see the note in deploy.yml about this
+            # box's broken $HOME under a non-interactive SSH login).
+            cd /home/administrator/CivilierERP
+
+            echo "Checking certificate renewal..."
+            docker compose run --rm certbot renew --webroot -w /var/www/certbot
+
+            echo "Reloading nginx so it serves the current certificate..."
+            docker compose exec -T nginx nginx -s reload
+
+            echo "Certificate now expires:"
+            echo | openssl s_client -connect localhost:443 -servername civiliererp.in 2>/dev/null | openssl x509 -noout -enddate

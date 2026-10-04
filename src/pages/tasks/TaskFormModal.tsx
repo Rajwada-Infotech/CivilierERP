@@ -4,6 +4,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { X, Plus, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 export default function TaskFormModal({ onClose, editTask }: { onClose: () => void; editTask?: any }) {
   const { addTask, updateTask } = useTask();
@@ -49,7 +52,7 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-background/80 backdrop-blur-sm p-0 sm:p-4">
+    <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-background/80 backdrop-blur-sm p-0 sm:p-4">
       <motion.div
         initial={{ opacity: 0, y: 40 }}
         animate={{ opacity: 1, y: 0 }}
@@ -91,7 +94,7 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
             </div>
             <div>
               <label className="block text-xs font-heading text-muted-foreground mb-1">Due Date *</label>
-              <input type="date" value={form.dueDate} onChange={e => setForm(p => ({ ...p, dueDate: e.target.value }))} required
+              <DateInput value={form.dueDate} onChange={e => setForm(p => ({ ...p, dueDate: e.target.value }))} required
                 className={`w-full px-3 py-2 rounded-lg text-sm bg-muted border text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${submitAttempted && !form.dueDate ? "border-destructive" : "border-border"}`} />
               {submitAttempted && !form.dueDate && (
                 <p className="mt-1 text-xs text-destructive">Due date is required</p>
@@ -101,11 +104,11 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
 
           <div>
             <label className="block text-xs font-heading text-muted-foreground mb-1">Assign To *</label>
-            <select value={form.assignedTo} onChange={e => handleAssign(e.target.value)} required
+            <SearchableNativeSelect value={form.assignedTo} onChange={e => handleAssign(e.target.value)} required
               className={`w-full px-3 py-2 rounded-lg text-sm bg-muted border text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${submitAttempted && !form.assignedTo ? "border-destructive" : "border-border"}`}>
               <option value="">Select user...</option>
               {allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
+            </SearchableNativeSelect>
             {submitAttempted && !form.assignedTo && (
               <p className="mt-1 text-xs text-destructive">Assignee is required</p>
             )}
@@ -146,6 +149,6 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
           </div>
         </form>
       </motion.div>
-    </div>
+    </div></BodyPortal>
   );
 }

@@ -12,19 +12,66 @@ router.use(
 );
 
 const { getPool, sql } = require("../db");
+const { projectAllowed } = require("../services/projectScope");
+
+// An inter-company transfer belongs to BOTH of its projects: a restricted user
+// can see it if either end is theirs (the receiving project needs to see what
+// is coming in) but can only raise one out of their own sender project.
+const ictScopeIds = (scope) => scope.map(Number).filter(Number.isFinite).join(",") || "NULL";
+const ictVisibleSql = (scope, alias = "ict") =>
+  scope ? `(${alias}.SenderProjectId IN (${ictScopeIds(scope)}) OR ${alias}.ReceiverProjectId IN (${ictScopeIds(scope)}))` : "";
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
 const { transition } = require("../services/approvalService");
-const { postReceivedPaymentApproval } = require("../services/generalLedger");
-const { getLastPurchaseRate } = require("../services/lastPurchaseRate");
-const { createSaleOrderInternal } = require("./customerSaleOrders");
-const { createSaleInvoiceInternal } = require("./saleInvoices");
-const { createReceivedPaymentInternal } = require("./receivedPayment");
-const { createPurchaseOrderInternal } = require("./purchaseOrders");
-const { createGRNInternal } = require("./grns");
-const { createExpenseBookingInternal } = require("./expenseBooking");
+const { getLastPurchaseRateByCompany } = require("../services/lastPurchaseRate");
+const { postInterCompanyStockTransferToGL } = require("../services/interCompanyStockTransferGL");
+const { reversePostingBySource } = require("../services/generalLedger");
+const { getMRItemFulfillment, recomputeMRFulfillment } = require("../services/materialRequestFulfillment");
+
+// Idempotent schema migration — adds GST columns if missing (safe to run every
+// startup; IF NOT EXISTS pattern avoids errors on already-updated DBs).
+async function ensureIctGstColumns(pool) {
+  try {
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransferItems' AND COLUMN_NAME='GstPct')
+        ALTER TABLE dbo.InterCompanyTransferItems ADD GstPct DECIMAL(5,2) NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransferItems' AND COLUMN_NAME='GstAmount')
+        ALTER TABLE dbo.InterCompanyTransferItems ADD GstAmount DECIMAL(18,2) NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransferItems' AND COLUMN_NAME='AmountInclGst')
+        ALTER TABLE dbo.InterCompanyTransferItems ADD AmountInclGst DECIMAL(18,2) NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransferItems' AND COLUMN_NAME='SortOrder')
+        ALTER TABLE dbo.InterCompanyTransferItems ADD SortOrder INT NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransfer' AND COLUMN_NAME='TotalGstAmount')
+        ALTER TABLE dbo.InterCompanyTransfer ADD TotalGstAmount DECIMAL(18,2) NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransfer' AND COLUMN_NAME='TotalAmountInclGst')
+        ALTER TABLE dbo.InterCompanyTransfer ADD TotalAmountInclGst DECIMAL(18,2) NULL;
+    `);
+  } catch (err) {
+    console.warn("[ICT] GST column migration warning (non-fatal):", err.message);
+  }
+}
+
+// Run migration once at module load time (pool may not be ready yet — the
+// getPool() call inside will connect lazily on first request if needed, so
+// we defer by one event-loop tick to let the connection pool initialise).
+setImmediate(async () => {
+  try { await ensureIctGstColumns(getPool()); }
+  catch (e) { /* pool not ready yet — migration will be skipped; it will
+                  re-run on next deploy */ }
+});
 
 function parsePositiveInt(value) {
   const n = parseInt(value, 10);
@@ -41,27 +88,6 @@ function userEmail(req) {
   return req.user?.email || req.user?.name || "system";
 }
 
-async function resolveDocType(pool, prefixes, linkLike = null) {
-  const list = Array.isArray(prefixes) ? prefixes : [prefixes];
-  for (const prefix of list) {
-    try {
-      return await resolveDocTypeId(pool, sql, prefix);
-    } catch {
-      /* try next option */
-    }
-  }
-  if (!linkLike) return null;
-  const result = await pool
-    .request()
-    .input("Link", sql.NVarChar(100), `%${linkLike}%`).query(`
-      SELECT TOP 1 TypeOfDocId
-      FROM dbo.TypeOfDoc
-      WHERE IsActive = 1 AND links_to LIKE @Link
-      ORDER BY TypeOfDocId
-    `);
-  return result.recordset[0]?.TypeOfDocId ?? null;
-}
-
 async function getProject(pool, projectId) {
   const result = await pool
     .request()
@@ -71,19 +97,6 @@ async function getProject(pool, projectId) {
       FROM dbo.enterprise p
       LEFT JOIN dbo.enterprise c ON c.id = p.company_id
       WHERE p.id = @ProjectId AND p.business_type = 'P'
-    `);
-  return result.recordset[0] || null;
-}
-
-async function getProjectLedger(pool, projectId, type) {
-  const suffix = type === "C" ? "CUST" : "SUPP";
-  const result = await pool
-    .request()
-    .input("Code", sql.NVarChar(20), `PRJ-${projectId}-${suffix}`)
-    .input("Type", sql.VarChar(50), type).query(`
-      SELECT TOP 1 LHeadId, LHeadName
-      FROM dbo.AccountHeadMaster
-      WHERE LHeadCode = @Code AND LHeadType = @Type AND Status = 'Approved'
     `);
   return result.recordset[0] || null;
 }
@@ -100,100 +113,22 @@ async function getProjectGodown(pool, projectId) {
   return result.recordset[0] || null;
 }
 
-async function getDummyBank(pool) {
-  const result = await pool.request().query(`
-    SELECT TOP 1 LHeadId, LHeadName
-    FROM dbo.AccountHeadMaster
-    WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'
-  `);
-  return result.recordset[0] || null;
-}
-
-async function createApprovedPayment(pool, payload, createdBy) {
-  const {
-    PPaymentName,
-    PMode = "Cash",
-    PAmount,
-    PDate,
-    PBankID,
-    PBankName,
-    PProject,
-    PCompany,
-    PExpenseRef,
-    parentDocNo,
-    rootExBDocNo,
-  } = payload;
-
-  const docTypeId = await resolveDocTypeId(pool, sql, "PAY");
-  const finalDocNo = await lockNextDocNumber(pool, sql, {
-    docTypeId,
-    tableName: "NewPayment",
-    docNoColumn: "DocNo",
-    issuedBy: createdBy,
-    parentDocNo,
-    rootExBDocNo,
-  });
-  const parts = finalDocNo.split("-");
-  const docYear = parseInt(parts[parts.length - 2], 10) || null;
-  const docSerial = parseInt(parts[parts.length - 1], 10) || null;
-
-  const insert = await pool
-    .request()
-    .input("PPaymentName", sql.VarChar, PPaymentName || "")
-    .input("PMode", sql.VarChar, PMode)
-    .input("PAmount", sql.Decimal(18, 2), Number(PAmount) || 0)
-    .input("PDocType", sql.VarChar, "Inter-Company Transfer")
-    .input("PDate", sql.Date, PDate || null)
-    .input("PBankID", sql.Int, PBankID)
-    .input("PBankName", sql.VarChar, PBankName || "Dummy Bank")
-    .input("PProject", sql.VarChar, PProject != null ? String(PProject) : "")
-    .input("PCompany", sql.VarChar, PCompany != null ? String(PCompany) : "")
-    .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
-    .input("DocNo", sql.NVarChar(100), finalDocNo)
-    .input("DocTypeId", sql.Int, docTypeId)
-    .input("DocYear", sql.SmallInt, docYear)
-    .input("DocSerial", sql.Int, docSerial)
-    .input("ParentDocNo", sql.NVarChar(100), parentDocNo || null)
-    .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo || null)
-    .input("PCreatedAt", sql.DateTime, new Date())
-    .input("PCreatedBy", sql.NVarChar(100), createdBy)
-    .input("Status", sql.NVarChar(20), "Pending").query(`
-      INSERT INTO dbo.NewPayment (
-        PPaymentName, PMode, PAmount, PDocType, PDate,
-        PBankID, PBankName, PProject, PCompany, PExpenseRef,
-        DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
-        PCreatedAt, PCreatedBy, Status
-      )
-      OUTPUT INSERTED.PPaymentID
-      VALUES (
-        @PPaymentName, @PMode, @PAmount, @PDocType, @PDate,
-        @PBankID, @PBankName, @PProject, @PCompany, @PExpenseRef,
-        @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
-        @PCreatedAt, @PCreatedBy, @Status
-      )
-    `);
-
-  const paymentId = insert.recordset[0].PPaymentID;
-  await backPatchRecordId(pool, sql, finalDocNo, "NewPayment", paymentId);
-  await transition("payments", paymentId, "Approved", createdBy, "admin", "System-approved inter-company stock transfer payment");
-  return { PPaymentID: paymentId, DocNo: finalDocNo };
-}
-
-// Drives a Draft record all the way to Approved regardless of how many
-// levels the configured approval workflow has. transition(..., "Approved")
-// only advances ONE level per call — for a 2+ level workflow, a single
-// call leaves the record at "Pending" with remainingLevels > 0 and never
-// fires GL posting. Loop until fully approved, capped by the workflow's
-// own totalLevels (from the first call's response) as a safety bound.
-async function approve(module, id, createdBy, note) {
-  await transition(module, id, "Pending", createdBy, "admin", note);
-  let result = await transition(module, id, "Approved", createdBy, "admin", note);
-  let guard = result?.totalLevels || 10;
-  while (result?.newStatus !== "Approved" && guard-- > 0) {
-    result = await transition(module, id, "Approved", createdBy, "admin", note);
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const tid = parseInt(id, 10);
+  if (!Number.isFinite(tid)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, tid).query(
+      `SELECT CASE WHEN ${ictVisibleSql(req.projectScope, "ict")} THEN 1 ELSE 0 END AS visible FROM dbo.InterCompanyTransfer ict WHERE ict.ICTId = @id`,
+    );
+    if (r.recordset.length && !r.recordset[0].visible) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  return result;
-}
+});
 
 router.get("/", authenticateToken, async (req, res) => {
   try {
@@ -201,6 +136,7 @@ router.get("/", authenticateToken, async (req, res) => {
     const { companyId, projectId, dateFrom, dateTo, status, limit = 100, page = 1 } = req.query;
     const request = pool.request();
     const where = [];
+    if (req.projectScope) where.push(ictVisibleSql(req.projectScope, "ict"));
 
     if (companyId) {
       where.push("(ict.SenderCompanyId = @companyId OR ict.ReceiverCompanyId = @companyId)");
@@ -260,12 +196,15 @@ router.get("/summary", authenticateToken, async (req, res) => {
       SELECT YEAR(TransferDate) AS Year,
              COUNT(*) AS TransferCount,
              SUM(TotalAmount) AS TotalAmount
-      FROM dbo.InterCompanyTransfer
+      FROM dbo.InterCompanyTransfer ict
     `;
+    const sumWhere = [];
     if (status !== "all") {
       request.input("status", sql.NVarChar(20), status);
-      query += " WHERE Status = @status";
+      sumWhere.push("ict.Status = @status");
     }
+    if (req.projectScope) sumWhere.push(ictVisibleSql(req.projectScope, "ict"));
+    if (sumWhere.length) query += " WHERE " + sumWhere.join(" AND ");
     query += " GROUP BY YEAR(TransferDate) ORDER BY Year DESC";
     const result = await request.query(query);
     res.json(result.recordset);
@@ -274,11 +213,10 @@ router.get("/summary", authenticateToken, async (req, res) => {
   }
 });
 
-// Re-resolves every entity needed to run the document chain, either from a
-// fresh POST body (creation time) or from a stored ICT header + items row
-// (approval time) — same shape either way so executeTransferChain() never
-// needs to know which caller it came from.
-async function resolveTransferContext(pool, { senderProjectId, receiverProjectId, items }) {
+// Re-resolves every entity needed to move stock + post GL for a transfer,
+// either from a fresh POST body (creation time) or from a stored ICT header
+// (approval time) — same shape either way.
+async function resolveTransferContext(pool, { senderProjectId, receiverProjectId }) {
   const sender = await getProject(pool, senderProjectId);
   const receiver = await getProject(pool, receiverProjectId);
   if (!sender || !receiver) {
@@ -297,16 +235,6 @@ async function resolveTransferContext(pool, { senderProjectId, receiverProjectId
     throw err;
   }
 
-  const receiverCustomer = await getProjectLedger(pool, receiverProjectId, "C");
-  const senderSupplier = await getProjectLedger(pool, senderProjectId, "S");
-  if (!receiverCustomer || !senderSupplier) {
-    const err = new Error(
-      "Auto-created customer/supplier ledger heads are missing. Re-save the projects or create PRJ-{id}-CUST and PRJ-{id}-SUPP approved heads.",
-    );
-    err.status = 400;
-    throw err;
-  }
-
   const senderGodown = await getProjectGodown(pool, senderProjectId);
   const receiverGodown = await getProjectGodown(pool, receiverProjectId);
   if (!senderGodown || !receiverGodown) {
@@ -315,17 +243,28 @@ async function resolveTransferContext(pool, { senderProjectId, receiverProjectId
     throw err;
   }
 
-  const dummyBank = await getDummyBank(pool);
-  if (!dummyBank) {
-    const err = new Error("Dummy Bank account not found.");
-    err.status = 500;
-    throw err;
-  }
-
-  return { sender, receiver, receiverCustomer, senderSupplier, senderGodown, receiverGodown, dummyBank };
+  return { sender, receiver, senderGodown, receiverGodown };
 }
 
-async function priceItems(pool, senderProjectId, senderProjectName, items) {
+// Priced at the SENDING COMPANY's own most recent purchase rate — across
+// every project that company owns, not just the one project the stock
+// happens to be leaving from (a sibling project may have bought the same
+// item more recently). Returns excl-GST rate + GST breakdown per item.
+// applyGst=false is a real business choice (not just a display preference)
+// — some inter-company movements genuinely aren't a taxable supply — so it
+// zeroes the GST component entirely rather than just hiding it: gstPct/
+// gstAmount come back 0 and amountInclGst equals the excl-GST amount.
+//
+// An item with no purchase history anywhere under the sending company used
+// to hard-fail the whole preview/create call — one such item blocked
+// pricing every other, perfectly priceable, item on the same transfer.
+// Now it prices at 0 with needsManualRate: true instead, so /preview can
+// still show every other item; the caller passes manualRate (and, if it
+// matters, manualGstPct) once the user's typed one in, and this same
+// function re-prices that item for real on the next call. POST / (actual
+// creation) still refuses to create anything while any item is still
+// unpriced — see its own check after calling this.
+async function priceItems(pool, senderCompanyId, senderCompanyName, items, applyGst = true) {
   const pricedItems = [];
   for (const [idx, item] of items.entries()) {
     const itemId = item.itemId || item.ItemId || item.ItemID;
@@ -335,254 +274,172 @@ async function priceItems(pool, senderProjectId, senderProjectName, items) {
       err.status = 400;
       throw err;
     }
-    const rateInfo = await getLastPurchaseRate(pool, senderProjectId, itemId);
-    if (!rateInfo) {
-      const err = new Error(
-        `No last purchase rate found for item ${item.itemName || itemId} in sender project ${senderProjectName}.`,
-      );
-      err.status = 400;
-      throw err;
+    const manualRate = Number(item.manualRate ?? item.ManualRate);
+    const rateInfo = await getLastPurchaseRateByCompany(pool, senderCompanyId, itemId);
+
+    let rate, gstPct, sourceDocNo, needsManualRate;
+    if (rateInfo) {
+      rate = Number(rateInfo.rate);
+      gstPct = applyGst ? Number(rateInfo.gstPct || 0) : 0;
+      sourceDocNo = rateInfo.sourceDocNo || null;
+      needsManualRate = false;
+    } else if (Number.isFinite(manualRate) && manualRate > 0) {
+      rate = manualRate;
+      gstPct = applyGst ? Number(item.manualGstPct ?? item.ManualGstPct ?? 0) || 0 : 0;
+      sourceDocNo = "Manual entry — no purchase history found";
+      needsManualRate = false;
+    } else {
+      rate = 0;
+      gstPct = 0;
+      sourceDocNo = null;
+      needsManualRate = true;
     }
-    const rate = Number(rateInfo.rate);
+
+    const baseAmt  = Math.round(qty * rate * 100) / 100;
+    const gstAmt   = Math.round(baseAmt * (gstPct / 100) * 100) / 100;
     pricedItems.push({
-      itemId: String(itemId),
-      itemName: item.itemName || item.ItemName || null,
-      itemCode: item.itemCode || item.ItemCode || null,
-      description: item.description || item.itemName || item.ItemName || null,
-      quantity: qty,
+      itemId:       String(itemId),
+      itemName:     item.itemName || item.ItemName || null,
+      itemCode:     item.itemCode || item.ItemCode || null,
+      description:  item.description || item.itemName || item.ItemName || null,
+      quantity:     qty,
       qty,
-      unit: item.uom || item.Unit || item.unit || "NOS",
-      uom: item.uom || item.Unit || item.unit || "NOS",
+      unit:         item.uom || item.Unit || item.unit || "NOS",
+      uom:          item.uom || item.Unit || item.unit || "NOS",
       rate,
-      amount: Math.round(qty * rate * 100) / 100,
-      tax: Number(item.tax || item.TaxPct || 0),
-      sourceDocNo: rateInfo.sourceDocNo || null,
+      amount:       baseAmt,          // excl. GST
+      gstPct,
+      gstAmount:    gstAmt,
+      amountInclGst: Math.round((baseAmt + gstAmt) * 100) / 100,
+      sourceDocNo,
+      needsManualRate,
+      // Which MaterialRequestItems row this line came from, when the ICT
+      // was raised from an MR — same passthrough purchaseOrders.js's own
+      // item mapping does for its own mrItemId.
+      mrItemId: item.mrItemId ?? item.MRItemId ?? null,
     });
   }
   return pricedItems;
 }
 
-// Persists a single link column the moment its document is created, rather
-// than waiting until the entire chain finishes. If a later step in the
-// chain throws (a real incident that happened in production: GRN creation
-// failed on a code bug, leaving the ICT stuck "Approved" with every link
-// NULL and SO/SI/RP/PO already committed but untraceable from the header),
-// the header still shows exactly how far the chain got — turning a manual
-// forensic reconstruction into a simple "resume from here" story.
-async function persistLink(pool, ictId, column, value) {
-  if (!ictId || !value) return;
-  try {
-    await pool.request().input("id", sql.Int, ictId).input("v", sql.Int, value)
-      .query(`UPDATE dbo.InterCompanyTransfer SET ${column} = @v WHERE ICTId = @id`);
-  } catch (err) {
-    console.error(`[inter-company-transfer] failed to persist ${column}=${value} for ICT ${ictId} (non-fatal):`, err.message);
-  }
-}
-
-// Runs the full commercial-paper chain (SO -> SI -> Payment -> PO -> GRN ->
-// Expense Booking -> Payment) for an already-Approved ICT header. Only
-// called from PUT /:id/approve, once a super_admin has approved the
-// request — everything from here on is 100% automatic, no further manual
-// steps, matching the original "no manual work after approval" spec.
-async function executeTransferChain(pool, ctx, createdBy, opts = {}) {
-  const { sender, receiver, receiverCustomer, senderSupplier, senderGodown, receiverGodown, dummyBank, pricedItems, totalAmount, transferDate } = ctx;
-  const { finYear = null, referenceNumber = null, remarks = null, docNo = null, ictId = null } = opts;
-
-  // The GRN on the receiving side automatically credits the destination
-  // godown's StockLedger — but nothing on the sending side ever debited the
-  // sender's godown, so the same stock silently duplicated across both
-  // projects on every inter-company transfer. Deduct it here, mirroring
-  // stockTransfers.js's own OUT-entry shape, and fail before creating any
-  // documents if the sender doesn't actually have enough stock.
+// Throws a 400 naming every short item when the sender's godown can't cover
+// the transfer. An item that appears on several lines is checked on its
+// combined quantity. Used both when the request is created (so a shortfall is
+// refused up front instead of sitting in the approval queue) and again at
+// approval (stock can change while a request is Pending).
+async function assertStockAvailable(pool, senderGodown, sender, pricedItems) {
+  const demand = new Map();
   for (const item of pricedItems) {
+    const key = String(item.itemId);
+    const cur = demand.get(key) || { qty: 0, name: item.itemName || item.itemId };
+    cur.qty += Number(item.qty) || 0;
+    demand.set(key, cur);
+  }
+  const short = [];
+  for (const [itemId, d] of demand) {
     const avail = await pool.request()
-      .input("itemId", sql.NVarChar(100), String(item.itemId))
+      .input("itemId", sql.NVarChar(100), itemId)
       .input("godownId", sql.Int, senderGodown.GodownID).query(`
         SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
         FROM dbo.StockLedger
         WHERE ItemID = @itemId AND GodownID = @godownId
       `);
-    const available = Number(avail.recordset[0].Available || 0);
-    if (available < item.qty) {
-      const err = new Error(
-        `Insufficient stock for item ${item.itemName || item.itemId} in sender project ${sender.ProjectName}: available=${available}, requested=${item.qty}.`,
-      );
-      err.status = 400;
-      throw err;
-    }
+    const available = Number(avail.recordset[0]?.Available || 0);
+    if (available < d.qty - 0.0001) short.push({ name: d.name, available, requested: d.qty });
   }
+  if (short.length) {
+    const err = new Error(
+      `Insufficient stock in sender project ${sender.ProjectName}: ` +
+        short.map((s) => `${s.name} (available ${s.available}, requested ${s.requested})`).join("; ") + ".",
+    );
+    err.status = 400;
+    throw err;
+  }
+}
+
+// Runs for an already-Approved ICT header: moves stock directly (no GRN/SO
+// needed) and posts the two-sided GL voucher. Only called from
+// PUT /:id/approve — no further manual steps after approval.
+async function executeTransfer(pool, ctx, createdBy, opts = {}) {
+  const { sender, receiver, senderGodown, receiverGodown, pricedItems, totalAmount, transferDate } = ctx;
+  const { docNo = null, ictId = null } = opts;
+
+  // Validate stock is actually available before moving anything.
+  await assertStockAvailable(pool, senderGodown, sender, pricedItems);
+
+  // Credit the sender's godown OUT, debit the receiver's godown IN —
+  // straight StockLedger movement, same shape stockTransfers.js already
+  // uses for intra-company transfers. No GRN/SO/Invoice needed to move
+  // stock between two godowns just because they sit under different
+  // companies.
   for (const item of pricedItems) {
     await pool.request()
       .input("ItemID", sql.NVarChar(50), String(item.itemId))
       .input("Qty", sql.Decimal(18, 2), item.qty)
       .input("UOM", sql.NVarChar(20), item.uom || null)
+      .input("RefID", sql.Int, ictId || 0)
       .input("GodownID", sql.Int, senderGodown.GodownID)
       .input("DocNo", sql.NVarChar(100), docNo).query(`
         INSERT INTO dbo.StockLedger (ItemID,Qty,UOM,Type,RefType,RefID,GodownID,DocNo,CreatedDate)
-        VALUES (@ItemID,@Qty,@UOM,'OUT','ICT',0,@GodownID,@DocNo,GETDATE())
+        VALUES (@ItemID,@Qty,@UOM,'OUT','ICT',@RefID,@GodownID,@DocNo,GETDATE())
+      `);
+    await pool.request()
+      .input("ItemID", sql.NVarChar(50), String(item.itemId))
+      .input("Qty", sql.Decimal(18, 2), item.qty)
+      .input("UOM", sql.NVarChar(20), item.uom || null)
+      .input("RefID", sql.Int, ictId || 0)
+      .input("GodownID", sql.Int, receiverGodown.GodownID)
+      .input("DocNo", sql.NVarChar(100), docNo).query(`
+        INSERT INTO dbo.StockLedger (ItemID,Qty,UOM,Type,RefType,RefID,GodownID,DocNo,CreatedDate)
+        VALUES (@ItemID,@Qty,@UOM,'IN','ICT',@RefID,@GodownID,@DocNo,GETDATE())
       `);
   }
 
-  const soDocTypeId = await resolveDocType(pool, ["SO"], "Sale Order");
-  const poDocTypeId = await resolveDocType(pool, ["DPO", "PO"], "Purchase Order");
-  const ebDocTypeId = await resolveDocType(pool, ["INV-GRN", "ExB-GRN"], "Expense Booking");
-  if (!soDocTypeId || !poDocTypeId || !ebDocTypeId) {
-    const err = new Error("Required document types for SO/PO/Expense Booking are missing.");
-    err.status = 500;
-    throw err;
-  }
-
-  const so = await createSaleOrderInternal(pool, {
-      SODate: transferDate,
-      CustomerID: receiverCustomer.LHeadId,
-      CompanyId: sender.CompanyId,
-      ProjectId: sender.ProjectId,
-      ReceivingGodownId: receiverGodown.GodownID,
-      ItemDescription: `Inter-company transfer to ${receiver.ProjectName}`,
-      Quantity: pricedItems.reduce((sum, item) => sum + item.qty, 0),
-      Unit: pricedItems[0]?.unit || "NOS",
-      Rate: pricedItems[0]?.rate || 0,
-      TotalAmount: totalAmount,
-      ReferenceNumber: referenceNumber,
-      PaymentTerms: "System generated inter-company stock transfer",
-      Status: "Open",
-      Remarks: remarks || `Inter-company stock transfer to ${receiver.ProjectName}`,
-      DocTypeId: soDocTypeId,
-      finYear,
-      SOItems: pricedItems,
-    }, createdBy);
-    await persistLink(pool, ictId, "SaleOrderId", so.SaleOrderID);
-
-    const si = await createSaleInvoiceInternal(pool, {
-      SaleOrderID: so.SaleOrderID,
-      SaleOrderSource: "CustomerSaleOrders",
-      InvoiceDate: transferDate,
-      Amount: totalAmount,
-      Remarks: `Auto-generated for inter-company transfer ${so.SaleOrderNo}`,
-      RPFinYear: finYear,
-    }, createdBy, createdBy);
-    await persistLink(pool, ictId, "SaleInvoiceId", si.SaleInvoiceID);
-
-    const rp = await createReceivedPaymentInternal(pool, {
-      RPCompanyName: sender.CompanyName,
-      RPCompanyId: sender.CompanyId,
-      RPReceivedFrom: si.SaleInvoiceNo,
-      RPCustomerName: receiverCustomer.LHeadName,
-      RPProjectName: sender.ProjectName,
-      RPProjectId: sender.ProjectId,
-      RPDocDate: transferDate,
-      RPMode: "Cash",
-      RPAmount: totalAmount,
-      RPDepositBankId: dummyBank.LHeadId,
-      RPDepositBankName: dummyBank.LHeadName,
-      RPRemarks: `[InterCompanyTransfer] Auto receipt via Dummy Bank for ${si.SaleInvoiceNo}`,
-      SourceSaleInvoiceId: si.SaleInvoiceID,
-      SourceSaleInvoiceDocNo: si.SaleInvoiceNo,
-    }, createdBy);
-    await pool.request().input("Id", sql.Int, rp.RPPaymentID).query("UPDATE dbo.ReceivedPayment SET RPStatus='Approved' WHERE RPPaymentID=@Id");
-    await postReceivedPaymentApproval(pool, rp.RPPaymentID, createdBy);
-    await persistLink(pool, ictId, "ReceivedPaymentId", rp.RPPaymentID);
-
-    const po = await createPurchaseOrderInternal(pool, {
-      PODate: transferDate,
-      ExpectedDeliveryDate: transferDate,
-      SupplierID: senderSupplier.LHeadId,
-      CompanyId: receiver.CompanyId,
-      ProjectId: receiver.ProjectId,
-      ItemDescription: `Inter-company transfer from ${sender.ProjectName}`,
-      Quantity: pricedItems.reduce((sum, item) => sum + item.qty, 0),
-      Unit: pricedItems[0]?.unit || "NOS",
-      Rate: pricedItems[0]?.rate || 0,
-      TotalAmount: totalAmount,
-      PaymentTerms: "System generated inter-company stock transfer",
-      Status: "Draft",
-      Remarks: `Auto PO for ${si.SaleInvoiceNo}`,
-      DocTypeId: poDocTypeId,
-      finYear,
-      POItems: pricedItems,
-      POType: "InterCompanyTransfer",
-      SourceSaleOrderId: so.SaleOrderID,
-      SourceSaleOrderDocNo: so.SaleOrderNo,
-      SourceSaleInvoiceId: si.SaleInvoiceID,
-      SourceSaleInvoiceDocNo: si.SaleInvoiceNo,
-    }, createdBy);
-    await approve("purchase-orders", po.PurchaseOrderID, createdBy, "System-approved inter-company transfer PO");
-    await persistLink(pool, ictId, "PurchaseOrderId", po.PurchaseOrderID);
-
-    const grnItems = pricedItems.map((item) => ({
-      itemId: item.itemId,
-      itemName: item.itemName,
-      receivedQty: item.qty,
-      quantity: item.qty,
-      uom: item.uom,
-      rate: item.rate,
-      totalAmount: item.amount,
-      amount: item.amount,
-    }));
-    const grn = await createGRNInternal(pool, {
-      grnDate: transferDate,
-      supplierId: senderSupplier.LHeadId,
-      poId: po.PurchaseOrderID,
-      grnItems,
-      status: "Draft",
-      remarks: `Auto GRN for inter-company transfer ${si.SaleInvoiceNo}`,
-      finYear,
-      parentDocNo: po.PurchaseOrderNo,
-      godownId: receiverGodown.GodownID,
-      projectId: receiver.ProjectId,
-    }, createdBy);
-    await approve("grn", grn.GRNID, createdBy, "System-approved inter-company transfer GRN");
-    await persistLink(pool, ictId, "GRNId", grn.GRNID);
-
-    const eb = await createExpenseBookingInternal(pool, {
-      EName: senderSupplier.LHeadName,
-      EProjectName: receiver.ProjectName,
-      EDocumentType: "GRN",
-      EDocDate: transferDate,
-      EAmount: totalAmount,
-      ENetAmount: totalAmount,
-      ECompanyId: receiver.CompanyId,
-      EDocTypeId: ebDocTypeId,
-      EFinYear: finYear,
-      ESourceId: grn.GRNID,
-      ERemarks: `Auto expense booking for inter-company transfer ${si.SaleInvoiceNo}`,
-    }, createdBy, opts.userId || null);
-    await approve("expense-booking", eb.id, createdBy, "System-approved inter-company transfer invoice");
-    await persistLink(pool, ictId, "ExpenseBookingId", eb.id);
-
-    const payment = await createApprovedPayment(pool, {
-      PPaymentName: senderSupplier.LHeadName,
-      PAmount: totalAmount,
-      PDate: transferDate,
-      PBankID: dummyBank.LHeadId,
-      PBankName: dummyBank.LHeadName,
-      PProject: receiver.ProjectId,
-      PCompany: receiver.CompanyId,
-      PExpenseRef: eb.docNo,
-      parentDocNo: eb.docNo,
-      rootExBDocNo: eb.docNo,
-    }, createdBy);
-
-  return {
-    SaleOrderID: so.SaleOrderID,
-    SaleInvoiceID: si.SaleInvoiceID,
-    ReceivedPaymentID: rp.RPPaymentID,
-    PurchaseOrderID: po.PurchaseOrderID,
-    GRNID: grn.GRNID,
-    ExpenseBookingID: eb.id,
-    NewPaymentID: payment.PPaymentID,
-  };
+  await postInterCompanyStockTransferToGL(pool, {
+    transferId: ictId,
+    docNo,
+    transferDate,
+    senderCompanyId: sender.CompanyId,
+    senderCompanyName: sender.CompanyName,
+    receiverCompanyId: receiver.CompanyId,
+    receiverCompanyName: receiver.CompanyName,
+    totalAmount,
+    createdBy,
+  });
 }
 
 // Loads an ICT header + its stored items back into the same context shape
 // resolveTransferContext()/priceItems() produce at creation time, so
-// executeTransferChain() can run identically whether called fresh or from
-// a later approval action.
+// executeTransfer() can run identically whether called fresh or from a
+// later approval action.
 async function loadStoredTransferContext(pool, ictRow) {
   const ctx = await resolveTransferContext(pool, {
     senderProjectId: ictRow.SenderProjectId,
     receiverProjectId: ictRow.ReceiverProjectId,
   });
+
+  // ictRow.SenderCompanyId/ReceiverCompanyId already carry whatever company
+  // POST / resolved at creation time — including the cross-tag override
+  // (senderCompanyOverrideId/receiverCompanyOverrideId there) for a project
+  // tagged to a company that isn't its primary company_id. resolveTransferContext
+  // above only ever re-derives the project's PRIMARY company via getProject(),
+  // so without this it silently discarded that override at approval time —
+  // the point executeTransfer() actually posts GL — and posted under the
+  // wrong company whenever the two differed.
+  if (ictRow.SenderCompanyId && ictRow.SenderCompanyId !== ctx.sender.CompanyId) {
+    const r = await pool.request().input("Id", sql.Int, ictRow.SenderCompanyId)
+      .query("SELECT id, name FROM dbo.enterprise WHERE id = @Id");
+    if (r.recordset[0]) {
+      ctx.sender = { ...ctx.sender, CompanyId: r.recordset[0].id, CompanyName: r.recordset[0].name };
+    }
+  }
+  if (ictRow.ReceiverCompanyId && ictRow.ReceiverCompanyId !== ctx.receiver.CompanyId) {
+    const r = await pool.request().input("Id", sql.Int, ictRow.ReceiverCompanyId)
+      .query("SELECT id, name FROM dbo.enterprise WHERE id = @Id");
+    if (r.recordset[0]) {
+      ctx.receiver = { ...ctx.receiver, CompanyId: r.recordset[0].id, CompanyName: r.recordset[0].name };
+    }
+  }
 
   const itemRows = await pool.request().input("id", sql.Int, ictRow.ICTId).query(`
     SELECT ItemId, ItemName, UOMCode, Quantity, Rate, Amount, SourceDocNo
@@ -608,10 +465,91 @@ async function loadStoredTransferContext(pool, ictRow) {
   return {
     ...ctx,
     pricedItems,
-    totalAmount: Number(ictRow.TotalAmount),
+    // GL posts the real transacted amount, GST included when this transfer
+    // actually applied it (TotalAmountInclGst equals TotalAmount when it
+    // didn't) — falls back to TotalAmount for pre-GST-column rows.
+    totalAmount: Number(ictRow.TotalAmountInclGst ?? ictRow.TotalAmount),
     transferDate: ictRow.TransferDate,
   };
 }
+
+// POST /preview — prices items at the sending company's most recent
+// purchase rate (excl. GST) WITHOUT creating anything, so the form's
+// Posting tab can show exactly what will be booked before the user submits.
+router.post("/preview", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
+    const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
+    if (req.projectScope && !projectAllowed(req.projectScope, senderProjectId)) {
+      return res.status(403).json({ error: "You can only raise a transfer out of one of your own projects." });
+    }
+    // Optional company overrides — used when a project is cross-tagged to a
+    // company that isn't its primary company_id (e.g. Pristine Enclave tagged
+    // to Delta Gardens). The override governs GL posting; purchase rate
+    // lookup still uses the project's own company for accurate pricing.
+    const senderCompanyOverrideId = parsePositiveInt(req.body.SenderCompanyId);
+    const receiverCompanyOverrideId = parsePositiveInt(req.body.ReceiverCompanyId);
+    const items = asItems(req.body.Items || req.body.TransferItems);
+    // Whether this transfer is a taxable supply at all — defaults to true;
+    // pass ApplyGst: false when it genuinely isn't (see priceItems).
+    const applyGst = req.body.ApplyGst !== false;
+
+    if (!senderProjectId || !receiverProjectId) {
+      return res.status(400).json({ error: "SenderProjectId and ReceiverProjectId are required." });
+    }
+    if (!items.length) {
+      return res.json({ items: [], totalAmount: 0 });
+    }
+
+    const ctx = await resolveTransferContext(pool, { senderProjectId, receiverProjectId });
+
+    // Resolve override company names if IDs were supplied
+    let senderCompanyId = ctx.sender.CompanyId;
+    let senderCompanyName = ctx.sender.CompanyName;
+    let receiverCompanyId = ctx.receiver.CompanyId;
+    let receiverCompanyName = ctx.receiver.CompanyName;
+
+    if (senderCompanyOverrideId && senderCompanyOverrideId !== senderCompanyId) {
+      const overrideRes = await pool.request()
+        .input("Id", sql.Int, senderCompanyOverrideId)
+        .query("SELECT id, name FROM dbo.enterprise WHERE id = @Id");
+      if (overrideRes.recordset[0]) {
+        senderCompanyId = overrideRes.recordset[0].id;
+        senderCompanyName = overrideRes.recordset[0].name;
+      }
+    }
+    if (receiverCompanyOverrideId && receiverCompanyOverrideId !== receiverCompanyId) {
+      const overrideRes = await pool.request()
+        .input("Id", sql.Int, receiverCompanyOverrideId)
+        .query("SELECT id, name FROM dbo.enterprise WHERE id = @Id");
+      if (overrideRes.recordset[0]) {
+        receiverCompanyId = overrideRes.recordset[0].id;
+        receiverCompanyName = overrideRes.recordset[0].name;
+      }
+    }
+
+    const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items, applyGst);
+    const totalAmount       = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+    const totalGstAmount    = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
+    const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
+
+    res.json({
+      items: pricedItems,
+      totalAmount,
+      totalGstAmount,
+      totalAmountInclGst,
+      applyGst,
+      senderCompanyId,
+      senderCompanyName,
+      receiverCompanyId,
+      receiverCompanyName,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 
 router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"), async (req, res) => {
   try {
@@ -620,9 +558,16 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     const transferDate = req.body.TransferDate || new Date().toISOString().slice(0, 10);
     const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
     const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
+    if (req.projectScope && !projectAllowed(req.projectScope, senderProjectId)) {
+      return res.status(403).json({ error: "You can only raise a transfer out of one of your own projects." });
+    }
+    const senderCompanyOverrideId = parsePositiveInt(req.body.SenderCompanyId);
+    const receiverCompanyOverrideId = parsePositiveInt(req.body.ReceiverCompanyId);
     const items = asItems(req.body.Items || req.body.TransferItems);
     const finYear = req.body.finYear || req.body.FinYear || null;
     const remarks = req.body.Remarks || null;
+    const applyGst = req.body.ApplyGst !== false;
+    const sourceMRId = parsePositiveInt(req.body.SourceMRId);
 
     if (!senderProjectId || !receiverProjectId) {
       return res.status(400).json({ error: "SenderProjectId and ReceiverProjectId are required." });
@@ -634,15 +579,89 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       return res.status(400).json({ error: "At least one transfer item is required." });
     }
 
-    const ctx = await resolveTransferContext(pool, { senderProjectId, receiverProjectId, items });
-    const pricedItems = await priceItems(pool, senderProjectId, ctx.sender.ProjectName, items);
-    const totalAmount = pricedItems.reduce((sum, item) => sum + item.amount, 0);
+    const ctx = await resolveTransferContext(pool, { senderProjectId, receiverProjectId });
 
-    // Only validate + record the request here — no documents are generated
-    // yet. The full auto-chain (SO -> ... -> Payment) only fires once a
-    // super_admin approves this request via PUT /:id/approve, matching the
-    // same Draft -> Pending -> Approved gate every other module already
-    // uses ("as we usually do approve").
+    // Apply company overrides (cross-tagged project support)
+    let senderCompanyId = ctx.sender.CompanyId;
+    let receiverCompanyId = ctx.receiver.CompanyId;
+    if (senderCompanyOverrideId && senderCompanyOverrideId !== senderCompanyId) {
+      const r = await pool.request().input("Id", sql.Int, senderCompanyOverrideId)
+        .query("SELECT id FROM dbo.enterprise WHERE id = @Id");
+      if (r.recordset[0]) senderCompanyId = senderCompanyOverrideId;
+    }
+    if (receiverCompanyOverrideId && receiverCompanyOverrideId !== receiverCompanyId) {
+      const r = await pool.request().input("Id", sql.Int, receiverCompanyOverrideId)
+        .query("SELECT id FROM dbo.enterprise WHERE id = @Id");
+      if (r.recordset[0]) receiverCompanyId = receiverCompanyOverrideId;
+    }
+
+    const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items, applyGst);
+    const unpriced = pricedItems.filter((i) => i.needsManualRate);
+    if (unpriced.length) {
+      return res.status(400).json({
+        error: `No purchase history found for ${unpriced.map((i) => i.itemName || i.itemId).join(", ")} under ${ctx.sender.CompanyName} — enter a rate manually for ${unpriced.length === 1 ? "it" : "them"} before submitting.`,
+      });
+    }
+
+    // Raised from a Material Request — same rules purchaseOrders.js already
+    // enforces for PO-from-MR (see its POST / handler): only an Approved or
+    // Partially Fulfilled MR can be a source, and no line can claim more
+    // than what's actually still pending on that MR item, across whatever
+    // mix of prior POs/ICTs already drew against it. A partial pick here —
+    // fewer items, or less than the full pending qty on a kept item — just
+    // leaves the rest pending for a later PO or ICT off the same MR; there's
+    // no separate "remaining qty" column to update, getMRItemFulfillment
+    // (and recomputeMRFulfillment below) always recompute it live.
+    let sourceMRDocNo = null;
+    if (sourceMRId) {
+      const mrCheck = await pool.request().input("MRId", sql.Int, sourceMRId)
+        .query("SELECT DocNo, Status, ProjectId FROM dbo.MaterialRequests WHERE MRId = @MRId");
+      if (!mrCheck.recordset.length) {
+        return res.status(404).json({ error: "Source Material Request not found." });
+      }
+      const mrRow = mrCheck.recordset[0];
+      if (!["Approved", "Partially Fulfilled"].includes(mrRow.Status)) {
+        return res.status(400).json({
+          error: `Cannot create an Inter-Company Transfer: Material Request is "${mrRow.Status}". Only Approved or Partially Fulfilled Material Requests can be used.`,
+        });
+      }
+      // An MR is raised by the project that needs the material, i.e. the
+      // RECEIVING project of this transfer.
+      if (mrRow.ProjectId != null && Number(mrRow.ProjectId) !== Number(receiverProjectId)) {
+        return res.status(400).json({
+          error: `Material Request ${mrRow.DocNo} belongs to a different project than the receiving project — pick that project as the receiver, or choose another request.`,
+        });
+      }
+      sourceMRDocNo = mrRow.DocNo;
+
+      const mrItemsWithMrItemId = pricedItems.filter((i) => i.mrItemId);
+      if (mrItemsWithMrItemId.length > 0) {
+        const fulfillment = await getMRItemFulfillment(pool, sourceMRId);
+        const pendingByItem = new Map(fulfillment.map((f) => [f.MRItemId, f]));
+        for (const i of mrItemsWithMrItemId) {
+          const f = pendingByItem.get(parseInt(i.mrItemId, 10));
+          if (f && i.qty - f.PendingQty > 0.0001) {
+            return res.status(400).json({
+              error: `Cannot transfer ${i.qty} of "${i.itemName || f.ItemName}" — only ${f.PendingQty} still pending on Material Request.`,
+            });
+          }
+        }
+      }
+    }
+
+    // Refuse a transfer the source godown can't cover — at creation, not only
+    // at approval.
+    await assertStockAvailable(pool, ctx.senderGodown, ctx.sender, pricedItems);
+
+    const totalAmount        = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+    const totalGstAmount     = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
+    const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
+
+
+    // Only validate + record the request here — no stock/GL happens yet.
+    // That only fires once a super_admin approves this request via
+    // PUT /:id/approve, matching the same Draft -> Pending -> Approved gate
+    // every other module already uses.
     const ictDocTypeId = await resolveDocTypeId(pool, sql, "ICT");
     const ictDocNo = await lockNextDocNumber(pool, sql, {
       docTypeId: ictDocTypeId,
@@ -660,20 +679,26 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
         .input("DocNo", sql.NVarChar(100), ictDocNo)
         .input("TransferDate", sql.Date, transferDate)
         .input("SenderProjectId", sql.Int, ctx.sender.ProjectId)
-        .input("SenderCompanyId", sql.Int, ctx.sender.CompanyId)
+        .input("SenderCompanyId", sql.Int, senderCompanyId)
         .input("ReceiverProjectId", sql.Int, ctx.receiver.ProjectId)
-        .input("ReceiverCompanyId", sql.Int, ctx.receiver.CompanyId)
+        .input("ReceiverCompanyId", sql.Int, receiverCompanyId)
         .input("TotalAmount", sql.Decimal(18, 2), totalAmount)
+        .input("TotalGstAmount", sql.Decimal(18, 2), totalGstAmount)
+        .input("TotalAmountInclGst", sql.Decimal(18, 2), totalAmountInclGst)
         .input("Remarks", sql.NVarChar(500), remarks)
         .input("DocTypeId", sql.Int, ictDocTypeId)
-        .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
+        .input("CreatedBy", sql.NVarChar(150), createdBy)
+        .input("SourceMRId", sql.Int, sourceMRId || null)
+        .input("SourceMRDocNo", sql.NVarChar(100), sourceMRDocNo).query(`
           INSERT INTO dbo.InterCompanyTransfer
             (DocNo, TransferDate, SenderProjectId, SenderCompanyId, ReceiverProjectId, ReceiverCompanyId,
-             Status, TotalAmount, Remarks, DocTypeId, CreatedBy)
+             Status, TotalAmount, TotalGstAmount, TotalAmountInclGst, Remarks, DocTypeId, CreatedBy,
+             SourceMRId, SourceMRDocNo)
           OUTPUT INSERTED.ICTId
           VALUES
             (@DocNo, @TransferDate, @SenderProjectId, @SenderCompanyId, @ReceiverProjectId, @ReceiverCompanyId,
-             'Draft', @TotalAmount, @Remarks, @DocTypeId, @CreatedBy)
+             'Draft', @TotalAmount, @TotalGstAmount, @TotalAmountInclGst, @Remarks, @DocTypeId, @CreatedBy,
+             @SourceMRId, @SourceMRDocNo)
         `);
       ictId = header.recordset[0].ICTId;
 
@@ -686,12 +711,18 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
           .input("Quantity", sql.Decimal(18, 4), item.qty)
           .input("Rate", sql.Decimal(18, 4), item.rate)
           .input("Amount", sql.Decimal(18, 2), item.amount)
+          .input("GstPct", sql.Decimal(5, 2), item.gstPct || 0)
+          .input("GstAmount", sql.Decimal(18, 2), item.gstAmount || 0)
+          .input("AmountInclGst", sql.Decimal(18, 2), item.amountInclGst || item.amount)
           .input("SourceDocNo", sql.NVarChar(100), item.sourceDocNo)
-          .input("SortOrder", sql.Int, idx).query(`
+          .input("SortOrder", sql.Int, idx)
+          .input("MRItemId", sql.Int, item.mrItemId ? parseInt(item.mrItemId, 10) : null).query(`
             INSERT INTO dbo.InterCompanyTransferItems
-              (ICTId, ItemId, ItemName, UOMCode, Quantity, Rate, Amount, SourceDocNo, SortOrder)
+              (ICTId, ItemId, ItemName, UOMCode, Quantity, Rate, Amount,
+               GstPct, GstAmount, AmountInclGst, SourceDocNo, SortOrder, MRItemId)
             VALUES
-              (@ICTId, @ItemId, @ItemName, @UOMCode, @Quantity, @Rate, @Amount, @SourceDocNo, @SortOrder)
+              (@ICTId, @ItemId, @ItemName, @UOMCode, @Quantity, @Rate, @Amount,
+               @GstPct, @GstAmount, @AmountInclGst, @SourceDocNo, @SortOrder, @MRItemId)
           `);
       }
 
@@ -710,14 +741,30 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       console.warn("ICT auto-submit failed (non-fatal):", submitErr.message);
     }
 
+    // Recompute the source MR's fulfillment (Approved -> Partially Fulfilled
+    // -> Completed) now that this ICT's items (with their MRItemId links)
+    // are committed — same fire-and-forget pattern purchaseOrders.js's own
+    // POST / uses for the identical PO-from-MR case.
+    if (sourceMRId) {
+      (async () => {
+        try {
+          await recomputeMRFulfillment(pool, sourceMRId, createdBy);
+        } catch (e) {
+          console.error("MR status update failed:", e.message);
+        }
+      })();
+    }
+
     await bumpCacheVersion("stock-transfers");
 
     res.status(201).json({
       ICTId: ictId,
       DocNo: ictDocNo,
       TotalAmount: totalAmount,
+      TotalGstAmount: totalGstAmount,
+      TotalAmountInclGst: totalAmountInclGst,
       Status: "Pending",
-      message: "Submitted for super_admin approval — the full document chain will be generated automatically once approved.",
+      message: "Submitted for super_admin approval — stock will move and the GL voucher will post automatically once approved.",
     });
   } catch (err) {
     console.error("[inter-company-transfer] POST /:", err);
@@ -725,9 +772,14 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
   }
 });
 
+
 // ── PUT /:id/approve — Pending → Approved (super_admin only); fires the
-// entire auto-generated document chain the moment full approval lands ──────
-router.put("/:id/approve", authenticateToken, requirePageRight("stock-transfers", "edit"), async (req, res) => {
+// direct stock move + two-sided GL voucher the moment full approval lands ──
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const id = parsePositiveInt(req.params.id);
@@ -739,36 +791,32 @@ router.put("/:id/approve", authenticateToken, requirePageRight("stock-transfers"
     const ictRow = headerRes.recordset[0];
     if (!ictRow) return res.status(404).json({ error: "Not found" });
 
-    const result = await transition("inter-company-transfer", id, "Approved", createdBy, req.user?.role, req.body?.note);
+    const result = await transition("inter-company-transfer", id, "Approved", createdBy, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
 
     if (result.newStatus !== "Approved") {
-      // Multi-level workflow, more approvals still required — no chain yet.
+      // Multi-level workflow, more approvals still required — no stock/GL yet.
       return res.json({ message: "Approval level recorded", ...result });
     }
 
     const ctx = await loadStoredTransferContext(pool, ictRow);
-    const links = await executeTransferChain(pool, ctx, createdBy, {
-      remarks: ictRow.Remarks,
-      userId: req.user?.userId || null,
+    await executeTransfer(pool, ctx, createdBy, {
       docNo: ictRow.DocNo,
       ictId: id,
     });
 
-    // Every link was already persisted incrementally inside
-    // executeTransferChain as each document was created — this just flips
-    // the header to its final state once the whole chain succeeds.
-    await pool.request().input("id", sql.Int, id).input("NewPaymentId", sql.Int, links.NewPaymentID)
-      .query("UPDATE dbo.InterCompanyTransfer SET Status = 'Completed', NewPaymentId = @NewPaymentId WHERE ICTId = @id");
+    await pool.request().input("id", sql.Int, id)
+      .query("UPDATE dbo.InterCompanyTransfer SET Status = 'Completed' WHERE ICTId = @id");
 
     await Promise.all([
       bumpCacheVersion("stock-transfers"),
       bumpCacheVersion("inventory-master"),
-      bumpCacheVersion("journal-voucher"),
-      bumpCacheVersion("new-payment"),
-      bumpCacheVersion("received-payment"),
+      bumpCacheVersion("trial-balance"),
+      bumpCacheVersion("general-ledger"),
+      bumpCacheVersion("balance-sheet"),
+      bumpCacheVersion("account-head-master"),
     ]);
 
-    res.json({ message: "Approved — transfer executed", ICTId: id, links });
+    res.json({ message: "Approved — stock moved and GL posted", ICTId: id });
   } catch (err) {
     console.error("[inter-company-transfer] PUT /:id/approve:", err);
     res.status(err.status || 500).json({ error: err.message });
@@ -776,13 +824,28 @@ router.put("/:id/approve", authenticateToken, requirePageRight("stock-transfers"
 });
 
 // ── PUT /:id/reject — Pending → Rejected; no documents are ever generated ───
-router.put("/:id/reject", authenticateToken, requirePageRight("stock-transfers", "edit"), async (req, res) => {
+router.put("/:id/reject", authenticateToken, async (req, res) => {
   try {
     const id = parsePositiveInt(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("inter-company-transfer", id, "Rejected", userEmail(req), req.user?.role, req.body?.note);
+    const result = await transition("inter-company-transfer", id, "Rejected", userEmail(req), req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("stock-transfers");
+
+    // A rejected transfer no longer holds the Material Request's quantity
+    // (getMRItemFulfillment ignores Rejected), so refresh the MR's status too —
+    // otherwise an MR that was marked Completed by this transfer stays
+    // Completed with quantity free again, and can never be used for a PO/ICT.
+    try {
+      const pool = getPool();
+      const src = await pool.request().input("id", sql.Int, id)
+        .query("SELECT SourceMRId FROM dbo.InterCompanyTransfer WHERE ICTId = @id");
+      if (src.recordset[0]?.SourceMRId) {
+        await recomputeMRFulfillment(pool, src.recordset[0].SourceMRId, null);
+      }
+    } catch (e) {
+      console.error("MR status update after ICT reject failed:", e.message);
+    }
     res.json({ message: "Rejected", ...result });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
@@ -795,9 +858,24 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const id = parsePositiveInt(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });
 
+    // Explicit column list (no `ict.*`) so the ISNULL-wrapped GST columns
+    // below don't collide with their own raw names from the header table —
+    // a duplicate-named column pair is technically legal in a SQL Server
+    // result set, but there's no reason to rely on the driver picking the
+    // right one of two same-named keys when building the row object.
     const header = await pool.request().input("id", sql.Int, id).query(`
-      SELECT ict.*, sp.name AS SenderProjectName, sc.name AS SenderCompanyName,
-             rp.name AS ReceiverProjectName, rc.name AS ReceiverCompanyName
+      SELECT ict.ICTId, ict.DocNo, ict.TransferDate,
+             ict.SenderProjectId, ict.SenderCompanyId,
+             ict.ReceiverProjectId, ict.ReceiverCompanyId,
+             ict.Status, ict.TotalAmount,
+             ISNULL(ict.TotalGstAmount, 0)    AS TotalGstAmount,
+             ISNULL(ict.TotalAmountInclGst, ict.TotalAmount) AS TotalAmountInclGst,
+             ict.Remarks, ict.SaleOrderId, ict.SaleInvoiceId, ict.ReceivedPaymentId,
+             ict.PurchaseOrderId, ict.GRNId, ict.ExpenseBookingId, ict.NewPaymentId,
+             ict.DocTypeId, ict.CreatedBy, ict.CreatedAt,
+             ict.SourceMRId, ict.SourceMRDocNo,
+             sp.name AS SenderProjectName,     sc.name AS SenderCompanyName,
+             rp.name AS ReceiverProjectName,   rc.name AS ReceiverCompanyName
       FROM dbo.InterCompanyTransfer ict
       LEFT JOIN dbo.enterprise sp ON sp.id = ict.SenderProjectId
       LEFT JOIN dbo.enterprise sc ON sc.id = ict.SenderCompanyId
@@ -808,15 +886,203 @@ router.get("/:id", authenticateToken, async (req, res) => {
     if (!header.recordset.length) return res.status(404).json({ error: "Not found" });
 
     const items = await pool.request().input("id", sql.Int, id).query(`
-      SELECT *
+      SELECT ICTItemId, ItemId, ItemName, UOMCode, Quantity, Rate, Amount,
+             ISNULL(GstPct, 0)       AS GstPct,
+             ISNULL(GstAmount, 0)    AS GstAmount,
+             ISNULL(AmountInclGst, Amount) AS AmountInclGst,
+             SourceDocNo, MRItemId,
+             ISNULL(SortOrder, 0)   AS SortOrder
       FROM dbo.InterCompanyTransferItems
       WHERE ICTId = @id
-      ORDER BY SortOrder, ICTItemId
+      ORDER BY ISNULL(SortOrder, 0), ICTItemId
     `);
 
     res.json({ ...header.recordset[0], items: items.recordset });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/posting — the two-sided GL voucher this transfer posts/posted
+// (Dr Inter-Company A/c — receivable / Cr Inter-Company Stock Transfer A/c
+// in the sender's books, mirrored in the receiver's — see
+// postInterCompanyStockTransferToGL), grouped by company same as
+// fundTransfer.js's own /:id/posting. Real entries once Completed;
+// otherwise just tells the UI nothing has posted yet.
+router.get("/:id/posting", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+
+    const ictRes = await pool.request().input("id", sql.Int, id).query(`
+      SELECT ict.ICTId, ict.DocNo, ict.Status,
+             ISNULL(ict.TotalAmountInclGst, ict.TotalAmount) AS Amount,
+             sc.name AS SenderCompanyName, rc.name AS ReceiverCompanyName
+      FROM dbo.InterCompanyTransfer ict
+      LEFT JOIN dbo.enterprise sc ON sc.id = ict.SenderCompanyId
+      LEFT JOIN dbo.enterprise rc ON rc.id = ict.ReceiverCompanyId
+      WHERE ict.ICTId = @id
+    `);
+    if (!ictRes.recordset.length) return res.status(404).json({ error: "Not found" });
+    const ict = ictRes.recordset[0];
+
+    const postedRes = await pool.request().input("id", sql.Int, id).query(`
+      SELECT gle.VoucherNo, gle.CompanyId, gle.DebitAmount, gle.CreditAmount,
+             ah.LHeadName, ent.name AS CompanyName
+      FROM dbo.GeneralLedgerEntry gle
+      JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = gle.LHeadId
+      LEFT JOIN dbo.enterprise ent ON ent.id = gle.CompanyId
+      WHERE gle.SourceType = 'InterCompanyTransfer' AND gle.SourceId = @id AND gle.IsReversed = 0
+      ORDER BY gle.CompanyId, gle.EntryId
+    `);
+    const isPosted = postedRes.recordset.length > 0;
+
+    let vouchers;
+    if (isPosted) {
+      const byCompany = new Map();
+      for (const row of postedRes.recordset) {
+        const key = row.CompanyId ?? "none";
+        if (!byCompany.has(key)) {
+          byCompany.set(key, { jvNo: row.VoucherNo, companyName: row.CompanyName, rows: [] });
+        }
+        byCompany.get(key).rows.push({
+          label: row.LHeadName,
+          side: Number(row.DebitAmount) > 0 ? "debit" : "credit",
+          amount: Number(row.DebitAmount) > 0 ? Number(row.DebitAmount) : Number(row.CreditAmount),
+        });
+      }
+      vouchers = [...byCompany.values()];
+    } else {
+      // Preview only — the real ledger heads are get-or-create'd at posting
+      // time (postInterCompanyStockTransferToGL), so this just names them
+      // generically rather than guessing whether they already exist.
+      vouchers = [
+        {
+          jvNo: null,
+          companyName: ict.SenderCompanyName,
+          rows: [
+            { label: `Inter-Company A/c — ${ict.ReceiverCompanyName || "Receiver"}`, side: "debit", amount: Number(ict.Amount) || 0 },
+            { label: `Inter-Company Stock Transfer — ${ict.SenderCompanyName || "Sender"}`, side: "credit", amount: Number(ict.Amount) || 0 },
+          ],
+        },
+        {
+          jvNo: null,
+          companyName: ict.ReceiverCompanyName,
+          rows: [
+            { label: `Inter-Company Stock Transfer — ${ict.ReceiverCompanyName || "Receiver"}`, side: "debit", amount: Number(ict.Amount) || 0 },
+            { label: `Inter-Company A/c — ${ict.SenderCompanyName || "Sender"}`, side: "credit", amount: Number(ict.Amount) || 0 },
+          ],
+        },
+      ];
+    }
+
+    res.json({
+      docNo: ict.DocNo,
+      status: ict.Status,
+      amount: Number(ict.Amount) || 0,
+      senderCompanyName: ict.SenderCompanyName,
+      receiverCompanyName: ict.ReceiverCompanyName,
+      isPosted,
+      vouchers,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /:id — any status is deletable; Completed reverses the stock
+// move and the two-sided GL voucher first, same convention journal-
+// voucher.js's DELETE uses (reversePostingBySource flips IsReversed rather
+// than deleting the ledger rows, preserving the audit trail). Draft/Pending/
+// Rejected never touched StockLedger/GL, so there's nothing to reverse for
+// them — just remove the request.
+router.delete("/:id", authenticateToken, requirePageRight("stock-transfers", "delete"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+
+    const headerRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT * FROM dbo.InterCompanyTransfer WHERE ICTId = @id");
+    const ictRow = headerRes.recordset[0];
+    if (!ictRow) return res.status(404).json({ error: "Not found" });
+
+    if (ictRow.Status === "Completed") {
+      const itemRows = await pool.request().input("id", sql.Int, id).query(`
+        SELECT ItemId, Quantity FROM dbo.InterCompanyTransferItems WHERE ICTId = @id
+      `);
+
+      // Guard against pushing the receiver's godown negative — if any of
+      // this transfer's stock has already been consumed downstream (issued
+      // out, transferred again, etc.), un-doing the original IN movement
+      // here would leave that later consumption unbacked.
+      const receiverGodown = await getProjectGodown(pool, ictRow.ReceiverProjectId);
+      if (receiverGodown) {
+        for (const item of itemRows.recordset) {
+          const avail = await pool.request()
+            .input("itemId", sql.NVarChar(100), String(item.ItemId))
+            .input("godownId", sql.Int, receiverGodown.GodownID).query(`
+              SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+              FROM dbo.StockLedger
+              WHERE ItemID = @itemId AND GodownID = @godownId
+            `);
+          const available = Number(avail.recordset[0].Available || 0);
+          if (available < Number(item.Quantity)) {
+            return res.status(409).json({
+              error: `Cannot delete — item ${item.ItemId} has already been partly consumed from the receiver's godown (available=${available}, transferred=${item.Quantity}). Reverse those downstream movements first.`,
+            });
+          }
+        }
+      }
+
+      await pool.request().input("RefID", sql.Int, id)
+        .query("DELETE FROM dbo.StockLedger WHERE RefType = 'ICT' AND RefID = @RefID");
+
+      await reversePostingBySource(pool, "InterCompanyTransfer", id);
+    }
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id)
+        .query("DELETE FROM dbo.InterCompanyTransferItems WHERE ICTId = @id");
+      await tx.request().input("id", sql.Int, id)
+        .query("DELETE FROM dbo.InterCompanyTransfer WHERE ICTId = @id");
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch {}
+      throw txErr;
+    }
+
+    await Promise.all([
+      bumpCacheVersion("stock-transfers"),
+      bumpCacheVersion("inventory-master"),
+      bumpCacheVersion("trial-balance"),
+      bumpCacheVersion("general-ledger"),
+      bumpCacheVersion("balance-sheet"),
+      bumpCacheVersion("account-head-master"),
+    ]);
+
+    // Release whatever this deleted ICT had reserved against its source MR
+    // — same pattern purchaseOrders.js's own DELETE /:id uses.
+    if (ictRow.SourceMRId) {
+      try {
+        await recomputeMRFulfillment(pool, ictRow.SourceMRId, null);
+      } catch (e) {
+        console.error("MR status update failed:", e.message);
+      }
+    }
+
+    res.json({
+      message:
+        ictRow.Status === "Completed"
+          ? "Deleted — stock movement and GL voucher reversed"
+          : "Deleted",
+    });
+  } catch (err) {
+    console.error("[inter-company-transfer] DELETE /:id:", err);
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

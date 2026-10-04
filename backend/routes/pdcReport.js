@@ -143,7 +143,7 @@ router.get("/filters", cache("pdc-report-filters", 300), async (req, res) => {
     const parties = await pool.request().query(`
       SELECT LHeadId AS id, LHeadName AS name, LHeadType AS type
       FROM dbo.AccountHeadMaster
-      WHERE LHeadType IN ('S', 'C', 'A') AND LHeadStatus = 1
+      WHERE LHeadType IN ('S', 'V', 'C', 'A') AND LHeadStatus = 1
       ORDER BY LHeadName
     `);
     res.json({ banks: banks.recordset, parties: parties.recordset });

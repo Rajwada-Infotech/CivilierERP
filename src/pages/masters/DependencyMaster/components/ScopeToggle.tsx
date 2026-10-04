@@ -11,7 +11,7 @@ export function ScopeToggle({ active, value, onChange }: Props) {
   if (!active) return null;
   return (
     <div className="flex items-center gap-3">
-      <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60">
+      <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60">
         Work Type
       </span>
       <div className="inline-flex rounded-lg border border-border overflow-hidden">

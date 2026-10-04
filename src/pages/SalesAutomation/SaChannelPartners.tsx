@@ -86,21 +86,17 @@ const SaChannelPartners: React.FC = () => {
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      const method = event.action === "add" ? "POST" : event.action === "update" ? "PUT" : "DELETE";
-      const url = event.action === "add" ? API : `${API}/${event.id}`;
-      const res = await fetchWithAuth(url, {
-        method,
-        headers: event.action === "delete" ? undefined : { "Content-Type": "application/json" },
-        body: event.action === "delete" ? undefined : JSON.stringify(toPayload(event.record)),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Operation failed");
-      toast.success(event.action === "delete" ? "Channel partner deleted" : "Channel partner saved");
-      await queryClient.invalidateQueries({ queryKey: ["sa-channel-partners"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
-    }
+    const method = event.action === "add" ? "POST" : event.action === "update" ? "PUT" : "DELETE";
+    const url = event.action === "add" ? API : `${API}/${event.id}`;
+    const res = await fetchWithAuth(url, {
+      method,
+      headers: event.action === "delete" ? undefined : { "Content-Type": "application/json" },
+      body: event.action === "delete" ? undefined : JSON.stringify(toPayload(event.record)),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Operation failed");
+    toast.success(event.action === "delete" ? "Channel partner deleted" : "Channel partner saved");
+    await queryClient.invalidateQueries({ queryKey: ["sa-channel-partners"] });
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading channel partners...</div>;

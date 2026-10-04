@@ -133,7 +133,7 @@ function SectionHeader({
       <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
         <Icon size={12} className="text-primary" />
       </div>
-      <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+      <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
         {label}
       </p>
       {badge}
@@ -283,11 +283,11 @@ function FilterBar({
           <div className="flex items-center justify-center w-5 h-5 rounded bg-muted">
             <Search size={11} className="text-muted-foreground" />
           </div>
-          <span className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+          <span className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
             Filter expense bookings
           </span>
           {activeCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
+            <span className="px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
               {activeCount} active
             </span>
           )}
@@ -301,7 +301,7 @@ function FilterBar({
               onChange("financialYear", "");
               onChange("supplier", "");
             }}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive transition-colors"
+            className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-destructive transition-colors"
           >
             <X size={10} /> Clear all
           </button>
@@ -312,7 +312,7 @@ function FilterBar({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {dropdowns.map(({ key, label, icon: Icon, items, placeholder }) => (
           <div key={key} className="space-y-1">
-            <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+            <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
               <Icon size={9} /> {label}
             </label>
             <Select
@@ -355,7 +355,7 @@ function FilterBar({
               return (
                 <span
                   key={key}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
                 >
                   <Icon size={9} />
                   {val}
@@ -425,12 +425,12 @@ function ExpenseBookingPicker({
           Select Expense Booking
         </label>
         {isFiltered && (
-          <span className="text-[10px] text-muted-foreground/60 font-heading normal-case tracking-normal">
+          <span className="text-[0.625rem] text-muted-foreground/60 font-heading normal-case tracking-normal">
             — showing {options.length} of {totalOptions}
           </span>
         )}
       </div>
-      <p className="text-[11px] text-muted-foreground -mt-1">
+      <p className="text-[0.6875rem] text-muted-foreground -mt-1">
         Selecting a booking auto-fills project, company, amount &amp; doc type.
       </p>
 
@@ -449,7 +449,7 @@ function ExpenseBookingPicker({
           ) : selected ? (
             <span className="flex items-center gap-2 min-w-0">
               <span
-                className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${
+                className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${
                   selected.type === "emi"
                     ? "bg-violet-500/10 text-violet-600 border border-violet-500/20"
                     : "bg-primary/10 text-primary border border-primary/20"
@@ -513,7 +513,7 @@ function ExpenseBookingPicker({
                   }`}
                 >
                   <span
-                    className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${
+                    className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${
                       o.type === "emi"
                         ? "bg-violet-500/10 text-violet-600 border border-violet-500/20"
                         : "bg-primary/10 text-primary border border-primary/20"
@@ -526,23 +526,23 @@ function ExpenseBookingPicker({
                       {o.label}
                     </p>
                     {o.projectName && (
-                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                      <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">
                         {o.projectName}
                       </p>
                     )}
                     {o.supplierName && (
-                      <p className="text-[10px] text-primary/60 mt-0.5 truncate">
+                      <p className="text-[0.625rem] text-primary/60 mt-0.5 truncate">
                         {o.supplierName}
                       </p>
                     )}
                     {o.type === "emi" && o.installmentNo && (
-                      <p className="text-[10px] text-violet-500 mt-0.5">
+                      <p className="text-[0.625rem] text-violet-500 mt-0.5">
                         Installment #{o.installmentNo}
                       </p>
                     )}
                   </div>
                   {o.amount != null && (
-                    <span className="shrink-0 text-[11px] font-mono font-semibold text-foreground/70 mt-0.5">
+                    <span className="shrink-0 text-[0.6875rem] font-mono font-semibold text-foreground/70 mt-0.5">
                       ₹{o.amount.toLocaleString("en-IN")}
                     </span>
                   )}
@@ -623,7 +623,7 @@ export function PaymentBreakdownPanel({
     <div className="rounded-xl bg-primary/5 border border-primary/20 px-4 py-3 space-y-2">
       <div className="flex items-center gap-2">
         <TrendingUp size={13} className="text-primary shrink-0" />
-        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
           Payment Breakdown
         </p>
       </div>

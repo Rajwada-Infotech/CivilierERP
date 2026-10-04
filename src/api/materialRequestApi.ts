@@ -9,6 +9,8 @@ export interface MRLineItem {
   UOMCode: string;
   Quantity: number;
   Remarks?: string;
+  // From the selected item's own Item Master tag (M_CostCenterId).
+  CostCenterId?: string | number | null;
 }
 
 export interface MaterialRequest {
@@ -27,7 +29,9 @@ export interface MaterialRequest {
   ProjectName?: string;
   FinYearName?: string;
   ItemCount?: number;
-  TotalQty?: number;
+  // "120.00 BAG, 1.50 MT" — per-UOM totals, since quantities in different
+  // UOMs can't be blindly summed into one number.
+  QtyByUom?: string;
   CreatedBy?: string;
   CreatedAt?: string;
   items?: MRLineItem[];
@@ -79,14 +83,18 @@ export const getMaterialRequests = (
     limit?: number;
     search?: string;
     status?: string;
+    projectId?: number;
+    groupBy?: "project";
   } = {},
 ) => {
-  const { page = 1, limit = 10, search = "", status = "" } = query;
+  const { page = 1, limit = 10, search = "", status = "", projectId, groupBy } = query;
   const qs = new URLSearchParams({
     page: String(page),
     limit: String(limit),
     ...(search ? { search } : {}),
     ...(status ? { status } : {}),
+    ...(projectId ? { projectId: String(projectId) } : {}),
+    ...(groupBy ? { groupBy } : {}),
   });
   return fetchWithAuth(`${BASE}?${qs}`).then((r) =>
     handleResponse<MRListResponse>(r),
@@ -251,6 +259,42 @@ export const getMRPOPrefillByDocNo = (docNo: string) =>
 export const getMRPOPrefill = (id: number | string) =>
   fetchWithAuth(`${BASE}/${id}/create-po-prefill`).then((r) =>
     handleResponse<MRPOPrefill>(r),
+  );
+
+export interface ICTMRPrefillItem {
+  MRItemId: number;
+  ItemId: string;
+  ItemName: string;
+  UOMCode: string;
+  UOMName: string;
+  Quantity: number;
+  /** Already consumed against this MR item across earlier POs/ICTs. */
+  OrderedQty: number;
+  /** What's left to transfer — the cap for this ICT line's quantity input. */
+  PendingQty: number;
+  Remarks: string;
+}
+
+export interface ICTMRPrefill {
+  MRId: number;
+  DocNo: string;
+  CompanyId: number | null;
+  CompanyName: string;
+  ProjectId: number | null;
+  ProjectName: string;
+  FinYearId: number | null;
+  FinYearName: string;
+  Remarks: string;
+  items: ICTMRPrefillItem[];
+}
+
+// Same "raise from MR" flow as getMRPOPrefill, for the Inter-Company Stock
+// Transfer form — see backend/routes/materialRequests.js's matching
+// GET /:id/create-ict-prefill for why the MR's own Company/Project map to
+// the ICT's Receiver side, not Sender.
+export const getICTMRPrefill = (id: number | string) =>
+  fetchWithAuth(`${BASE}/${id}/create-ict-prefill`).then((r) =>
+    handleResponse<ICTMRPrefill>(r),
   );
 
 export const markMROrdered = (id: number | string) =>

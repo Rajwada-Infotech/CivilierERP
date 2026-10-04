@@ -286,7 +286,9 @@ export interface SupplierHead {
 }
 
 export async function fetchSupplierHeads(): Promise<SupplierHead[]> {
-  const res = await fetchWithAuth("/api/account-head?type=S");
+  // Vendors, Suppliers, and Landlords (Landlord is LHeadType='S' too) — an
+  // invoice's Payable To can be any of them, unlike PO/GRN.
+  const res = await fetchWithAuth("/api/account-head?type=S,V");
   if (!res.ok) return [];
   const raw = await res.json().catch(() => []);
   return (Array.isArray(raw) ? raw : []).map((h: any) => ({ id: h.LHeadId, label: h.LHeadName }));

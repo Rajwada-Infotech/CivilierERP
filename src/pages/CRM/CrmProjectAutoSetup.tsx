@@ -1,45 +1,49 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil, X, ChevronDown, ChevronRight, Map as MapIcon } from "lucide-react";
 import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 
 const API = "/api/crm/project-auto-setup";
 const PROJECTS_API = "/api/unit-master/projects";
 const DROPDOWN_API = "/api/business/dropdown";
+const EMPTY_ITEMS: any[] = [];
 
 type NamingScheme = "Alphabetical" | "Numeric" | "Custom";
 
-// Same vocabulary as src/pages/followup/UnitMaster.tsx's own UNIT_TYPES, so a
-// type picked here reads back identically once units land on that page.
-const UNIT_TYPES = [
-  "1 BHK", "1.5 BHK", "2 BHK", "2.5 BHK", "3 BHK", "3.5 BHK", "4 BHK", "4+ BHK",
-  "Studio", "Villa", "Plot", "Commercial", "Other",
-];
+// Unit Types come from Unit Composition (dbo.RoomLayoutType) — only types
+// with a defined room layout are offered for a new pick (see unitTypeOptions),
+// since every generated unit's rooms are built from its layout.
+function firstPickableType(types: LayoutType[]): string {
+  return types.find((t) => t.roomCount > 0)?.label ?? "";
+}
 
 type TemplateRow = { UnitType: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
-type UnitEdit = { UnitName: string; UnitType: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
+type PaymentPlan = { Id: number; PlanName: string; IsActive: boolean };
+type UnitEdit = { UnitName: string; FloorNo: string; UnitType: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 
-async function fetchProjects(): Promise<any[]> {
-  try { const r = await fetchWithAuth(PROJECTS_API); return r.ok ? r.json() : []; } catch { return []; }
-}
-// Company is the real top of this hierarchy (dbo.enterprise: business_type
-// 'C' is a Project's business_type 'P' parent via company_id) — same shared
-// dropdown endpoint every other Company->Project chain in the app already
-// uses. fetchProjects above already returns each Project's CompanyId.
-async function fetchCompanies(): Promise<{ id: number; name: string }[]> {
+async function fetchApplicablePlans(projectId: string): Promise<PaymentPlan[]> {
   try {
-    const r = await fetchWithAuth(DROPDOWN_API);
-    if (!r.ok) return [];
-    const data = await r.json();
-    return data.companies ?? [];
+    const r = await fetchWithAuth(`/api/unit-master/applicable-payment-plans?projectId=${projectId}`);
+    return r.ok ? r.json() : [];
   } catch { return []; }
 }
+
+async function fetchDropdown(): Promise<{ companies: any[]; projects: any[] }> {
+  try {
+    const r = await fetchWithAuth(DROPDOWN_API);
+    if (!r.ok) return { companies: [], projects: [] };
+    return r.json();
+  } catch { return { companies: [], projects: [] }; }
+}
+
 async function fetchStatus(projectId: string): Promise<any> {
   const r = await fetchWithAuth(`${API}/status?projectId=${projectId}`);
   return r.ok ? r.json() : null;
@@ -89,26 +93,380 @@ function isDuplicateBlockName(name: string, idx: number, batch: string[], existi
   return batch.some((other, i) => i !== idx && other.trim().toLowerCase() === n);
 }
 
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background";
-const labelCls = "text-xs text-muted-foreground block mb-1";
-const cardCls = "rounded-xl border border-border p-4 space-y-3";
+// Field/label/card styles shared with the rest of the app's forms (uppercase
+// tracked labels, soft muted inputs, card surfaces).
+const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-muted/30 focus:bg-background focus:outline-none focus:ring-2 focus:ring-ring/40 transition-colors";
+const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
+const cardCls = "rounded-xl border border-border bg-card p-4 sm:p-5 space-y-4 shadow-sm";
+// Touch-friendly pill used for blocks / floors / units chips.
+const chipCls = "inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors";
 
-// Consistent section header across the Blocks/Floors/Units cards — a small
-// colored icon badge instead of a bare icon, so the three sections read as
-// distinct, color-coded areas of one page rather than a numbered "Step 1/2/3"
-// wizard (this is a resumable, all-editable dashboard now, not a strict
-// linear flow — the label shouldn't pretend otherwise).
-const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; title: string; done?: boolean; right?: React.ReactNode }> =
-  ({ icon: Icon, colorClass, title, done, right }) => (
-    <div className="flex items-center gap-2">
-      <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${colorClass}`}>
-        <Icon size={13} />
+// Consistent section header across the Blocks/Floors/Units cards — a coloured
+// icon badge plus a one-line hint, so each section says what it is for. The
+// sections stay independently editable (a resumable dashboard, not a strict
+// wizard).
+const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; title: string; hint?: string; done?: boolean; right?: React.ReactNode }> =
+  ({ icon: Icon, colorClass, title, hint, done, right }) => (
+    <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+      <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${colorClass}`}>
+        <Icon size={17} />
       </span>
-      <h3 className="text-sm font-semibold">{title}</h3>
-      {done && <CheckCircle2 size={13} className="text-green-600" />}
-      {right}
+      <div className="min-w-0 flex-1">
+        <h3 className="text-sm sm:text-base font-heading font-semibold flex items-center gap-1.5">
+          {title}
+          {done && (
+            <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded-full">
+              <CheckCircle2 size={11} /> Done
+            </span>
+          )}
+        </h3>
+        {hint && <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>}
+      </div>
+      {right && <div className="flex items-center gap-2 ml-auto">{right}</div>}
     </div>
   );
+
+// Blocks → Floors → Units progress, so it's obvious at a glance which part of
+// the setup is complete and what comes next.
+const SetupProgress: React.FC<{ steps: { label: string; detail: string; done: boolean; active: boolean }[] }> = ({ steps }) => (
+  <ol className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+    {steps.map((s, i) => (
+      <li
+        key={s.label}
+        className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 transition-colors ${
+          s.done
+            ? "border-green-500/30 bg-green-500/5"
+            : s.active
+              ? "border-sky-500/40 bg-sky-500/5 ring-1 ring-sky-500/20"
+              : "border-border bg-card"
+        }`}
+      >
+        <span
+          className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${
+            s.done ? "bg-green-500 text-white" : s.active ? "btn-module text-white" : "bg-muted text-muted-foreground"
+          }`}
+        >
+          {s.done ? <CheckCircle2 size={16} /> : i + 1}
+        </span>
+        <div className="min-w-0">
+          <div className="text-sm font-heading font-semibold">{s.label}</div>
+          <div className="text-xs text-muted-foreground truncate">{s.detail}</div>
+        </div>
+      </li>
+    ))}
+  </ol>
+);
+
+
+// ── Plot Layout (plotted projects) ──────────────────────────────────────────
+// The floor-driven step above cannot describe a plotted block: there are no
+// floors to hang units off. This is its counterpart — one template per BLOCK,
+// because in a plotted development the block IS the layout.
+//
+// The sizes here SEED the generated plots; they are not a claim that every plot
+// is identical. Real layouts have plots of differing sizes, each with its own
+// area, dimensions, facing and survey number, edited per plot afterwards.
+// Generating uniform plots and refining them beats hand-creating sixty rows.
+const PlotLayoutStep: React.FC<{
+  blocks: any[];
+  projectTypeName?: string;
+  canEdit: boolean;
+  canCreate: boolean;
+  onChanged: () => void;
+}> = ({ blocks, projectTypeName, canEdit, canCreate, onChanged }) => {
+  const [drafts, setDrafts] = useState<Record<number, any>>({});
+  const [busy, setBusy] = useState<number | null>(null);
+
+  const draftFor = (b: any) => {
+    const t = b.PlotTemplate;
+    return (
+      drafts[b.Id] ?? {
+        PlotCount: t?.PlotCount ?? "",
+        NumberPrefix: t?.NumberPrefix ?? "P-",
+        StartNumber: t?.StartNumber ?? 1,
+        DefaultAreaSqFt: t?.DefaultAreaSqFt ?? "",
+        DefaultRatePerSqFt: t?.DefaultRatePerSqFt ?? "",
+        DefaultFacing: t?.DefaultFacing ?? "",
+        DefaultRoadWidthFt: t?.DefaultRoadWidthFt ?? "",
+      }
+    );
+  };
+  const patch = (id: number, p: any) =>
+    setDrafts((d) => ({ ...d, [id]: { ...draftFor(blocks.find((b) => b.Id === id)), ...p } }));
+
+  const save = async (b: any) => {
+    const d = draftFor(b);
+    if (!d.PlotCount) { toast.error("How many plots?"); return; }
+    setBusy(b.Id);
+    try {
+      const r = await fetchWithAuth(`${API}/blocks/${b.Id}/plot-template`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(d),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Could not save the plot layout");
+      toast.success(`Plot layout saved for ${b.BlockName}`);
+      onChanged();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  };
+
+  const generate = async (b: any) => {
+    setBusy(b.Id);
+    try {
+      const r = await fetchWithAuth(`${API}/generate-plots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ BlockId: b.Id }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Could not generate plots");
+      // Skipped names are reported rather than swallowed: a partially generated
+      // block is completed without anyone wondering why the count is short.
+      toast.success(
+        `${body.created} plot(s) created in ${b.BlockName}` +
+          (body.skipped?.length ? ` — ${body.skipped.length} already existed` : ""),
+      );
+      onChanged();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(null); }
+  };
+
+  return (
+    <div className={`${cardCls} border-l-2 border-l-emerald-500`}>
+      <SectionHeader
+        icon={Ruler}
+        colorClass="bg-emerald-500/10 text-emerald-600"
+        title="Plot Layout"
+        done={blocks.some((b) => b.PlotTemplate?.IsGenerated)}
+      />
+      <p className="text-[0.6875rem] text-muted-foreground -mt-1">
+        {projectTypeName ? `${projectTypeName} — no floors. ` : ""}
+        Plots are laid out per block. These sizes seed every plot; adjust each
+        plot&apos;s own area, dimensions, facing and survey number afterwards in Plot Master.
+      </p>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+        {blocks.map((b) => {
+          const d = draftFor(b);
+          const t = b.PlotTemplate;
+          const generated = !!t?.IsGenerated;
+          const working = busy === b.Id;
+          const f = (label: string, key: string, type = "number", placeholder = "") => (
+            <div>
+              <label className="block text-[0.625rem] uppercase tracking-wide text-muted-foreground mb-0.5">{label}</label>
+              <input
+                type={type}
+                value={d[key] ?? ""}
+                placeholder={placeholder}
+                disabled={generated || !canEdit || working}
+                onChange={(e) => patch(b.Id, { [key]: e.target.value })}
+                className="w-full h-8 text-xs border border-border rounded-lg px-2 bg-background disabled:opacity-50"
+              />
+            </div>
+          );
+          // Plots entered or imported directly in Plot Master: nothing to lay out here.
+          if (t?.FromPlotMaster) return (
+            <div key={b.Id} className="rounded-lg border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-foreground">{b.BlockName}</span>
+                <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-medium">{t.PlotsCreated} plot(s) in Plot Master</span>
+              </div>
+              <p className="text-xs text-muted-foreground">These plots were entered in Plot Master, each with its own number and area. Edit them there.</p>
+            </div>
+          );
+          return (
+            <div key={b.Id} className="rounded-lg border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-foreground">{b.BlockName}</span>
+                {generated ? (
+                  <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-medium">
+                    {t.PlotsCreated} plot(s) created
+                  </span>
+                ) : (
+                  <span className="text-[0.6875rem] text-muted-foreground">not laid out yet</span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {f("Plots", "PlotCount")}
+                {f("Prefix", "NumberPrefix", "text", "P-")}
+                {f("Start No.", "StartNumber")}
+                {f("Area (sq ft)", "DefaultAreaSqFt")}
+                {f("Rate / sq ft", "DefaultRatePerSqFt")}
+                {f("Road (ft)", "DefaultRoadWidthFt")}
+                <div className="col-span-3">
+                  {f("Facing", "DefaultFacing", "text", "e.g. North")}
+                </div>
+              </div>
+
+              {!generated && (
+                <div className="flex justify-end gap-2 pt-1">
+                  {canEdit && (
+                    <button onClick={() => save(b)} disabled={working}
+                      className="px-3 h-8 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40">
+                      {working ? "Saving…" : "Save layout"}
+                    </button>
+                  )}
+                  {canCreate && t && (
+                    <button onClick={() => generate(b)} disabled={working}
+                      className="px-3 h-8 text-xs bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
+                      {working ? "Generating…" : `Generate ${t.PlotCount} plot(s)`}
+                    </button>
+                  )}
+                </div>
+              )}
+              {generated && (
+                <p className="text-[0.6875rem] text-muted-foreground">
+                  Generated. Manage this land inventory in Plot Master. Regenerating here is blocked so the layout cannot be doubled.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ── Plot Block Expand Row ───────────────────────────────────────────────────
+// Wraps PlotBlockBrowser with its own expand/collapse toggle. Exists as a
+// separate component (not inlined into .map()) because React requires hooks
+// to be called unconditionally at the top level of a component — calling
+// useState inside a map callback violates the Rules of Hooks.
+const PlotBlockExpandRow: React.FC<{
+  block: any;
+  onChanged: () => void;
+}> = ({ block, onChanged }) => {
+  const [open, setOpen] = useState(false);
+  const tpl = block.PlotTemplate;
+  return (
+    <div className="rounded-lg border border-border/50 overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted/30"
+      >
+        {open ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
+        <span className="text-xs font-medium flex-1">{block.BlockName}</span>
+        {tpl && (
+          <span className="text-[0.6875rem] text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full font-medium shrink-0">
+            {tpl.PlotsCreated ?? tpl.PlotCount} plot(s)
+          </span>
+        )}
+      </button>
+      {open && (
+        <PlotBlockBrowser
+          blockId={block.Id}
+          blockName={block.BlockName}
+          onDeleteUnit={() => onChanged()}
+        />
+      )}
+    </div>
+  );
+};
+
+// ── Plot Block Browser ──────────────────────────────────────────────────────
+// Shows the generated plots for a plotted block in a card grid — the same
+// "browse what was generated" experience that BlockFloorTree + FloorUnitList
+// provides for floored projects. Fetches on first mount via the new
+// GET /blocks/:blockId/plots endpoint (no FloorId exists for plots).
+type PlotUnit = {
+  Id: number; UnitName: string; PlotNo?: string; AreaSqFt?: number; RatePerSqFt?: number;
+  Facing?: string; RoadWidthFt?: number; IsActive: boolean; UnitKind: string;
+  LockBookingNo?: string; LockHoldId?: string; LockApplicationNo?: string;
+};
+const PlotBlockBrowser: React.FC<{
+  blockId: number;
+  blockName: string;
+  onDeleteUnit: (unit: PlotUnit) => void;
+}> = ({ blockId, blockName, onDeleteUnit }) => {
+  const [plots, setPlots] = useState<PlotUnit[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (plots !== null) return;
+    setLoading(true);
+    fetchWithAuth(`${API}/blocks/${blockId}/plots`)
+      .then((r) => r.ok ? r.json() : { plots: [] })
+      .then((data) => setPlots(data.plots || []))
+      .catch(() => setPlots([]))
+      .finally(() => setLoading(false));
+  }, [blockId, plots]);
+
+  const handleDelete = async (u: PlotUnit) => {
+    if (!window.confirm(`Delete plot "${u.UnitName}"?`)) return;
+    setDeletingId(u.Id);
+    try {
+      const res = await fetchWithAuth(`${API}/plots/${u.Id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete plot");
+      toast.success(data.message || "Plot deleted");
+      setPlots((ps) => (ps || []).filter((p) => p.Id !== u.Id));
+      onDeleteUnit(u);
+    } catch (e: any) { toast.error(e.message); } finally { setDeletingId(null); }
+  };
+
+  return (
+    <div className="ml-6 pl-3 border-l border-border pb-1.5">
+      {loading ? (
+        <div className="text-[0.6875rem] text-muted-foreground py-1">Loading plots…</div>
+      ) : !plots?.length ? (
+        <div className="text-[0.6875rem] text-muted-foreground py-1">No plots found — try refreshing.</div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5 py-1">
+          {plots.map((u) => {
+            const lockReason = u.LockBookingNo ? `Booked — ${u.LockBookingNo}`
+              : u.LockHoldId ? "On hold"
+              : u.LockApplicationNo ? `Applied — ${u.LockApplicationNo}`
+              : null;
+            const isExpanded = expandedId === u.Id;
+            const dotColor = u.LockBookingNo ? "bg-red-500" : u.LockHoldId ? "bg-sky-500" : u.LockApplicationNo ? "bg-sky-500" : "bg-green-500";
+            return (
+              <div key={u.Id}
+                className={`rounded-lg border p-2 text-[0.6875rem] cursor-pointer transition-colors ${isExpanded ? "border-emerald-500/50 bg-emerald-500/5" : "border-border/60 bg-muted/20 hover:bg-muted/40"}`}
+                onClick={() => setExpandedId(isExpanded ? null : u.Id)}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-mono font-semibold truncate">{u.UnitName}</span>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} title={lockReason || "Available"} />
+                </div>
+                <div className="text-muted-foreground truncate">
+                  {u.AreaSqFt ? `${u.AreaSqFt} sq ft` : "—"}
+                  {u.RatePerSqFt ? ` · ₹${Number(u.RatePerSqFt).toLocaleString("en-IN")}/sqft` : ""}
+                  {u.Facing ? ` · ${u.Facing}` : ""}
+                </div>
+                {isExpanded && (
+                  <div onClick={(e) => e.stopPropagation()} className="mt-1.5 pt-1.5 border-t border-border/60 space-y-1.5">
+                    {u.RoadWidthFt && <div className="text-muted-foreground">Road: {u.RoadWidthFt} ft</div>}
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Status:</span>
+                      {lockReason ? (
+                        <span className="text-sky-600 flex items-center gap-0.5"><Lock size={9} /> {lockReason}</span>
+                      ) : (
+                        <span className="text-green-600">Available</span>
+                      )}
+                    </div>
+                    <div className="flex gap-3">
+                      <a href="/crm/setup/plot-master" className="text-primary hover:underline">Open Plot Master</a>
+                      <button onClick={() => handleDelete(u)} disabled={!!lockReason || deletingId === u.Id}
+                        className="text-red-600 hover:underline disabled:opacity-40 disabled:no-underline">
+                        {deletingId === u.Id ? "Deleting…" : "Delete"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <a href="/crm/setup/plot-master" className="text-[0.6875rem] text-primary hover:underline flex items-center gap-0.5 mt-0.5">
+        manage land inventory in Plot Master <ExternalLink size={9} />
+      </a>
+    </div>
+  );
+};
 
 const CrmProjectAutoSetup: React.FC = () => {
   const qc = useQueryClient();
@@ -189,11 +547,21 @@ const CrmProjectAutoSetup: React.FC = () => {
   // instead of staying open with nothing left to do. This re-opens it
   // on demand (e.g. to prep the template before adding more floors later).
   const [unitTemplateOpenFor, setUnitTemplateOpenFor] = useState<Record<number, boolean>>({});
+  // Payment plan IDs selected per block — forward-filled to every unit generated in that block.
+  const [blockPaymentPlans, setBlockPaymentPlans] = useState<Record<number, number[]>>({});
 
-  const { data: companies = [] } = useQuery({ queryKey: ["business-dropdown-companies"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
-  const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
+  const { data: dropdown } = useQuery({ queryKey: ["crm-business-dropdown"], queryFn: fetchDropdown, staleTime: 5 * 60_000 });
+  const companies = dropdown?.companies || [];
+  const projects = dropdown?.projects || [];
+  const { data: unitTypesMaster = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60_000 });
+  const { data: applicablePlans = [] } = useQuery<PaymentPlan[]>({
+    queryKey: ["applicable-plans-for-project", projectId],
+    queryFn: () => fetchApplicablePlans(projectId),
+    enabled: !!projectId,
+    staleTime: 2 * 60_000,
+  });
   const projectsForCompany = useMemo(
-    () => (companyId ? (projects as any[]).filter((p: any) => String(p.CompanyId) === companyId) : []),
+    () => companyId ? (projects as any[]).filter((p: any) => String(p.company_ids || p.company_id || p.CompanyId || "").split(",").includes(companyId)) : [],
     [projects, companyId],
   );
   const { data: status, isLoading: statusLoading } = useQuery({
@@ -210,9 +578,12 @@ const CrmProjectAutoSetup: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["crm-unit-matrix"] });
     qc.invalidateQueries({ queryKey: ["crm-parking-matrix"] });
     qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
+    // Flat Master (Civil Work DPR) — generating/editing units here also
+    // builds/adjusts their rooms there.
+    invalidateRoomData(qc);
   };
 
-  const blocksForNames: any[] = status?.blocks || [];
+  const blocksForNames: any[] = status?.blocks ?? EMPTY_ITEMS;
   const existingBlockNamesLower = useMemo(
     () => new Set(blocksForNames.map((b) => String(b.BlockName).trim().toLowerCase())),
     [blocksForNames],
@@ -226,12 +597,16 @@ const CrmProjectAutoSetup: React.FC = () => {
   // it's no longer gated on whether Blocks already exist.
   useEffect(() => {
     const n = Math.max(1, Math.min(100, parseInt(blockCount, 10) || 0));
-    setBlockNames(generateNames(n, namingScheme, existingBlockNamesLower));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blockCount, namingScheme, status?.project?.Id, existingBlockNamesLower]);
+    const nextNames = generateNames(n, namingScheme, existingBlockNamesLower);
+    setBlockNames((current) =>
+      current.length === nextNames.length && current.every((name, index) => name === nextNames[index])
+        ? current
+        : nextNames,
+    );
+  }, [blockCount, namingScheme, existingBlockNamesLower]);
 
-  const blocks: any[] = status?.blocks || [];
-  const floors: any[] = status?.floors || [];
+  const blocks: any[] = status?.blocks ?? EMPTY_ITEMS;
+  const floors: any[] = status?.floors ?? EMPTY_ITEMS;
   const floorsByBlock = useMemo(() => {
     const map = new Map<number, any[]>();
     floors.forEach((f) => {
@@ -262,6 +637,12 @@ const CrmProjectAutoSetup: React.FC = () => {
     });
   }, [blocks, floorsByBlock]);
 
+  // Whether this project lays out FLOORS or PLOTS. Taken from the type's
+  // HasFloors flag, resolved server-side in /status — never from its name, so
+  // a type added in Project Type master works here with no change. A project
+  // with no type set resolves to floors, which is the legacy behaviour.
+  const isPlotted = status?.projectType ? !status.projectType.HasFloors : false;
+
   const step1Done = blocks.length > 0;
   const step2Done = floors.length > 0;
 
@@ -286,8 +667,11 @@ const CrmProjectAutoSetup: React.FC = () => {
               OpenTerraceAreaSqFt: it.OpenTerraceAreaSqFt != null ? String(it.OpenTerraceAreaSqFt) : "",
               RatePerSqFt: it.RatePerSqFt != null ? String(it.RatePerSqFt) : "",
             }))
-          : [{ UnitType: "2 BHK", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }];
+          : [{ UnitType: firstPickableType(unitTypesMaster), Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }];
         setTemplates((m) => ({ ...m, [b.Id]: rows }));
+        if (data.paymentPlanIds?.length) {
+          setBlockPaymentPlans((m) => ({ ...m, [b.Id]: data.paymentPlanIds }));
+        }
       } catch { /* leave unset — user can still add rows manually */ }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -468,7 +852,8 @@ const CrmProjectAutoSetup: React.FC = () => {
     setEditingUnitId(unit.Id);
     setEditingUnit({
       UnitName: unit.UnitName || "",
-      UnitType: unit.UnitType || "2 BHK",
+      FloorNo: unit.FloorNo != null ? String(unit.FloorNo) : "",
+      UnitType: unit.UnitType || firstPickableType(unitTypesMaster),
       AreaSqFt: unit.AreaSqFt != null ? String(unit.AreaSqFt) : "",
       CarpetAreaSqFt: unit.CarpetAreaSqFt != null ? String(unit.CarpetAreaSqFt) : "",
       BuiltUpAreaSqFt: unit.BuiltUpAreaSqFt != null ? String(unit.BuiltUpAreaSqFt) : "",
@@ -483,6 +868,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     if (!editingUnit) return;
     const unitName = editingUnit.UnitName.trim();
     if (!unitName) { toast.error("Unit name is required"); return; }
+    const floorNo = editingUnit.FloorNo !== "" ? parseInt(editingUnit.FloorNo, 10) : null;
     setSavingUnitId(unit.Id);
     try {
       const res = await fetchWithAuth(`/api/unit-master/${unit.Id}`, {
@@ -492,7 +878,7 @@ const CrmProjectAutoSetup: React.FC = () => {
           ProjectId: unit.ProjectId,
           BlockId: unit.BlockId,
           UnitName: unitName,
-          FloorNo: unit.FloorNo,
+          FloorNo: floorNo,
           UnitType: editingUnit.UnitType || null,
           AreaSqFt: editingUnit.AreaSqFt || null,
           CarpetAreaSqFt: editingUnit.CarpetAreaSqFt || null,
@@ -506,7 +892,16 @@ const CrmProjectAutoSetup: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to update unit");
-      toast.success(data.message || "Unit updated");
+      // A Unit Type change rebuilds the unit's rooms from the new layout.
+      const rs = data.roomSync;
+      toast.success(
+        (data.message || "Unit updated")
+        + (rs?.added ? ` — ${rs.added} room(s) added from the ${rs.layout} layout` : "")
+        + (rs?.deactivated ? `, ${rs.deactivated} old room(s) deactivated` : ""),
+      );
+      if (rs?.keptWithWork?.length) {
+        toast.warning(`Kept ${rs.keptWithWork.join(", ")} — not in the new layout but has DPR work recorded against it.`);
+      }
       setFloorUnits((m) => ({
         ...m,
         [floorId]: (m[floorId] || []).map((u) => u.Id === unit.Id
@@ -533,7 +928,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   const templateTotal = (blockId: number) => (templates[blockId] || []).reduce((s, r) => s + (parseInt(r.Count, 10) || 0), 0);
 
   const addTemplateRow = (blockId: number) =>
-    setTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { UnitType: "2 BHK", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }] }));
+    setTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { UnitType: firstPickableType(unitTypesMaster), Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }] }));
   const removeTemplateRow = (blockId: number, idx: number) =>
     setTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((_, i) => i !== idx) }));
   const updateTemplateRow = (blockId: number, idx: number, patch: Partial<TemplateRow>) =>
@@ -548,16 +943,19 @@ const CrmProjectAutoSetup: React.FC = () => {
       const res = await fetchWithAuth(`${API}/blocks/${blockId}/unit-template`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Items: rows.map((r) => ({
-          UnitType: r.UnitType,
-          Count: r.Count,
-          AreaSqFt: r.AreaSqFt || null,
-          CarpetAreaSqFt: r.CarpetAreaSqFt || null,
-          BuiltUpAreaSqFt: r.BuiltUpAreaSqFt || null,
-          SuperBuiltUpAreaSqFt: r.SuperBuiltUpAreaSqFt || null,
-          OpenTerraceAreaSqFt: r.OpenTerraceAreaSqFt || null,
-          RatePerSqFt: r.RatePerSqFt || null,
-        })) }),
+        body: JSON.stringify({
+          Items: rows.map((r) => ({
+            UnitType: r.UnitType,
+            Count: r.Count,
+            AreaSqFt: r.AreaSqFt || null,
+            CarpetAreaSqFt: r.CarpetAreaSqFt || null,
+            BuiltUpAreaSqFt: r.BuiltUpAreaSqFt || null,
+            SuperBuiltUpAreaSqFt: r.SuperBuiltUpAreaSqFt || null,
+            OpenTerraceAreaSqFt: r.OpenTerraceAreaSqFt || null,
+            RatePerSqFt: r.RatePerSqFt || null,
+          })),
+          PaymentPlanIds: blockPaymentPlans[blockId] || [],
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save template");
@@ -598,7 +996,18 @@ const CrmProjectAutoSetup: React.FC = () => {
       if (data.createdCount === 0) {
         toast.info("No eligible floors to generate — set a unit count on at least one floor first");
       } else {
-        toast.success(`${data.createdCount} unit(s) created — e.g. ${data.sample.slice(0, 3).join(", ")}`);
+        toast.success(
+          `${data.createdCount} unit(s) created — e.g. ${data.sample.slice(0, 3).join(", ")}`
+          + (data.roomsCreated ? ` · ${data.roomsCreated} room(s) built in Flat Master from their layouts` : ""),
+        );
+        const noRooms: { unitType: string; count: number }[] = data.unitsWithoutRooms ?? [];
+        if (noRooms.length) {
+          toast.warning(
+            `No rooms built for ${noRooms.map((r) => `${r.count} × ${r.unitType}`).join(", ")} — that Unit Type has no layout yet. `
+            + "Define it in Civil Work DPR › Unit Composition, then use Flat Master's \"Generate Rooms in Bulk\".",
+            { duration: 12000 },
+          );
+        }
       }
       refetchStatus();
       invalidateSyncedMasters();
@@ -614,7 +1023,9 @@ const CrmProjectAutoSetup: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "CRM", "Project Auto Setup"]} />
       <CrmShell
         title="CRM — Auto Project Setup"
-      subtitle="Pick a Project, then generate its Blocks, Floors, and Units in one guided flow instead of one-row-at-a-time forms"
+        subtitle={isPlotted
+          ? "Configure plot blocks and land inventory here. Plot Master remains the sales inventory until construction creates a Unit Master record."
+          : "Pick a Project, then generate its Blocks, Floors, and Units in one guided flow instead of one-row-at-a-time forms"}
     >
       <div className="space-y-4">
         {/* Plain in-page toggle — no route change, so switching tabs never
@@ -623,22 +1034,22 @@ const CrmProjectAutoSetup: React.FC = () => {
             CrmProjectAutoSetupParking.tsx); nothing below is shared with
             it, so a slow request or stale render on one side can never
             affect the other. */}
-        <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-1 w-fit">
+        <div className="grid grid-cols-1 sm:grid-cols-2 sm:flex sm:w-fit items-center gap-1 rounded-xl border border-border bg-muted/30 p-1">
           <button
             onClick={() => setActiveTab("setup")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${
-              activeTab === "setup" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+            className={`flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 text-xs sm:text-sm rounded-lg font-medium transition-all ${
+              activeTab === "setup" ? "btn-module text-white shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-background/60"
             }`}
           >
-            <Building2 size={14} /> Block / Floor / Unit Setup
+            <Building2 size={15} className="shrink-0" /> <span className="truncate">{isPlotted ? "Block / Plot" : "Block / Floor / Unit"}</span>
           </button>
           <button
             onClick={() => setActiveTab("parking")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${
-              activeTab === "parking" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+            className={`flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 text-xs sm:text-sm rounded-lg font-medium transition-all ${
+              activeTab === "parking" ? "btn-module text-white shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-background/60"
             }`}
           >
-            <Car size={14} /> Parking Setup
+            <Car size={15} className="shrink-0" /> <span className="truncate">Parking Setup</span>
           </button>
         </div>
 
@@ -646,34 +1057,68 @@ const CrmProjectAutoSetup: React.FC = () => {
           <CrmProjectAutoSetupParking />
         ) : (
         <>
+        {/* Company → Project picker, side by side on wider screens. */}
         <div className={cardCls}>
-          <label className={labelCls}>Company</label>
-          <select
-            value={companyId}
-            onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); }}
-            className={inputCls}
-          >
-            <option value="">Select company</option>
-            {(companies as any[]).map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
-          </select>
+          <SectionHeader
+            icon={Building2}
+            colorClass="bg-sky-500/10 text-sky-600"
+            title="Select Project"
+            hint="Choose the company and project you want to set up."
+          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>Company <span className="text-destructive">*</span></label>
+              <select
+                value={companyId}
+                onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); }}
+                className={inputCls}
+              >
+                <option value="">Select company</option>
+                {(companies as any[]).map((c: any) => <option key={c.id || c.Id} value={String(c.id || c.Id)}>{c.name || c.Name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Project <span className="text-destructive">*</span></label>
+              <select
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                disabled={!companyId}
+                className={`${inputCls} ${!companyId ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                <option value="">{companyId ? "Select project" : "Select a Company first"}</option>
+                {projectsForCompany.map((p: any) => <option key={p.id || p.Id} value={String(p.id || p.Id)}>{p.name || p.Name}</option>)}
+              </select>
+            </div>
+          </div>
         </div>
 
-        <div className={cardCls}>
-          <label className={labelCls}>Project</label>
-          <select
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-            disabled={!companyId}
-            className={`${inputCls} ${!companyId ? "opacity-50 cursor-not-allowed" : ""}`}
-          >
-            <option value="">{companyId ? "Select project" : "Select a Company first"}</option>
-            {projectsForCompany.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-          </select>
-        </div>
+        {!projectId && (
+          <div className="rounded-xl border border-dashed border-border bg-muted/10 px-6 py-10 text-center">
+            <Building2 size={28} className="mx-auto text-muted-foreground/60 mb-2" />
+            <p className="text-sm font-medium">No project selected</p>
+            <p className="text-xs text-muted-foreground mt-1">Pick a company and project above to see and manage its blocks, floors and units.</p>
+          </div>
+        )}
 
         {projectId && statusLoading && (
-          <div className="text-sm text-muted-foreground text-center py-6">Loading...</div>
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-xl bg-muted/40 animate-pulse" />)}
+          </div>
         )}
+
+        {/* Progress across the three setup sections. */}
+        {projectId && status && (() => {
+          const generatedUnits = floors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
+          return (
+            <SetupProgress
+              steps={[
+                { label: "Blocks", detail: step1Done ? `${blocks.length} block${blocks.length === 1 ? "" : "s"} created` : "Create the project's blocks", done: step1Done, active: !step1Done },
+                { label: "Floors", detail: step2Done ? `${floors.length} floor${floors.length === 1 ? "" : "s"} planned` : "Set floors for each block", done: step2Done, active: step1Done && !step2Done },
+                { label: "Units", detail: generatedUnits ? `${generatedUnits} unit${generatedUnits === 1 ? "" : "s"} generated` : "Define unit types & generate", done: step2Done && generatedUnits > 0 && !floors.some((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0), active: step2Done },
+              ]}
+            />
+          );
+        })()}
 
         {projectId && status && !status.shortCodeValid && (
           <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
@@ -681,13 +1126,19 @@ const CrmProjectAutoSetup: React.FC = () => {
           </div>
         )}
 
-        {/* Flags the exact class of gap that caused a real mix-up once
-            before: active Units under this project with no Floor at all
-            can't show up in the tree below, so this surfaces them instead
-            of silently doing nothing about them. */}
-        {projectId && status && status.legacyUnitCount > 0 && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-600">
-            {status.legacyUnitCount} unit{status.legacyUnitCount === 1 ? "" : "s"} on this project {status.legacyUnitCount === 1 ? "has" : "have"} no Floor assigned and won't appear in the tree below — resolve them in <a href="/crm/setup/unit-master" className="underline">Unit Master</a> (assign a floor, or deactivate if they're stale/duplicate data) before relying on this page as the full picture.
+        {/* Floor-less units are now shown in the Unassigned row in the tree
+            below (Option B synthetic bucket). This note stays as a lightweight
+            signpost so staff know what the amber row means without having to
+            guess — it disappears automatically once all units are fixed. */}
+        {projectId && status && !isPlotted && status.legacyUnitCount > 0 && (
+          <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-2.5 text-sm text-sky-600 flex items-center gap-2">
+            <span>
+              {status.legacyUnitCount} unit{status.legacyUnitCount === 1 ? "" : "s"} with no floor assigned — visible as the{" "}
+              <span className="font-semibold">Unassigned</span> row in the tree below. Edit each unit to assign a floor, or go to{" "}
+              <a href="/crm/setup/unit-master" className="underline" onClick={(e) => e.stopPropagation()}>
+                Unit Master
+              </a>.
+            </span>
           </div>
         )}
 
@@ -703,31 +1154,121 @@ const CrmProjectAutoSetup: React.FC = () => {
                 completed Block/Floor/Unit no longer needs a "Generate"-
                 shaped form left open to prove it exists. */}
             {blocks.length > 0 && (() => {
+              // ── Plotted overview ─────────────────────────────────────────
+              if (isPlotted) {
+                const totalPlotted   = blocks.reduce((s, b) => s + (b.PlotTemplate?.PlotCount  ?? 0), 0);
+                const totalCreated   = blocks.reduce((s, b) => s + (b.PlotTemplate?.PlotsCreated ?? 0), 0);
+                const pendingBlocks  = blocks.filter((b) => b.PlotTemplate && !b.PlotTemplate.IsGenerated).length;
+                const noTemplates    = blocks.filter((b) => !b.PlotTemplate).length;
+                return (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="p-4 pb-3 flex items-center gap-2 border-b border-border bg-muted/20">
+                      <Building2 size={16} className="text-primary shrink-0" />
+                      <span className="text-sm font-semibold truncate">{status.project?.Name}</span>
+                      <span className="ml-2 text-[0.6875rem] text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full font-medium">
+                        {status.projectType?.Name ?? "Plotted"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 divide-x divide-border border-b border-border">
+                      {[
+                        { label: "Blocks",          value: blocks.length },
+                        { label: "Plots configured", value: totalPlotted },
+                        { label: "Plots created",    value: totalCreated },
+                        { label: "Blocks pending",   value: pendingBlocks + noTemplates, accent: (pendingBlocks + noTemplates) > 0 },
+                      ].map((stat) => (
+                        <div key={stat.label} className="px-4 py-2.5 text-center">
+                          <div className={`text-lg font-semibold ${stat.accent ? "text-sky-600" : "text-foreground"}`}>{stat.value}</div>
+                          <div className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">{stat.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="p-2">
+                      {blocks.map((b) => {
+                        const tpl = b.PlotTemplate;
+                        const isExpanded = !!treeExpandedBlocks[b.Id];
+                        const pendingLabel = !tpl
+                          ? "Set up plot layout"
+                          : !tpl.IsGenerated
+                            ? `Generate ${tpl.PlotCount} plot(s)`
+                            : null;
+                        return (
+                          <div key={b.Id} className="text-xs rounded-lg hover:bg-muted/30">
+                            <button
+                              onClick={() => setTreeExpandedBlocks((m) => ({ ...m, [b.Id]: !isExpanded }))}
+                              className="w-full grid grid-cols-4 items-center gap-2 px-2 py-1.5 text-left"
+                            >
+                              <span className="flex items-center gap-2 min-w-0">
+                                {isExpanded ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
+                                <span className="font-medium truncate">{b.BlockName}</span>
+                              </span>
+                              <span className="text-muted-foreground">{tpl ? `${tpl.PlotCount} configured` : "—"}</span>
+                              <span className="text-muted-foreground">{tpl?.PlotsCreated ?? 0} created</span>
+                              <span>
+                                {pendingLabel ? (
+                                  <span className="text-sky-600 bg-sky-500/10 px-1.5 py-0.5 rounded-full">{pendingLabel}</span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded-full">
+                                    <CheckCircle2 size={11} /> Done
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                            {isExpanded && tpl?.IsGenerated && (
+                              <PlotBlockBrowser
+                                blockId={b.Id}
+                                blockName={b.BlockName}
+                                onDeleteUnit={(unit) => { refetchStatus(); invalidateSyncedMasters(); }}
+                              />
+                            )}
+                            {isExpanded && !tpl?.IsGenerated && (
+                              <div className="ml-6 pl-3 border-l border-border pb-1.5 text-muted-foreground text-[0.6875rem] py-1">
+                                {tpl ? "Generate plots first to browse them here." : "Set up the plot layout below first."}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+
+              // ── Floored overview ─────────────────────────────────────────
               const totalFloors = floors.length;
               const totalUnitsGenerated = floors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
               const pendingFloorCount = floors.filter((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0).length;
               return (
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <div className="p-4 pb-3 flex items-center gap-2 border-b border-border bg-muted/20">
-                    <Building2 size={16} className="text-primary shrink-0" />
-                    <span className="text-sm font-semibold truncate">{status.project?.Name}</span>
+                <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+                  <div className="px-4 sm:px-5 py-3.5 flex items-center gap-3 border-b border-border bg-muted/20">
+                    <span className="w-9 h-9 rounded-xl btn-module flex items-center justify-center shrink-0">
+                      <Building2 size={17} />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-sm sm:text-base font-heading font-semibold truncate">{status.project?.Name}</div>
+                      <div className="text-xs text-muted-foreground">Project overview — click a block to see its floors and units</div>
+                    </div>
                   </div>
-                  {/* Stat strip — the at-a-glance numbers a person actually
+                  {/* Stat cards — the at-a-glance numbers a person actually
                       scans for first, ahead of the per-block detail below. */}
-                  <div className="grid grid-cols-4 divide-x divide-border border-b border-border">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 p-3 sm:p-4 border-b border-border">
                     {[
-                      { label: "Blocks", value: blocks.length },
-                      { label: "Floors", value: totalFloors },
-                      { label: "Units generated", value: totalUnitsGenerated },
-                      { label: "Floors pending", value: pendingFloorCount, accent: pendingFloorCount > 0 },
+                      { label: "Blocks", value: blocks.length, icon: Building2, tone: "text-violet-600 bg-violet-500/10" },
+                      { label: "Floors", value: totalFloors, icon: Layers, tone: "text-cyan-600 bg-cyan-500/10" },
+                      { label: "Units generated", value: totalUnitsGenerated, icon: Ruler, tone: "text-sky-600 bg-sky-500/10" },
+                      { label: "Floors pending", value: pendingFloorCount, icon: Lock, tone: pendingFloorCount > 0 ? "text-amber-600 bg-[#ffe2021a]" : "text-green-600 bg-green-500/10" },
                     ].map((stat) => (
-                      <div key={stat.label} className="px-4 py-2.5 text-center">
-                        <div className={`text-lg font-semibold ${stat.accent ? "text-amber-600" : "text-foreground"}`}>{stat.value}</div>
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{stat.label}</div>
+                      <div key={stat.label} className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5">
+                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${stat.tone}`}>
+                          <stat.icon size={16} />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-lg sm:text-xl font-heading font-bold leading-tight">{stat.value}</div>
+                          <div className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide truncate">{stat.label}</div>
+                        </div>
                       </div>
                     ))}
                   </div>
-                  <div className="p-2">
+                  <div className="p-2 sm:p-3 space-y-1">
                     {blocks.map((b) => {
                       const blockFloors = floorsByBlock.get(b.Id) || [];
                       const totalUnits = blockFloors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
@@ -742,32 +1283,39 @@ const CrmProjectAutoSetup: React.FC = () => {
                           ? `Generate units on ${pendingFloors.length} floor${pendingFloors.length === 1 ? "" : "s"}`
                           : null;
                       return (
-                        <div key={b.Id} className="text-xs rounded-lg hover:bg-muted/30">
-                          {/* Same 4-column layout as the stat-strip header
-                              above (Name | Floors | Units | Status), so this
-                              row actually fills the row's width with real
-                              data instead of one left-aligned label and a
-                              badge stranded far to the right. */}
+                        <div key={b.Id} className={`text-xs rounded-lg border transition-colors ${isExpanded ? "border-border bg-muted/20" : "border-transparent hover:bg-muted/30"}`}>
+                          {/* Name | Floors | Units | Status — stacks into two
+                              lines on phones so nothing gets squeezed. */}
                           <button onClick={() => setTreeExpandedBlocks((m) => ({ ...m, [b.Id]: !isExpanded }))}
-                            className="w-full grid grid-cols-4 items-center gap-2 px-2 py-1.5 text-left">
+                            className="w-full grid grid-cols-[1fr_auto] sm:grid-cols-4 items-center gap-x-3 gap-y-1 px-3 py-2.5 text-left">
                             <span className="flex items-center gap-2 min-w-0">
-                              {isExpanded ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
-                              <span className="font-medium truncate">{b.BlockName}</span>
+                              {isExpanded ? <ChevronDown size={14} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={14} className="shrink-0 text-muted-foreground" />}
+                              <span className="w-7 h-7 rounded-lg bg-violet-500/10 text-violet-600 flex items-center justify-center shrink-0">
+                                <Building2 size={13} />
+                              </span>
+                              <span className="text-sm font-semibold truncate">Block {b.BlockName}</span>
                             </span>
-                            <span className="text-muted-foreground">{blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"}</span>
-                            <span className="text-muted-foreground">{totalUnits} unit{totalUnits === 1 ? "" : "s"} generated</span>
-                            <span>
+                            <span className="hidden sm:flex items-center gap-1.5 text-muted-foreground">
+                              <Layers size={12} /> {blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"}
+                            </span>
+                            <span className="hidden sm:flex items-center gap-1.5 text-muted-foreground">
+                              <Ruler size={12} /> {totalUnits} unit{totalUnits === 1 ? "" : "s"} generated
+                            </span>
+                            <span className="justify-self-end sm:justify-self-start">
                               {pendingLabel ? (
-                                <span className="text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded-full">{pendingLabel}</span>
+                                <span className="inline-flex text-amber-600 bg-[#ffe2021a] px-2 py-0.5 rounded-full font-medium">{pendingLabel}</span>
                               ) : blockFloors.length > 0 ? (
-                                <span className="inline-flex items-center gap-1 text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded-full">
+                                <span className="inline-flex items-center gap-1 text-green-600 bg-green-500/10 px-2 py-0.5 rounded-full font-medium">
                                   <CheckCircle2 size={11} /> Done
                                 </span>
                               ) : null}
                             </span>
+                            <span className="sm:hidden col-span-2 pl-[3.25rem] text-muted-foreground">
+                              {blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"} · {totalUnits} unit{totalUnits === 1 ? "" : "s"} generated
+                            </span>
                           </button>
                           {isExpanded && (
-                            <div className="ml-6 pl-3 border-l border-border pb-1.5">
+                            <div className="ml-5 sm:ml-8 mr-2 pl-3 border-l-2 border-border pb-2">
                               <BlockFloorTree
                                 blockFloors={blockFloors}
                                 expandedFloorId={overviewExpandedFloorId}
@@ -782,6 +1330,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onCancelEditUnit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                                 onSaveUnit={handleSaveUnit}
                                 onDeleteUnit={handleDeleteUnit}
+                                unitTypesMaster={unitTypesMaster}
                               />
                             </div>
                           )}
@@ -797,15 +1346,31 @@ const CrmProjectAutoSetup: React.FC = () => {
                 header, chips, and the add-affordance all inline — instead
                 of stacked sections, since at rest there's nothing here but
                 a handful of short labels. */}
-            <div className={`${cardCls} border-l-2 border-l-violet-500`}>
-              <div className="flex items-center flex-wrap gap-x-2 gap-y-1.5">
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="w-6 h-6 rounded-full flex items-center justify-center bg-violet-500/10 text-violet-600">
-                    <Building2 size={13} />
-                  </span>
-                  <h3 className="text-sm font-semibold">Blocks</h3>
-                  {step1Done && <CheckCircle2 size={13} className="text-green-600" />}
-                </div>
+            <div className={`${cardCls} border-l-4 border-l-violet-500`}>
+              <SectionHeader
+                icon={Building2}
+                colorClass="bg-violet-500/10 text-violet-600"
+                title={isPlotted ? "1 · Plot Blocks" : "1 · Blocks"}
+                hint={step1Done ? "Click a block to see its floors. Use Edit to rename or remove blocks." : "Create the towers / blocks of this project."}
+                done={step1Done}
+                right={
+                  <>
+                    {rights.canEdit && step1Done && (
+                      <button onClick={() => { setBlocksEditMode((v) => !v); setEditingBlockId(null); }}
+                        className={`inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-medium ${blocksEditMode ? "btn-module text-white" : "text-muted-foreground hover:text-foreground border border-border hover:bg-muted/50"}`}>
+                        <Pencil size={12} /> {blocksEditMode ? "Done" : "Edit"}
+                      </button>
+                    )}
+                    {step1Done && !showAddBlockForm && (
+                      <button onClick={() => setShowAddBlockForm(true)}
+                        className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-medium border border-dashed border-primary/50 text-primary hover:bg-primary/5">
+                        + Add Blocks
+                      </button>
+                    )}
+                  </>
+                }
+              />
+              <div className="flex items-center flex-wrap gap-2">
 
                 {/* Locked, plain-label chips by default — someone just here
                     to see the project plan gets a calm, read-only list, not
@@ -814,7 +1379,13 @@ const CrmProjectAutoSetup: React.FC = () => {
                     getBlockLockReason). Rename/delete only appear once
                     blocksEditMode is switched on via the toggle below. */}
                 {blocks.map((b) => (
-                  <span key={b.Id} className={`flex items-center gap-1 text-[11px] pl-2 pr-1.5 py-0.5 rounded-full font-medium ${blocksEditMode ? "bg-muted/70 border border-border" : "bg-muted/40"}`}>
+                  <span key={b.Id} className={`${chipCls} font-medium ${
+                    blocksEditMode
+                      ? "bg-muted/70 border-border"
+                      : blocksExpandedBlocks[b.Id]
+                        ? "bg-violet-500/10 border-violet-500/40 text-violet-700 dark:text-violet-300"
+                        : "bg-muted/40 border-border/60 hover:border-violet-500/40"
+                  }`}>
                     {editingBlockId === b.Id ? (
                       <input autoFocus type="text" value={editingBlockName}
                         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
@@ -827,12 +1398,12 @@ const CrmProjectAutoSetup: React.FC = () => {
                       <>
                         <span>{b.BlockName}</span>
                         <button onClick={() => { setEditingBlockId(b.Id); setEditingBlockName(b.BlockName); }}
-                          className="text-muted-foreground hover:text-primary">
-                          <Pencil size={9} />
+                          title="Rename block" className="p-0.5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10">
+                          <Pencil size={11} />
                         </button>
                         <button onClick={() => handleDeleteBlock(b)}
-                          className="text-muted-foreground hover:text-red-600">
-                          <X size={10} />
+                          title="Delete block" className="p-0.5 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10">
+                          <X size={12} />
                         </button>
                       </>
                     ) : (
@@ -841,42 +1412,33 @@ const CrmProjectAutoSetup: React.FC = () => {
                       // interaction as the overview card above — but with
                       // its own independent expand state (blocksExpandedBlocks),
                       // so expanding it here doesn't also expand it up there.
-                      <button onClick={() => setBlocksExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))}
-                        className="flex items-center gap-1 hover:text-primary">
-                        {blocksExpandedBlocks[b.Id] ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
-                        {b.BlockName}
-                      </button>
+                        isPlotted ? (
+                          <a href="/crm/setup/plot-master" className="flex items-center gap-1 hover:text-primary">
+                            <MapIcon size={12} /> {b.BlockName}
+                          </a>
+                        ) : (
+                        <button onClick={() => setBlocksExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))}
+                          className="flex items-center gap-1">
+                          {blocksExpandedBlocks[b.Id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          {b.BlockName}
+                        </button>
+                        )
                     )}
                   </span>
                 ))}
-
-                {rights.canEdit && step1Done && (
-                  <button onClick={() => { setBlocksEditMode((v) => !v); setEditingBlockId(null); }}
-                    className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${blocksEditMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}>
-                    {blocksEditMode ? "Done" : "Edit"}
-                  </button>
-                )}
-
-                {/* "Add More Blocks" only opens on demand — a collapsed
-                    project already has its blocks; there's no reason to keep
-                    a whole create-form permanently open underneath them. A
-                    brand-new project (nothing to add "more" to yet) shows
-                    the form open by default instead of an empty collapsed
-                    card. */}
-                {step1Done && !showAddBlockForm && (
-                  <button onClick={() => setShowAddBlockForm(true)}
-                    className="text-[11px] text-primary hover:underline">
-                    + Add
-                  </button>
-                )}
+                {/* Edit / "+ Add Blocks" live in the section header. "Add
+                    More Blocks" only opens on demand; a brand-new project
+                    shows the create form open by default. */}
               </div>
 
               {/* Expanded Block(s) — its Floor tree, drilling further into
                   real Units per Floor, same as clicking through the
                   overview card above. */}
-              {blocks.filter((b) => blocksExpandedBlocks[b.Id]).map((b) => (
-                <div key={b.Id} className="rounded-lg border border-border/50 p-2 text-xs">
-                  <div className="font-medium mb-1">{b.BlockName}</div>
+              {!isPlotted && blocks.filter((b) => blocksExpandedBlocks[b.Id]).map((b) => (
+                <div key={b.Id} className="rounded-xl border border-violet-500/20 bg-violet-500/[0.03] p-3 text-xs">
+                  <div className="text-sm font-semibold mb-1.5 flex items-center gap-1.5">
+                    <Building2 size={13} className="text-violet-600" /> Block {b.BlockName}
+                  </div>
                   <BlockFloorTree
                     blockFloors={floorsByBlock.get(b.Id) || []}
                     expandedFloorId={blocksExpandedFloorId}
@@ -891,21 +1453,22 @@ const CrmProjectAutoSetup: React.FC = () => {
                     onCancelEditUnit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                     onSaveUnit={handleSaveUnit}
                     onDeleteUnit={handleDeleteUnit}
+                    unitTypesMaster={unitTypesMaster}
                   />
                 </div>
               ))}
 
               {(!step1Done || showAddBlockForm) && (
-                <div className={step1Done ? "pt-2 mt-2 border-t border-border space-y-3" : "space-y-3"}>
+                <div className={step1Done ? "rounded-xl border border-dashed border-border bg-muted/10 p-3 sm:p-4 space-y-4" : "space-y-4"}>
                   <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-foreground">{step1Done ? "Add More Blocks" : "Create Blocks"}</div>
+                    <div className="text-sm font-heading font-semibold text-foreground">{step1Done ? `Add More ${isPlotted ? "Plot " : ""}Blocks` : `Create ${isPlotted ? "Plot " : ""}Blocks`}</div>
                     {step1Done && (
-                      <button onClick={() => setShowAddBlockForm(false)} className="text-xs text-muted-foreground hover:text-foreground">
+                      <button onClick={() => setShowAddBlockForm(false)} className="text-xs px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50">
                         Cancel
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className={labelCls}>Number of Blocks</label>
                       <input type="number" min={1} max={100} value={blockCount}
@@ -913,16 +1476,19 @@ const CrmProjectAutoSetup: React.FC = () => {
                     </div>
                     <div>
                       <label className={labelCls}>Naming Scheme</label>
-                      <div className="flex items-center gap-3 h-[34px]">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 rounded-lg border border-border bg-muted/30 p-1">
                         {(["Alphabetical", "Numeric", "Custom"] as NamingScheme[]).map((s) => (
-                          <label key={s} className="flex items-center gap-1 text-xs cursor-pointer">
-                            <input type="radio" checked={namingScheme === s} onChange={() => setNamingScheme(s)} /> {s}
+                          <label key={s} className={`flex items-center justify-center gap-1 text-xs py-1.5 rounded-md cursor-pointer transition-colors ${
+                            namingScheme === s ? "bg-background shadow-sm font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+                          }`}>
+                            <input type="radio" className="sr-only" checked={namingScheme === s} onChange={() => setNamingScheme(s)} /> {s}
                           </label>
                         ))}
                       </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <label className={labelCls}>Block Names</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 -mt-2">
                     {blockNames.map((name, i) => {
                       const dupe = isDuplicateBlockName(name, i, blockNames, existingBlockNamesLower);
                       return (
@@ -932,15 +1498,17 @@ const CrmProjectAutoSetup: React.FC = () => {
                             name={`block-name-${i}-${projectId || "new"}`}
                             onChange={(e) => setBlockNames((arr) => arr.map((v, idx) => idx === i ? e.target.value : v))}
                             className={`${inputCls} ${dupe ? "border-destructive text-destructive" : ""}`} />
-                          {dupe && <div className="text-[10px] text-destructive mt-0.5">Already exists</div>}
+                          {dupe && <div className="text-[0.625rem] text-destructive mt-0.5">Already exists</div>}
                         </div>
                       );
                     })}
                   </div>
-                  <button onClick={handleSaveBlocks} disabled={savingBlocks || !rights.canCreate || blockNames.some((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower))}
-                    className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                    {step1Done ? "Add Blocks" : "OK — Create Blocks"}
-                  </button>
+                  <div className="flex justify-end pt-1">
+                    <button onClick={handleSaveBlocks} disabled={savingBlocks || !rights.canCreate || blockNames.some((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower))}
+                      className="w-full sm:w-auto px-5 py-2.5 text-sm btn-module text-white rounded-lg font-semibold shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                      {savingBlocks ? "Saving…" : step1Done ? "Add Blocks" : "OK — Create Blocks"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -951,18 +1519,68 @@ const CrmProjectAutoSetup: React.FC = () => {
                 over. Submitting an unchanged count for an already-set-up
                 block is always a safe no-op (POST /floors only ever adds
                 what's missing). */}
-            {step1Done && (
-              <div className={`${cardCls} border-l-2 border-l-cyan-500`}>
-                <SectionHeader icon={Layers} colorClass="bg-cyan-500/10 text-cyan-600" title="Floor Plan" done={step2Done} right={
+            {/* A plotted block has no floors, so the whole Floor Plan step is
+                replaced rather than hidden field-by-field — the backend refuses
+                POST /floors for such a block anyway, and leaving the step
+                visible would invite an action that can only fail. */}
+            {step1Done && isPlotted && (
+              <PlotLayoutStep
+                blocks={blocks}
+                projectTypeName={status?.projectType?.Name}
+                canEdit={rights.canEdit}
+                canCreate={rights.canCreate}
+                onChanged={() => { refetchStatus(); invalidateSyncedMasters(); }}
+              />
+            )}
+
+            {/* Plot browse — shown once at least one block has plots generated.
+                Mirrors the "Unit Types & Generation" card for floored projects:
+                expand a block to browse every plot, check availability status,
+                and delete a plot (with the booking/hold lock guard in place).
+                Detailed editing stays in Unit Master. */}
+            {step1Done && isPlotted && blocks.some((b) => b.PlotTemplate?.IsGenerated) && (
+              <div className={`${cardCls} border-l-2 border-l-sky-500`}>
+                <SectionHeader
+                  icon={MapIcon}
+                  colorClass="bg-sky-500/10 text-sky-600"
+                  title="Land Inventory"
+                  done={blocks.every((b) => !b.PlotTemplate || b.PlotTemplate.IsGenerated)}
+                  right={<a href={`/crm/setup/plot-master?projectId=${projectId}`} className="ml-auto inline-flex items-center gap-1 text-[0.6875rem] text-primary hover:underline">Open Plot Master <ExternalLink size={11} /></a>}
+                />
+                <p className="text-[0.6875rem] text-muted-foreground -mt-1">Review live availability below. Use Plot Master for filters, plot history, and conversion to Unit Master after construction.</p>
+                <div className="space-y-1.5">
+                  {blocks.map((b) => {
+                    const tpl = b.PlotTemplate;
+                    if (!tpl?.IsGenerated) {
+                      return (
+                        <div key={b.Id} className="rounded-lg border border-border/50 p-2 flex items-center gap-2">
+                          <span className="text-xs font-medium">{b.BlockName}</span>
+                          <span className="text-[0.6875rem] text-muted-foreground">
+                            {tpl ? `${tpl.PlotCount} configured — generate plots first` : "No layout set"}
+                          </span>
+                        </div>
+                      );
+                    }
+                    return <PlotBlockExpandRow key={b.Id} block={b} onChanged={() => { refetchStatus(); invalidateSyncedMasters(); }} />;
+                  })}
+                </div>
+              </div>
+            )}
+
+            {step1Done && !isPlotted && (
+              <div className={`${cardCls} border-l-4 border-l-cyan-500`}>
+                <SectionHeader icon={Layers} colorClass="bg-cyan-500/10 text-cyan-600" title="2 · Floor Plan" done={step2Done}
+                  hint={step2Done ? "Click a floor to see its units. Use Edit to remove empty floors." : "Enter how many floors each block has."}
+                  right={
                   rights.canEdit && step2Done && (
                     <button onClick={() => setFloorsEditMode((v) => !v)}
-                      className={`ml-auto text-[11px] px-2 py-0.5 rounded-full font-medium ${floorsEditMode ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}>
-                      {floorsEditMode ? "Done" : "Edit"}
+                      className={`inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-medium ${floorsEditMode ? "btn-module text-white" : "text-muted-foreground hover:text-foreground border border-border hover:bg-muted/50"}`}>
+                      <Pencil size={12} /> {floorsEditMode ? "Done" : "Edit"}
                     </button>
                   )
                 } />
 
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {blocks.map((b) => {
                     const blockFloors = floorsByBlock.get(b.Id) || [];
                     const hasFloors = blockFloors.length > 0;
@@ -971,38 +1589,48 @@ const CrmProjectAutoSetup: React.FC = () => {
                     // more via the toggle below.
                     const isOpen = !hasFloors || !!floorFormOpenFor[b.Id];
                     return (
-                      <div key={b.Id} className="rounded-lg border border-border/50 p-2">
+                      <div key={b.Id} className="rounded-xl border border-border/60 bg-background/50 p-3">
                         {hasFloors && !isOpen ? (
                           // Collapsed tree row — this is the state a
                           // completed block sits in, instead of the input
                           // staying open forever.
                           <div>
-                            <div className="flex items-center flex-wrap gap-1.5">
-                              <span className="text-xs font-medium w-20 shrink-0 flex items-center gap-1">
-                                {b.BlockName} <CheckCircle2 size={11} className="text-green-600" />
+                            <div className="flex items-center flex-wrap gap-2">
+                              <span className="text-sm font-semibold flex items-center gap-1.5 w-full sm:w-auto">
+                                <Building2 size={13} className="text-violet-600" /> Block {b.BlockName}
+                                <CheckCircle2 size={13} className="text-green-600" />
+                                <span className="text-xs font-normal text-muted-foreground">· {blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"}</span>
                               </span>
-                              <div className="flex flex-wrap items-center gap-1">
+                              <div className="flex flex-wrap items-center gap-1.5 order-last w-full">
                                 {blockFloors.map((f) => (
-                                  <span key={f.Id} className={`flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded text-muted-foreground ${floorsEditMode ? "bg-muted/70" : "bg-muted/40"}`}>
+                                  <span key={f.Id} className={`inline-flex items-center gap-1 text-xs min-w-[2rem] justify-center px-2 py-1 rounded-lg border text-muted-foreground transition-colors ${
+                                    f.FloorNo === -1
+                                      ? "bg-sky-500/10 text-sky-600 border-sky-500/30"
+                                      : floorPlanExpandedFloorId === f.Id
+                                        ? "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/40"
+                                        : floorsEditMode ? "bg-muted/70 border-border" : "bg-muted/40 border-border/50 hover:border-cyan-500/40"
+                                  }`}>
                                     {/* Generated floors are clickable in view
                                         mode — same drill-into-Units tree as
-                                        the overview card/Blocks section. */}
-                                    {!floorsEditMode && f.IsGenerated ? (
+                                        the overview card/Blocks section.
+                                        Unassigned bucket (FloorNo -1) is not
+                                        clickable here — use the overview tree. */}
+                                    {!floorsEditMode && f.IsGenerated && f.FloorNo !== -1 ? (
                                       <button onClick={() => handleToggleFloorPlanFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
                                     ) : (
                                       <span>{f.FloorLabel}</span>
                                     )}
-                                    {floorsEditMode && (
-                                      <button onClick={() => handleDeleteFloor(f)} className="hover:text-red-600">
-                                        <X size={9} />
+                                    {floorsEditMode && f.FloorNo !== -1 && (
+                                      <button onClick={() => handleDeleteFloor(f)} title="Delete floor" className="rounded hover:text-red-600 hover:bg-red-500/10">
+                                        <X size={11} />
                                       </button>
                                     )}
                                   </span>
                                 ))}
                               </div>
                               <button onClick={() => setFloorFormOpenFor((m) => ({ ...m, [b.Id]: true }))}
-                                className="text-[11px] text-primary hover:underline ml-auto">
-                                + Add more floors
+                                className="text-xs px-2.5 py-1 rounded-lg border border-dashed border-primary/50 text-primary hover:bg-primary/5 ml-auto">
+                                + Add floors
                               </button>
                             </div>
                             {(() => {
@@ -1015,6 +1643,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   editingUnitId={editingUnitId}
                                   editingUnit={editingUnit}
                                   savingUnitId={savingUnitId}
+                                  unitTypesMaster={unitTypesMaster}
                                   onStartEdit={startEditUnit}
                                   onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
                                   onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
@@ -1027,7 +1656,9 @@ const CrmProjectAutoSetup: React.FC = () => {
                         ) : (
                           <div className="space-y-1.5">
                             <div className="flex items-center gap-3">
-                              <span className="text-xs font-medium w-20 shrink-0">{b.BlockName}</span>
+                              <span className="text-sm font-semibold w-24 shrink-0 flex items-center gap-1.5">
+                                <Building2 size={13} className="text-violet-600" /> {b.BlockName}
+                              </span>
                               <input type="number" min={1} max={100} placeholder="Number of floors"
                                 value={floorCounts[b.Id] || ""}
                                 onChange={(e) => setFloorCounts((m) => ({ ...m, [b.Id]: e.target.value }))}
@@ -1040,17 +1671,17 @@ const CrmProjectAutoSetup: React.FC = () => {
                               )}
                             </div>
                             {hasFloors && (
-                              <div className="flex flex-wrap items-center gap-1 pl-[92px]">
+                              <div className="flex flex-wrap items-center gap-1.5 sm:pl-[108px]">
                                 {blockFloors.map((f) => (
-                                  <span key={f.Id} className={`flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded text-muted-foreground ${floorsEditMode ? "bg-muted/70" : "bg-muted/40"}`}>
+                                  <span key={f.Id} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-border/50 text-muted-foreground ${floorsEditMode ? "bg-muted/70" : "bg-muted/40"}`}>
                                     {!floorsEditMode && f.IsGenerated ? (
                                       <button onClick={() => handleToggleFloorPlanFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
                                     ) : (
                                       <span>{f.FloorLabel}</span>
                                     )}
                                     {floorsEditMode && (
-                                      <button onClick={() => handleDeleteFloor(f)} className="hover:text-red-600">
-                                        <X size={9} />
+                                      <button onClick={() => handleDeleteFloor(f)} title="Delete floor" className="rounded hover:text-red-600 hover:bg-red-500/10">
+                                        <X size={11} />
                                       </button>
                                     )}
                                   </span>
@@ -1067,6 +1698,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   editingUnitId={editingUnitId}
                                   editingUnit={editingUnit}
                                   savingUnitId={savingUnitId}
+                                  unitTypesMaster={unitTypesMaster}
                                   onStartEdit={startEditUnit}
                                   onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
                                   onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
@@ -1082,18 +1714,21 @@ const CrmProjectAutoSetup: React.FC = () => {
                   })}
                 </div>
                 {blocks.some((b) => !(floorsByBlock.get(b.Id) || []).length || floorFormOpenFor[b.Id]) && (
-                  <button onClick={async () => { await handleSaveFloors(); setFloorFormOpenFor({}); }} disabled={savingFloors}
-                    className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                    {step2Done ? "Add Floors" : "OK — Generate Floors"}
-                  </button>
+                  <div className="flex justify-end pt-1 border-t border-border/60">
+                    <button onClick={async () => { await handleSaveFloors(); setFloorFormOpenFor({}); }} disabled={savingFloors}
+                      className="w-full sm:w-auto mt-3 px-5 py-2.5 text-sm btn-module text-white rounded-lg font-semibold shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                      {savingFloors ? "Saving…" : step2Done ? "Add Floors" : "OK — Generate Floors"}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
 
             {/* Unit Types & Generation */}
-            {step2Done && (
-              <div className={`${cardCls} border-l-2 border-l-amber-500`}>
-                <SectionHeader icon={Ruler} colorClass="bg-amber-500/10 text-amber-600" title="Unit Types & Generation" />
+            {step2Done && !isPlotted && (
+              <div className={`${cardCls} border-l-4 border-l-sky-500`}>
+                <SectionHeader icon={Ruler} colorClass="bg-sky-500/10 text-sky-600" title="3 · Unit Types & Generation"
+                  hint="Define the unit mix per floor for each block, apply it to the floors, then generate the units." />
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {blocks.map((b) => {
@@ -1113,35 +1748,35 @@ const CrmProjectAutoSetup: React.FC = () => {
                     const totalGeneratedUnits = (floorsByBlock.get(b.Id) || []).reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
 
                     return (
-                      <div key={b.Id} className="rounded-lg border border-border/60 p-3 space-y-2">
+                      <div key={b.Id} className="rounded-xl border border-border/60 bg-background/50 p-3 sm:p-4 space-y-3">
                         {blockFullyGenerated && !unitTemplateOpenFor[b.Id] ? (
                           // Locked summary row — nothing pending here, so the
                           // template editor and per-floor forms stay closed
                           // instead of sitting open with nothing left to do.
                           <div className="space-y-1.5">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-semibold flex items-center gap-1">
-                                {b.BlockName} <CheckCircle2 size={12} className="text-green-600" />
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                              <span className="text-sm font-semibold flex items-center gap-1.5">
+                                <Building2 size={13} className="text-violet-600" /> Block {b.BlockName} <CheckCircle2 size={13} className="text-green-600" />
                               </span>
-                              <span className="text-[11px] text-muted-foreground">
+                              <span className="text-xs text-muted-foreground">
                                 {totalGeneratedUnits} unit{totalGeneratedUnits === 1 ? "" : "s"} generated
                               </span>
                               <button onClick={() => setUnitTemplateOpenFor((m) => ({ ...m, [b.Id]: true }))}
-                                className="text-[11px] text-primary hover:underline ml-auto">
+                                className="text-xs px-2.5 py-1 rounded-lg border border-border text-primary hover:bg-primary/5 ml-auto">
                                 Manage template / units
                               </button>
                             </div>
-                            <div className="flex flex-wrap gap-1">
+                            <div className="flex flex-wrap gap-1.5">
                               {groundFloor && (
                                 <button onClick={() => handleToggleExpandFloor(groundFloor)}
-                                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded bg-muted/40">
+                                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:border-sky-500/40">
                                   {expandedFloorId === groundFloor.Id ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
                                   <Lock size={9} /> Ground: {groundFloor.GeneratedUnitCount || 0}
                                 </button>
                               )}
                               {nonGroundFloors.map((f) => (
                                 <button key={f.Id} onClick={() => handleToggleExpandFloor(f)}
-                                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded bg-muted/40">
+                                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:border-sky-500/40">
                                   {expandedFloorId === f.Id ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
                                   <Lock size={9} /> {f.FloorLabel}: {f.GeneratedUnitCount}
                                 </button>
@@ -1161,20 +1796,24 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                                 onSave={handleSaveUnit}
                                 onDelete={handleDeleteUnit}
+                                unitTypesMaster={unitTypesMaster}
                               />
                             ))}
                           </div>
                         ) : (
                           <>
                             <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-semibold">{b.BlockName}</span>
+                              <span className="text-sm font-semibold flex items-center gap-1.5">
+                                <Building2 size={13} className="text-violet-600" /> Block {b.BlockName}
+                              </span>
                               {blockFullyGenerated && (
                                 <button onClick={() => setUnitTemplateOpenFor((m) => ({ ...m, [b.Id]: false }))}
-                                  className="text-[11px] text-muted-foreground hover:text-foreground ml-auto">
+                                  className="text-xs px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 ml-auto">
                                   Collapse
                                 </button>
                               )}
                             </div>
+                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Unit mix per floor</div>
 
                         {/* Unit Type template — defined ONCE per block, then
                             applied to every non-Ground floor in one click.
@@ -1182,53 +1821,60 @@ const CrmProjectAutoSetup: React.FC = () => {
                             this total still gets typed by cycling through
                             this same sequence (see getBlockUnitSequence). */}
                         <div className="space-y-1.5">
+                          {!firstPickableType(unitTypesMaster) && (
+                            <p className="text-[0.6875rem] text-sky-600 dark:text-sky-400">
+                              No Unit Type has a room layout yet — define one in Civil Work DPR › Unit Composition first.
+                            </p>
+                          )}
                           {rows.map((row, idx) => (
-                            <div key={idx} className="rounded border border-border/50 bg-muted/20 p-2 space-y-1.5">
+                            <div key={idx} className="rounded-lg border border-border/60 bg-muted/20 p-2.5 space-y-2">
                               <div className="flex items-center gap-2">
                                 <select value={row.UnitType} onChange={(e) => updateTemplateRow(b.Id, idx, { UnitType: e.target.value })}
+                                  title={unitTypesMaster.find((t) => t.label === row.UnitType)?.summary || undefined}
                                   className={`${inputCls} !py-1 flex-1`}>
-                                  {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                                  {!row.UnitType && <option value="" disabled>Select Unit Type</option>}
+                                  {unitTypeOptions(unitTypesMaster, row.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
                                 </select>
                                 <input type="number" min={1} max={100} placeholder="Count" value={row.Count}
                                   onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
                                   className={`${inputCls} !py-1 !w-20`} />
-                                <button onClick={() => removeTemplateRow(b.Id, idx)} className="text-muted-foreground hover:text-red-600 shrink-0 ml-auto">
-                                  <X size={12} />
+                                <button onClick={() => removeTemplateRow(b.Id, idx)} title="Remove unit type" className="p-1 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10 shrink-0 ml-auto">
+                                  <X size={14} />
                                 </button>
                               </div>
-                              <div className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr] gap-1.5">
+                              <div className="grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-6 gap-2">
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
+                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
                                   <input type="number" min={0} placeholder="—" value={row.AreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { AreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate/sqft (₹)</span>
+                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Rate/sqft (₹)</span>
                                   <input type="number" min={0} placeholder="—" value={row.RatePerSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { RatePerSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Carpet (sqft)</span>
+                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Carpet (sqft)</span>
                                   <input type="number" min={0} placeholder="—" value={row.CarpetAreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { CarpetAreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Built-up (sqft)</span>
+                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Built-up (sqft)</span>
                                   <input type="number" min={0} placeholder="—" value={row.BuiltUpAreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { BuiltUpAreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">SBU (sqft)</span>
+                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">SBU (sqft)</span>
                                   <input type="number" min={0} placeholder="—" value={row.SuperBuiltUpAreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { SuperBuiltUpAreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
                                 </div>
                                 <div className="flex flex-col gap-0.5">
-                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Open Terrace (sqft)</span>
+                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Open Terrace (sqft)</span>
                                   <input type="number" min={0} placeholder="—" value={row.OpenTerraceAreaSqFt}
                                     onChange={(e) => updateTemplateRow(b.Id, idx, { OpenTerraceAreaSqFt: e.target.value })}
                                     className={`${inputCls} !py-1`} />
@@ -1236,28 +1882,64 @@ const CrmProjectAutoSetup: React.FC = () => {
                               </div>
                             </div>
                           ))}
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => addTemplateRow(b.Id)} className="text-xs text-primary hover:underline">+ Add Type</button>
-                            <span className="text-[11px] text-muted-foreground ml-auto">Total: {templateTotal(b.Id)} unit(s)/floor</span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button onClick={() => addTemplateRow(b.Id)} className="text-xs px-2.5 py-1.5 rounded-lg border border-dashed border-primary/50 text-primary hover:bg-primary/5">+ Add Type</button>
+                            <span className="text-xs text-muted-foreground ml-auto">Total: <span className="font-semibold text-foreground">{templateTotal(b.Id)}</span> unit(s)/floor</span>
                             {rights.canEdit && (
                               <button onClick={() => handleSaveTemplate(b.Id)} disabled={savingTemplateBlockId === b.Id}
-                                className="px-2.5 py-1 text-[11px] bg-muted rounded-lg font-medium hover:bg-muted/70 disabled:opacity-40">
+                                className="px-3 py-1.5 text-xs border border-border bg-background rounded-lg font-medium hover:bg-muted/60 disabled:opacity-40">
                                 Save Template
                               </button>
                             )}
                             {rights.canEdit && (
                               <button onClick={() => handleApplyTemplate(b.Id)} disabled={applyingTemplateBlockId === b.Id || !templateTotal(b.Id)}
-                                className="px-2.5 py-1 text-[11px] bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                                className="px-3 py-1.5 text-xs btn-module text-white rounded-lg font-medium shadow-sm disabled:opacity-40">
                                 Apply to Floors
                               </button>
                             )}
                           </div>
+                          {applicablePlans.length > 0 && (
+                            <div className="pt-1.5 border-t border-border/40">
+                              <div className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mb-1">
+                                Payment Plans — forward-filled to every unit generated in this block
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {applicablePlans.map((plan) => {
+                                  const selected = (blockPaymentPlans[b.Id] || []).includes(plan.Id);
+                                  return (
+                                    <button
+                                      key={plan.Id}
+                                      onClick={() => setBlockPaymentPlans((m) => ({
+                                        ...m,
+                                        [b.Id]: selected
+                                          ? (m[b.Id] || []).filter((id) => id !== plan.Id)
+                                          : [...(m[b.Id] || []), plan.Id],
+                                      }))}
+                                      className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${
+                                        selected
+                                          ? "btn-module text-white border-primary"
+                                          : "bg-muted/40 border-border text-muted-foreground hover:text-foreground"
+                                      }`}
+                                    >
+                                      {plan.PlanName}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {(blockPaymentPlans[b.Id] || []).length > 0 && (
+                                <div className="text-[0.625rem] text-green-600 mt-1">
+                                  {(blockPaymentPlans[b.Id] || []).length} plan{(blockPaymentPlans[b.Id] || []).length > 1 ? "s" : ""} selected — saved with template
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         {/* Ground floor stays its own explicit row — never
                             covered by the block template above. */}
                         {groundFloor && (
-                          <div className="pt-1 border-t border-border/60">
+                          <div className="pt-3 border-t border-border/60 space-y-2">
+                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Ground floor</div>
                             {groundFloor.IsGenerated ? (
                               <button onClick={() => handleToggleExpandFloor(groundFloor)}
                                 className="text-xs text-muted-foreground flex items-center gap-1 hover:text-primary">
@@ -1289,6 +1971,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                                 onSave={handleSaveUnit}
                                 onDelete={handleDeleteUnit}
+                                unitTypesMaster={unitTypesMaster}
                               />
                             )}
                           </div>
@@ -1298,17 +1981,19 @@ const CrmProjectAutoSetup: React.FC = () => {
                             (generated by the template above); a pencil
                             reveals the editable count for a real exception. */}
                         {nonGroundFloors.length > 0 && (
-                          <div className="flex flex-wrap gap-1 pt-1 border-t border-border/60">
+                          <div className="pt-3 border-t border-border/60 space-y-2">
+                          <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Units per floor</div>
+                          <div className="flex flex-wrap gap-1.5">
                             {nonGroundFloors.map((f) => (
                               <div key={f.Id} className="text-xs">
                                 {f.IsGenerated ? (
                                   <button onClick={() => handleToggleExpandFloor(f)}
-                                    className="flex items-center gap-1 text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded bg-muted/40">
+                                    className="inline-flex items-center gap-1 text-muted-foreground hover:text-primary px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:border-sky-500/40">
                                     {expandedFloorId === f.Id ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
                                     <Lock size={9} /> {f.FloorLabel}: {f.GeneratedUnitCount}
                                   </button>
                                 ) : editingFloorId === f.Id ? (
-                                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/40">
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-primary/40 bg-muted/40">
                                     {f.FloorLabel}:
                                     <input autoFocus type="number" min={0} max={500} value={f.UnitCount}
                                       onChange={(e) => handleFloorFieldSave(f, { UnitCount: parseInt(e.target.value, 10) || 0 })}
@@ -1318,9 +2003,9 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   </span>
                                 ) : (
                                   <button onClick={() => setEditingFloorId(f.Id)}
-                                    className="group flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/40 hover:bg-muted/70">
+                                    className="group inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:bg-muted/70" title="Edit unit count for this floor">
                                     <span>{f.FloorLabel}: {f.UnitCount}</span>
-                                    <Pencil size={8} className="opacity-0 group-hover:opacity-60" />
+                                    <Pencil size={10} className="opacity-40 group-hover:opacity-80" />
                                   </button>
                                 )}
                                 {expandedFloorId === f.Id && (
@@ -1336,10 +2021,12 @@ const CrmProjectAutoSetup: React.FC = () => {
                                     onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
                                     onSave={handleSaveUnit}
                                     onDelete={handleDeleteUnit}
+                                    unitTypesMaster={unitTypesMaster}
                                   />
                                 )}
                               </div>
                             ))}
+                          </div>
                           </div>
                         )}
                           </>
@@ -1359,10 +2046,15 @@ const CrmProjectAutoSetup: React.FC = () => {
                   const g = bf.find((f) => f.FloorNo === 0);
                   return ng.some((f) => !f.IsGenerated && f.UnitCount > 0) || (!!g && !g.IsGenerated && !!g.HasUnits && g.UnitCount > 0);
                 }) && (
-                  <button onClick={handleGenerate} disabled={generating}
-                    className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                    Generate Units
-                  </button>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-3">
+                    <div className="text-xs text-muted-foreground flex-1">
+                      <span className="font-semibold text-foreground">Ready to generate.</span> Units will be created for every floor that has a unit count and isn't generated yet.
+                    </div>
+                    <button onClick={handleGenerate} disabled={generating}
+                      className="w-full sm:w-auto px-5 py-2.5 text-sm btn-module text-white rounded-lg font-semibold shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                      {generating ? "Generating…" : "Generate Units"}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -1400,14 +2092,28 @@ const BlockFloorTree: React.FC<{
   onCancelEditUnit: () => void;
   onSaveUnit: (floorId: number, unit: any) => void;
   onDeleteUnit: (floorId: number, unit: any) => void;
-}> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit }) => (
+  unitTypesMaster: LayoutType[];
+}> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit, unitTypesMaster }) => (
   <div className="space-y-0.5">
     {blockFloors.length === 0 ? (
       <div className="text-muted-foreground py-0.5">No floors yet.</div>
     ) : (
       blockFloors.map((f) => (
         <div key={f.Id}>
-          {f.IsGenerated ? (
+          {f.FloorNo === -1 ? (
+            // Synthetic "Unassigned" bucket — units with no FloorNo at all.
+            // Still clickable to expand and edit inline (assign a real floor),
+            // but amber-styled so it reads as "something to fix" not "done".
+            <button onClick={() => onToggleFloor(f)}
+              className="w-full flex items-center gap-1.5 py-0.5 text-left hover:text-sky-700 text-sky-600">
+              {expandedFloorId === f.Id ? <ChevronDown size={10} className="shrink-0" /> : <ChevronRight size={10} className="shrink-0" />}
+              <Layers size={10} className="shrink-0" />
+              <span className="shrink-0 font-medium">Unassigned</span>
+              <span className="text-sky-500/80">
+                {f.GeneratedUnitCount ?? f.UnitCount} unit{(f.GeneratedUnitCount ?? f.UnitCount) === 1 ? "" : "s"} — no floor set, edit to assign one
+              </span>
+            </button>
+          ) : f.IsGenerated ? (
             <button onClick={() => onToggleFloor(f)}
               className="w-full flex items-center gap-1.5 py-0.5 text-left hover:text-primary">
               {expandedFloorId === f.Id ? <ChevronDown size={10} className="shrink-0" /> : <ChevronRight size={10} className="shrink-0" />}
@@ -1422,7 +2128,7 @@ const BlockFloorTree: React.FC<{
               <Layers size={10} className="text-muted-foreground shrink-0" />
               <span className="shrink-0">Floor {f.FloorLabel}</span>
               {f.HasUnits && f.UnitCount > 0 ? (
-                <span className="text-amber-600">{f.UnitCount} unit{f.UnitCount === 1 ? "" : "s"} planned — not generated yet</span>
+                <span className="text-sky-600">{f.UnitCount} unit{f.UnitCount === 1 ? "" : "s"} planned — not generated yet</span>
               ) : (
                 <span className="text-muted-foreground">no units planned</span>
               )}
@@ -1436,6 +2142,7 @@ const BlockFloorTree: React.FC<{
               editingUnitId={editingUnitId}
               editingUnit={editingUnit}
               savingUnitId={savingUnitId}
+              unitTypesMaster={unitTypesMaster}
               onStartEdit={onStartEditUnit}
               onEditChange={onEditUnitChange}
               onCancelEdit={onCancelEditUnit}
@@ -1456,12 +2163,13 @@ const FloorUnitList: React.FC<{
   editingUnitId: number | null;
   editingUnit: UnitEdit | null;
   savingUnitId: number | null;
+  unitTypesMaster: LayoutType[];
   onStartEdit: (unit: any) => void;
   onEditChange: (patch: Partial<UnitEdit>) => void;
   onCancelEdit: () => void;
   onSave: (floorId: number, unit: any) => void;
   onDelete: (floorId: number, unit: any) => void;
-}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => {
+}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, unitTypesMaster, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => {
   // Tapping a unit expands it into a small detail panel (status + real
   // Edit/Delete buttons) instead of always showing a bare pencil/× stranded
   // at the far edge of the row. Local to this floor's list — each floor
@@ -1471,9 +2179,9 @@ const FloorUnitList: React.FC<{
   return (
     <div className="ml-4 mt-1 border-l border-border pl-3">
       {loading ? (
-        <div className="text-[11px] text-muted-foreground py-1">Loading...</div>
+        <div className="text-[0.6875rem] text-muted-foreground py-1">Loading...</div>
       ) : (units || []).length === 0 ? (
-        <div className="text-[11px] text-muted-foreground py-1">No units left on this floor.</div>
+        <div className="text-[0.6875rem] text-muted-foreground py-1">No units left on this floor.</div>
       ) : (
         // A responsive card grid instead of one full-width row per unit —
         // uses the available width on a wide screen instead of a single
@@ -1487,66 +2195,84 @@ const FloorUnitList: React.FC<{
               : null;
             const isEditing = editingUnitId === u.Id && editingUnit;
             const isExpanded = expandedUnitId === u.Id;
-            const dotColor = u.LockBookingNo ? "bg-red-500" : u.LockHoldId ? "bg-amber-500" : u.LockApplicationNo ? "bg-amber-500" : "bg-green-500";
+            const dotColor = u.LockBookingNo ? "bg-red-500" : u.LockHoldId ? "bg-sky-500" : u.LockApplicationNo ? "bg-sky-500" : "bg-green-500";
 
             if (isEditing) {
               return (
                 <div key={u.Id} className="col-span-2 sm:col-span-3 lg:col-span-4 rounded-lg border border-primary/40 bg-muted/20 p-2 space-y-1.5">
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     <input autoFocus value={editingUnit.UnitName}
                       autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                       name={`unit-name-${u.Id}`}
                       onChange={(e) => onEditChange({ UnitName: e.target.value })}
                       placeholder="Unit name"
-                      className="h-7 rounded border border-border bg-background px-2 text-[11px] font-mono outline-none focus:border-primary" />
+                      className="h-7 rounded border border-border bg-background px-2 text-[0.6875rem] font-mono outline-none focus:border-primary" />
                     <select value={editingUnit.UnitType}
                       onChange={(e) => onEditChange({ UnitType: e.target.value })}
-                      className="h-7 rounded border border-border bg-background px-1 text-[11px] outline-none focus:border-primary">
-                      {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      title={unitTypesMaster.find((t) => t.label === editingUnit.UnitType)?.summary || undefined}
+                      className="h-7 rounded border border-border bg-background px-1 text-[0.6875rem] outline-none focus:border-primary">
+                      {!editingUnit.UnitType && <option value="" disabled>Select Unit Type</option>}
+                      {unitTypeOptions(unitTypesMaster, u.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
                     </select>
                   </div>
+                  {/* Floor No. input — only shown for Unassigned units (FloorNo IS NULL)
+                      so staff can assign a real floor right here without going to Unit Master.
+                      Hidden for units already on a real floor — their floor is set correctly
+                      by the wizard and shouldn't be changed from the inline form. */}
+                  {u.FloorNo == null && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[0.625rem] text-sky-600 uppercase tracking-wide font-medium shrink-0">Floor No. (required)</span>
+                      <input
+                        value={editingUnit.FloorNo}
+                        type="number"
+                        placeholder="e.g. 1"
+                        onChange={(e) => onEditChange({ FloorNo: e.target.value })}
+                        className="h-7 w-24 rounded border border-sky-500/50 bg-background px-2 text-[0.6875rem] outline-none focus:border-sky-600"
+                      />
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5">
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
+                      <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
                       <input value={editingUnit.AreaSqFt} type="number" min={0} placeholder="—"
                         onChange={(e) => onEditChange({ AreaSqFt: e.target.value })}
-                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                        className="h-7 rounded border border-border bg-background px-2 text-[0.6875rem] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Carpet (sqft)</span>
+                      <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Carpet (sqft)</span>
                       <input value={editingUnit.CarpetAreaSqFt} type="number" min={0} placeholder="—"
                         onChange={(e) => onEditChange({ CarpetAreaSqFt: e.target.value })}
-                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                        className="h-7 rounded border border-border bg-background px-2 text-[0.6875rem] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Built-up (sqft)</span>
+                      <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Built-up (sqft)</span>
                       <input value={editingUnit.BuiltUpAreaSqFt} type="number" min={0} placeholder="—"
                         onChange={(e) => onEditChange({ BuiltUpAreaSqFt: e.target.value })}
-                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                        className="h-7 rounded border border-border bg-background px-2 text-[0.6875rem] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">SBU (sqft)</span>
+                      <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">SBU (sqft)</span>
                       <input value={editingUnit.SuperBuiltUpAreaSqFt} type="number" min={0} placeholder="—"
                         onChange={(e) => onEditChange({ SuperBuiltUpAreaSqFt: e.target.value })}
-                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                        className="h-7 rounded border border-border bg-background px-2 text-[0.6875rem] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Open Terrace (sqft)</span>
+                      <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Open Terrace (sqft)</span>
                       <input value={editingUnit.OpenTerraceAreaSqFt} type="number" min={0} placeholder="—"
                         onChange={(e) => onEditChange({ OpenTerraceAreaSqFt: e.target.value })}
-                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                        className="h-7 rounded border border-border bg-background px-2 text-[0.6875rem] outline-none focus:border-primary" />
                     </div>
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Rate/sqft (₹)</span>
+                      <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Rate/sqft (₹)</span>
                       <input value={editingUnit.RatePerSqFt} type="number" min={0} placeholder="—"
                         onChange={(e) => onEditChange({ RatePerSqFt: e.target.value })}
-                        className="h-7 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary" />
+                        className="h-7 rounded border border-border bg-background px-2 text-[0.6875rem] outline-none focus:border-primary" />
                     </div>
                   </div>
                   <div className="flex justify-end gap-2">
-                    <button onClick={onCancelEdit} className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:text-foreground">Cancel</button>
+                    <button onClick={onCancelEdit} className="text-[0.6875rem] px-2 py-1 rounded text-muted-foreground hover:text-foreground">Cancel</button>
                     <button onClick={() => onSave(floorId, u)} disabled={savingUnitId === u.Id}
-                      className="text-[11px] px-2 py-1 rounded bg-primary text-primary-foreground font-medium hover:bg-primary/90 disabled:opacity-40">
+                      className="text-[0.6875rem] px-2 py-1 rounded btn-module text-white font-medium disabled:opacity-40">
                       Save
                     </button>
                   </div>
@@ -1556,7 +2282,7 @@ const FloorUnitList: React.FC<{
 
             return (
               <div key={u.Id}
-                className={`rounded-lg border p-2 text-[11px] cursor-pointer transition-colors ${isExpanded ? "border-primary/50 bg-primary/5" : "border-border/60 bg-muted/20 hover:bg-muted/40"}`}
+                className={`rounded-lg border p-2 text-[0.6875rem] cursor-pointer transition-colors ${isExpanded ? "border-primary/50 bg-primary/5" : "border-border/60 bg-muted/20 hover:bg-muted/40"}`}
                 onClick={() => setExpandedUnitId(isExpanded ? null : u.Id)}
               >
                 <div className="flex items-center justify-between gap-1">
@@ -1574,7 +2300,7 @@ const FloorUnitList: React.FC<{
                     <div className="flex items-center gap-1">
                       <span className="text-muted-foreground">Status:</span>
                       {lockReason ? (
-                        <span className="text-amber-600 flex items-center gap-0.5"><Lock size={9} /> {lockReason}</span>
+                        <span className="text-sky-600 flex items-center gap-0.5"><Lock size={9} /> {lockReason}</span>
                       ) : (
                         <span className="text-green-600">Available</span>
                       )}
@@ -1592,7 +2318,7 @@ const FloorUnitList: React.FC<{
           })}
         </div>
       )}
-      <a href="/crm/setup/unit-master" className="text-[11px] text-primary hover:underline flex items-center gap-0.5">
+      <a href="/crm/setup/unit-master" className="text-[0.6875rem] text-primary hover:underline flex items-center gap-0.5">
         edit details in Unit Master <ExternalLink size={9} />
       </a>
     </div>

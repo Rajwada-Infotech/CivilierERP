@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -25,10 +25,27 @@ export function useDependencyMasterForm(editing: DependencyMasterDetail | null, 
       }
     : undefined;
 
-  const cascade = useScopeCascade(initialScope);
+  const cascade = useScopeCascade(initialScope, editing?.id ?? null);
   const [alias, setAlias] = useState(editing?.alias ?? "");
   const [workType, setWorkType] = useState<WorkType>(editing?.workType ?? "INTERNAL");
   const ladder = useActivityLadder(editing?.activities ?? []);
+
+  // Re-sync when `editing` arrives after this hook's first render — the
+  // page renders before its GET /dependency-master/:id query resolves
+  // (DependencyMasterFormPage calls this hook unconditionally, before its
+  // own loading-guard return), so the useState initializers above always
+  // ran once against `editing === null` and never re-ran once the real
+  // record loaded. Without this, opening Edit on an existing chain always
+  // showed a blank Alias and an empty Activity Chain — indistinguishable
+  // from starting a brand new one — exactly like useScopeCascade's own
+  // re-sync effect already exists to prevent for the scope cascade.
+  useEffect(() => {
+    if (!editing) return;
+    setAlias(editing.alias ?? "");
+    setWorkType(editing.workType ?? "INTERNAL");
+    ladder.reset(editing.activities ?? []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing?.id]);
 
   const aliasActive = cascade.isComplete;
   const toggleActive = aliasActive && alias.trim().length > 0;

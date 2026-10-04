@@ -22,7 +22,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   SalesShell,
@@ -128,7 +128,7 @@ const SalesDashboard = () => {
   const { theme } = useTheme();
   usePageRights("sales-dashboard");
 
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const {
     data: rawData,
@@ -321,7 +321,7 @@ const SalesDashboard = () => {
                 </div>
                 <button
                   onClick={() => navigate("/sales/sale-order")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#a855f7" }}
                 >
                   View all →
@@ -412,7 +412,7 @@ const SalesDashboard = () => {
                 </div>
                 <button
                   onClick={() => navigate("/sales/sale-invoice")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#d946ef" }}
                 >
                   View all →
@@ -464,7 +464,7 @@ const SalesDashboard = () => {
                           </TableCell>
                           <TableCell>
                             <span
-                              className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                              className={`text-[0.625rem] px-2 py-0.5 rounded-full font-medium ${
                                 inv.PaymentStatus === "Paid"
                                   ? "bg-emerald-500/15 text-emerald-500"
                                   : "bg-amber-500/15 text-amber-500"

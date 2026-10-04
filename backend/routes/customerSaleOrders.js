@@ -4,6 +4,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard } = require("../services/projectScope");
+
+// Any :id route — refuse an order whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CustomerSaleOrders WHERE SaleOrderID = @id"));
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -187,7 +191,13 @@ const createSaleOrderInternal = async (pool, payload, userEmail) => {
     err.status = 404;
     throw err;
   }
-  if (custCheck.recordset[0].LHeadType !== "C") {
+  // 'A' is the Customer type everywhere else in this schema (CustomerMaster.tsx,
+  // debitNote.js's PARTY_TYPES) — 'C' means Contractor. This previously checked
+  // 'C', which no real Customer Master entry has, so this validation would have
+  // rejected every genuine customer the moment a frontend actually called this
+  // route. Never reached in production (no frontend page wires up to
+  // CustomerSaleOrders yet), caught while auditing a related area.
+  if (custCheck.recordset[0].LHeadType !== "A") {
     const err = new Error("Selected account is not a Customer.");
     err.status = 400;
     throw err;
@@ -346,6 +356,7 @@ router.get("/", cache("customer-sale-orders", 300, { shared: true }), async (req
 
     const whereConditions = [];
     if (companyId) whereConditions.push("so.CompanyId = @companyId");
+    if (req.projectScope) whereConditions.push(projectPredicate(req.projectScope, "so.ProjectId", "").trim());
     if (status) whereConditions.push("so.Status = @status");
     if (customerId) whereConditions.push("so.CustomerID = @customerId");
     const extraWhere = whereConditions.length

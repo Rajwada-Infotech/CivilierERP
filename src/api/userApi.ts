@@ -7,7 +7,7 @@ const RIGHTS_BASE_URL = "/api/user-rights";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
 });
 
 export interface User {
@@ -33,7 +33,7 @@ export const getUsers = async (): Promise<User[]> => {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch users");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const addUser = async (user: {

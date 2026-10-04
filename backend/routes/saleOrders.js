@@ -1,8 +1,33 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectAllowed } = require("../services/projectScope");
+
+// A sale order moves stock from one project to another: a restricted user can
+// see it if either end is theirs, but can only raise one out of their own project.
+const soScopeIds = (scope) => scope.map(Number).filter(Number.isFinite).join(",") || "NULL";
+const soVisibleSql = (scope, alias = "so") =>
+  scope ? ` AND (${alias}.FromProjectID IN (${soScopeIds(scope)}) OR ${alias}.ToProjectID IN (${soScopeIds(scope)}))` : "";
+
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const oid = parseInt(id, 10);
+  if (!Number.isFinite(oid)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, oid).query(
+      `SELECT CASE WHEN 1=1${soVisibleSql(req.projectScope, "so")} THEN 1 ELSE 0 END AS visible FROM dbo.SaleOrders so WHERE so.SaleOrderID = @id`,
+    );
+    if (r.recordset.length && !r.recordset[0].visible) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -68,7 +93,7 @@ router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60)
       .input("limit", sql.Int, parseInt(limit))
       .input("offset", sql.Int, offset);
 
-    let where = "WHERE 1=1";
+    let where = "WHERE 1=1" + soVisibleSql(req.projectScope, "so");
     if (fromCompany) {
       request.input("fromCompany", sql.Int, parseInt(fromCompany));
       where += " AND so.FromCompanyID=@fromCompany";
@@ -150,6 +175,9 @@ router.get("/:id", requirePageRight("sale-order", "view"), async (req, res) => {
 // posted once the order clears its final approval level (see PUT /:id/approve).
 router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
   const pool = getPool();
+  if (req.projectScope && !projectAllowed(req.projectScope, parseInt(req.body?.FromProjectID, 10))) {
+    return res.status(403).json({ error: "You can only raise a sale order out of one of your own projects." });
+  }
   try {
     const {
       FromCompanyID,
@@ -334,7 +362,8 @@ router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
 
 // ── PUT /:id/submit — Draft/Rejected → Pending ─────────────────────────────
 router.put("/:id/submit", requirePageRight("sale-order", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -355,8 +384,13 @@ router.put("/:id/submit", requirePageRight("sale-order", "edit"), async (req, re
 });
 
 // ── PUT /:id/approve — Pending → Approved (posts stock on final approval) ──
-router.put("/:id/approve", requirePageRight("sale-order", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const pool = getPool();
   try {
     const userEmail = requireUserEmail(req, res);
@@ -467,6 +501,8 @@ router.put("/:id/approve", requirePageRight("sale-order", "edit"), async (req, r
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
 
     await bumpCacheVersion("sale-orders");
@@ -486,8 +522,9 @@ router.put("/:id/approve", requirePageRight("sale-order", "edit"), async (req, r
 });
 
 // ── PUT /:id/reject — Pending → Rejected ───────────────────────────────────
-router.put("/:id/reject", requirePageRight("sale-order", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+router.put("/:id/reject", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const { note } = req.body;
   try {
     const userEmail = requireUserEmail(req, res);
@@ -500,6 +537,7 @@ router.put("/:id/reject", requirePageRight("sale-order", "edit"), async (req, re
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("sale-orders");
     res.json({ message: "Sale order rejected", ...result });

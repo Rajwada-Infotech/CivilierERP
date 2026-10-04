@@ -125,6 +125,11 @@ export function ApprovalInboxDetailModal({
 
   const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
   const lineItems = extractLineItems(detail);
+  // A Material Request has no Rate/Amount at all — pricing only enters the
+  // picture once a PO is raised against it — so showing "qty × ₹0.00 = ₹0.00"
+  // per line here was just wrong, not merely empty. Name + Qty (+ UOM) is
+  // all that's meaningful for an MR. Matches web's ApprovalReviewPanel.tsx.
+  const isMaterialRequest = item.Module === "material-requests";
   const extraFields = detail
     ? Object.entries(detail).filter(
         ([k, v]) =>
@@ -208,11 +213,19 @@ export function ApprovalInboxDetailModal({
                     <View key={i} className="flex-row items-center justify-between px-3 py-2.5" style={{ borderTopWidth: i === 0 ? 0 : 1, borderTopColor: `${colors.border}66` }}>
                       <View className="flex-1 min-w-0 pr-2">
                         <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.medium }}>{name}</Text>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 1 }}>
-                          {qty.toLocaleString("en-IN")}{uom ? ` ${uom}` : ""} × {formatINR(rate)}
-                        </Text>
+                        {!isMaterialRequest && (
+                          <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 1 }}>
+                            {qty.toLocaleString("en-IN")}{uom ? ` ${uom}` : ""} × {formatINR(rate)}
+                          </Text>
+                        )}
                       </View>
-                      <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{formatINR(amount)}</Text>
+                      {isMaterialRequest ? (
+                        <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
+                          {qty.toLocaleString("en-IN")}{uom ? ` ${uom}` : ""}
+                        </Text>
+                      ) : (
+                        <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{formatINR(amount)}</Text>
+                      )}
                     </View>
                   );
                 })}
@@ -238,7 +251,26 @@ export function ApprovalInboxDetailModal({
           )}
         </ScrollView>
 
-        {item.Status === "Pending" && (
+        {item.Status === "Pending" && item._canAct === false ? (
+          // Named on this record's workflow, but not this level — approving/
+          // rejecting here would just 403 from transition()'s own per-level
+          // gate (see approvalService.js). Say so instead of showing live-
+          // looking buttons guaranteed to fail, same as the web inbox does.
+          <View
+            style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: insets.bottom + 12 }}
+            className="px-4 pt-3"
+          >
+            <View
+              className="flex-row items-center justify-center gap-1.5 py-3 rounded-xl"
+              style={{ backgroundColor: colors.muted, borderWidth: 1, borderColor: colors.border }}
+            >
+              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
+                Waiting on Level {item._currentLevel}
+                {item._totalLevels ? ` of ${item._totalLevels}` : ""}
+              </Text>
+            </View>
+          </View>
+        ) : item.Status === "Pending" && (
           <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: insets.bottom + 12 }}>
             {rejecting ? (
               <View className="px-4 pt-3">
@@ -280,6 +312,11 @@ export function ApprovalInboxDetailModal({
                   <XCircle size={15} color={colors.destructive} />
                   <Text style={{ color: colors.destructive, fontSize: 13, fontFamily: fonts.heading.semibold }}>Reject</Text>
                 </Pressable>
+                {item.NeedsReview ? (
+                <View className="flex-1 items-center justify-center py-2 px-2 rounded-xl" style={{ borderWidth: 1, borderColor: "#f59e0b66", backgroundColor: "#f59e0b14" }}>
+                  <Text style={{ color: "#b45309", fontSize: 11, fontFamily: fonts.heading.semibold, textAlign: "center" }}>Waiting for Accounts to set the deposit bank (web)</Text>
+                </View>
+                ) : (
                 <Pressable
                   onPress={() => doAction("approve")}
                   disabled={acting !== null}
@@ -289,6 +326,7 @@ export function ApprovalInboxDetailModal({
                   {acting === "approve" ? <ActivityIndicator size="small" color="#fff" /> : <CheckCircle2 size={15} color="#fff" />}
                   <Text style={{ color: "#fff", fontSize: 13, fontFamily: fonts.heading.semibold }}>Approve</Text>
                 </Pressable>
+                )}
               </View>
             )}
           </View>

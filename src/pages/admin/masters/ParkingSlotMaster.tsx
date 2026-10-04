@@ -17,7 +17,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/parking-slot-master";
 const DROPDOWN_API = "/api/business/dropdown";
-const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
 
 async function fetchSlots(): Promise<any[]> {
   const res = await fetchWithAuth(API);
@@ -31,7 +30,7 @@ async function fetchSlots(): Promise<any[]> {
 // Company -> Project -> Block, each strictly gated behind its parent
 // (disabledWhen in MasterPage.tsx) so this can never fall back to showing
 // every row unfiltered.
-const fields: FieldDef[] = [
+const FIELDS_SLOT_PREFIX: FieldDef[] = [
   {
     name: "companyId",
     label: "Company",
@@ -79,14 +78,8 @@ const fields: FieldDef[] = [
     type: "text",
     required: true,
   },
-  {
-    name: "parkingType",
-    label: "Parking Type",
-    type: "select",
-    required: true,
-    defaultValue: "Open",
-    options: PARKING_TYPES,
-  },
+];
+const FIELDS_SLOT_SUFFIX: FieldDef[] = [
   {
     name: "isActive",
     label: "Status",
@@ -120,8 +113,8 @@ function computeStatus(item: {
   lockHoldId: number | null;
 }): string {
   if (!item.isActive) return "Blocked";
-  if (item.lockAllotmentId) return "Booked";
-  if (item.lockHoldId) return "On Hold";
+  if (item.lockAllotmentId != null) return "Booked";
+  if (item.lockHoldId != null) return "On Hold";
   return "Available";
 }
 
@@ -134,6 +127,28 @@ const ParkingSlotMaster: React.FC = () => {
     queryFn: fetchSlots,
     staleTime: 5 * 60 * 1000,
   });
+
+  const { data: parkingTypes = [] } = useQuery<string[]>({
+    queryKey: ["parking-master-types"],
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/parking-master/types");
+      return r.ok ? r.json() : [];
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const fields = React.useMemo<FieldDef[]>(() => [
+    ...FIELDS_SLOT_PREFIX,
+    {
+      name: "parkingType",
+      label: "Parking Type",
+      type: "select",
+      required: true,
+      defaultValue: parkingTypes[0] ?? "Open",
+      options: parkingTypes,
+    } as FieldDef,
+    ...FIELDS_SLOT_SUFFIX,
+  ], [parkingTypes]);
 
   const { data: allBlocks = [] } = useQuery<{ Id: number; Name: string; ProjectId: number }[]>({
     queryKey: ["parking-slot-master-blocks"],
@@ -179,7 +194,7 @@ const ParkingSlotMaster: React.FC = () => {
         companyId: project ? String(project.company_id) : "",
         projectId: String(item.ProjectId),
         projectName: item.ProjectName ?? "",
-        blockId: item.BlockId ? String(item.BlockId) : "",
+        blockId: item.BlockId != null ? String(item.BlockId) : "",
         blockName: item.BlockName ?? "",
         slotNo: item.SlotNo ?? "",
         parkingType: item.ParkingType ?? "Open",
@@ -269,11 +284,11 @@ const ParkingSlotMaster: React.FC = () => {
           // A Booked or OnHold slot can't be edited OR deleted — it's an
           // individual inventory item, same treatment as Unit Master.
           isRowLocked={(row) =>
-            row.lockAllotmentId
+            row.lockAllotmentId != null
               ? row.lockBookingNo
                 ? `Booked (${row.lockBookingNo as string})`
                 : "Currently allotted"
-              : row.lockHoldId
+              : row.lockHoldId != null
                 ? "Currently on hold"
                 : null
           }
@@ -298,13 +313,13 @@ const ParkingSlotMaster: React.FC = () => {
             win.document.write(safeHtml`
               <html><head><title>Parking Slot — ${row.slotNo}</title>
               <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-              </head><body><h2>Parking Slot</h2><table>
+              </head><body><h2>Parking Slot</h2><div className="overflow-x-auto thin-scroll"><table>
                 <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
                 <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
                 <tr><td>Slot No.</td><td>${row.slotNo || "—"}</td></tr>
                 <tr><td>Type</td><td>${row.parkingType || "—"}</td></tr>
                 <tr><td>Status</td><td>${row.status}</td></tr>
-              </table></body></html>
+              </table></div></body></html>
             `);
             win.document.close();
             win.print();

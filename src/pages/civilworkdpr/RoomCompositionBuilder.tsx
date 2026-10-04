@@ -4,12 +4,15 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { getRoomCategoryOptions, type RoomCategory } from "@/api/roomCategoryMasterApi";
 import {
   getBhkTemplate,
   saveBhkTemplate,
   getLayoutTypes,
   addLayoutType,
+  removeLayoutType,
+  LAYOUT_TYPES_QUERY_KEY,
   type BhkType,
 } from "@/api/unitBhkConfigApi";
 import { Grid3x3, Home, Minus, Plus, Save, X } from "lucide-react";
@@ -32,10 +35,11 @@ export default function RoomCompositionBuilder() {
   const [addingType, setAddingType] = useState(false);
   const [newTypeLabel, setNewTypeLabel] = useState("");
   const [addingSaving, setAddingSaving] = useState(false);
+  const [removingTypeKey, setRemovingTypeKey] = useState<string | null>(null);
   const newTypeInputRef = useRef<HTMLInputElement>(null);
 
   const { data: layoutTypes = [], isLoading: loadingTypes } = useQuery({
-    queryKey: ["layout-types"],
+    queryKey: LAYOUT_TYPES_QUERY_KEY,
     queryFn: getLayoutTypes,
     staleTime: 60 * 1000,
   });
@@ -88,6 +92,14 @@ export default function RoomCompositionBuilder() {
     if (!bhkType) return;
     setSaving(true);
     try {
+      // Deliberately does not touch any already-built room — this
+      // composition is shared company-wide, but Room Master's own
+      // project-scoped "Generate rooms" (Generate & Reconcile Rooms) is the
+      // only thing that ever builds or reconciles actual rooms from it, one
+      // project at a time. Auto-propagating a save here into every unit
+      // that already had rooms built, across every project with no project
+      // scoping, used to mean tweaking this for one project's needs could
+      // silently add or delete rooms in an unrelated project.
       await saveBhkTemplate(bhkType, {
         composition: (categories as RoomCategory[]).map((c) => ({
           roomCategoryId: c.id,
@@ -96,6 +108,10 @@ export default function RoomCompositionBuilder() {
       });
       toast.success(`${selectedLabel} template saved`);
       qc.invalidateQueries({ queryKey: ["bhk-template", bhkType] });
+      // Room counts/summaries feed the CRM Auto Setup + Unit Master pickers.
+      qc.invalidateQueries({ queryKey: LAYOUT_TYPES_QUERY_KEY });
+      // The save just added/removed rooms across every unit of this type.
+      invalidateRoomData(qc);
     } catch (e: any) {
       toast.error(e.message ?? "Save failed");
     } finally {
@@ -110,7 +126,7 @@ export default function RoomCompositionBuilder() {
     try {
       const created = await addLayoutType(label);
       toast.success(`"${created.label}" added`);
-      await qc.invalidateQueries({ queryKey: ["layout-types"] });
+      await qc.invalidateQueries({ queryKey: LAYOUT_TYPES_QUERY_KEY });
       setBhkType(created.typeKey);
       setNewTypeLabel("");
       setAddingType(false);
@@ -121,6 +137,21 @@ export default function RoomCompositionBuilder() {
     }
   };
 
+  const handleRemoveType = async (t: (typeof layoutTypes)[number]) => {
+    if (!window.confirm(`Remove "${t.label}"? This can't be undone; it stays removable only while no unit is still tagged with it.`)) return;
+    setRemovingTypeKey(t.typeKey);
+    try {
+      await removeLayoutType(t.typeKey);
+      toast.success(`"${t.label}" removed`);
+      if (bhkType === t.typeKey) setBhkType(null);
+      await qc.invalidateQueries({ queryKey: LAYOUT_TYPES_QUERY_KEY });
+    } catch (e: any) {
+      toast.error(e.message ?? "Couldn't remove type");
+    } finally {
+      setRemovingTypeKey(null);
+    }
+  };
+
   const totalRooms = Object.values(quantities).reduce((s, n) => s + (n || 0), 0);
 
   return (
@@ -128,11 +159,11 @@ export default function RoomCompositionBuilder() {
       <Breadcrumbs
         items={[
           { label: "Civil Work DPR", path: "/civilworkdpr" },
-          { label: "Room Composition" },
+          { label: "Unit Composition" },
         ]}
       />
       <CivilWorkDprShell
-        title="Room Composition"
+        title="Unit Composition"
         subtitle="One room layout template per type — every unit of that type inherits it automatically"
         icon={Grid3x3}
       >
@@ -159,18 +190,39 @@ export default function RoomCompositionBuilder() {
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {layoutTypes.map((t) => (
-                      <button
+                      <div
                         key={t.typeKey}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         onClick={() => setBhkType(t.typeKey)}
-                        className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border transition-all ${
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setBhkType(t.typeKey); } }}
+                        className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border transition-all cursor-pointer ${
                           bhkType === t.typeKey
                             ? "border-cyan-500 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
                             : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
                         }`}
                       >
                         {t.label}
-                      </button>
+                        {t.roomCount === 0 && (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-amber-500"
+                            title="No rooms defined yet — this type can't be picked for units until it has a layout"
+                          />
+                        )}
+                        {/* Only custom types (not the 4 seeded BHK defaults) can be
+                            removed — same rule the backend enforces. */}
+                        {!t.isSystem && rights.canDelete && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleRemoveType(t); }}
+                            disabled={removingTypeKey === t.typeKey}
+                            title={`Remove "${t.label}"`}
+                            className="ml-0.5 -mr-1 w-4 h-4 shrink-0 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-red-500 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
+                          >
+                            <X size={11} />
+                          </button>
+                        )}
+                      </div>
                     ))}
 
                     {addingType ? (
@@ -229,7 +281,7 @@ export default function RoomCompositionBuilder() {
                 <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
                   <Grid3x3 size={14} className="text-cyan-600 dark:text-cyan-400" />
                   <span className="text-sm font-heading font-semibold text-foreground">
-                    {selectedLabel} Room Composition
+                    {selectedLabel} Unit Composition
                   </span>
                 </div>
                 <div className="p-5 space-y-5">
@@ -238,15 +290,17 @@ export default function RoomCompositionBuilder() {
                   ) : (
                     <>
                       <p className="text-xs text-muted-foreground">
-                        This layout applies to every unit tagged {selectedLabel} across every project,
-                        tower, and floor — set it once here instead of per unit.
+                        This layout applies to every unit tagged {selectedLabel} — set it once here instead
+                        of per unit. Saving never touches a room that's already been built; it only takes
+                        effect for units whose rooms haven't been generated yet. To rebuild an already-built
+                        unit's rooms from this layout, use Room Master's "Generate Rooms" for its project.
                       </p>
 
                       <div className="space-y-2">
                         <p className={labelCls}>Room Categories</p>
                         {(categories as RoomCategory[]).length === 0 ? (
                           <p className="text-sm text-muted-foreground">
-                            No active room categories yet — add some in Room Category Master first.
+                            No active room categories yet — add some in Room Master first.
                           </p>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -290,7 +344,7 @@ export default function RoomCompositionBuilder() {
                           <button
                             onClick={handleSave}
                             disabled={saving}
-                            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 disabled:opacity-50 transition-all"
+                            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:opacity-90 disabled:opacity-50 transition-all"
                           >
                             <Save size={13} /> {saving ? "Saving…" : `Save ${selectedLabel} Template`}
                           </button>

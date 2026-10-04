@@ -1,4 +1,4 @@
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+﻿import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE_URL = "/api/account-head";
 
@@ -71,5 +71,5 @@ export interface AccountGroup {
 export const getAccountGroups = async (): Promise<AccountGroup[]> => {
   const res = await fetchWithAuth("/api/account-group");
   if (!res.ok) throw new Error(`Account Groups GET failed: ${res.status}`);
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -6,45 +7,75 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
-// ─── Fixed checklist template ────────────────────────────────────────────
-// Every booking gets exactly these items. There is no admin UI to add/remove
-// items — the set is small and deliberate, matching what actually needs to
-// be verified with the customer on the welcome call. Adding a new mandatory
-// check later just means adding a row here (existing bookings simply won't
-// have a saved row for it yet, which the GET endpoint treats as unchecked).
-const CHECKLIST_TEMPLATE = [
+// ─── Checklist template ──────────────────────────────────────────────────
+// ALWAYS_TEMPLATE applies to every booking — these facts exist for every
+// single booking with no exception, so there's always something real to
+// confirm. There is no admin UI to add/remove items — the set is small and
+// deliberate, matching what actually needs to be verified with the customer
+// on the welcome call.
+const ALWAYS_TEMPLATE = [
   { section: "ProjectUnit", key: "project_name", label: "Project name confirmed with customer" },
   { section: "ProjectUnit", key: "unit_no", label: "Unit number, type & structural area confirmed" },
   { section: "ProjectUnit", key: "booking_date", label: "Booking date confirmed" },
   { section: "ProjectUnit", key: "total_value", label: "Total booking value / grand total confirmed" },
 
-  { section: "PaymentPlan", key: "plan_structure", label: "Payment plan name & milestone structure confirmed" },
-  { section: "PaymentPlan", key: "milestone_dates", label: "Milestone due dates explained to customer" },
+  // One combined confirmation, not two — "which milestones are due when" is
+  // part of explaining the plan structure itself, not a separately
+  // verifiable fact with its own data to check against.
+  { section: "PaymentPlan", key: "plan_structure", label: "Payment plan structure & milestone schedule confirmed with customer" },
   { section: "PaymentPlan", key: "outstanding_balance", label: "Outstanding balance confirmed" },
-
-  { section: "CoApplicant", key: "co_applicant_identity", label: "Co-applicant name & relation confirmed (or marked N/A)" },
-  { section: "CoApplicant", key: "co_applicant_kyc", label: "Co-applicant PAN/Aadhaar confirmed (or marked N/A)" },
-  { section: "CoApplicant", key: "co_applicant_contact", label: "Co-applicant contact details confirmed (or marked N/A)" },
 
   { section: "PersonalContact", key: "applicant_name", label: "Applicant name confirmed" },
   { section: "PersonalContact", key: "mobile_number", label: "Mobile number confirmed" },
   { section: "PersonalContact", key: "email", label: "Email address confirmed" },
   { section: "PersonalContact", key: "address", label: "Communication address confirmed" },
 
-  { section: "Parking", key: "parking_selection", label: "Parking slot(s) & charges confirmed with customer (or marked N/A if none)" },
-
-  { section: "ExtraCharges", key: "extra_charges", label: "Extra work / additional charges confirmed with customer (or marked N/A if none)" },
-
   { section: "Documents", key: "documents_uploaded", label: "All required KYC/booking documents uploaded" },
   { section: "Documents", key: "documents_verified", label: "All uploaded documents verified against originals" },
 ];
+// CONDITIONAL_TEMPLATE items exist on the checklist ONLY when the booking
+// actually has that kind of data on file — a booking with no co-applicant,
+// no parking, or no extra charges has nothing to verify there, so forcing a
+// checkbox (previously ticked as "N/A") added a click with no real fact
+// behind it. `existsCol` names the flag computed per-booking in
+// loadItems()'s existence query; the item is included only when it's truthy.
+// `legacyKeys` lets a booking that already had its old, more granular items
+// checked keep showing as verified under the new merged item instead of
+// silently reverting to unchecked.
+const CONDITIONAL_TEMPLATE = [
+  {
+    section: "CoApplicant", key: "co_applicant_details",
+    label: "Co-applicant name, relation, KYC & contact details confirmed",
+    existsCol: "HasCoApplicant",
+    legacyKeys: ["co_applicant_identity", "co_applicant_kyc", "co_applicant_contact"],
+  },
+  {
+    section: "Parking", key: "parking_selection",
+    label: "Parking slot(s) & charges confirmed with customer",
+    existsCol: "HasParking",
+  },
+  {
+    section: "ExtraCharges", key: "extra_charges",
+    label: "Extra work / additional charges confirmed with customer",
+    existsCol: "HasExtraCharges",
+  },
+];
+// A plot (land) sale confirms the same facts in land terms. Same keys, so
+// saved ticks carry over; only the wording the caller reads changes.
+const PLOT_SALE_LABELS = {
+  unit_no: "Plot number(s), size & facing confirmed",
+  total_value: "Total land value / grand total confirmed (no GST on land)",
+  plan_structure: "Payment schedule (Booking Amount, then the balance) confirmed with customer",
+};
+const PLOT_SALE_SECTION_LABELS = { ProjectUnit: "Project & Plot Details", PaymentPlan: "Payment Schedule" };
+
 const SECTION_LABELS = {
   ProjectUnit: "Project & Unit Details",
   PaymentPlan: "Payment Plan",
@@ -54,24 +85,62 @@ const SECTION_LABELS = {
   ExtraCharges: "Extra Charges",
   Documents: "Documents & Attachments",
 };
-const ITEM_BY_KEY = Object.fromEntries(CHECKLIST_TEMPLATE.map((t) => [t.key, t]));
+// Every key the checklist could ever use, for validating a PUT/recheck
+// itemKey exists at all (applicability to THIS booking is checked
+// separately via getActiveTemplate, since that depends on real booking data).
+const ITEM_BY_KEY = Object.fromEntries([...ALWAYS_TEMPLATE, ...CONDITIONAL_TEMPLATE].map((t) => [t.key, t]));
+
+// The real, per-booking checklist: every ALWAYS item, plus each CONDITIONAL
+// item only when this booking actually has that kind of data. Total item
+// count is therefore not a fixed 18 — it's whatever genuinely applies to
+// this specific booking (a self-funded, no-parking, no-extra-charges,
+// no-co-applicant booking has fewer real facts to confirm, and its
+// checklist reflects exactly that).
+async function getActiveTemplate(pool, bookingId) {
+  const ctx = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT
+      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmCoApplicant WHERE BookingId = @bid AND IsActive = 1) THEN 1 ELSE 0 END AS HasCoApplicant,
+      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmParkingAllotment WHERE BookingId = @bid AND IsActive = 1) THEN 1 ELSE 0 END AS HasParking,
+      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmExtraCharge WHERE BookingId = @bid AND IsActive = 1) THEN 1 ELSE 0 END AS HasExtraCharges,
+      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot WHERE BookingId = @bid) THEN 1 ELSE 0 END AS IsPlotSale
+  `);
+  const flags = ctx.recordset[0] || {};
+  const items = [
+    ...ALWAYS_TEMPLATE,
+    ...CONDITIONAL_TEMPLATE.filter((t) => flags[t.existsCol] === 1),
+  ];
+  if (flags.IsPlotSale !== 1) return items;
+  return items.map((t) => ({
+    ...t,
+    label: PLOT_SALE_LABELS[t.key] || t.label,
+    sectionLabel: PLOT_SALE_SECTION_LABELS[t.section],
+  }));
+}
 
 async function loadItems(pool, bookingId) {
-  const saved = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT ItemKey, IsChecked, Remarks, CheckedBy, CheckedAt,
-           RecheckStatus, RecheckReason, RecheckRequestedBy, RecheckRequestedAt, ResolvedBy, ResolvedAt
-    FROM dbo.CrmWelcomeChecklistItem WHERE BookingId = @bid
-  `);
+  const [saved, activeTemplate] = await Promise.all([
+    pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT ItemKey, IsChecked, Remarks, CheckedBy, CheckedAt,
+             RecheckStatus, RecheckReason, RecheckRequestedBy, RecheckRequestedAt, ResolvedBy, ResolvedAt
+      FROM dbo.CrmWelcomeChecklistItem WHERE BookingId = @bid
+    `),
+    getActiveTemplate(pool, bookingId),
+  ]);
   const savedByKey = Object.fromEntries(saved.recordset.map((r) => [r.ItemKey, r]));
 
-  const items = CHECKLIST_TEMPLATE.map((t) => {
+  const items = activeTemplate.map((t) => {
     const s = savedByKey[t.key];
+    // Continuity: a merged item with no row of its own yet, whose every
+    // legacy sub-item was already checked, counts as already checked —
+    // staff already confirmed those facts under the old, more granular
+    // items; merging the checklist must not silently un-verify real work.
+    const legacyAllChecked = !s && t.legacyKeys?.length > 0 && t.legacyKeys.every((lk) => savedByKey[lk]?.IsChecked);
     return {
       Section: t.section,
-      SectionLabel: SECTION_LABELS[t.section],
+      SectionLabel: t.sectionLabel || SECTION_LABELS[t.section],
       ItemKey: t.key,
       Label: t.label,
-      IsChecked: !!s?.IsChecked,
+      IsChecked: !!s?.IsChecked || legacyAllChecked,
       Remarks: s?.Remarks || "",
       CheckedBy: s?.CheckedBy || null,
       CheckedAt: s?.CheckedAt || null,
@@ -82,16 +151,21 @@ async function loadItems(pool, bookingId) {
     };
   });
 
-  const sections = Object.keys(SECTION_LABELS).map((section) => {
-    const secItems = items.filter((i) => i.Section === section);
-    return {
-      section,
-      label: SECTION_LABELS[section],
-      items: secItems,
-      complete: secItems.every((i) => i.IsChecked && i.RecheckStatus !== CrmStatus.OPEN),
-      hasOpenRecheck: secItems.some((i) => i.RecheckStatus === CrmStatus.OPEN),
-    };
-  });
+  // Only sections that actually have an applicable item this time — a
+  // booking with no co-applicant simply has no "Co-Applicant Details"
+  // section at all, not an empty/trivially-complete one.
+  const sections = Object.keys(SECTION_LABELS)
+    .filter((section) => items.some((i) => i.Section === section))
+    .map((section) => {
+      const secItems = items.filter((i) => i.Section === section);
+      return {
+        section,
+        label: secItems[0].SectionLabel,
+        items: secItems,
+        complete: secItems.every((i) => i.IsChecked && i.RecheckStatus !== CrmStatus.OPEN),
+        hasOpenRecheck: secItems.some((i) => i.RecheckStatus === CrmStatus.OPEN),
+      };
+    });
 
   const totalCount = items.length;
   const checkedCount = items.filter((i) => i.IsChecked && i.RecheckStatus !== CrmStatus.OPEN).length;
@@ -100,15 +174,70 @@ async function loadItems(pool, bookingId) {
   return { items, sections, totalCount, checkedCount, openRecheckCount, canSubmit: checkedCount === totalCount && openRecheckCount === 0 };
 }
 
+const { renderWelcomeCallPdfBuffer } = require("../services/welcomeCallPdf");
+
+router.get("/:bookingId/pdf", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
+    
+    // Fetch booking & company details
+    const bkg = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT b.BookingNo, b.UnitNo, a.ApplicantName, proj.name AS ProjectName,
+             comp.logo AS CompanyLogo
+      FROM dbo.CrmBooking b
+      LEFT JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+      LEFT JOIN dbo.enterprise comp ON comp.id = b.CompanyId AND comp.business_type = 'C'
+      WHERE b.Id = @bid
+    `);
+    if (!bkg.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const bData = bkg.recordset[0];
+
+    // Fetch submission details
+    const sub = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT s.SubmittedAt, u.name AS SubmittedByName
+      FROM dbo.CrmWelcomeCallSubmission s
+      LEFT JOIN dbo.Users u ON u.id = s.SubmittedBy
+      WHERE s.BookingId = @bid
+    `);
+    const subData = sub.recordset[0] || {};
+
+    // Fetch checklist state
+    const state = await loadItems(pool, bookingId);
+    
+    const pdfData = {
+      ...bData,
+      ...subData,
+      sections: state.sections,
+    };
+
+    const buffer = await renderWelcomeCallPdfBuffer(pdfData);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="WelcomeCall_Verification_${bData.BookingNo}.pdf"`);
+    res.send(buffer);
+  } catch (e) {
+    console.error("[crm-welcome-checklist] GET /:bookingId/pdf error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /:bookingId — full checklist state + submission/lock status
 router.get("/:bookingId", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const state = await loadItems(pool, bookingId);
     const sub = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT IsLocked, SubmittedBy, SubmittedAt FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
-    res.json({ ...state, submission: sub.recordset[0] || null });
+    // Surfaced so the frontend can disable Submit with a clear reason up
+    // front, instead of only finding out on a failed submit attempt — see
+    // the same gate enforced (never just trusted from the client) in POST /submit.
+    const called = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 1 AS x FROM dbo.CrmWelcomeCall WHERE BookingId = @bid AND Outcome = 'Welcomed'");
+    res.json({ ...state, submission: sub.recordset[0] || null, hasWelcomedCall: !!called.recordset.length });
   } catch (e) {
     console.error("[crm-welcome-checklist] GET /:bookingId error:", e.message);
     res.status(500).json({ error: e.message });
@@ -127,9 +256,15 @@ function assertUnlocked(pool, bookingId) {
 router.put("/:bookingId/items/:itemKey", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const itemKey = req.params.itemKey;
     if (!ITEM_BY_KEY[itemKey]) return res.status(400).json({ error: "Unknown checklist item" });
+
+    const activeTemplate = await getActiveTemplate(pool, bookingId);
+    if (!activeTemplate.some((t) => t.key === itemKey)) {
+      return res.status(400).json({ error: "This checklist item doesn't apply to this booking (no matching data on file)" });
+    }
 
     if (await assertUnlocked(pool, bookingId)) {
       return res.status(400).json({ error: "This checklist has already been submitted and locked. Reopen it first." });
@@ -178,11 +313,17 @@ router.put("/:bookingId/items/:itemKey", requirePageRight("crm-welcome-calls", "
 router.post("/:bookingId/items/:itemKey/recheck", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const itemKey = req.params.itemKey;
     if (!ITEM_BY_KEY[itemKey]) return res.status(400).json({ error: "Unknown checklist item" });
     const reason = String(req.body.Reason || "").trim();
     if (!reason) return res.status(400).json({ error: "A reason is required to send an item for recheck" });
+
+    const activeTemplate = await getActiveTemplate(pool, bookingId);
+    if (!activeTemplate.some((t) => t.key === itemKey)) {
+      return res.status(400).json({ error: "This checklist item doesn't apply to this booking (no matching data on file)" });
+    }
 
     if (await assertUnlocked(pool, bookingId)) {
       return res.status(400).json({ error: "This checklist has already been submitted and locked. Reopen it first." });
@@ -238,7 +379,8 @@ router.post("/:bookingId/items/:itemKey/recheck", requirePageRight("crm-welcome-
 router.post("/:bookingId/items/:itemKey/resolve", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const itemKey = req.params.itemKey;
     if (!ITEM_BY_KEY[itemKey]) return res.status(400).json({ error: "Unknown checklist item" });
 
@@ -257,13 +399,26 @@ router.post("/:bookingId/items/:itemKey/resolve", requirePageRight("crm-welcome-
   }
 });
 
-// POST /:bookingId/submit — final submit. Requires every item checked and
-// zero open recheck flags. Locks the checklist read-only and stamps who/when.
+// POST /:bookingId/submit — final submit. Requires every item checked, zero
+// open recheck flags, AND an actual Welcome Call already logged with
+// Outcome = 'Welcomed' — the checklist is staff sign-off on facts confirmed
+// DURING that call, so it can't be legitimately complete if the call itself
+// never happened. Before this gate, the checklist and the call log were two
+// entirely independent completion paths that could silently disagree: staff
+// could tick every box and lock the checklist without ever placing a
+// successful call, while the dashboard's "pending welcome call" alert (which
+// checks for a real Outcome = 'Welcomed' row) would still correctly show the
+// booking as not done — a locked, "submitted" checklist next to a booking
+// the rest of the system still considered un-called.
 router.post("/:bookingId/submit", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
+    // Same gate as the rest of the Welcome Call workflow (crmWelcomeCalls.js
+    // POST / uses requireApprovedBooking) — this checklist can't be
+    // meaningfully "verified" on a booking that isn't itself Approved.
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const state = await loadItems(pool, bookingId);
@@ -272,6 +427,14 @@ router.post("/:bookingId/submit", requirePageRight("crm-welcome-calls", "edit"),
         error: state.openRecheckCount > 0
           ? `${state.openRecheckCount} item(s) still have an open recheck flag — resolve them before submitting.`
           : `${state.totalCount - state.checkedCount} item(s) are not yet checked off.`,
+      });
+    }
+
+    const called = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 1 AS x FROM dbo.CrmWelcomeCall WHERE BookingId = @bid AND Outcome = 'Welcomed'");
+    if (!called.recordset.length) {
+      return res.status(400).json({
+        error: "Log a call with outcome 'Welcomed' before submitting the verification checklist — the checklist confirms facts checked during that call.",
       });
     }
 
@@ -308,7 +471,8 @@ router.post("/:bookingId/submit", requirePageRight("crm-welcome-calls", "edit"),
 router.post("/:bookingId/reopen", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId).input("by", sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmWelcomeCallSubmission
@@ -329,7 +493,15 @@ router.post("/:bookingId/reopen", requirePageRight("crm-welcome-calls", "edit"),
 router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const conds = [`ci.RecheckStatus = '${CrmStatus.OPEN}'`];
+    const req0 = pool.request();
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
@@ -341,7 +513,8 @@ router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), asyn
       JOIN dbo.CrmBooking b ON b.Id = ci.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      WHERE ci.RecheckStatus = '${CrmStatus.OPEN}'
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      WHERE ${conds.join(" AND ")}
       GROUP BY b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo), COALESCE(bn.ProjectName, b.ProjectName), a.ApplicantName, a.Mobile
       ORDER BY MIN(ci.RecheckRequestedAt)
     `);

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -53,14 +54,14 @@ async function validateItems(pool, items) {
   return { error: null, namesById };
 }
 
-// A plan can be tagged to AT MOST ONE Project (dbo.CrmPaymentPlanProject,
-// enforced 1:1 from the Plan's side by migration 270's unique index on
-// PlanId — a Project can still have many Plans tagged to it, just not the
-// other way around). Optional — an untagged plan just never appears in a
-// Project/Block-filtered dropdown but is still offered as part of the
-// final "all active plans" fallback everywhere. This is the TOP tier of
-// the Project -> Block -> Unit cascade Unit Master's own tags
-// (dbo.CrmUnitPaymentPlan) and the new Block tags
+// A plan can be tagged to MANY Projects (dbo.CrmPaymentPlanProject, true
+// many-to-many as of migration 417 — a Project can have many Plans tagged
+// to it, and a Plan can likewise be tagged to many Projects, same shape as
+// Bank Master's own Project tagging in crmProjectBanks.js). Optional — an
+// untagged plan just never appears in a Project/Block-filtered dropdown but
+// is still offered as part of the final "all active plans" fallback
+// everywhere. This is the TOP tier of the Project -> Block -> Unit cascade
+// Unit Master's own tags (dbo.CrmUnitPaymentPlan) and the Block tags
 // (dbo.CrmBlockPaymentPlan) sit below — see
 // crmEntityCreation.js's getApplicablePaymentPlans/resolveApplicationPaymentPlan
 // for the single place that walks the whole cascade.
@@ -74,35 +75,52 @@ const PLAN_SELECT = `
           WHERE i.PlanTemplateId = p.Id
           ORDER BY i.MilestoneNo
           FOR JSON PATH) AS MilestonesJson,
-         proj.ProjectId, proj.ProjectName
+         proj.ProjectsJson, proj.ProjectIds
   FROM dbo.CrmPaymentPlanTemplate p
   OUTER APPLY (
-    SELECT TOP 1 cpp.ProjectId, e.name AS ProjectName
-    FROM dbo.CrmPaymentPlanProject cpp
-    JOIN dbo.enterprise e ON e.id = cpp.ProjectId AND e.business_type = 'P'
-    WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1
+    SELECT
+      (
+        SELECT cpp.ProjectId, e.name AS ProjectName
+        FROM dbo.CrmPaymentPlanProject cpp
+        JOIN dbo.enterprise e ON e.id = cpp.ProjectId AND e.business_type = 'P'
+        WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1
+        ORDER BY e.name
+        FOR JSON PATH
+      ) AS ProjectsJson,
+      -- Plain comma-joined id list — CrmApplication.tsx's own
+      -- projectTaggedPaymentPlans filter (and any other consumer of the bare
+      -- GET / list) reads this directly the same way it already reads
+      -- Unit/Block PaymentPlanIds, so it needs no JSON parsing to check
+      -- "is this plan tagged to my project".
+      (
+        SELECT STRING_AGG(CAST(cpp2.ProjectId AS NVARCHAR(20)), ',')
+        FROM dbo.CrmPaymentPlanProject cpp2
+        WHERE cpp2.PlanId = p.Id AND cpp2.IsActive = 1
+      ) AS ProjectIds
   ) proj
 `;
 
-// Sets this plan's single tagged Project (or clears it if projectId is
-// null) — deactivate-then-upsert, same pattern as unitMaster.js's own
-// syncUnitPaymentPlanTags one tier up the hierarchy. migration 270's unique
-// index on PlanId (WHERE IsActive = 1) is the actual 1:1 enforcement; this
-// just never gives it a second active row to conflict over.
-async function syncPaymentPlanProjectTag(pool, planId, projectId) {
+// Sets this plan's full set of tagged Projects (replaces whatever was
+// tagged before) — deactivate-all-then-upsert-each, same pattern as
+// crmProjectBanks.js's syncBankProjectTags one tier over (Bank <-> Project)
+// and unitMaster.js's syncUnitPaymentPlanTags one tier below (Unit <->
+// Plan). Pass an empty array to clear all tags.
+async function syncPaymentPlanProjectTags(pool, planId, projectIds) {
   await pool.request().input("pid", sql.Int, planId)
     .query("UPDATE dbo.CrmPaymentPlanProject SET IsActive = 0 WHERE PlanId = @pid");
-  if (!Number.isFinite(projectId)) return;
-  await pool.request()
-    .input("pid", sql.Int, planId)
-    .input("proj", sql.Int, projectId)
-    .query(`
-      MERGE dbo.CrmPaymentPlanProject AS tgt
-      USING (SELECT @pid AS PlanId, @proj AS ProjectId) AS src
-      ON tgt.PlanId = src.PlanId AND tgt.ProjectId = src.ProjectId
-      WHEN MATCHED THEN UPDATE SET IsActive = 1
-      WHEN NOT MATCHED THEN INSERT (PlanId, ProjectId, IsActive, CreatedAt) VALUES (src.PlanId, src.ProjectId, 1, SYSDATETIME());
-    `);
+  for (const projectId of projectIds) {
+    if (!Number.isFinite(projectId)) continue;
+    await pool.request()
+      .input("pid", sql.Int, planId)
+      .input("proj", sql.Int, projectId)
+      .query(`
+        MERGE dbo.CrmPaymentPlanProject AS tgt
+        USING (SELECT @pid AS PlanId, @proj AS ProjectId) AS src
+        ON tgt.PlanId = src.PlanId AND tgt.ProjectId = src.ProjectId
+        WHEN MATCHED THEN UPDATE SET IsActive = 1
+        WHEN NOT MATCHED THEN INSERT (PlanId, ProjectId, IsActive, CreatedAt) VALUES (src.PlanId, src.ProjectId, 1, SYSDATETIME());
+      `);
+  }
 }
 
 // GET / — every plan. ?isActive=1 filters to active-only (used by Unit
@@ -113,9 +131,52 @@ router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) 
   try {
     const pool = getPool();
     const showAll = req.query.showAll === "true";
-    const where = showAll ? "" : "WHERE p.IsActive = 1";
-    const result = await pool.request().query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC`);
-    res.json(result.recordset);
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    if (!showAll) conds.push("p.IsActive = 1");
+    // A plan can tag to many Projects (dbo.CrmPaymentPlanProject) — there is
+    // no Block dimension on a plan. Project filter is a direct EXISTS (works
+    // the same regardless of how many projects are tagged); Company filter
+    // walks up to any tagged project's parent (enterprise.company_id). Done
+    // via EXISTS rather than the PLAN_SELECT OUTER APPLY alias so the clause
+    // sits at the same query level cleanly (SQL Server won't let a WHERE
+    // reference a SELECT-list alias).
+    if (projectId) {
+      req0.input("projectId", sql.Int, projectId);
+      conds.push("EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject cpp WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1 AND cpp.ProjectId = @projectId)");
+    }
+    if (companyId) {
+      req0.input("companyId", sql.Int, companyId);
+      conds.push("EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject cpp JOIN dbo.enterprise e ON e.id = cpp.ProjectId AND e.business_type = 'P' WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1 AND e.company_id = @companyId)");
+    }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+
+    if (!req.query.page) {
+      const result = await req0.query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
+    const offset = (page - 1) * pageSize;
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmPaymentPlanTemplate p
+          WHERE ${showAll ? "1=1" : "p.IsActive = 1"}
+            AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject cpp WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1 AND cpp.ProjectId = @projectId2))
+            AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject cpp JOIN dbo.enterprise e ON e.id = cpp.ProjectId AND e.business_type = 'P' WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1 AND e.company_id = @companyId2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-payment-plans] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -125,7 +186,8 @@ router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) 
 router.get("/:id", requirePageRight("crm-payment-plans", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [planRes, itemsRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${PLAN_SELECT} WHERE p.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -202,8 +264,8 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
 
     await tx.commit();
 
-    if (b.ProjectId != null && b.ProjectId !== "") {
-      await syncPaymentPlanProjectTag(pool, planId, parseInt(b.ProjectId, 10));
+    if (Array.isArray(b.ProjectIds) && b.ProjectIds.length) {
+      await syncPaymentPlanProjectTags(pool, planId, b.ProjectIds.map((p) => parseInt(p, 10)));
     }
 
     res.status(201).json({ success: true, id: planId });
@@ -225,7 +287,8 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
 // created after this edit pick up the new split.
 router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, res) => {
   const pool = getPool();
-  const id = parseInt(req.params.id);
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   const b = req.body;
   const items = Array.isArray(b.Items) ? b.Items : null;
   let namesById = null;
@@ -283,13 +346,13 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
 
     await tx.commit();
 
-    // Only touches the Project tag if the caller actually sent the field —
+    // Only touches the Project tags if the caller actually sent the field —
     // same "don't clobber on a partial edit" reasoning as BookingAmount
-    // above. An explicit null/empty clears the tag; the key being absent
+    // above. An explicit empty array clears every tag; the key being absent
     // entirely leaves whatever's already tagged untouched.
-    if (Object.prototype.hasOwnProperty.call(b, "ProjectId")) {
-      const projectId = b.ProjectId != null && b.ProjectId !== "" ? parseInt(b.ProjectId, 10) : null;
-      await syncPaymentPlanProjectTag(pool, id, projectId);
+    if (Object.prototype.hasOwnProperty.call(b, "ProjectIds")) {
+      const projectIds = Array.isArray(b.ProjectIds) ? b.ProjectIds.map((p) => parseInt(p, 10)) : [];
+      await syncPaymentPlanProjectTags(pool, id, projectIds);
     }
 
     const usage = await pool.request().input("id", sql.Int, id)
@@ -315,7 +378,8 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
 // their column names haven't been confirmed.
 router.delete("/:id", requirePageRight("crm-payment-plans", "delete"), async (req, res) => {
   const pool = getPool();
-  const id = parseInt(req.params.id);
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const [bookingUsage, projectUsage] = await Promise.all([
       pool.request().input("id", sql.Int, id)

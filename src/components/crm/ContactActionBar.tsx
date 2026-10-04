@@ -25,7 +25,7 @@ export function CallDialog({ applicantName, mobile, onClose }: { applicantName: 
   };
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xs text-center">
+      <DialogContent accent="crm" className="max-w-xs text-center">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-center gap-1.5"><PhoneCall size={16} className="text-primary" /> Call {applicantName}</DialogTitle>
         </DialogHeader>
@@ -63,7 +63,7 @@ export function ContactActionBar({
   const [calling, setCalling] = useState(false);
   if (!mobile && !email) return null;
   const btnCls = compact
-    ? "flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border font-medium"
+    ? "flex items-center gap-1 text-[0.6875rem] px-2 py-1 rounded-md border font-medium"
     : "flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium";
 
   return (

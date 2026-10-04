@@ -1,10 +1,17 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a return whose project is outside the user's scope.
+// (/issues/:id/items uses :id for a Material Issue, handled by its own check below.)
+const returnGuard = projectParamGuard("SELECT ProjectId FROM dbo.MaterialIssueReturn WHERE ReturnId = @id");
+router.param("id", (req, res, next, id) => (req.path.startsWith("/issues/") ? projectParamGuard("SELECT ProjectId FROM dbo.MaterialIssues WHERE IssueId = @id")(req, res, next, id) : returnGuard(req, res, next, id)));
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { transition } = require("../services/approvalService");
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 router.use(authMiddleware);
@@ -16,6 +23,7 @@ router.get("/", requirePageRight("material-issue-return", "view"), async (req, r
     const pool = getPool();
     const { companyId, projectId, status } = req.query;
     const conditions = ["1=1"];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "ir.ProjectId", "").trim());
     const request = pool.request();
     if (companyId) { conditions.push("ir.CompanyId = @CompanyId"); request.input("CompanyId", sql.Int, parseInt(companyId)); }
     if (projectId) { conditions.push("ir.ProjectId = @ProjectId"); request.input("ProjectId", sql.Int, parseInt(projectId)); }
@@ -48,6 +56,7 @@ router.get("/issues", requirePageRight("material-issue-return", "view"), async (
     const pool = getPool();
     const { companyId, projectId } = req.query;
     const conditions = ["mi.Status = 'Approved'"];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "mi.ProjectId", "").trim());
     const request = pool.request();
     if (companyId) { conditions.push("mi.CompanyId = @CompanyId"); request.input("CompanyId", sql.Int, parseInt(companyId)); }
     if (projectId) { conditions.push("mi.ProjectId = @ProjectId"); request.input("ProjectId", sql.Int, parseInt(projectId)); }
@@ -103,8 +112,10 @@ router.get("/:id", requirePageRight("material-issue-return", "view"), async (req
     const [header, items] = await Promise.all([
       pool.request().input("ReturnId", sql.Int, id).query(`
         SELECT ir.*, mi.DocNo AS IssueDocNo,
-               co.name AS CompanyName, pr.name AS ProjectName
+               co.name AS CompanyName, pr.name AS ProjectName,
+               cu.name AS CreatedByName
         FROM dbo.MaterialIssueReturn ir
+        LEFT JOIN dbo.users cu ON cu.id = ir.CreatedBy
         LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
         LEFT JOIN dbo.enterprise co ON co.id = ir.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = ir.ProjectId
@@ -125,6 +136,7 @@ router.get("/:id", requirePageRight("material-issue-return", "view"), async (req
 // ── POST / — create a return ──────────────────────────────────────────────────
 router.post("/", requirePageRight("material-issue-return", "create"), async (req, res) => {
   const { IssueId, ReturnDate, CompanyId, ProjectId, GodownId, Reason, Remarks, items } = req.body;
+  if (!assertProjectAllowed(req, res, ProjectId)) return;
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "At least one item is required" });
 
@@ -191,7 +203,18 @@ router.post("/", requirePageRight("material-issue-return", "create"), async (req
       }
 
       await tx.commit();
-      res.status(201).json({ message: "Issue return created", id: returnId, docNo });
+
+      // Auto-submit Draft -> Pending immediately, matching every other
+      // approval-gated module (Material Request, PO, GRN) — there's no
+      // separate manual "Submit" step in this list, so approval requests
+      // show up in the Approval Inbox the moment the return is created.
+      try {
+        await transition("material-issue-return", returnId, "Pending", req.user?.email, req.user?.role);
+      } catch (submitErr) {
+        console.warn("Issue Return auto-submit failed (non-fatal):", submitErr.message);
+      }
+
+      res.status(201).json({ message: "Issue return created and submitted for approval", id: returnId, docNo });
     } catch (innerErr) {
       await tx.rollback();
       throw innerErr;
@@ -207,6 +230,7 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   const { ReturnDate, IssueId, CompanyId, ProjectId, GodownId, Reason, Remarks, items } = req.body;
+  if (!assertProjectAllowed(req, res, ProjectId)) return;
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "At least one item is required" });
 
@@ -216,9 +240,10 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
       .query("SELECT Status FROM dbo.MaterialIssueReturn WHERE ReturnId = @id");
     if (!existing.recordset.length) return res.status(404).json({ error: "Not found" });
     const currentStatus = existing.recordset[0].Status;
-    if (!["Draft", "Approved"].includes(currentStatus))
-      return res.status(400).json({ error: "Only Draft or Approved returns can be edited" });
+    if (!["Draft", "Approved", "Rejected"].includes(currentStatus))
+      return res.status(400).json({ error: "Only Draft, Approved, or Rejected returns can be edited" });
     const wasApproved = currentStatus === "Approved";
+    const wasRejected = currentStatus === "Rejected";
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialIssueReturn", "ReturnId", id)
       : null;
@@ -226,6 +251,18 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Editing an already-Approved return must go back through approval —
+      // its stock IN (RefType='IRN') was already credited back on approval,
+      // gated by PostedToStock; un-post it here and reset the flag so
+      // /:id/approve re-credits it with the edited quantities once it's
+      // approved again, instead of the old amounts silently standing.
+      if (wasApproved) {
+        await tx.request().input("id", sql.Int, id)
+          .query("DELETE FROM dbo.StockLedger WHERE RefType='IRN' AND RefID=@id");
+        await tx.request().input("id", sql.Int, id)
+          .query("UPDATE dbo.MaterialIssueReturn SET PostedToStock = 0 WHERE ReturnId=@id");
+      }
+
       await tx.request()
         .input("id", sql.Int, id)
         .input("ReturnDate", sql.Date, ReturnDate)
@@ -237,6 +274,7 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
         .input("Remarks", sql.NVarChar(1000), Remarks || null)
         .query(`
           UPDATE dbo.MaterialIssueReturn SET
+            ${wasApproved ? "Status='Pending'," : ""}
             ReturnDate=@ReturnDate, IssueId=@IssueId, CompanyId=@CompanyId,
             ProjectId=@ProjectId, GodownId=@GodownId, Reason=@Reason,
             Remarks=@Remarks, UpdatedAt=SYSDATETIME()
@@ -289,7 +327,34 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
         }
       }
 
-      res.json({ message: "Issue return updated" });
+      // A corrected, previously-Rejected return goes straight back into the
+      // approval queue on save — no separate "Submit" click. transition()'s
+      // Pending branch writes a fresh Level=0 marker, which restarts
+      // approval at level 1 regardless of what was approved before the
+      // rejection (see approvalService.js's currentCycleCutoffSql).
+      let resubmitted = false;
+      if (wasRejected) {
+        try {
+          await transition("material-issue-return", id, "Pending", req.user?.email, req.user?.role);
+          resubmitted = true;
+        } catch (resubmitErr) {
+          console.error("[issueReturn] auto-resubmit after edit failed:", resubmitErr.message);
+          return res.status(207).json({
+            message: "Issue return updated, but could not be re-submitted for approval — submit it manually.",
+            resubmitError: resubmitErr.message,
+          });
+        }
+      }
+
+      res.json({
+        message: wasApproved
+          ? "Issue return updated — stock credit reversed, sent back for approval"
+          : resubmitted
+            ? "Issue return updated and re-submitted for approval"
+            : "Issue return updated",
+        reopenedForApproval: wasApproved,
+        resubmitted,
+      });
     } catch (innerErr) {
       await tx.rollback();
       throw innerErr;
@@ -301,96 +366,101 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
 });
 
 // ── PUT /:id/submit ───────────────────────────────────────────────────────────
+// Rarely needed now that POST / auto-submits, but kept for a return that
+// failed to auto-submit, or a Rejected one someone resubmits without editing.
 router.put("/:id/submit", requirePageRight("material-issue-return", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
-    const pool = getPool();
-    await pool.request().input("id", sql.Int, id).query(`
-      UPDATE dbo.MaterialIssueReturn SET Status='Pending', UpdatedAt=SYSDATETIME()
-      WHERE ReturnId=@id AND Status='Draft'
-    `);
-    res.json({ message: "Submitted for approval" });
+    const result = await transition("material-issue-return", id, "Pending", req.user?.email, req.user?.role);
+    res.json({ message: "Submitted for approval", ...result });
   } catch (err) {
-    console.error("[issueReturn] PUT /:id/submit:", err);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(err.status || 400).json({ error: err.message });
   }
 });
 
 // ── PUT /:id/approve ──────────────────────────────────────────────────────────
-router.put("/:id/approve", requirePageRight("material-issue-return", "edit"), async (req, res) => {
+// Stock is only credited back once the record is genuinely fully approved —
+// transition() itself is the authority on this (it accounts for multi-level
+// and "everyone must approve" workflows configured in Approval Setup), same
+// pattern stockTransfers.js and saleOrders.js use for their own stock posts.
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    const result = await transition(
+      "material-issue-return", id, "Approved", req.user?.email, req.user?.role,
+      null, req.user?.userId ?? null,
+    );
 
-    // Fetch header + items before updating status
-    const [headerRes, itemsRes] = await Promise.all([
-      pool.request().input("id", sql.Int, id).query(`
-        SELECT ReturnId, DocNo, GodownId, Status FROM dbo.MaterialIssueReturn WHERE ReturnId=@id
-      `),
-      pool.request().input("id", sql.Int, id).query(`
-        SELECT M_Id, Quantity, UOMSymbol FROM dbo.MaterialIssueReturnItems WHERE ReturnId=@id
-      `),
-    ]);
-    if (!headerRes.recordset.length) return res.status(404).json({ error: "Not found" });
-    if (headerRes.recordset[0].Status !== "Pending")
-      return res.status(400).json({ error: "Return is not in Pending status" });
-
-    const { DocNo, GodownId } = headerRes.recordset[0];
-    const returnItems = itemsRes.recordset;
-
-    const tx = pool.transaction();
-    await tx.begin();
-    try {
-      await tx.request().input("id", sql.Int, id).query(`
-        UPDATE dbo.MaterialIssueReturn SET Status='Approved', UpdatedAt=SYSDATETIME()
-        WHERE ReturnId=@id
-      `);
-
-      // Credit stock back — one IN entry per item
-      for (const item of returnItems) {
-        const qty = Number(item.Quantity);
-        if (!qty || qty <= 0) continue;
-        await tx.request()
-          .input("ItemID", sql.NVarChar(50), String(item.M_Id))
-          .input("Qty", sql.Decimal(18, 4), qty)
-          .input("UOM", sql.NVarChar(20), item.UOMSymbol || null)
-          .input("Type", sql.NVarChar(10), "IN")
-          .input("RefType", sql.NVarChar(20), "IRN")
-          .input("RefID", sql.Int, id)
-          .input("DocNo", sql.NVarChar(100), DocNo)
-          .input("GodownID", sql.Int, GodownId || null)
-          .query(`
-            INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
-            VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
-          `);
+    if (result.newStatus === "Approved") {
+      const [headerRes, itemsRes] = await Promise.all([
+        pool.request().input("id", sql.Int, id).query(`
+          SELECT DocNo, GodownId, PostedToStock FROM dbo.MaterialIssueReturn WHERE ReturnId=@id
+        `),
+        pool.request().input("id", sql.Int, id).query(`
+          SELECT M_Id, Quantity, UOMSymbol FROM dbo.MaterialIssueReturnItems WHERE ReturnId=@id
+        `),
+      ]);
+      const header = headerRes.recordset[0];
+      if (header && !header.PostedToStock) {
+        const tx = pool.transaction();
+        await tx.begin();
+        try {
+          // Credit stock back — one IN entry per item.
+          for (const item of itemsRes.recordset) {
+            const qty = Number(item.Quantity);
+            if (!qty || qty <= 0) continue;
+            await tx.request()
+              .input("ItemID", sql.NVarChar(50), String(item.M_Id))
+              .input("Qty", sql.Decimal(18, 4), qty)
+              .input("UOM", sql.NVarChar(20), item.UOMSymbol || null)
+              .input("Type", sql.NVarChar(10), "IN")
+              .input("RefType", sql.NVarChar(20), "IRN")
+              .input("RefID", sql.Int, id)
+              .input("DocNo", sql.NVarChar(100), header.DocNo)
+              .input("GodownID", sql.Int, header.GodownId || null)
+              .query(`
+                INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
+                VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, @GodownID, GETDATE())
+              `);
+          }
+          await tx.request().input("id", sql.Int, id)
+            .query("UPDATE dbo.MaterialIssueReturn SET PostedToStock = 1 WHERE ReturnId = @id");
+          await tx.commit();
+        } catch (postErr) {
+          try { await tx.rollback(); } catch {}
+          // The approval itself already committed via transition() above —
+          // don't fail the request over this, but surface it clearly.
+          console.error(`[issueReturn] stock posting failed for #${id} after approval:`, postErr.message);
+          return res.json({ message: "Approved", ...result, warning: `Approved, but stock could not be posted: ${postErr.message}` });
+        }
       }
+    }
 
-      await tx.commit();
-      res.json({ message: "Approved" });
-    } catch (e) { await tx.rollback(); throw e; }
+    res.json({ message: "Approved", ...result });
   } catch (err) {
-    console.error("[issueReturn] PUT /:id/approve:", err);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(err.status || (err.message?.includes("not authorized") ? 403 : 400)).json({ error: err.message });
   }
 });
 
 // ── PUT /:id/reject ───────────────────────────────────────────────────────────
-router.put("/:id/reject", requirePageRight("material-issue-return", "edit"), async (req, res) => {
+// Nothing was ever posted to StockLedger before approval, so there is
+// nothing to reverse here.
+router.put("/:id/reject", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
-    const pool = getPool();
-    const result = await pool.request().input("id", sql.Int, id).query(`
-      UPDATE dbo.MaterialIssueReturn SET Status='Rejected', UpdatedAt=SYSDATETIME()
-      WHERE ReturnId=@id AND Status='Pending'
-    `);
-    if (!result.rowsAffected[0]) return res.status(400).json({ error: "Return is not in Pending status" });
-    res.json({ message: "Rejected" });
+    const { note } = req.body || {};
+    const result = await transition("material-issue-return", id, "Rejected", req.user?.email, req.user?.role, note || null, req.user?.userId ?? null);
+    res.json({ message: "Rejected", ...result });
   } catch (err) {
-    console.error("[issueReturn] PUT /:id/reject:", err);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(err.status || 400).json({ error: err.message });
   }
 });
 

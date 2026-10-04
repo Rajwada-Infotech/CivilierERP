@@ -21,10 +21,17 @@ const GL_ACCOUNTS = {
   // AccountGroup wiring in 230) — was seeded but never actually posted to
   // until postOnAccountAdjustment/postPaymentApproval below.
   ON_ACCOUNT: "Company On Account A/c",
-  // Singleton counter-account for Cash-mode Direct Payments (migration 339)
-  // — Cash payments never carry a PBankID (Payment.tsx disables the Bank
-  // field for Cash), so this stands in for the bank leg on the credit side.
-  CASH_IN_HAND: "Cash-in-Hand A/c",
+  // Pooled liability for a standalone Received Payment (no invoice,
+  // contract, or CRM milestone/booking to apply against) — see
+  // postReceivedPaymentApproval below. Migration 424 seeded a new head
+  // named "Advance from Customers A/c" for this; migration 425 consolidated
+  // it onto the pre-existing "Advance from Customer" head instead (same
+  // concept, one head, no "A/c" suffix) — this name must match that head.
+  ADVANCE_FROM_CUSTOMERS: "Advance from Customer",
+  // Cash-mode counter-account is NOT listed here — since migration 418 it's
+  // a real, user-selectable Bank (LHeadType='B'), resolved via
+  // getCashInHandBankId() by LHeadCode='CASH-IN-HAND', not this
+  // GL-only-lookup name map (see getGLHeadId's LHeadType='GL' filter).
   // Singleton counter-account for Debit Note value adjustments (migration
   // 359) — see postDebitNoteAdjustment below.
   DEBIT_NOTE_ADJUSTMENT: "Debit Note Adjustment A/c",
@@ -52,6 +59,37 @@ function isAdvancePaymentReason(paymentName) {
 // once seeded, so there's no need to hit the DB on every posting call.
 const glHeadIdCache = new Map();
 
+/**
+ * Resolve a GL head by its STABLE CODE, falling back to its name.
+ *
+ * getGLHeadId() below matches on LHeadName, which is a display string a user
+ * can edit from Account Head Master. Renaming "Sale of Land" to anything else
+ * makes every posting that asks for it throw — at posting time, after the
+ * invoice is already approved. LHeadCode is the key that is not meant to change
+ * (migrations 472 / 484 set CRM-SALE-INCOME and CRM-SALE-LAND).
+ *
+ * The name fallback is kept because older databases may predate the codes, so
+ * this is strictly more robust than either lookup alone: it survives a rename,
+ * and still works where the code was never set.
+ */
+async function getGLHeadIdByCode(pool, code, fallbackName) {
+  const cacheKey = `code:${code}`;
+  if (glHeadIdCache.has(cacheKey)) return glHeadIdCache.get(cacheKey);
+  const result = await pool
+    .request()
+    .input("Code", sql.NVarChar(100), code)
+    .query(`SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = @Code AND LHeadType = 'GL'`);
+  const id = result.recordset[0]?.LHeadId ?? null;
+  if (id != null) {
+    glHeadIdCache.set(cacheKey, id);
+    return id;
+  }
+  if (!fallbackName) {
+    throw new Error(`GL account with code "${code}" not found in AccountHeadMaster (LHeadType='GL')`);
+  }
+  return getGLHeadId(pool, fallbackName);
+}
+
 async function getGLHeadId(pool, name) {
   if (glHeadIdCache.has(name)) return glHeadIdCache.get(name);
   const result = await pool
@@ -67,6 +105,88 @@ async function getGLHeadId(pool, name) {
     );
   }
   glHeadIdCache.set(name, id);
+  return id;
+}
+
+// Cash-in-Hand (migration 418) is LHeadType='B' — unlike every other
+// GL_ACCOUNTS singleton, it's meant to be user-selectable as a real Bank on
+// the Payment page (picking it there locks Payment Mode to Cash), not just
+// an invisible fallback — so getGLHeadId's LHeadType='GL' filter can never
+// find it. Resolved by LHeadCode instead, same sentinel-lookup convention
+// 'DUMMY-BANK' uses elsewhere (Sale Invoice Cash payments, Contract Master
+// advance allocation) rather than a name match.
+//
+// One head PER COMPANY (LHeadCode `CASH-C-<companyId>`), not the single
+// global 'CASH-IN-HAND' head migration 418 originally seeded — every
+// company's cash payments used to credit that ONE shared bucket, so
+// Company A's physical cash-on-hand balance was indistinguishable from
+// Company B's. Get-or-create, mirroring loanSanction.js's
+// ensureLoanLedgerHead — lazily seeds a company's own head the first time
+// it actually makes a cash payment, so no migration/backfill is needed for
+// companies that already existed, and new companies get one automatically
+// too. The old global 'CASH-IN-HAND' head is left untouched (its
+// historical GL activity stays exactly where it is) and is only used as a
+// last-resort fallback when a payment has no resolvable companyId at all.
+const cashInHandBankIdCache = new Map(); // companyId -> LHeadId
+async function ensureCashInHandHead(pool, companyId, createdBy) {
+  const code = `CASH-C-${companyId}`;
+  const existing = await pool
+    .request()
+    .input("code", sql.NVarChar(20), code)
+    .query(`SELECT LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = @code`);
+  if (existing.recordset.length) return existing.recordset[0].LHeadId;
+
+  const companyRes = await pool
+    .request()
+    .input("id", sql.Int, companyId)
+    .query(`SELECT name FROM dbo.enterprise WHERE id = @id`);
+  const companyName = companyRes.recordset[0]?.name || `Company ${companyId}`;
+
+  const banksGroup = await pool.request().query(`SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'BNK'`);
+  const banksGroupId = banksGroup.recordset[0]?.AGId ?? null;
+
+  const inserted = await pool
+    .request()
+    .input("LHeadName", sql.NVarChar(200), `Cash in Hand - ${companyName}`)
+    .input("LHeadCode", sql.NVarChar(20), code)
+    .input("LHeadAddress", sql.NVarChar(300), "N/A")
+    .input("LHeadContactPerson", sql.NVarChar(100), "System Admin")
+    .input("LHeadType", sql.VarChar(50), "B")
+    .input("LHeadStatus", sql.Bit, 1)
+    .input("LBelongsTo", sql.Int, banksGroupId)
+    .input("Status", sql.NVarChar(20), "Approved")
+    .input("DisplayName", sql.NVarChar(200), `Cash in Hand — ${companyName}`)
+    .input("CompanyName", sql.NVarChar(500), companyName)
+    .input("CreatedBy", sql.NVarChar(150), createdBy || "system").query(`
+      INSERT INTO dbo.AccountHeadMaster
+        (LHeadName, LHeadCode, LHeadAddress, LHeadContactPerson, LHeadType, LHeadStatus,
+         LBelongsTo, Status, DisplayName, CompanyName, ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.LHeadId
+      VALUES
+        (@LHeadName, @LHeadCode, @LHeadAddress, @LHeadContactPerson, @LHeadType, @LHeadStatus,
+         @LBelongsTo, @Status, @DisplayName, @CompanyName, @CreatedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
+    `);
+  try {
+    const { bumpCacheVersion } = require("../redis");
+    await bumpCacheVersion("account-head-master");
+  } catch { /* cache invalidation is best-effort, never block posting on it */ }
+  return inserted.recordset[0].LHeadId;
+}
+
+async function getCashInHandBankId(pool, companyId, createdBy) {
+  if (!companyId) {
+    // No resolvable company — fall back to the original global head rather
+    // than failing the posting outright (e.g. a payment predating any
+    // company scoping, or a party/JV payment where companyId genuinely
+    // isn't known).
+    const result = await pool
+      .request()
+      .query(`SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = 'CASH-IN-HAND' AND Status = 'Approved'`);
+    return result.recordset[0]?.LHeadId ?? null;
+  }
+  if (cashInHandBankIdCache.has(companyId)) return cashInHandBankIdCache.get(companyId);
+  const id = await ensureCashInHandHead(pool, companyId, createdBy);
+  if (id) cashInHandBankIdCache.set(companyId, id);
   return id;
 }
 
@@ -114,6 +234,12 @@ async function postVoucher(pool, {
   projectId = null,
   costCenterId = null,
   createdBy = null,
+  // Optional direct Fixed-Asset linkage (migration 404) — set by the
+  // depreciation / FA-maintenance posting services, NULL for every other
+  // module. Stamped onto every leg of the voucher.
+  assetId = null,
+  finYear = null,
+  faItemCode = null,
 }) {
   if (!legs || legs.length < 2) {
     throw new Error("postVoucher requires at least 2 legs");
@@ -151,13 +277,18 @@ async function postVoucher(pool, {
         .input("CompanyId", sql.Int, companyId)
         .input("ProjectId", sql.Int, projectId)
         .input("CostCenterId", sql.Int, leg.costCenterId ?? costCenterId)
-        .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
+        .input("CreatedBy", sql.NVarChar(150), createdBy)
+        .input("AssetId", sql.Int, assetId)
+        .input("FinYear", sql.NVarChar(20), finYear)
+        .input("FAItemCode", sql.NVarChar(200), faItemCode).query(`
           INSERT INTO dbo.GeneralLedgerEntry
             (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration,
-             SourceType, SourceId, CompanyId, ProjectId, CostCenterId, CreatedBy)
+             SourceType, SourceId, CompanyId, ProjectId, CostCenterId, CreatedBy,
+             AssetId, FinYear, FAItemCode)
           VALUES
             (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration,
-             @SourceType, @SourceId, @CompanyId, @ProjectId, @CostCenterId, @CreatedBy)
+             @SourceType, @SourceId, @CompanyId, @ProjectId, @CostCenterId, @CreatedBy,
+             @AssetId, @FinYear, @FAItemCode)
         `);
     }
     await tx.commit();
@@ -192,6 +323,17 @@ async function postVoucher(pool, {
 async function postGRNApproval(pool, grnId, userEmail) {
   if (await hasPosting(pool, "GRN", grnId))
     return { posted: true, reason: "already posted (idempotent)" };
+
+  // routes/grns.js's POST /:id/post-to-gl (SourceType='GRNPosting') is the
+  // authoritative posting path for a GRN — it independently guards against
+  // re-entry the same way this function does, but neither ever checked for
+  // the OTHER's posting, so a GRN approved (auto-posting here) and later
+  // run through the manual "Post to GL" action got double-posted to GL
+  // under two different accounting treatments (see migration 410's cleanup
+  // of the historical cases this caused). If GRNPosting already handled
+  // this GRN, defer to it entirely.
+  if (await hasPosting(pool, "GRNPosting", grnId))
+    return { posted: true, reason: "already posted via GRNPosting (authoritative)" };
 
   const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
     SELECT grn.GRNID, grn.DocNo, grn.GRNNo, grn.GRNDate, grn.GRNItems,
@@ -270,40 +412,42 @@ async function postGRNApproval(pool, grnId, userEmail) {
   // set) instead of falling into Purchase A/c, so a fixed-asset purchase
   // actually shows up under the FIXED ASSETS group in Trial Balance/the
   // Balance Sheet rather than as an ordinary expense.
+  //
+  // Non-fixed-asset items also get this treatment now — any item tagged
+  // with its own GL Account (Item_Master_Group.M_GLHeadId, migration 295)
+  // posts there instead of the shared Purchase A/c. Previously every
+  // ordinary item lumped into Purchase A/c regardless of its own tag, so a
+  // tagged item's GL account never actually appeared in Trial Balance.
+  const { resolveItemGlHeads } = require("./itemGlHead");
   const itemIds = items.map((it) => it.itemId).filter((id) => id != null).map(String);
-  const fixedAssetGlHeadByItemId = new Map();
-  if (itemIds.length) {
-    const req = pool.request();
-    const placeholders = itemIds
-      .map((id, i) => {
-        req.input(`iid${i}`, sql.NVarChar(100), id);
-        return `@iid${i}`;
-      })
-      .join(",");
-    const faRes = await req.query(`
-      SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, M_GLHeadId
-      FROM dbo.Item_Master_Group
-      WHERE CONVERT(NVARCHAR(100), M_Id) IN (${placeholders}) AND M_Type = 'Fixed Asset'
-    `);
-    for (const r of faRes.recordset) fixedAssetGlHeadByItemId.set(r.M_Id, r.M_GLHeadId ?? null);
-  }
+  const itemGlMap = await resolveItemGlHeads(pool, sql, itemIds);
 
-  const defaultFixedAssetHeadId = fixedAssetGlHeadByItemId.size
-    ? await getGLHeadId(pool, GL_ACCOUNTS.FIXED_ASSET)
-    : null;
-
-  let purchaseAmount = 0;
-  const fixedAssetAmountByHead = new Map(); // lHeadId -> amount
+  const purchaseAmountByHead = new Map(); // lHeadId (null = default Purchase A/c) -> { amount, itemNames }
+  const fixedAssetAmountByHead = new Map(); // lHeadId -> { amount, itemNames }
   for (const it of items) {
     const amt = Number(it.totalAmount) || 0;
     const itemId = it.itemId != null ? String(it.itemId) : null;
-    if (itemId && fixedAssetGlHeadByItemId.has(itemId)) {
-      const headId = fixedAssetGlHeadByItemId.get(itemId) || defaultFixedAssetHeadId;
-      fixedAssetAmountByHead.set(headId, (fixedAssetAmountByHead.get(headId) || 0) + amt);
-    } else {
-      purchaseAmount += amt;
-    }
+    const master = itemId ? itemGlMap.get(itemId) : null;
+    const itemName = it.itemName || it.ItemName || it.description || it.Description || null;
+    const target = master?.isFixedAsset
+      ? fixedAssetAmountByHead
+      : purchaseAmountByHead;
+    const headId = master?.isFixedAsset ? master.glHeadId : (master?.glHeadId ?? null);
+    const bucket = target.get(headId) ?? { amount: 0, itemNames: [] };
+    bucket.amount += amt;
+    if (itemName) bucket.itemNames.push(itemName);
+    target.set(headId, bucket);
   }
+  // See services/grnPosting.js's itemNameSuffix — same short "which item
+  // earned this leg" suffix, kept in sync between the two GRN posting
+  // paths so a leg's Narration reads the same regardless of which one
+  // posted it.
+  const itemNameSuffix = (itemNames) => {
+    const unique = [...new Set(itemNames)];
+    if (unique.length === 0) return "";
+    if (unique.length <= 2) return ` — ${unique.join(", ")}`;
+    return ` — ${unique[0]} & ${unique.length - 1} more`;
+  };
 
   const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
   const provisionalCreditHeadId = await getGLHeadId(
@@ -315,10 +459,15 @@ async function postGRNApproval(pool, grnId, userEmail) {
     GL_ACCOUNTS.PENDING_GRN_PROVISION,
   );
 
-  const fixedAssetLegs = Array.from(fixedAssetAmountByHead.entries()).map(([lHeadId, amt]) => ({
+  const purchaseLegs = Array.from(purchaseAmountByHead.entries()).map(([lHeadId, { amount, itemNames }]) => ({
+    lHeadId: lHeadId || purchaseHeadId,
+    debit: amount,
+    narration: `GRN ${docNo} — goods received (base)${itemNameSuffix(itemNames)}`,
+  }));
+  const fixedAssetLegs = Array.from(fixedAssetAmountByHead.entries()).map(([lHeadId, { amount, itemNames }]) => ({
     lHeadId,
-    debit: amt,
-    narration: `GRN ${docNo} — fixed asset received (capitalized)`,
+    debit: amount,
+    narration: `GRN ${docNo} — fixed asset received (capitalized)${itemNameSuffix(itemNames)}`,
   }));
 
   await postVoucher(pool, {
@@ -330,11 +479,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
     projectId: grn.ProjectId ?? null,
     createdBy: userEmail,
     legs: [
-      {
-        lHeadId: purchaseHeadId,
-        debit: purchaseAmount,
-        narration: `GRN ${docNo} — goods received (base)`,
-      },
+      ...purchaseLegs,
       ...fixedAssetLegs,
       {
         lHeadId: provisionalCreditHeadId,
@@ -380,9 +525,21 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
   if (await hasPosting(pool, "ExpenseBooking", ebId))
     return { posted: true, reason: "already posted (idempotent)" };
 
+  // routes/expenseBooking.js's POST /:id/post-to-gl (SourceType='InvoicePosting')
+  // is the authoritative posting path for an invoice — it independently
+  // guards against re-entry the same way this function does, but neither
+  // ever checked for the OTHER's posting, so an invoice approved (auto-
+  // posting here) and later run through the manual "Post to GL" action got
+  // double-credited to the vendor under two different accounting treatments
+  // (see migration 409's cleanup of the historical cases this caused). If
+  // InvoicePosting already handled this invoice, defer to it entirely.
+  if (await hasPosting(pool, "InvoicePosting", ebId))
+    return { posted: true, reason: "already posted via InvoicePosting (authoritative)" };
+
   const result = await pool.request().input("Eid", sql.Int, ebId).query(`
     SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.EAmount, eb.ENetAmount,
-           eb.ESourceType, eb.ESourceId, eb.EName, eb.ECompanyId, eb.EProjectName
+           eb.ESourceType, eb.ESourceId, eb.EName, eb.ECompanyId, eb.EProjectName,
+           eb.EBillingTermsData, eb.LHeadId
     FROM dbo.ExpenseBooking eb
     WHERE eb.Eid = @Eid
   `);
@@ -416,7 +573,32 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
       };
 
     const grnTotal = Number(grn.TotalAmount) || 0;
-    const delta = netAmount - grnTotal; // billing-term adjustment, can be negative
+    // eb.ENetAmount is the GST-inclusive payable; when it's unset (older/
+    // incompletely-saved bookings) the module-level `netAmount` above falls
+    // back to eb.EAmount — the taxable BASE amount, not tax-inclusive — which
+    // silently credited the supplier only the base amount instead of the
+    // full invoice payable. For a GRN-linked booking the GRN's own
+    // (incl-GST) TotalAmount is the correct fallback instead.
+    //
+    // A SET-but-wrong ENetAmount hits the exact same problem through a
+    // different door: the (delta = effectiveNetAmount - grnTotal) legs
+    // below exist to route a genuine billing-term adjustment (freight,
+    // discount) to Purchase A/c instead of the supplier — but when
+    // EBillingTermsData has no actual terms recorded, there's no legitimate
+    // reason for ENetAmount to differ from the GRN's own total at all, so a
+    // mismatch there is data corruption, not a real adjustment. Trusting it
+    // anyway silently routed the gap (here, the GST portion) to Purchase
+    // A/c instead of the supplier, understating what they're actually owed.
+    let billingTerms = [];
+    try {
+      const parsed = eb.EBillingTermsData ? JSON.parse(eb.EBillingTermsData) : [];
+      if (Array.isArray(parsed)) billingTerms = parsed;
+    } catch { /* malformed — treat as no terms */ }
+    const hasBillingTerms = billingTerms.length > 0;
+    const effectiveNetAmount = eb.ENetAmount != null && (hasBillingTerms || Number(eb.ENetAmount) === grnTotal)
+      ? netAmount
+      : grnTotal;
+    const delta = effectiveNetAmount - grnTotal; // billing-term adjustment, can be negative
 
     const pendingGrnHeadId = await getGLHeadId(
       pool,
@@ -432,7 +614,7 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
       },
       {
         lHeadId: grn.SupplierID,
-        credit: netAmount,
+        credit: effectiveNetAmount,
         narration: `${docNo} — supplier liability booked`,
       },
     ];
@@ -468,32 +650,57 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
   }
 
   // Non-GRN sourced (PO / WO_PO / WORK_DONE / standalone)
-  const supplierHeadId = await getHeadIdByName(pool, eb.EName);
+  // eb.LHeadId is the actual FK to the chosen party — use it directly.
+  // eb.EName is a free-text purpose/description field on a direct (TOD)
+  // booking ("Payment for Shiv Shakti Building Materials"), NOT
+  // necessarily the party's exact ledger name, despite this function's
+  // old assumption that "EName IS the chosen head's label" — an exact
+  // string match against it silently failed (posted:false, no error
+  // surfaced anywhere) for the vast majority of TOD bookings, leaving
+  // their invoice liability permanently unposted even after a payment
+  // against them was posted. Falls back to the EName match only for
+  // older rows saved before LHeadId existed on this table.
+  const supplierHeadId = eb.LHeadId || (await getHeadIdByName(pool, eb.EName));
   // can't determine counter-account — skip rather than guess wrong
   if (!supplierHeadId)
     return {
       posted: false,
-      reason: `ExpenseBooking ${ebId}: EName "${eb.EName}" did not match any AccountHeadMaster head`,
+      reason: `ExpenseBooking ${ebId}: no LHeadId set and EName "${eb.EName}" did not match any AccountHeadMaster head`,
     };
 
   const baseAmount = Number(eb.EAmount) || 0;
   const gstAndTerms = Math.max(0, netAmount - baseAmount);
 
-  const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
-  const provisionalCreditHeadId = await getGLHeadId(
-    pool,
-    GL_ACCOUNTS.PROVISIONAL_CREDIT,
-  );
+  // Multi Expense Head tagging (migration 303, dbo.ExpenseHeadAllocation) —
+  // a direct/TOD booking can tag its own Dr leg(s) to specific GL heads
+  // instead of the generic Purchase A/c, e.g. "Director or Partner
+  // Remuneration" rather than every direct payment lumping into Purchase.
+  // routes/expenseBooking.js's create/update handlers already validate that
+  // these rows sum to the booking's own net (GST-inclusive) amount before
+  // saving — see the comment there: "each row is its own future Dr leg...
+  // together they must add up to exactly what's owed to the supplier". This
+  // function used to ignore the table entirely and always debit Purchase
+  // A/c for the base amount, silently discarding the user's chosen head the
+  // moment the booking got approved.
+  const { getAllocations } = require("./expenseHeadAllocation");
+  const allocations = await getAllocations(pool, sql, "ExpenseBooking", ebId);
+  const allocSum = Math.round(allocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
+  const useAllocations = allocations.length > 0 && Math.abs(allocSum - netAmount) < 0.5;
 
-  await postVoucher(pool, {
-    voucherNo: docNo,
-    voucherDate,
-    sourceType: "ExpenseBooking",
-    sourceId: ebId,
-    companyId,
-    projectId,
-    createdBy: userEmail,
-    legs: [
+  let debitLegs;
+  if (useAllocations) {
+    debitLegs = allocations.map((a) => ({
+      lHeadId: a.lHeadId,
+      debit: a.amount,
+      narration: `${docNo} — ${a.lHeadName || "expense booked"}`,
+    }));
+  } else {
+    const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
+    const provisionalCreditHeadId = await getGLHeadId(
+      pool,
+      GL_ACCOUNTS.PROVISIONAL_CREDIT,
+    );
+    debitLegs = [
       {
         lHeadId: purchaseHeadId,
         debit: baseAmount,
@@ -504,6 +711,19 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
         debit: gstAndTerms,
         narration: `${docNo} — GST / billing terms`,
       },
+    ];
+  }
+
+  await postVoucher(pool, {
+    voucherNo: docNo,
+    voucherDate,
+    sourceType: "ExpenseBooking",
+    sourceId: ebId,
+    companyId,
+    projectId,
+    createdBy: userEmail,
+    legs: [
+      ...debitLegs,
       {
         lHeadId: supplierHeadId,
         credit: netAmount,
@@ -590,12 +810,23 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   if (await hasPosting(pool, "NewPayment", paymentId))
     return { posted: true, reason: "already posted (idempotent)" };
 
+  // routes/newPayment.js's POST /:id/post-to-gl (SourceType='PaymentPosting')
+  // is the authoritative posting path for a payment — it independently
+  // guards against re-entry the same way this function does, but neither
+  // ever checked for the OTHER's posting, so a payment approved (auto-
+  // posting here) and later run through the manual "Post to GL" action got
+  // double-posted under two different accounting treatments (same bug
+  // class as GRN/GRNPosting and ExpenseBooking/InvoicePosting). If
+  // PaymentPosting already handled this payment, defer to it entirely.
+  if (await hasPosting(pool, "PaymentPosting", paymentId))
+    return { posted: true, reason: "already posted via PaymentPosting (authoritative)" };
+
   const result = await pool
     .request()
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
       SELECT PPaymentID, PAmount, PDate, PBankID, PMode, PExpenseRef, DocNo,
-             PCompany, PProject, ContractId, PPartyId, PPaymentName,
+             PCompany, PProject, ContractId, PPartyId, PPaymentName, JVLineId,
              ISNULL(TDSAmount, 0) AS TDSAmount
       FROM dbo.NewPayment
       WHERE PPaymentID = @PPaymentID
@@ -604,11 +835,11 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   if (!payment) return { posted: false, reason: `Payment ${paymentId} not found` };
 
   // Cash-mode payments never carry a PBankID (Payment.tsx disables the Bank
-  // field for Cash) — Cash-in-Hand (migration 339) stands in for the bank
-  // leg instead of hard-failing for lack of one.
+  // field for Cash) — that company's own Cash-in-Hand head stands in for
+  // the bank leg instead of hard-failing for lack of one.
   let bankId = payment.PBankID;
   if (!bankId && payment.PMode === "Cash") {
-    bankId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
+    bankId = await getCashInHandBankId(pool, parseInt(payment.PCompany, 10) || null, userEmail).catch(() => null);
   }
   if (!bankId)
     return { posted: false, reason: `Payment ${paymentId} has no PBankID (bank account)` };
@@ -620,6 +851,62 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   const companyId = parseInt(payment.PCompany, 10);
   const projectId = parseInt(payment.PProject, 10);
   const docNo = payment.DocNo || `PMT-${paymentId}`;
+
+  // Loan disbursement (Customer Loan's original "Company to Customer"
+  // direction — we lend TO a customer, money goes OUT via NewPayment) —
+  // this Payment IS the loan's own real bank-side leg. Debit the loan's
+  // own BorrowerLHeadId (the customer's shadow ledger head, e.g.
+  // "Loan - <CustomerName>") directly instead of falling through to
+  // resolvePaymentSupplierHeadId below, which would land on PPartyId — the
+  // customer's ORDINARY head (the same one used for regular sales/AR), a
+  // different account entirely, silently orphaning this entry from the
+  // loan's own bookkeeping instead of the two tying together into one
+  // trail. Mirrors postReceivedPaymentApproval's identical fix for the
+  // opposite (money coming in) direction.
+  const loanDisbursementRes = await pool
+    .request()
+    .input("PaymentId", sql.Int, paymentId)
+    .query(`
+      SELECT LoanId, LoanNo, BorrowerLHeadId FROM dbo.LoanSanction
+      WHERE DisbursementPaymentType = 'NewPayment' AND DisbursementPaymentId = @PaymentId
+    `);
+  if (loanDisbursementRes.recordset.length) {
+    const loan = loanDisbursementRes.recordset[0];
+    if (!loan.BorrowerLHeadId) {
+      return { posted: false, reason: `Loan ${loan.LoanNo} has no BorrowerLHeadId — cannot post this disbursement.` };
+    }
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: payment.PDate,
+      sourceType: "NewPayment",
+      sourceId: paymentId,
+      companyId: Number.isFinite(companyId) ? companyId : null,
+      projectId: Number.isFinite(projectId) ? projectId : null,
+      createdBy: userEmail,
+      legs: [
+        { lHeadId: loan.BorrowerLHeadId, debit: amount, narration: `${docNo} — loan disbursement sent (${loan.LoanNo})` },
+        { lHeadId: bankId, credit: amount, narration: `${docNo} — loan disbursement sent (${loan.LoanNo})` },
+      ],
+    });
+    return { posted: true };
+  }
+
+  // Loan repayment via NewPayment — not exercised by any current caller
+  // (every loan type's repayment goes through Received Payment instead,
+  // see postReceivedPaymentApproval's matching guard), but the /:id/pay
+  // route does accept newPaymentId, so guard it the same way in case that
+  // ever changes: the loan's own repayment posting (SourceType=
+  // 'LoanRepayment') would already cover it completely.
+  const loanRepaymentRes = await pool
+    .request()
+    .input("PaymentId", sql.Int, paymentId)
+    .query(`SELECT TOP 1 LoanId FROM dbo.LoanPayment WHERE NewPaymentId = @PaymentId`);
+  if (loanRepaymentRes.recordset.length) {
+    return {
+      posted: false,
+      reason: `This Payment settles LoanId ${loanRepaymentRes.recordset[0].LoanId}'s repayment — already posted via the loan's own repayment GL entry (see the loan's Posting tab), not posted again here.`,
+    };
+  }
 
   // TDS (migration 304) — when set, the credit side splits into Bank (net
   // of TDS) + TDS Payable; every debit-side branch below (Expense Head
@@ -635,8 +922,10 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   // split too would post a SECOND TDS Payable credit for the same amount,
   // double-counting the liability. Only a standalone/contract payment
   // (no linked invoice, TDS never deducted anywhere else yet) should
-  // actually split TDS out of its own posting.
-  const tdsAmount = payment.PExpenseRef ? 0 : Number(payment.TDSAmount) || 0;
+  // actually split TDS out of its own posting. A payment settling a
+  // Journal Voucher line (JVLineId) is the same case: TDS, if any, was
+  // already withheld as its own liability leg when the JV was posted.
+  const tdsAmount = (payment.PExpenseRef || payment.JVLineId) ? 0 : Number(payment.TDSAmount) || 0;
   if (tdsAmount > amount) {
     return { posted: false, reason: `Payment ${paymentId}: TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — data issue, re-save the payment.` };
   }
@@ -683,6 +972,48 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
           narration: `${docNo} — ${a.lHeadName} (direct expense payment)`,
         })),
         ...bankAndTdsLegs(bankId, `${docNo} — direct expense payment`, `${docNo} — TDS Payable`),
+      ],
+    });
+    return { posted: true };
+  }
+
+  // "Merge invoices into one payment" (migration 501) — one payment
+  // settling several ExpenseBooking invoices at once, all sharing the same
+  // supplier. Posted as ONE Dr-Supplier leg PER invoice (so the GL stays
+  // traceable to each invoice's own amount, same as the Direct Expense
+  // Payment case above) + a single combined Bank/Cash credit leg for the
+  // total — the actual cash movement really is one payment, not several.
+  // No TDS leg here: see isMergedForTds's comment in newPayment.js — every
+  // invoice already carries its own, already-posted TDS.
+  const { getLinks } = require("./paymentExpenseBookingLink");
+  const mergedLinks = await getLinks(pool, sql, paymentId);
+  if (mergedLinks.length > 0) {
+    const linkSum = Math.round(mergedLinks.reduce((s, l) => s + l.allocatedAmount, 0) * 100) / 100;
+    if (Math.abs(linkSum - amount) > 0.5) {
+      return {
+        posted: false,
+        reason: `Payment ${paymentId}: merged invoice amounts (₹${linkSum.toFixed(2)}) no longer add up to the payment amount (₹${amount.toFixed(2)}) — re-save the payment before approving.`,
+      };
+    }
+    const mergedSupplierHeadId = await resolvePaymentSupplierHeadId(pool, payment);
+    if (!mergedSupplierHeadId) {
+      return { posted: false, reason: `Payment ${paymentId}: could not resolve the merged payment's supplier/party account.` };
+    }
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: payment.PDate,
+      sourceType: "NewPayment",
+      sourceId: paymentId,
+      companyId: Number.isFinite(companyId) ? companyId : null,
+      projectId: Number.isFinite(projectId) ? projectId : null,
+      createdBy: userEmail,
+      legs: [
+        ...mergedLinks.map((l) => ({
+          lHeadId: mergedSupplierHeadId,
+          debit: l.allocatedAmount,
+          narration: `${docNo} — ${l.eDocNo} (merged payment)`,
+        })),
+        { lHeadId: bankId, credit: amount, narration: `${docNo} — payment made (merged invoices)` },
       ],
     });
     return { posted: true };
@@ -951,7 +1282,8 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
     .input("RPPaymentID", sql.Int, rpId)
     .query(`
       SELECT RPPaymentID, RPAmount, RPDocDate, RPDepositBankId, RPCustomerName,
-             RPReceivedFrom, RPCompanyId, RPProjectId, SourceSaleInvoiceId, DocNo
+             RPReceivedFrom, RPCompanyId, RPProjectId, SourceSaleInvoiceId, DocNo,
+             ContractId, CrmMilestoneId, CrmBookingId, CrmApplicationId
       FROM dbo.ReceivedPayment
       WHERE RPPaymentID = @RPPaymentID
     `);
@@ -964,19 +1296,96 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
   if (amount <= 0)
     return { posted: false, reason: `ReceivedPayment ${rpId} amount is ${amount} (<= 0)` };
 
-  let customerHeadId = null;
-  if (rp.SourceSaleInvoiceId) {
-    const siResult = await pool
-      .request()
-      .input("SaleInvoiceID", sql.Int, rp.SourceSaleInvoiceId)
-      .query(`SELECT CustomerID FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SaleInvoiceID`);
-    customerHeadId = siResult.recordset[0]?.CustomerID ?? null;
+  const docNo = rp.DocNo || `RCV-${rpId}`;
+
+  // Loan disbursement (Bank Loan, or Customer Loan's "Customer to Company"
+  // direction — migration 402) — this ReceivedPayment IS the loan's own
+  // real bank-side leg. Credit the loan's own LenderLHeadId (the external
+  // lender's shadow ledger head, e.g. "Loan - <CustomerName>") directly
+  // instead of falling through to the generic name/invoice-based customer
+  // resolution below — that would land on the party's ORDINARY head (the
+  // same one used for regular sales/AR), a different account entirely,
+  // silently orphaning this entry from the loan's own bookkeeping instead
+  // of the two tying together into one trail.
+  const loanDisbursementRes = await pool
+    .request()
+    .input("RpId", sql.Int, rpId)
+    .query(`
+      SELECT LoanId, LoanNo, LenderLHeadId FROM dbo.LoanSanction
+      WHERE DisbursementPaymentType = 'ReceivedPayment' AND DisbursementPaymentId = @RpId
+    `);
+  if (loanDisbursementRes.recordset.length) {
+    const loan = loanDisbursementRes.recordset[0];
+    if (!loan.LenderLHeadId) {
+      return { posted: false, reason: `Loan ${loan.LoanNo} has no LenderLHeadId — cannot post this disbursement.` };
+    }
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: rp.RPDocDate,
+      sourceType: "ReceivedPayment",
+      sourceId: rpId,
+      companyId: rp.RPCompanyId ?? null,
+      projectId: rp.RPProjectId ?? null,
+      createdBy: userEmail,
+      legs: [
+        { lHeadId: rp.RPDepositBankId, debit: amount, narration: `${docNo} — loan disbursement received (${loan.LoanNo})` },
+        { lHeadId: loan.LenderLHeadId, credit: amount, narration: `${docNo} — loan disbursement received (${loan.LoanNo})` },
+      ],
+    });
+    return { posted: true };
   }
-  if (!customerHeadId) {
-    customerHeadId = await getHeadIdByName(
-      pool,
-      rp.RPCustomerName || rp.RPReceivedFrom,
-    );
+
+  // Loan repayment via Received Payment — every loan type's repayment is
+  // recorded here (see LoanSanction.tsx's own comment on this), including
+  // the "we're the borrower paying an external party back" shapes (Bank
+  // Loan, Customer-to-Company). The loan's own repayment posting
+  // (postCustomerLoanRepayment / postBankLoanRepayment below, SourceType=
+  // 'LoanRepayment') already posts the complete, correct voucher — bank
+  // leg AND loan-ledger leg together, in the right direction either way —
+  // the moment POST /:id/pay runs, which happens at Received Payment
+  // CREATION time, before this approval step. Posting again here under
+  // SourceType='ReceivedPayment' would double-count the same bank
+  // movement against the wrong (regular, not shadow) head. Skip entirely.
+  const loanRepaymentRes = await pool
+    .request()
+    .input("RpId", sql.Int, rpId)
+    .query(`SELECT TOP 1 LoanId FROM dbo.LoanPayment WHERE ReceivedPaymentId = @RpId`);
+  if (loanRepaymentRes.recordset.length) {
+    return {
+      posted: false,
+      reason: `This Received Payment settles LoanId ${loanRepaymentRes.recordset[0].LoanId}'s repayment — already posted via the loan's own repayment GL entry (see the loan's Posting tab), not posted again here.`,
+    };
+  }
+
+  // Standalone advance — nothing yet to apply this receipt against (no
+  // invoice, no contract, not a CRM milestone/booking payment). Crediting
+  // the customer's own Sundry Debtors head here would be wrong: an advance
+  // is a liability (goods/services still owed to them), not a reduction of
+  // what they owe US — the two are opposite sides of the balance sheet.
+  // Posts to the pooled "Advance from Customer" head instead (same
+  // pattern as GL_ACCOUNTS.ON_ACCOUNT on the supplier side), tagged in the
+  // narration with who it's actually from since the pooled head itself
+  // carries no per-customer breakdown.
+  const isStandaloneAdvance =
+    !rp.SourceSaleInvoiceId && !rp.ContractId && !rp.CrmMilestoneId && !rp.CrmBookingId && !rp.CrmApplicationId;
+
+  let customerHeadId = null;
+  if (isStandaloneAdvance) {
+    customerHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+  } else {
+    if (rp.SourceSaleInvoiceId) {
+      const siResult = await pool
+        .request()
+        .input("SaleInvoiceID", sql.Int, rp.SourceSaleInvoiceId)
+        .query(`SELECT CustomerID FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SaleInvoiceID`);
+      customerHeadId = siResult.recordset[0]?.CustomerID ?? null;
+    }
+    if (!customerHeadId) {
+      customerHeadId = await getHeadIdByName(
+        pool,
+        rp.RPCustomerName || rp.RPReceivedFrom,
+      );
+    }
   }
   if (!customerHeadId)
     return {
@@ -984,7 +1393,9 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
       reason: `ReceivedPayment ${rpId}: could not resolve customer (invoice ${rp.SourceSaleInvoiceId ?? "none"}, name "${rp.RPCustomerName || rp.RPReceivedFrom}")`,
     };
 
-  const docNo = rp.DocNo || `RCV-${rpId}`;
+  const creditNarration = isStandaloneAdvance
+    ? `${docNo} — advance received from ${rp.RPCustomerName || rp.RPReceivedFrom || "customer"}`
+    : `${docNo} — payment received`;
 
   await postVoucher(pool, {
     voucherNo: docNo,
@@ -1003,7 +1414,7 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
       {
         lHeadId: customerHeadId,
         credit: amount,
-        narration: `${docNo} — payment received`,
+        narration: creditNarration,
       },
     ],
   });
@@ -1166,8 +1577,11 @@ async function postFundTransferApproval(pool, ftId, userEmail) {
 }
 
 module.exports = {
+  getGLHeadIdByCode,
   GL_ACCOUNTS,
   getGLHeadId,
+  getCashInHandBankId,
+  ensureCashInHandHead,
   getHeadIdByName,
   hasPosting,
   postVoucher,

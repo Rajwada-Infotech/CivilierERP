@@ -168,6 +168,7 @@ export default function ControlPanel() {
     },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["dba-control-panel"] }),
+    onError: (e: Error) => toast.error(e.message || "Update failed"),
   });
 
   const [selectedAccess, setSelectedAccess] = useState<TenantAccess | null>(
@@ -358,7 +359,7 @@ export default function ControlPanel() {
               </div>
               <div>
                 <div className="text-xl font-bold font-heading leading-none">{s.value}</div>
-                <div className="text-[11px] text-muted-foreground mt-0.5">{s.label}</div>
+                <div className="text-[0.6875rem] text-muted-foreground mt-0.5">{s.label}</div>
               </div>
             </CardContent>
           </Card>
@@ -418,15 +419,15 @@ export default function ControlPanel() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
-                  <TableHead className="text-[11px] font-semibold pl-4">Tenant</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Database</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Plan</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Access</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Expires</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Days Left</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Storage</TableHead>
-                  <TableHead className="text-[11px] font-semibold">Status</TableHead>
-                  <TableHead className="text-right text-[11px] font-semibold pr-4">Actions</TableHead>
+                  <TableHead className="text-[0.6875rem] font-semibold pl-4">Tenant</TableHead>
+                  <TableHead className="text-[0.6875rem] font-semibold">Database</TableHead>
+                  <TableHead className="text-[0.6875rem] font-semibold">Plan</TableHead>
+                  <TableHead className="text-[0.6875rem] font-semibold">Access</TableHead>
+                  <TableHead className="text-[0.6875rem] font-semibold">Expires</TableHead>
+                  <TableHead className="text-[0.6875rem] font-semibold">Days Left</TableHead>
+                  <TableHead className="text-[0.6875rem] font-semibold">Storage</TableHead>
+                  <TableHead className="text-[0.6875rem] font-semibold">Status</TableHead>
+                  <TableHead className="text-right text-[0.6875rem] font-semibold pr-4">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -441,27 +442,27 @@ export default function ControlPanel() {
                   return (
                     <TableRow key={acc.tenant_id} className="group text-xs hover:bg-muted/20 transition-colors">
                       <TableCell className="pl-4 py-3">
-                        <div className="font-heading font-semibold text-[12px]">{acc.name}</div>
-                        <div className="text-muted-foreground font-mono text-[10px] mt-0.5">{acc.tenant_id}</div>
+                        <div className="font-heading font-semibold text-[0.75rem]">{acc.name}</div>
+                        <div className="text-muted-foreground font-mono text-[0.625rem] mt-0.5">{acc.tenant_id}</div>
                       </TableCell>
                       <TableCell>
-                        <div className="font-mono text-[11px] font-semibold text-primary">{acc.db_name}</div>
-                        <div className="text-muted-foreground text-[10px] mt-0.5">{acc.server}</div>
+                        <div className="font-mono text-[0.6875rem] font-semibold text-primary">{acc.db_name}</div>
+                        <div className="text-muted-foreground text-[0.625rem] mt-0.5">{acc.server}</div>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
                           <PL.icon size={11} className={PL.color.split(" ")[1]} />
-                          <Badge className={`text-[10px] ${PL.color}`}>{PL.label}</Badge>
+                          <Badge className={`text-[0.625rem] ${PL.color}`}>{PL.label}</Badge>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge className={`text-[10px] ${AL.color}`}>{AL.label}</Badge>
+                        <Badge className={`text-[0.625rem] ${AL.color}`}>{AL.label}</Badge>
                       </TableCell>
-                      <TableCell className="font-mono text-[11px] text-muted-foreground">
+                      <TableCell className="font-mono text-[0.6875rem] text-muted-foreground">
                         {acc.expires_on}
                       </TableCell>
                       <TableCell>
-                        <span className={`font-bold text-[11px] ${getDaysColor(acc.days_remaining)}`}>
+                        <span className={`font-bold text-[0.6875rem] ${getDaysColor(acc.days_remaining)}`}>
                           {acc.days_remaining < 0
                             ? `${Math.abs(acc.days_remaining)}d overdue`
                             : `${acc.days_remaining}d`}
@@ -476,7 +477,7 @@ export default function ControlPanel() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="text-[11px] text-muted-foreground">
+                        <div className="text-[0.6875rem] text-muted-foreground">
                           {acc.storage_used} / {acc.storage_limit}
                         </div>
                         <div className="w-16 h-1 bg-muted rounded-full mt-1.5">
@@ -488,15 +489,15 @@ export default function ControlPanel() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col gap-1">
-                          <Badge className={`text-[10px] w-fit ${SC.color}`}>{acc.status}</Badge>
+                          <Badge className={`text-[0.625rem] w-fit ${SC.color}`}>{acc.status}</Badge>
                           {acc.is_trial && (
-                            <Badge className="text-[9px] bg-violet-500/10 text-violet-600 border-violet-500/20 w-fit">Trial</Badge>
+                            <Badge className="text-[0.5625rem] bg-violet-500/10 text-violet-600 border-violet-500/20 w-fit">Trial</Badge>
                           )}
                         </div>
                       </TableCell>
                       <TableCell className="text-right pr-4">
                         <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-lg"
+                          <Button data-row-view variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-lg"
                             onClick={() => { setSelectedAccess(acc); setDetailOpen(true); }}>
                             <Eye size={12} />
                           </Button>
@@ -539,13 +540,13 @@ export default function ControlPanel() {
             <div className="space-y-4 py-2">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                     Tenant
                   </p>
                   <p className="text-xs font-medium">{selectedAccess.name}</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                     Database
                   </p>
                   <p className="text-xs font-mono text-primary">
@@ -553,27 +554,27 @@ export default function ControlPanel() {
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                     Plan
                   </p>
                   <Badge
-                    className={`text-[10px] ${PLAN_CONFIG[selectedAccess.plan].color}`}
+                    className={`text-[0.625rem] ${PLAN_CONFIG[selectedAccess.plan].color}`}
                   >
                     {PLAN_CONFIG[selectedAccess.plan].label}
                   </Badge>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                     Access Level
                   </p>
                   <Badge
-                    className={`text-[10px] ${ACCESS_LEVEL_CONFIG[selectedAccess.access_level].color}`}
+                    className={`text-[0.625rem] ${ACCESS_LEVEL_CONFIG[selectedAccess.access_level].color}`}
                   >
                     {ACCESS_LEVEL_CONFIG[selectedAccess.access_level].label}
                   </Badge>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                     Granted On
                   </p>
                   <p className="text-xs font-mono">
@@ -581,7 +582,7 @@ export default function ControlPanel() {
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                     Expires On
                   </p>
                   <p
@@ -591,13 +592,13 @@ export default function ControlPanel() {
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                     Max Users
                   </p>
                   <p className="text-xs">{selectedAccess.max_users} users</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                     Amount Paid
                   </p>
                   <p className="text-xs font-bold text-green-600">
@@ -607,7 +608,7 @@ export default function ControlPanel() {
               </div>
 
               <div className="space-y-1.5">
-                <div className="flex justify-between text-[10px]">
+                <div className="flex justify-between text-[0.625rem]">
                   <span className="text-muted-foreground">Access Duration</span>
                   <span
                     className={`font-bold ${getDaysColor(selectedAccess.days_remaining)}`}
@@ -628,7 +629,7 @@ export default function ControlPanel() {
               </div>
 
               <div className="space-y-1.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                   Included Features
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -638,7 +639,7 @@ export default function ControlPanel() {
                   ).map((f, i) => (
                     <span
                       key={i}
-                      className="flex items-center gap-1 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-full px-2 py-0.5 text-[10px]"
+                      className="flex items-center gap-1 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-full px-2 py-0.5 text-[0.625rem]"
                     >
                       <CheckCircle2 size={9} /> {f}
                     </span>
@@ -679,7 +680,7 @@ export default function ControlPanel() {
             {/* Step 1 — Tenant */}
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 text-[10px] font-bold flex items-center justify-center">1</span>
+                <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 text-[0.625rem] font-bold flex items-center justify-center">1</span>
                 <Label className="text-xs font-semibold">Select Tenant</Label>
               </div>
               <Select
@@ -695,7 +696,7 @@ export default function ControlPanel() {
                   ) : accesses.map((t) => (
                     <SelectItem key={t.tenant_id} value={t.tenant_id} className="text-xs">
                       <span className="font-medium">{t.name}</span>
-                      <span className="text-muted-foreground ml-2 font-mono text-[10px]">{t.tenant_id}</span>
+                      <span className="text-muted-foreground ml-2 font-mono text-[0.625rem]">{t.tenant_id}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -705,7 +706,7 @@ export default function ControlPanel() {
             {/* Step 2 — Plan cards */}
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 text-[10px] font-bold flex items-center justify-center">2</span>
+                <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 text-[0.625rem] font-bold flex items-center justify-center">2</span>
                 <Label className="text-xs font-semibold">Choose Plan</Label>
               </div>
               <div className="grid grid-cols-3 gap-2">
@@ -725,9 +726,9 @@ export default function ControlPanel() {
                     >
                       <div className="flex items-center gap-1.5 mb-1">
                         <cfg.icon size={11} className={active ? "text-emerald-500" : "text-muted-foreground"} />
-                        <span className={`text-[11px] font-semibold ${active ? "text-emerald-600" : "text-foreground"}`}>{cfg.label}</span>
+                        <span className={`text-[0.6875rem] font-semibold ${active ? "text-emerald-600" : "text-foreground"}`}>{cfg.label}</span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground">{cfg.price}</span>
+                      <span className="text-[0.625rem] text-muted-foreground">{cfg.price}</span>
                     </button>
                   );
                 })}
@@ -737,7 +738,7 @@ export default function ControlPanel() {
             {/* Step 3 — Access Level buttons */}
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 text-[10px] font-bold flex items-center justify-center">3</span>
+                <span className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 text-[0.625rem] font-bold flex items-center justify-center">3</span>
                 <Label className="text-xs font-semibold">Access Level</Label>
               </div>
               <div className="grid grid-cols-3 gap-2">
@@ -757,9 +758,9 @@ export default function ControlPanel() {
                     >
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <cfg.icon size={11} className={active ? "text-blue-500" : "text-muted-foreground"} />
-                        <span className={`text-[11px] font-semibold ${active ? "text-blue-600" : "text-foreground"}`}>{cfg.label}</span>
+                        <span className={`text-[0.6875rem] font-semibold ${active ? "text-blue-600" : "text-foreground"}`}>{cfg.label}</span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-[0.625rem] text-muted-foreground">
                         {level === "read" && "View data only"}
                         {level === "read_write" && "Read & modify data"}
                         {level === "full" && "Complete control"}
@@ -779,7 +780,7 @@ export default function ControlPanel() {
                     <p className={`text-xs font-semibold ${grantForm.isTrial ? "text-violet-600" : "text-foreground"}`}>
                       Trial Period Access
                     </p>
-                    <p className="text-[10px] text-muted-foreground">Free • Read Only • max 3 users • 1 GB storage</p>
+                    <p className="text-[0.625rem] text-muted-foreground">Free • Read Only • max 3 users • 1 GB storage</p>
                   </div>
                 </div>
                 <button
@@ -810,7 +811,7 @@ export default function ControlPanel() {
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-violet-500 mt-1 flex items-center gap-1">
+                  <p className="text-[0.625rem] text-violet-500 mt-1 flex items-center gap-1">
                     <Timer size={9} /> Max 60 days • No payment required
                   </p>
                 </div>
@@ -854,12 +855,12 @@ export default function ControlPanel() {
             {/* Features preview */}
             {grantForm.plan && (
               <div className="bg-muted/40 rounded-lg p-3 space-y-1.5 border border-border">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-medium">
                   Included with {PLAN_CONFIG[grantForm.plan].label}
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {FEATURES_BY_PLAN[grantForm.plan].map((f, i) => (
-                    <span key={i} className="flex items-center gap-1 bg-background border rounded-full px-2 py-0.5 text-[10px]">
+                    <span key={i} className="flex items-center gap-1 bg-background border rounded-full px-2 py-0.5 text-[0.625rem]">
                       <CheckCircle2 size={9} className="text-emerald-500" /> {f}
                     </span>
                   ))}

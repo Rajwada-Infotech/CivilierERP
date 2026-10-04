@@ -178,7 +178,7 @@ export async function fetchNextDocNumber(docTypeId: number, finYear?: string): P
 
 export interface ContactPerson {
   name: string;
-  type: "S" | "C" | "A";
+  type: "S" | "V" | "C" | "A";
   partyId: number;
   partyName: string;
   partyCode: string | null;

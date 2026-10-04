@@ -4,6 +4,8 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { Building2, FolderKanban, CalendarDays, Users, Search, X, ChevronDown } from "lucide-react";
 import type { BookingFilters } from "../types";
 import { PARTY_TYPE_LABELS } from "../api";
+import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // Typeable, scrollable combobox for the Vendor filter (suppliers,
 // contractors, brokers — grouped by category) — a plain native <select>
@@ -117,7 +119,7 @@ function VendorCombo({
         ) : (
           filteredGroups.map((g) => (
             <div key={g.groupLabel}>
-              <p className="px-2.5 pt-2 pb-1 text-[10px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70">
+              <p className="px-2.5 pt-2 pb-1 text-[0.625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70">
                 {g.groupLabel}
               </p>
               {g.items.map((item) => (
@@ -186,7 +188,10 @@ export function FilterBar({
     ? projectOptions.filter(
         (p) =>
           p.belongs_to === selectedCompanyId ||
-          p.company_id === selectedCompanyId,
+          p.company_id === selectedCompanyId ||
+          // Also offered under any company the project is TAGGED to (Project
+          // Master's multi-company tagging), not just its owning company.
+          projectBelongsToCompany(p as ProjectCompanyLike, selectedCompanyId),
       )
     : projectOptions;
   const projects = filteredProjectOptions.map((o) => o.label);
@@ -195,7 +200,7 @@ export function FilterBar({
   // VendorCombo renders one labeled header per group (Suppliers/Contractors/
   // Brokers/Other), matching PARTY_TYPE_LABELS' categorization — same
   // grouping the Payment form's own Payee/Party dropdown uses.
-  const CATEGORY_ORDER = ["Suppliers", "Contractors", "Brokers", "Customers", "Other"];
+  const CATEGORY_ORDER = ["Vendors", "Suppliers", "Contractors", "Brokers", "Customers", "Partners", "Other"];
   const supplierGroups = (() => {
     const groups = new Map<string, { id: number; label: string }[]>();
     supplierOptions.forEach((s) => {
@@ -266,13 +271,13 @@ export function FilterBar({
             <Search size={11} style={{ color: "#818cf8" }} />
           </div>
           <span
-            className="text-[11px] font-heading uppercase tracking-wider"
+            className="text-[0.6875rem] font-heading uppercase tracking-wider"
             style={{ color: _fbDark ? "#64748b" : "#6366f1" }}
           >
             Filter expense bookings
           </span>
           {activeCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
+            <span className="px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
               {activeCount} active
             </span>
           )}
@@ -286,7 +291,7 @@ export function FilterBar({
               onChange("year", "");
               onChange("supplier", "");
             }}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive transition-colors"
+            className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-destructive transition-colors"
           >
             <X size={10} /> Clear all
           </button>
@@ -296,11 +301,11 @@ export function FilterBar({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {dropdowns.map(({ key, label, icon: Icon, items, placeholder }) => (
           <div key={key} className="space-y-1">
-            <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+            <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
               <Icon size={9} /> {label}
             </label>
             <div className="relative">
-              <select
+              <SearchableNativeSelect
                 value={filters[key] || ""}
                 onChange={(e) => onChange(key, e.target.value)}
                 className="w-full appearance-none pl-2 pr-7 py-1.5 rounded-lg text-xs bg-background border border-border/70 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -311,7 +316,7 @@ export function FilterBar({
                     {item}
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
               <ChevronDown
                 size={11}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
@@ -324,7 +329,7 @@ export function FilterBar({
             and searchable (see VendorCombo above), unlike the flat native
             <select>s used for the other filters. */}
         <div className="space-y-1">
-          <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+          <label className="flex items-center gap-1 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
             <Users size={9} /> Vendor
           </label>
           <VendorCombo
@@ -344,7 +349,7 @@ export function FilterBar({
               return (
                 <span
                   key={key}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
                 >
                   {val}
                   <button

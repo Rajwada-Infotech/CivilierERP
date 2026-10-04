@@ -16,11 +16,13 @@
  */
 
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const {
   lockNextDocNumber,
@@ -28,7 +30,7 @@ const {
   resolveDocTypeId,
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
-const { transition } = require("../services/approvalService");
+const { transition, writeAuditLog } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { poExistsForMR } = require("../utils/materialChainGuard");
@@ -47,6 +49,35 @@ const requireUser = (req, res) => {
   }
   return name;
 };
+
+// The base date + longest lead time (Days of Supply) among the items being
+// requested — RequiredByDate can never be earlier than this, since the
+// slowest item to supply can't arrive any sooner. Mirrors the client-side
+// min-date computation in MaterialRequest.tsx so a direct API call can't
+// bypass it.
+async function computeMinRequiredByDate(pool, baseDate, itemIds) {
+  const hasCol = await pool
+    .request()
+    .query(
+      `SELECT COUNT(1) AS cnt FROM sys.columns
+       WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
+    )
+    .then((r) => r.recordset[0].cnt > 0);
+  if (!hasCol || !itemIds.length) return null;
+
+  const ids = [...new Set(itemIds.map((id) => String(id)))];
+  const result = await pool.request().query(`
+    SELECT MAX(M_DaysOfSupply) AS MaxDays
+    FROM   dbo.Item_Master_Group
+    WHERE  CONVERT(NVARCHAR(50), M_Id) IN (${ids.map((id) => `'${id.replace(/'/g, "''")}'`).join(",")})
+  `);
+  const maxDays = result.recordset[0]?.MaxDays;
+  if (!maxDays || maxDays <= 0) return null;
+
+  const min = new Date(baseDate);
+  min.setDate(min.getDate() + maxDays);
+  return min;
+}
 
 async function ensureTablesExist(pool) {
   // Create MaterialRequests header table if it doesn't exist
@@ -103,14 +134,33 @@ router.get("/companies", authenticateToken, async (req, res) => {
   }
 });
 
+// Any route with :id — refuse an MR whose project is outside the user's scope.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const mrId = parseInt(id, 10);
+  if (!Number.isFinite(mrId)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, mrId)
+      .query("SELECT ProjectId FROM dbo.MaterialRequests WHERE MRId = @id");
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /projects ──────────────────────────────────────────────────────────────
 router.get("/projects", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id, name, short_name, company_id
+      SELECT id, name, short_name, company_id,
+             (SELECT STRING_AGG(CAST(pc.CompanyId AS NVARCHAR(20)), ',')
+                FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = enterprise.id) AS tagged_company_ids
       FROM   dbo.enterprise
-      WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)
+      WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)${projectPredicate(req.projectScope, "id")}
       ORDER  BY name
     `);
     res.json(result.recordset);
@@ -147,9 +197,10 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     const requestedProjectId = req.query.projectId
       ? parseInt(req.query.projectId, 10)
       : null;
+    if (requestedProjectId && !assertProjectAllowed(req, res, requestedProjectId)) return;
 
     // Detect optional columns (same pattern as inventoryMaster.js)
-    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate] =
+    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply, hasCC] =
       await Promise.all([
         pool
           .request()
@@ -177,6 +228,20 @@ router.get("/item-options", authenticateToken, async (req, res) => {
           .query(
             `SELECT COUNT(1) AS cnt FROM sys.columns
              WHERE object_id = OBJECT_ID(N'dbo.StockLedger') AND name = N'EntryDate'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_CostCenterId'`,
           )
           .then((r) => r.recordset[0].cnt > 0),
       ]);
@@ -227,6 +292,9 @@ router.get("/item-options", authenticateToken, async (req, res) => {
               ${hasUOM ? "img.M_UOM AS DefaultUOM," : "NULL AS DefaultUOM,"}
               uom.UOMName  AS DefaultUOMName,
               uom.Symbol   AS DefaultUOMSymbol,
+              ${hasDaysOfSupply ? "img.M_DaysOfSupply" : "NULL"} AS DaysOfSupply,
+              ${hasCC ? "img.M_CostCenterId" : "NULL"} AS M_CostCenterId,
+              ${hasCC ? "cc.Name" : "NULL"} AS CostCenterName,
               ISNULL(SUM(CASE WHEN sl.Type = 'IN'  THEN sl.Qty ELSE 0 END), 0)
             - ISNULL(SUM(CASE WHEN sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0)
               AS AvailableStock
@@ -237,9 +305,12 @@ router.get("/item-options", authenticateToken, async (req, res) => {
         ${dateFilter}
         ${godownFilter}
       ${hasUOM ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM" : "LEFT JOIN dbo.UOMMaster uom ON 1=0"}
+      ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = img.M_CostCenterId" : ""}
       WHERE (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
       GROUP BY img.M_Id, img.M_Name, img.M_Type, grp.M_Name
                ${hasUOM ? ", img.M_UOM" : ""},
+               ${hasDaysOfSupply ? "img.M_DaysOfSupply," : ""}
+               ${hasCC ? "img.M_CostCenterId, cc.Name," : ""}
                uom.UOMName, uom.Symbol
       ORDER BY img.M_Name
     `);
@@ -277,7 +348,7 @@ router.get("/preview-next-number", authenticateToken, async (req, res) => {
     }
     if (!dtId) return res.json({ nextDocNo: null });
     const preview = await previewNextDocNumber(pool, sql, dtId);
-    res.json({ nextDocNo: preview });
+    res.json(preview);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -295,6 +366,8 @@ router.get("/", authenticateToken, async (req, res) => {
     const search = req.query.search || "";
     const statusFilter = req.query.status || ""; // exact status filter from dashboard
     const companyId = parseInt(req.query.companyId, 10) || null;
+    const projectId = parseInt(req.query.projectId, 10) || null;
+    const groupByProject = req.query.groupBy === "project";
 
     const request = pool.request();
     request.input("offset", sql.Int, offset);
@@ -302,18 +375,41 @@ router.get("/", authenticateToken, async (req, res) => {
     request.input("search", sql.NVarChar, `%${search}%`);
     request.input("statusFilter", sql.NVarChar, statusFilter);
     request.input("companyId", sql.Int, companyId);
+    request.input("projectId", sql.Int, projectId);
 
-    const result = await request.query(`
+    const baseSelect = `
       SELECT
-        mr.MRId, mr.DocNo, mr.Status, mr.Priority,
+        mr.MRId, mr.ProjectId, mr.DocNo, mr.Status, mr.Priority,
         mr.RequestDate, mr.RequiredByDate,
         mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
         ec.name  AS CompanyName,
         ep.name  AS ProjectName,
         fy.FName AS FinYearName,
         COUNT(mri.MRItemId)      AS ItemCount,
-        SUM(mri.Quantity)        AS TotalQty,
-        COUNT(*)  OVER ()        AS _total
+        -- Quantities in different UOMs aren't fungible (e.g. bags vs. metric
+        -- tons) — a single blind SUM(Quantity) across every line item mixed
+        -- them together into one meaningless number. Sum per UOM instead and
+        -- return it as one "120.00 BAG, 1.50 MT" string.
+        (
+          SELECT STUFF((
+            SELECT ', ' + FORMAT(SUM(mri2.Quantity), 'N2') + ' ' + ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
+            FROM dbo.MaterialRequestItems mri2
+            LEFT JOIN dbo.UOMMaster u2 ON u2.UOMCode = mri2.UOMCode
+            WHERE mri2.MRId = mr.MRId
+            -- Must match the SELECT's grouping expression exactly (SQL Server
+            -- requires the GROUP BY expression to be textually identical to
+            -- the non-aggregated SELECT expression it covers) — this used to
+            -- read ISNULL(u2.UOMName, mri2.UOMCode), one ISNULL short of the
+            -- SELECT's ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, '')), which
+            -- SQL Server doesn't recognize as the same expression. That
+            -- mismatch 500'd this entire list endpoint outright (error 8120)
+            -- every Material Request list request failed, at every
+            -- page/limit, found via a live "material requests aren't
+            -- fetching" report on 2026-09-22.
+            GROUP BY ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
+            FOR XML PATH('')
+          ), 1, 2, '')
+        )                        AS QtyByUom
       FROM       dbo.MaterialRequests mr WITH (NOLOCK)
       LEFT JOIN  dbo.enterprise  ec  WITH (NOLOCK) ON ec.id  = mr.CompanyId
       LEFT JOIN  dbo.enterprise  ep  WITH (NOLOCK) ON ep.id  = mr.ProjectId
@@ -322,13 +418,37 @@ router.get("/", authenticateToken, async (req, res) => {
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
         AND (@statusFilter = '' OR mr.Status = @statusFilter)
         AND (@companyId IS NULL OR mr.CompanyId = @companyId)
+        AND (@projectId IS NULL OR mr.ProjectId = @projectId)${projectPredicate(req.projectScope, "mr.ProjectId")}
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,
                mr.RequestDate, mr.RequiredByDate,
-               mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
+               mr.ProjectId, mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
                ec.name, ep.name, fy.FName
-      ORDER BY mr.CreatedAt DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-    `);
+    `;
+
+
+    // groupBy=project pages by PROJECT, not by row: each page holds `limit`
+    // whole projects (newest-activity first) with every one of their MRs, so
+    // a project's folder is never split across pages.
+    const result = await request.query(
+      groupByProject
+        ? `
+      WITH base AS (${baseSelect}),
+      proj AS (
+        SELECT ISNULL(ProjectId, 0) AS PKey, MAX(CreatedAt) AS LastAt FROM base GROUP BY ISNULL(ProjectId, 0)
+      ),
+      ranked AS (
+        SELECT PKey, ROW_NUMBER() OVER (ORDER BY LastAt DESC) AS rn, COUNT(*) OVER () AS _total FROM proj
+      )
+      SELECT b.*, r._total
+      FROM base b JOIN ranked r ON r.PKey = ISNULL(b.ProjectId, 0)
+      WHERE r.rn > @offset AND r.rn <= @offset + @limit
+      ORDER BY r.rn, b.CreatedAt DESC`
+        : `
+      WITH base AS (${baseSelect})
+      SELECT *, COUNT(*) OVER () AS _total FROM base
+      ORDER BY CreatedAt DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`,
+    );
 
     const total = result.recordset[0]?._total ?? 0;
     const data = result.recordset.map(({ _total, ...row }) => row);
@@ -355,6 +475,7 @@ router.get("/approved-list", authenticateToken, async (req, res) => {
       "mr.Status IN ('Approved', 'Partially Fulfilled')",
       "mr.DocNo IS NOT NULL",
     ];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "mr.ProjectId", "").trim());
 
     if (req.query.companyId) {
       conditions.push("mr.CompanyId = @companyId");
@@ -429,6 +550,7 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Material Request not found" });
 
     const mr = header.recordset[0];
+    if (!assertProjectAllowed(req, res, mr.ProjectId)) return;
     if (!["Approved", "Partially Fulfilled"].includes(mr.Status))
       return res.status(400).json({
         error: `MR is ${mr.Status}. Only Approved or Partially Fulfilled MRs can generate a Normal PO.`,
@@ -490,20 +612,30 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
 router.get("/pending-summary", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    // SQL Server refuses SUM(ISNULL((SELECT SUM(...) ... WHERE correlated), 0))
+    // outright — "Cannot perform an aggregate function on an expression
+    // containing an aggregate or a subquery" — even though the inner
+    // subquery returns one scalar per outer row. OUTER APPLY computes that
+    // same per-item ordered quantity as its own row first, so the outer
+    // SUM(ISNULL(...)) is only ever aggregating a plain column, not a
+    // nested aggregate subquery. Same semantics, just restructured to be
+    // something SQL Server will actually run. Found live: /pending-summary
+    // 500'd on every request, 2026-09-22.
     const result = await pool.request().query(`
       SELECT
         mri.MRId,
         SUM(mri.Quantity) AS TotalRequested,
-        SUM(ISNULL((
-          SELECT SUM(poi.Quantity)
-          FROM dbo.PurchaseOrderItems poi
-          JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
-          WHERE poi.MRItemId = mri.MRItemId
-            AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
-        ), 0)) AS TotalOrdered
+        SUM(ISNULL(ord.OrderedQty, 0)) AS TotalOrdered
       FROM dbo.MaterialRequestItems mri
       JOIN dbo.MaterialRequests mr ON mr.MRId = mri.MRId
-      WHERE mr.Status IN ('Approved', 'Partially Fulfilled', 'Completed')
+      OUTER APPLY (
+        SELECT SUM(poi.Quantity) AS OrderedQty
+        FROM dbo.PurchaseOrderItems poi
+        JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+        WHERE poi.MRItemId = mri.MRItemId
+          AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
+      ) ord
+      WHERE mr.Status IN ('Approved', 'Partially Fulfilled', 'Completed')${projectPredicate(req.projectScope, "mr.ProjectId")}
       GROUP BY mri.MRId
     `);
     res.json(
@@ -537,6 +669,7 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
     const conditions = [
       "mr.Status IN ('Approved', 'Partially Fulfilled')",
     ];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "mr.ProjectId", "").trim());
 
     if (req.query.companyId) {
       conditions.push("mr.CompanyId = @companyId");
@@ -574,13 +707,27 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
           JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
           WHERE poi.MRItemId = mri.MRItemId
             AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
+        ), 0)
+        +
+        ISNULL((
+          SELECT SUM(icti.Quantity)
+          FROM dbo.InterCompanyTransferItems icti
+          JOIN dbo.InterCompanyTransfer ict ON ict.ICTId = icti.ICTId
+          WHERE icti.MRItemId = mri.MRItemId
+            AND ISNULL(ict.Status, '') NOT IN ('Rejected')
         ), 0) AS OrderedQty,
         (
           SELECT STRING_AGG(po2.DocNo, ', ')
           FROM dbo.PurchaseOrders po2
           WHERE po2.SourceMRId = mr.MRId
             AND ISNULL(po2.Status, '') NOT IN ('Deleted', 'Rejected')
-        ) AS LinkedPOs
+        ) AS LinkedPOs,
+        (
+          SELECT STRING_AGG(ict2.DocNo, ', ')
+          FROM dbo.InterCompanyTransfer ict2
+          WHERE ict2.SourceMRId = mr.MRId
+            AND ISNULL(ict2.Status, '') NOT IN ('Rejected')
+        ) AS LinkedICTs
       FROM dbo.MaterialRequests mr
       JOIN dbo.MaterialRequestItems mri ON mri.MRId = mr.MRId
       LEFT JOIN dbo.enterprise ec ON ec.id = mr.CompanyId
@@ -607,6 +754,7 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
           FulfilledQty: ordered,
           PendingQty: Math.max(0, requested - ordered),
           LinkedPOs: r.LinkedPOs || "",
+          LinkedICTs: r.LinkedICTs || "",
         };
       })
       .filter((r) => r.PendingQty > 0);
@@ -644,9 +792,10 @@ router.get("/:id", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Not found" });
 
     const items = await pool.request().input("id", sql.Int, id).query(`
-        SELECT mri.*, u.UOMName, u.Symbol AS UOMSymbol
+        SELECT mri.*, u.UOMName, u.Symbol AS UOMSymbol, cc.Name AS CostCenterName
         FROM   dbo.MaterialRequestItems mri
         LEFT JOIN dbo.UOMMaster u ON u.UOMCode = mri.UOMCode
+        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = mri.CostCenterId
         WHERE  mri.MRId = @id
         ORDER  BY mri.MRItemId
       `);
@@ -658,6 +807,19 @@ router.get("/:id", authenticateToken, async (req, res) => {
 });
 
 // ── POST / ─────────────────────────────────────────────────────────────────────
+// The financial year is optional on the form, but every "approved MR" picker
+// (Quotation, PO) filters on it — a request saved without one silently vanished
+// from them. When the client sends none, take the year whose date range covers
+// the request date.
+async function resolveFinYearId(db, finYearId, requestDate) {
+  const given = parseInt(finYearId, 10);
+  if (Number.isFinite(given) && given > 0) return given;
+  const r = await db.request().input("d", sql.Date, requestDate || new Date()).query(
+    "SELECT TOP 1 FId FROM dbo.FinYear WHERE @d >= FStartDate AND @d <= FEndDate ORDER BY FStartDate DESC",
+  );
+  return r.recordset[0]?.FId ?? null;
+}
+
 router.post("/", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
@@ -679,10 +841,24 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       items = [],
     } = req.body;
 
+    if (!assertProjectAllowed(req, res, ProjectId)) return;
     if (!Reason?.trim())
       return res.status(400).json({ error: "Reason is required" });
     if (!items.length)
       return res.status(400).json({ error: "At least one item required" });
+
+    if (RequiredByDate) {
+      const minDate = await computeMinRequiredByDate(
+        pool,
+        RequestDate || new Date(),
+        items.map((i) => i.ItemId),
+      );
+      if (minDate && new Date(RequiredByDate) < minDate) {
+        return res.status(400).json({
+          error: `Required By Date can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+        });
+      }
+    }
 
     let dtId = clientDocTypeId ? parseInt(clientDocTypeId, 10) : null;
     if (!dtId) {
@@ -721,7 +897,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
         .request()
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
-        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("FinYearId", sql.Int, await resolveFinYearId(pool, FinYearId, RequestDate))
         .input("RequestDate", sql.Date, RequestDate || new Date())
         .input("RequiredByDate", sql.Date, RequiredByDate || null)
         .input("Priority", sql.NVarChar(20), Priority)
@@ -748,9 +924,10 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
           .input("ItemName", sql.NVarChar(200), item.ItemName || null)
           .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
           .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
-          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
-            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
-            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null)
+          .input("CostCenterId", sql.Int, Number.isFinite(parseInt(item.CostCenterId, 10)) ? parseInt(item.CostCenterId, 10) : null).query(`
+            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks, CostCenterId)
+            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks, @CostCenterId)
           `);
       }
 
@@ -833,9 +1010,14 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       items = [],
     } = req.body;
 
-    // Guard against editing a Pending/Rejected MR — Draft is normal editing,
-    // Approved is allowed too (logged as an amendment below) so an approved
-    // request doesn't become permanently frozen.
+    if (!assertProjectAllowed(req, res, ProjectId)) return;
+
+    // Guard against editing a Pending MR (mid-approval — reject it first) —
+    // Draft is normal editing, Approved is allowed too (logged as an
+    // amendment below) so an approved request doesn't become permanently
+    // frozen, and Rejected is allowed so a corrected request doesn't have to
+    // be recreated from scratch under a new doc number: saving it here
+    // re-submits it automatically (below), restarting approval at level 1.
     const statusCheck = await pool
       .request()
       .input("id", sql.Int, id)
@@ -843,11 +1025,23 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     if (!statusCheck.recordset.length)
       return res.status(404).json({ error: "Not found" });
     const currentMRStatus = statusCheck.recordset[0].Status;
-    if (!["Draft", "Approved"].includes(currentMRStatus))
+    if (!["Draft", "Pending", "Approved", "Rejected"].includes(currentMRStatus))
       return res.status(409).json({
-        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft or Approved requests can be edited.`,
+        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Pending, Approved, or Rejected requests can be edited.`,
       });
     const wasApproved = currentMRStatus === "Approved";
+    const wasRejected = currentMRStatus === "Rejected";
+    // Editing a Pending request (possibly already partially approved) must
+    // restart its approval cycle the same way wasRejected's resubmit does —
+    // otherwise a level approved against the OLD numbers would still count
+    // toward the edited ones. Can't reuse transition("Pending") for this
+    // like the Rejected case does: it only accepts Draft/Rejected as the
+    // FROM status and throws on an already-Pending record. Instead this
+    // writes the same fresh Level=0/'Pending' audit marker transition()'s
+    // own Pending branch writes — currentCycleCutoffSql (approvalService.js)
+    // only counts approvals whose ActionAt is after the latest such marker,
+    // so this alone is what makes "approved so far" reset to zero.
+    const wasPending = currentMRStatus === "Pending";
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
       : null;
@@ -860,6 +1054,19 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       return res.status(409).json({
         error: `Cannot edit: ${blockingPO} is linked to this Material Request. Delete it first, then edit the request.`,
       });
+
+    if (RequiredByDate) {
+      const minDate = await computeMinRequiredByDate(
+        pool,
+        RequestDate || new Date(),
+        items.map((i) => i.ItemId),
+      );
+      if (minDate && new Date(RequiredByDate) < minDate) {
+        return res.status(400).json({
+          error: `Required By Date can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+        });
+      }
+    }
 
     // Header update + item replacement must be one atomic unit — previously
     // each ran on the plain pool (auto-committing individually). The item
@@ -876,7 +1083,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
         .input("id", sql.Int, id)
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
-        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("FinYearId", sql.Int, await resolveFinYearId(pool, FinYearId, RequestDate))
         .input("RequestDate", sql.Date, RequestDate || new Date())
         .input("RequiredByDate", sql.Date, RequiredByDate || null)
         .input("Priority", sql.NVarChar(20), Priority)
@@ -884,17 +1091,19 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
         // The edit form never actually sends Status back (it only edits
         // header/item fields), so this must preserve whatever status the
-        // record already has via COALESCE rather than overwrite it — an
-        // unconditional overwrite would silently revert an Approved
-        // request to Draft on every post-approval edit.
-        .input("Status", sql.NVarChar(20), Status || null)
+        // record already has via COALESCE rather than overwrite it — EXCEPT
+        // an edit to an already-Approved request, which must go back
+        // through approval instead of silently staying Approved with the
+        // new numbers un-reviewed. Mirrors journalVoucher.js's wasApproved
+        // handling.
+        .input("Status", sql.NVarChar(20), wasApproved ? "Pending" : Status || null)
         .input("UpdatedBy", sql.NVarChar(200), user).query(`
           UPDATE dbo.MaterialRequests
           SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
               RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
               Priority=@Priority, Reason=@Reason, Remarks=@Remarks,
               Status=COALESCE(@Status, Status), UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
-          WHERE MRId=@id AND Status IN ('Draft', 'Approved')
+          WHERE MRId=@id AND Status IN ('Draft', 'Pending', 'Approved', 'Rejected')
         `);
 
       // Race-condition guard: if another request approved/submitted this MR
@@ -921,9 +1130,10 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
           .input("ItemName", sql.NVarChar(200), item.ItemName || null)
           .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
           .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
-          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
-            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
-            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null)
+          .input("CostCenterId", sql.Int, Number.isFinite(parseInt(item.CostCenterId, 10)) ? parseInt(item.CostCenterId, 10) : null).query(`
+            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks, CostCenterId)
+            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks, @CostCenterId)
           `);
       }
 
@@ -957,7 +1167,49 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       }
     }
 
-    res.json({ message: "Material request updated" });
+    // A corrected, previously-Rejected MR goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which (via
+    // approvalService.js's currentCycleCutoffSql) makes any levels approved
+    // BEFORE the rejection stop counting: the edited request is genuinely
+    // re-reviewed starting at level 1, not resumed from wherever it was
+    // rejected.
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("material-requests", id, "Pending", user, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[material-requests] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Material request updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    // Already Pending (not via the Rejected resubmit above) — restart the
+    // approval cycle in place, same reasoning as wasRejected's comment
+    // above, just without a Status change since it's Pending already.
+    if (wasPending) {
+      try {
+        await writeAuditLog("MaterialRequests", id, 0, req.user?.role, user, "Pending", null);
+      } catch (resetErr) {
+        console.error("[material-requests] approval-cycle reset after edit failed:", resetErr.message);
+      }
+    }
+
+    res.json({
+      message: wasApproved
+        ? "Material request updated — sent back for approval"
+        : wasPending
+          ? "Material request updated — approval restarted from level 1"
+          : resubmitted
+            ? "Material request updated and re-submitted for approval"
+            : "Material request updated",
+      reopenedForApproval: wasApproved,
+      resubmitted,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1008,7 +1260,8 @@ router.put("/:id/submit", authenticateToken, requirePageRight("material-request"
   if (!user) return;
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     await pool
       .request()
       .input("id", sql.Int, id)
@@ -1070,6 +1323,88 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
         FROM dbo.MaterialRequestItems mri
         LEFT JOIN dbo.UOMMaster  u  ON u.UOMCode = mri.UOMCode
         LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(50), im.M_Id) = CONVERT(NVARCHAR(50), mri.ItemId)
+        WHERE mri.MRId = @id
+      `);
+
+    const fulfillment = await getMRItemFulfillment(pool, id);
+    const pendingByItem = new Map(fulfillment.map((f) => [f.MRItemId, f]));
+    const itemsWithPending = items.recordset
+      .map((it) => {
+        const f = pendingByItem.get(it.MRItemId);
+        return {
+          ...it,
+          OrderedQty: f?.OrderedQty ?? 0,
+          PendingQty: f ? f.PendingQty : it.Quantity,
+        };
+      })
+      .filter((it) => it.PendingQty > 0);
+
+    res.json({
+      MRId: mr.MRId,
+      DocNo: mr.DocNo,
+      CompanyId: mr.CompanyId,
+      CompanyName: mr.CompanyName,
+      ProjectId: mr.ProjectId,
+      ProjectName: mr.ProjectName,
+      FinYearId: mr.FinYearId,
+      FinYearName: mr.FinYearName,
+      Remarks: mr.Remarks,
+      items: itemsWithPending,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/create-ict-prefill ─────────────────────────────────────────────────
+// Same shape as create-po-prefill, for the Inter-Company Stock Transfer
+// form's "raise from Material Request" flow — the MR's own Company/Project
+// is what the transfer is being requested FOR, so the frontend slots it in
+// as the ICT's Receiver side (the sender company/godown — who actually has
+// the stock — is a separate pick the user still makes). Only Approved/
+// Partially Fulfilled MRs qualify, same as PO; items already reflect what's
+// still pending after any prior PO or ICT draws against this MR (see
+// getMRItemFulfillment).
+router.get("/:id/create-ict-prefill", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const header = await pool.request().input("id", sql.Int, id).query(`
+        SELECT
+          mr.MRId, mr.DocNo, mr.Status,
+          mr.CompanyId, e_co.name  AS CompanyName,
+          mr.ProjectId, e_pr.name  AS ProjectName,
+          mr.FinYearId, fy.FName AS FinYearName,
+          mr.Remarks
+        FROM dbo.MaterialRequests mr
+        LEFT JOIN dbo.enterprise      e_co ON e_co.id = mr.CompanyId
+        LEFT JOIN dbo.enterprise      e_pr ON e_pr.id = mr.ProjectId
+        LEFT JOIN dbo.FinYear         fy   ON fy.FId = mr.FinYearId
+        WHERE mr.MRId = @id
+      `);
+
+    if (!header.recordset.length)
+      return res.status(404).json({ error: "Material Request not found" });
+
+    const mr = header.recordset[0];
+    if (!["Approved", "Partially Fulfilled"].includes(mr.Status))
+      return res.status(400).json({
+        error: `MR is ${mr.Status}. Only Approved or Partially Fulfilled MRs can generate an Inter-Company Transfer.`,
+      });
+
+    const items = await pool.request().input("id", sql.Int, id).query(`
+        SELECT
+          mri.MRItemId,
+          mri.ItemId,
+          mri.ItemName,
+          mri.UOMCode,
+          u.UOMName,
+          mri.Quantity,
+          mri.Remarks
+        FROM dbo.MaterialRequestItems mri
+        LEFT JOIN dbo.UOMMaster  u  ON u.UOMCode = mri.UOMCode
         WHERE mri.MRId = @id
       `);
 
@@ -1181,6 +1516,8 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
       "Approved",
       user,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("material-requests");
     res.json({ message: "Material Request approved", ...result });
@@ -1207,6 +1544,7 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
       user,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("material-requests");
     res.json({ message: "Material Request rejected", ...result });

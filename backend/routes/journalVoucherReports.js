@@ -70,9 +70,12 @@ router.get("/list", authenticateToken, async (req, res) => {
 
     let query = `
       SELECT jv.JVID, jv.JVNo, jv.JVDate, jv.Narration, jv.CompanyId, jv.ProjectId,
+             co.name AS CompanyName, pr.name AS ProjectName,
              jv.Status, jv.CreatedBy, jv.CreatedAt,
              (SELECT SUM(DebitAmount) FROM dbo.JournalVoucherLines WHERE JVID = jv.JVID) AS TotalAmount
       FROM dbo.JournalVoucher jv
+      LEFT JOIN dbo.enterprise co ON co.id = jv.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = jv.ProjectId
     `;
     if (conditions.length) query += " WHERE " + conditions.join(" AND ");
     query += " ORDER BY jv.JVDate DESC, jv.JVID DESC";

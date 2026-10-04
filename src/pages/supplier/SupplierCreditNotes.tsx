@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import * as spApi from "@/api/supplierPortalApi";
 import { Input } from "@/components/ui/input";
 import { RefreshCw, Search, ReceiptText, AlertTriangle } from "lucide-react";
@@ -18,7 +18,7 @@ const fmtPercent1 = (n: number | null | undefined) => {
 
 export default function SupplierCreditNotes() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [search, setSearch] = useState("");
 
   const { data: notes = [], isLoading, isFetching, refetch } = useQuery({
@@ -83,15 +83,15 @@ export default function SupplierCreditNotes() {
 
           <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div className="rounded-xl bg-card/60 border border-border/60 px-4 py-3">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Total Notes</p>
+              <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Total Notes</p>
               <p className="text-xl font-semibold text-foreground mt-0.5">{notes.length}</p>
             </div>
             <div className="rounded-xl bg-card/60 border border-border/60 px-4 py-3">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Total Deducted</p>
+              <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Total Deducted</p>
               <p className="text-xl font-semibold text-rose-500 mt-0.5">{fmt(totalAmount)}</p>
             </div>
             <div className="rounded-xl bg-card/60 border border-border/60 px-4 py-3 col-span-2 sm:col-span-1">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Active</p>
+              <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Active</p>
               <p className="text-xl font-semibold text-foreground mt-0.5">
                 {notes.filter((n) => n.Status !== "Cancelled").length}
               </p>
@@ -130,15 +130,15 @@ export default function SupplierCreditNotes() {
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Doc No</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Date</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Company</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Project</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Delivery / PO</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Item</th>
-                  <th className="text-right px-3 py-2.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">% Bad</th>
-                  <th className="text-right px-3 py-2.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Amount</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Status</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[0.6875rem] uppercase tracking-wide">Doc No</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[0.6875rem] uppercase tracking-wide">Date</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[0.6875rem] uppercase tracking-wide">Company</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[0.6875rem] uppercase tracking-wide">Project</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[0.6875rem] uppercase tracking-wide">Delivery / PO</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[0.6875rem] uppercase tracking-wide">Item</th>
+                  <th className="text-right px-3 py-2.5 font-medium text-muted-foreground text-[0.6875rem] uppercase tracking-wide">% Bad</th>
+                  <th className="text-right px-3 py-2.5 font-medium text-muted-foreground text-[0.6875rem] uppercase tracking-wide">Amount</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-muted-foreground text-[0.6875rem] uppercase tracking-wide">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -153,17 +153,17 @@ export default function SupplierCreditNotes() {
                     <td className="px-3 py-2.5">
                       <div className="text-xs font-mono text-foreground">{n.VehicleInOutDocNo ?? "—"}</div>
                       {n.PONumber && (
-                        <div className="text-[10px] text-muted-foreground font-mono">PO {n.PONumber}</div>
+                        <div className="text-[0.625rem] text-muted-foreground font-mono">PO {n.PONumber}</div>
                       )}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="text-xs font-medium text-foreground">{n.ItemName ?? "—"}</div>
-                      <div className="text-[10px] text-muted-foreground">
+                      <div className="text-[0.625rem] text-muted-foreground">
                         {n.RejectedQty} of {n.ReceivedQty} {n.UomName ?? ""}
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-right">
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
+                      <span className="inline-flex items-center gap-1 text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
                         <AlertTriangle className="w-3 h-3" />
                         {fmtPercent1(n.PercentBad)}
                       </span>
@@ -173,7 +173,7 @@ export default function SupplierCreditNotes() {
                     </td>
                     <td className="px-3 py-2.5">
                       <span
-                        className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                        className={`inline-block text-[0.625rem] font-medium px-1.5 py-0.5 rounded ${
                           n.Status === "Cancelled"
                             ? "bg-muted text-muted-foreground line-through"
                             : "bg-emerald-500/10 text-emerald-600"

@@ -88,7 +88,7 @@ async function resolvePartyFromRef(pool, expenseRef) {
       .query(`
         SELECT TOP 1 LHeadId, LHeadType
         FROM dbo.AccountHeadMaster
-        WHERE LHeadName = @LHeadName AND LHeadType IN ('S','C','A')
+        WHERE LHeadName = @LHeadName AND LHeadType IN ('S','V','C','A')
       `);
     if (nameRes.recordset.length) {
       const { LHeadId, LHeadType } = nameRes.recordset[0];

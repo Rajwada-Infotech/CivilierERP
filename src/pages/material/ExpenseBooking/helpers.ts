@@ -266,6 +266,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     bookingDate: new Date().toISOString().slice(0, 10),
     dueDate: "",
     financialYear: "",
+    expenseHeadName: "",
     companyId: null,
     poId: null,
     supplier: "",
@@ -408,6 +409,7 @@ export function dbToRecord(row: any): ExpenseRecord {
     docTypeName: row.DocTypeName ?? "",
     docTypeId: row.EDocTypeId != null ? Number(row.EDocTypeId) : null,
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
+    createdByName: (row as any).CreatedByName || "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: row.EFinYear ?? "",
     companyId: row.ECompanyId ? parseInt(row.ECompanyId, 10) : null,
@@ -433,6 +435,11 @@ export function dbToRecord(row: any): ExpenseRecord {
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
+    // Direct/DINV bookings tag their Expense Head(s) via the multi-head
+    // allocation table (EExpenseHeadNames, batch-joined in the list route);
+    // EGLAccountName/EGLAccount are the legacy single-head fields, kept as
+    // a fallback for records saved before that existed.
+    expenseHeadName: row.EExpenseHeadNames ?? row.EGLAccountName ?? row.EGLAccount ?? "",
     // For GRN-linked bookings, basicAmount = qty × rate (no GST) stored in EAmount.
     // EGrnTotalAmount is the incl-GST total used only for netAmount display.
     basicAmount: parseFloat(row.EAmount) || 0,

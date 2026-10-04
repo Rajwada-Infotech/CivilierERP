@@ -75,10 +75,14 @@ import { getTCRecords } from "@/api/tcMasterApi";
 import { useQuery } from "@tanstack/react-query";
 import { getHsn } from "@/api/hsnApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import {
   DocNumberPreview,
   fetchNextDocNumber,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ─── WO Chain Status Hook ─────────────────────────────────────────────────────
 interface WOChainStatus {
@@ -489,7 +493,7 @@ const MaterialBreakdownModal: React.FC<{
         <Package size={12} />
         <span className="hidden md:inline">Materials</span>
         {activity.materials.length > 0 ? (
-          <span className="bg-primary text-primary-foreground rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold leading-none">
+          <span className="bg-primary text-primary-foreground rounded-full w-4 h-4 flex items-center justify-center text-[0.625rem] font-bold leading-none">
             {activity.materials.length}
           </span>
         ) : (
@@ -498,7 +502,7 @@ const MaterialBreakdownModal: React.FC<{
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
           <div
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => setOpen(false)}
@@ -552,17 +556,17 @@ const MaterialBreakdownModal: React.FC<{
                       </span>
                     )}
                   </div>
-                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium hidden sm:block">
+                  <span className="text-[0.625rem] text-blue-600 dark:text-blue-400 font-medium hidden sm:block">
                     Auto-applied as multiplier to all materials
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5 text-[10px] text-blue-700 dark:text-blue-300 font-medium bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded">
+                <div className="flex items-center gap-1.5 text-[0.625rem] text-blue-700 dark:text-blue-300 font-medium bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded">
                   <Calculator size={10} />
                   Ratio × Area × Price
                 </div>
               </div>
               {activity.area === 0 && (
-                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1">
+                <p className="text-[0.625rem] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1">
                   <AlertCircle size={10} className="shrink-0" />
                   Set the Activity Area in the activity row first — material
                   totals will be 0 until then.
@@ -609,7 +613,7 @@ const MaterialBreakdownModal: React.FC<{
                           {loadingItems ? (
                             <div className="flex-1 h-[34px] rounded-md border border-border bg-muted/30 animate-pulse" />
                           ) : (
-                            <select
+                            <SearchableNativeSelect
                               value={mat.itemId}
                               onChange={(e) =>
                                 handleItemChange(idx, e.target.value)
@@ -626,7 +630,7 @@ const MaterialBreakdownModal: React.FC<{
                                   {it.name}
                                 </option>
                               ))}
-                            </select>
+                            </SearchableNativeSelect>
                           )}
                           <button
                             onClick={() => deleteMaterial(idx)}
@@ -637,7 +641,7 @@ const MaterialBreakdownModal: React.FC<{
                         </div>
                         {suppliers.length > 0 && (
                           <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                            <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                               Supplier
                             </p>
                             <select
@@ -669,7 +673,7 @@ const MaterialBreakdownModal: React.FC<{
                         )}
                         <div className="grid grid-cols-3 gap-2">
                           <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                            <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                               Ratio / Unit
                             </p>
                             <input
@@ -687,7 +691,7 @@ const MaterialBreakdownModal: React.FC<{
                             />
                           </div>
                           <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                            <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                               Unit
                             </p>
                             {uomOptions.length > 0 ? (
@@ -719,7 +723,7 @@ const MaterialBreakdownModal: React.FC<{
                             )}
                           </div>
                           <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                            <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                               Price / Unit
                             </p>
                             <div className="relative">
@@ -742,7 +746,7 @@ const MaterialBreakdownModal: React.FC<{
                           </div>
                         </div>
                         {mat.gstRate > 0 && (
-                          <div className="mt-1 text-[11px] text-violet-600 dark:text-violet-400 font-medium">
+                          <div className="mt-1 text-[0.6875rem] text-violet-600 dark:text-violet-400 font-medium">
                             GST {mat.gstRate}% (from SAC) ={" "}
                             {fmt((lineTotal * mat.gstRate) / 100)}
                           </div>
@@ -770,7 +774,7 @@ const MaterialBreakdownModal: React.FC<{
                 <div className="rounded-lg border border-border overflow-hidden">
                   <div className="bg-muted/40 px-3 py-2 border-b border-border flex items-center gap-1.5">
                     <Package size={11} className="text-muted-foreground" />
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       Material Cost Breakdown
                     </span>
                   </div>
@@ -849,14 +853,14 @@ const MaterialBreakdownModal: React.FC<{
               </button>
               <button
                 onClick={() => setOpen(false)}
-                className="flex items-center gap-1.5 text-sm font-semibold px-5 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                className="flex items-center gap-1.5 text-sm font-semibold px-5 py-2 rounded-lg btn-module text-white hover:opacity-90 transition-opacity"
               >
                 <Check size={13} />
                 Done
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );
@@ -913,7 +917,7 @@ const HsnPopover: React.FC<{
       <PopoverTrigger asChild>
         <button type="button" className={triggerClass}>
           <Receipt size={variant === "full" ? 12 : 11} className="shrink-0" />
-          <span className="truncate text-[11px]">
+          <span className="truncate text-[0.6875rem]">
             {variant === "full"
               ? hasHsn
                 ? `SAC: ${activity.hsnCode} (${activity.hsnGstRate}%)`
@@ -931,7 +935,7 @@ const HsnPopover: React.FC<{
       >
         {/* Header */}
         <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider">
             Select SAC Code
           </p>
           <button
@@ -1163,13 +1167,13 @@ const ActivityRow: React.FC<{
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+            <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
               Unit
             </p>
             {uomSelectJSX}
           </div>
           <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+            <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
               Area
             </p>
             <input
@@ -1186,7 +1190,7 @@ const ActivityRow: React.FC<{
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+            <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
               Rate / Unit (Labour)
             </p>
             <div className="relative">
@@ -1206,7 +1210,7 @@ const ActivityRow: React.FC<{
             </div>
           </div>
           <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+            <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
               Activity Total
             </p>
             <div className="flex items-center h-[34px]">
@@ -1221,19 +1225,19 @@ const ActivityRow: React.FC<{
         {(labourTotal > 0 || materialsTotal > 0 || activityGstAmount > 0) && (
           <div className="flex items-center gap-2 flex-wrap">
             {labourTotal > 0 && (
-              <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
                 <Hammer size={9} />
                 Labour: {fmt(labourTotal)}
               </span>
             )}
             {materialsTotal > 0 && (
-              <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
                 <Package size={9} />
                 Materials: {fmt(materialsTotal)}
               </span>
             )}
             {activityGstAmount > 0 && (
-              <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800">
                 <Receipt size={9} />
                 GST {activity.hsnCode} ({activity.hsnGstRate}%):{" "}
                 {fmt(activityGstAmount)}
@@ -1323,23 +1327,23 @@ const ActivityRow: React.FC<{
         </div>
         {(labourTotal > 0 || materialsTotal > 0 || activityGstAmount > 0) && (
           <div className="flex items-center gap-3 px-3 py-1.5 bg-muted/10 border-t border-border/40 flex-wrap">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mr-1">
+            <span className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mr-1">
               Breakdown:
             </span>
             {labourTotal > 0 && (
-              <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
                 <Hammer size={9} />
                 Labour: {fmt(labourTotal)}
               </span>
             )}
             {materialsTotal > 0 && (
-              <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
                 <Package size={9} />
                 Materials: {fmt(materialsTotal)}
               </span>
             )}
             {activityGstAmount > 0 && (
-              <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800">
                 <Receipt size={9} />
                 GST {activity.hsnCode} ({activity.hsnGstRate}%):{" "}
                 {fmt(activityGstAmount)}
@@ -1519,7 +1523,7 @@ const ActivityGroupCard: React.FC<{
                 ].map((h) => (
                   <div
                     key={h}
-                    className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                    className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground"
                   >
                     {h}
                   </div>
@@ -1873,7 +1877,7 @@ const WorkOrderDetailPanel: React.FC<{
               },
             ].map(({ label, icon, value, highlight }) => (
               <div key={label}>
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1 mb-1">
+                <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1 mb-1">
                   {icon}
                   {label}
                 </p>
@@ -1886,7 +1890,7 @@ const WorkOrderDetailPanel: React.FC<{
             ))}
             {detail.Remarks && (
               <div className="col-span-1 sm:col-span-2 lg:col-span-3">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                   Remarks
                 </p>
                 <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2">
@@ -1896,7 +1900,7 @@ const WorkOrderDetailPanel: React.FC<{
             )}
             {detail.TermsAndConditions && (
               <div className="col-span-1 sm:col-span-2 lg:col-span-3">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                   Terms & Conditions
                 </p>
                 <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2 whitespace-pre-line">
@@ -1951,7 +1955,7 @@ const WorkOrderDetailPanel: React.FC<{
                   key={label}
                   className="rounded-lg bg-muted/40 px-3 py-2.5 border border-border/60"
                 >
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                     {label}
                   </p>
                   <p className={`text-sm font-bold ${cls}`}>{value}</p>
@@ -2077,7 +2081,7 @@ const WorkOrderDetailPanel: React.FC<{
                         ].map((h) => (
                           <div
                             key={h}
-                            className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                            className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground"
                           >
                             {h}
                           </div>
@@ -2200,7 +2204,7 @@ const WorkOrderDetailPanel: React.FC<{
                                     {act.materials.length !== 1 ? "s" : ""}
                                   </span>
                                   {detail.SupplierName && (
-                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
+                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-semibold">
                                       {detail.SupplierName}
                                     </span>
                                   )}
@@ -2227,7 +2231,7 @@ const WorkOrderDetailPanel: React.FC<{
                                       ].map((h) => (
                                         <div
                                           key={h}
-                                          className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                                          className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground"
                                         >
                                           {h}
                                         </div>
@@ -2247,7 +2251,7 @@ const WorkOrderDetailPanel: React.FC<{
                                               <p className="text-xs font-medium text-foreground">
                                                 {mat.ItemName || "—"}
                                               </p>
-                                              <p className="text-[10px] text-muted-foreground">
+                                              <p className="text-[0.625rem] text-muted-foreground">
                                                 {mat.Quantity} × {act.Area}{" "}
                                                 {act.UOMName} × ₹{mat.Rate}
                                               </p>
@@ -2261,7 +2265,7 @@ const WorkOrderDetailPanel: React.FC<{
                                           {/* Desktop material */}
                                           <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 items-center px-6 py-2 border-b border-border/20 last:border-0">
                                             <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                                              <span className="w-4 h-4 rounded flex items-center justify-center bg-primary/10 text-primary text-[10px] font-bold shrink-0">
+                                              <span className="w-4 h-4 rounded flex items-center justify-center bg-primary/10 text-primary text-[0.625rem] font-bold shrink-0">
                                                 {matIdx + 1}
                                               </span>
                                               {mat.ItemName || "—"}
@@ -2303,7 +2307,7 @@ const WorkOrderDetailPanel: React.FC<{
                             {/* Remarks */}
                             {act.Remarks && (
                               <div className="px-4 py-2 border-t border-border/30 bg-muted/5">
-                                <span className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">
+                                <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-semibold">
                                   Remarks:{" "}
                                 </span>
                                 <span className="text-xs text-muted-foreground">
@@ -2415,6 +2419,13 @@ const WorkOrdersList: React.FC<{
   const paginated = filtered.slice((page - 1) * LIMIT, page * LIMIT);
   const filteredTotal = filtered.length;
   const filteredPages = Math.ceil(filteredTotal / LIMIT);
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: approvalTrails, isLoading: approvalTrailsLoading } = useApprovalTrailsBulk(
+    "WorkOrderHeader",
+    paginated.map((wo) => wo.Id),
+  );
 
   // Summary stats
   const stats = useMemo(() => {
@@ -2538,7 +2549,7 @@ const WorkOrdersList: React.FC<{
           ].map((h) => (
             <div
               key={h}
-              className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+              className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground"
             >
               {h}
             </div>
@@ -2602,6 +2613,9 @@ const WorkOrdersList: React.FC<{
                       <ApprovalStatusChain
                         table="WorkOrderHeader"
                         recordId={wo.Id}
+                        fallback={<StatusBadge status={wo.Status || "Draft"} />}
+                        preloaded={approvalTrails.get(String(wo.Id)) ?? null}
+                        preloadedLoading={approvalTrailsLoading}
                       />
                     </div>
                     <div className="text-xs space-y-1">
@@ -2633,7 +2647,7 @@ const WorkOrdersList: React.FC<{
                           {fmt(wo.TotalAmount || 0)}
                         </span>
                         <div className="flex items-center gap-1.5">
-                          <button
+                          <button data-row-view
                             onClick={() => onViewDetail(wo.Id)}
                             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
                           >
@@ -2658,10 +2672,10 @@ const WorkOrdersList: React.FC<{
                       <p className="text-sm font-mono font-semibold text-primary">
                         {wo.DocumentNumber}
                       </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                      <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-mono">
                         {(wo as any).DocNo || ""}
                       </p>
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-[0.625rem] text-muted-foreground">
                         #{wo.Id}
                       </p>
                     </div>
@@ -2680,20 +2694,20 @@ const WorkOrdersList: React.FC<{
                       >
                         {wo.ProjectName || "—"}
                       </p>
-                      <p className="text-[10px] text-muted-foreground truncate">
+                      <p className="text-[0.625rem] text-muted-foreground truncate">
                         {wo.ContractorName || "—"}
                       </p>
                     </div>
                     <div>
                       {wo.BoqDocNo ? (
                         <span
-                          className="text-[10px] font-mono text-primary/80 bg-primary/5 border border-primary/15 px-1.5 py-0.5 rounded truncate block"
+                          className="text-[0.625rem] font-mono text-primary/80 bg-primary/5 border border-primary/15 px-1.5 py-0.5 rounded truncate block"
                           title={wo.BoqDocNo}
                         >
                           {wo.BoqDocNo}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-muted-foreground">
+                        <span className="text-[0.625rem] text-muted-foreground">
                           —
                         </span>
                       )}
@@ -2719,7 +2733,7 @@ const WorkOrdersList: React.FC<{
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <button
+                      <button data-row-view
                         onClick={() => onViewDetail(wo.Id)}
                         title="View details"
                         className="w-8 h-8 flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-colors"
@@ -2764,7 +2778,7 @@ const WorkOrdersList: React.FC<{
                     onClick={() => setPage(pageNum)}
                     className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-medium transition-colors ${
                       page === pageNum
-                        ? "bg-primary text-primary-foreground"
+                        ? "btn-module text-white"
                         : "border border-border text-muted-foreground hover:bg-muted"
                     }`}
                   >
@@ -3291,7 +3305,7 @@ const WorkOrderEditPanel: React.FC<{
           <button
             onClick={handleSave}
             disabled={saving || loadingDropdowns}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg btn-module text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
           >
             {saving ? (
               <>
@@ -3338,7 +3352,7 @@ const WorkOrderEditPanel: React.FC<{
           <div className="px-4 sm:px-5 py-4">
             <div className="flex items-center gap-2 mb-3.5">
               <div className="w-1 h-4 rounded-full bg-primary/60 shrink-0" />
-              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
                 Project Configuration
               </span>
             </div>
@@ -3419,7 +3433,7 @@ const WorkOrderEditPanel: React.FC<{
                   ))}
                 </select>
                 {form.boqId && (
-                  <p className="text-[10px] text-muted-foreground mt-1">
+                  <p className="text-[0.625rem] text-muted-foreground mt-1">
                     Company &amp; Project auto-filled from BOQ
                   </p>
                 )}
@@ -3469,7 +3483,7 @@ const WorkOrderEditPanel: React.FC<{
           <div className="px-4 sm:px-5 py-4">
             <div className="flex items-center gap-2 mb-3.5">
               <div className="w-1 h-4 rounded-full bg-indigo-400/70 shrink-0" />
-              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
                 Document Configuration
               </span>
             </div>
@@ -3486,7 +3500,7 @@ const WorkOrderEditPanel: React.FC<{
                   readOnly
                   className={`${inputCls} bg-muted/50 text-muted-foreground font-mono cursor-not-allowed`}
                 />
-                <p className="text-[11px] text-muted-foreground mt-1">
+                <p className="text-[0.6875rem] text-muted-foreground mt-1">
                   Auto-generated
                 </p>
               </div>
@@ -3502,8 +3516,7 @@ const WorkOrderEditPanel: React.FC<{
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     size={14}
                   />
-                  <input
-                    type="date"
+                  <DateInput
                     value={form.docDate}
                     onChange={(e) => setField("docDate", e.target.value)}
                     className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-red-400" : "border-border"}`}
@@ -3517,7 +3530,7 @@ const WorkOrderEditPanel: React.FC<{
           <div className="px-4 sm:px-5 py-4">
             <div className="flex items-center gap-2 mb-3.5">
               <div className="w-1 h-4 rounded-full bg-emerald-400/70 shrink-0" />
-              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
                 Parties &amp; Amount
               </span>
             </div>
@@ -3577,7 +3590,7 @@ const WorkOrderEditPanel: React.FC<{
                     className={`${inputCls} pl-7 bg-muted/50 text-muted-foreground cursor-not-allowed`}
                   />
                 </div>
-                <p className="text-[11px] text-muted-foreground mt-1">
+                <p className="text-[0.6875rem] text-muted-foreground mt-1">
                   Auto-calculated from activities
                 </p>
               </div>
@@ -3588,7 +3601,7 @@ const WorkOrderEditPanel: React.FC<{
           <div className="px-4 sm:px-5 py-4">
             <div className="flex items-center gap-2 mb-3.5">
               <div className="w-1 h-4 rounded-full bg-amber-400/70 shrink-0" />
-              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
                 Notes &amp; Terms
               </span>
             </div>
@@ -3615,13 +3628,13 @@ const WorkOrderEditPanel: React.FC<{
                 </button>
                 {tcDropdownOpen && (
                   <>
-                    <div
+                    <BodyPortal><div
                       className="fixed inset-0 z-[99]"
                       onClick={() => setTcDropdownOpen(false)}
-                    />
+                    /></BodyPortal>
                     <div className="absolute left-0 top-full mt-1 z-[100] w-80 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
                       <div className="px-3 py-2 border-b border-border">
-                        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                        <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider">
                           Select Terms &amp; Conditions
                         </p>
                       </div>
@@ -3662,7 +3675,7 @@ const WorkOrderEditPanel: React.FC<{
                                   <span className="block text-sm font-medium text-foreground truncate">
                                     {tc.name}
                                   </span>
-                                  <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                  <span className="block text-[0.6875rem] text-muted-foreground truncate mt-0.5">
                                     {tc.terms}
                                   </span>
                                 </span>
@@ -3692,7 +3705,7 @@ const WorkOrderEditPanel: React.FC<{
                       key={tc.id}
                       className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
                     >
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-bold flex items-center justify-center mt-0.5">
                         {idx + 1}
                       </span>
                       <div className="flex-1 min-w-0">
@@ -3839,7 +3852,7 @@ const WorkOrderEditPanel: React.FC<{
         <button
           onClick={handleSave}
           disabled={saving || loadingDropdowns}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-lg btn-module text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
         >
           {saving ? (
             <>
@@ -4467,7 +4480,7 @@ const WorkOrderMaster: React.FC = () => {
                     <h2 className="text-sm font-bold text-foreground tracking-tight">
                       Work Order Details
                     </h2>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                       Configuration, parties &amp; document info
                     </p>
                   </div>
@@ -4484,7 +4497,7 @@ const WorkOrderMaster: React.FC = () => {
                 <div className="px-5 py-4">
                   <div className="flex items-center gap-2 mb-3.5">
                     <div className="w-1 h-4 rounded-full bg-primary/60 shrink-0" />
-                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
                       Project Configuration
                     </span>
                   </div>
@@ -4563,7 +4576,7 @@ const WorkOrderMaster: React.FC = () => {
                         ))}
                       </select>
                       {form.boqId && (
-                        <p className="text-[10px] text-primary/70 mt-1 flex items-center gap-1">
+                        <p className="text-[0.625rem] text-primary/70 mt-1 flex items-center gap-1">
                           <Check size={9} />
                           Company &amp; Project auto-filled from BOQ
                         </p>
@@ -4618,7 +4631,7 @@ const WorkOrderMaster: React.FC = () => {
                 <div className="px-5 py-4">
                   <div className="flex items-center gap-2 mb-3.5">
                     <div className="w-1 h-4 rounded-full bg-indigo-400/70 shrink-0" />
-                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
                       Document Configuration
                     </span>
                   </div>
@@ -4694,7 +4707,7 @@ const WorkOrderMaster: React.FC = () => {
                         className={`${inputCls} font-mono`}
                         placeholder="Auto-generated…"
                       />
-                      <p className="text-[10px] text-muted-foreground mt-1">
+                      <p className="text-[0.625rem] text-muted-foreground mt-1">
                         Auto-filled, still editable
                       </p>
                     </div>
@@ -4705,7 +4718,7 @@ const WorkOrderMaster: React.FC = () => {
                 <div className="px-5 py-4">
                   <div className="flex items-center gap-2 mb-3.5">
                     <div className="w-1 h-4 rounded-full bg-emerald-400/70 shrink-0" />
-                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
                       Parties &amp; Amount
                     </span>
                   </div>
@@ -4723,8 +4736,7 @@ const WorkOrderMaster: React.FC = () => {
                           className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                           size={14}
                         />
-                        <input
-                          type="date"
+                        <DateInput
                           value={form.docDate}
                           onChange={(e) => setField("docDate", e.target.value)}
                           className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-red-400" : "border-border"}`}
@@ -4794,7 +4806,7 @@ const WorkOrderMaster: React.FC = () => {
                           className={`${inputCls} pl-7 bg-muted/40 text-foreground font-mono font-semibold cursor-not-allowed`}
                         />
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                      <p className="text-[0.625rem] text-muted-foreground mt-1 flex items-center gap-1">
                         <Calculator size={9} />
                         Auto-calculated from activities
                       </p>
@@ -4806,7 +4818,7 @@ const WorkOrderMaster: React.FC = () => {
                 <div className="px-5 py-4">
                   <div className="flex items-center gap-2 mb-3.5">
                     <div className="w-1 h-4 rounded-full bg-amber-400/70 shrink-0" />
-                    <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
+                    <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
                       Notes &amp; Terms
                     </span>
                   </div>
@@ -4838,13 +4850,13 @@ const WorkOrderMaster: React.FC = () => {
                         </button>
                         {tcDropdownOpen && (
                           <>
-                            <div
+                            <BodyPortal><div
                               className="fixed inset-0 z-[99]"
                               onClick={() => setTcDropdownOpen(false)}
-                            />
+                            /></BodyPortal>
                             <div className="absolute right-0 top-full mt-1 z-[100] w-80 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
                               <div className="px-3 py-2 border-b border-border">
-                                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider">
                                   Select Terms &amp; Conditions
                                 </p>
                               </div>
@@ -4887,7 +4899,7 @@ const WorkOrderMaster: React.FC = () => {
                                           <span className="block text-sm font-medium text-foreground truncate">
                                             {tc.name}
                                           </span>
-                                          <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                          <span className="block text-[0.6875rem] text-muted-foreground truncate mt-0.5">
                                             {tc.terms}
                                           </span>
                                         </span>
@@ -4918,7 +4930,7 @@ const WorkOrderMaster: React.FC = () => {
                             key={tc.id}
                             className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
                           >
-                            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-bold flex items-center justify-center mt-0.5">
                               {idx + 1}
                             </span>
                             <div className="flex-1 min-w-0">

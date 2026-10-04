@@ -66,3 +66,9 @@ CivilierERP Documentation.pdf
 public/downloads/
 
 backend/uploads/crm-invoices/
+
+# Generated at CI build time (git commit + build timestamp) so a deploy can
+# verify what actually landed on a box instead of trusting "no error" — see
+# deploy-from-artifact.sh's post-deploy verification step. Never handwritten.
+public/version.json
+backend/build-info.json

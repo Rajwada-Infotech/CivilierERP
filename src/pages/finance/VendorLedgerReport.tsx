@@ -1,22 +1,22 @@
 /**
  * VendorLedgerReport.tsx — Reports → Vendor Ledger Report
  *
- * Search any party or GL head by name — supplier, customer, contractor,
- * broker, loan counterparty, bank, whatever — and see every transaction ever
- * posted against it: invoices, payments, loans, journal vouchers, fund
- * transfers, GRNs. Same running-balance passbook pattern as Balance Enquiry,
- * just searched by name across every ledger head instead of picked from a
+ * Search any Sundry Creditor — Supplier or Contractor — by name and see
+ * every transaction ever posted against it: invoices, payments, journal
+ * vouchers, fund transfers. Same running-balance passbook pattern as
+ * Balance Enquiry, just searched by name instead of picked from a
  * bank-only dropdown. See backend/routes/vendorLedger.js.
  *
- * Before a party is searched/selected, shows every transaction across every
- * party (newest first) instead of an empty placeholder — the "all" view then
- * narrows to one party's own passbook (with running balance and summary
+ * Before a vendor is searched/selected, shows every vendor transaction
+ * (newest first) instead of an empty placeholder — the "all" view then
+ * narrows to one vendor's own passbook (with running balance and summary
  * tiles) once one is picked. `VendorLedgerReportBody` is the reusable core
  * (no page chrome), embedded directly into Reports.tsx's report catalog;
  * the default export below just wraps it for the standalone route.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -26,6 +26,7 @@ import { formatINR } from "@/utils/formatCurrency";
 import { format, parseISO } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   searchLedgerHeads,
   getLedgerSummary,
@@ -49,7 +50,16 @@ import {
   Building2,
   Landmark,
   CircleDollarSign,
+  Briefcase,
+  FolderKanban,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
+
+interface EntityOption {
+  id: number;
+  label: string;
+  company_id?: number;
+}
 
 function fmtDate(d: string | null | undefined): string {
   if (!d) return "—";
@@ -62,6 +72,17 @@ function fmtDate(d: string | null | undefined): string {
 
 function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+// Balance figures here follow vendorLedger.js's own convention: running
+// balance = Debit − Credit. A supplier's normal balance is a Credit
+// (what we owe them), so a negative running balance is "Cr"; a positive
+// one — e.g. an on-account advance not yet fully applied against an
+// invoice — is "Dr" (they're holding more of our money than we owe them).
+function fmtBalance(n: number): string {
+  const rounded = Math.round(n * 100) / 100;
+  if (rounded === 0) return `${formatINR(0)}`;
+  return `${formatINR(Math.abs(rounded))} ${rounded > 0 ? "Dr" : "Cr"}`;
 }
 
 function datePreset(key: "today" | "week" | "month" | "fy" | "all"): { from: string; to: string } {
@@ -87,7 +108,7 @@ function datePreset(key: "today" | "week" | "month" | "fy" | "all"): { from: str
 // LHeadType codes used across this app's AccountHeadMaster.
 const TYPE_META: Record<string, { label: string; icon: React.ElementType; color: string }> = {
   S: { label: "Supplier", icon: Building2, color: "text-orange-500" },
-  C: { label: "Customer", icon: Users, color: "text-sky-500" },
+  C: { label: "Contractor", icon: Building2, color: "text-amber-600" },
   A: { label: "Customer", icon: Users, color: "text-sky-500" },
   BR: { label: "Broker", icon: Users, color: "text-violet-500" },
   B: { label: "Bank", icon: Landmark, color: "text-emerald-500" },
@@ -111,7 +132,7 @@ const SOURCE_META: Record<string, { label: string; icon: React.ElementType; colo
   CrmOnAccountPayment: { label: "CRM On A/C Payment", icon: TrendingUp, color: "text-teal-500", bg: "bg-teal-500/10" },
   CrmSalesDeed: { label: "CRM Sales Deed", icon: FileText, color: "text-sky-500", bg: "bg-sky-500/10" },
   FundTransfer: { label: "Fund Transfer", icon: ArrowLeftRight, color: "text-indigo-500", bg: "bg-indigo-500/10" },
-  JournalVoucher: { label: "Journal Voucher", icon: FileText, color: "text-amber-500", bg: "bg-amber-500/10" },
+  JournalVoucher: { label: "Journal Voucher", icon: FileText, color: "text-amber-500", bg: "bg-[#ffe2021a]" },
   LoanPosting: { label: "Loan", icon: CircleDollarSign, color: "text-violet-500", bg: "bg-violet-500/10" },
   LoanRepayment: { label: "Loan Repayment", icon: CircleDollarSign, color: "text-violet-500", bg: "bg-violet-500/10" },
   DebitNoteAdjustment: { label: "Debit Note", icon: FileText, color: "text-red-500", bg: "bg-red-500/10" },
@@ -124,6 +145,42 @@ const SOURCE_META: Record<string, { label: string; icon: React.ElementType; colo
 };
 function sourceMeta(sourceType: string) {
   return SOURCE_META[sourceType] || { label: sourceType, icon: Receipt, color: "text-muted-foreground", bg: "bg-muted" };
+}
+
+function FilterSelect({
+  label,
+  icon: Icon,
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  label: string;
+  icon: React.ElementType;
+  value: number | null;
+  onChange: (id: number | null) => void;
+  options: EntityOption[];
+  placeholder: string;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 flex-1 min-w-[140px]">
+      <span className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading flex items-center gap-1">
+        <Icon size={9} /> {label}
+      </span>
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+        className="mt-1 h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none cursor-pointer"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 function docRefFor(t: LedgerEntry): string | null {
@@ -145,9 +202,10 @@ function exportColumns(showParty: boolean, showBalance: boolean): ExportColumn[]
   ];
   if (showParty) cols.push({ header: "Party", accessor: (r) => (r.PartyName as string) ?? "—" });
   cols.push(
-    { header: "Voucher No", accessor: "VoucherNo" },
+    { header: "Doc Number", accessor: (r) => docRefFor(r as unknown as LedgerEntry) ?? "—" },
     { header: "Type", accessor: (r) => sourceMeta(r.SourceType as string).label },
-    { header: "Reference", accessor: (r) => docRefFor(r as unknown as LedgerEntry) ?? "—" },
+    { header: "Vendor Invoice No", accessor: (r) => (r.VendorInvoiceNo as string) ?? "—" },
+    { header: "Vendor Invoice Date", accessor: (r) => fmtDate(r.VendorInvoiceDate as string) },
     { header: "Narration", accessor: "Narration" },
     { header: "Cost Centre", accessor: (r) => (r.CostCenterName as string) ?? "—" },
     { header: "Debit", accessor: (r) => (Number(r.DebitAmount) > 0 ? Number(r.DebitAmount).toFixed(2) : "") },
@@ -199,26 +257,88 @@ export function VendorLedgerReportBody() {
     setToDate(to);
   };
 
+  // ── Company / Project filters ──
+  const [allCompanies, setAllCompanies] = useState<EntityOption[]>([]);
+  const [allProjects, setAllProjects] = useState<EntityOption[]>([]);
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  const [projectId, setProjectId] = useState<number | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      fetchWithAuth("/api/enterprises/options?business_type=C").then((r) => (r.ok ? r.json() : [])),
+      fetchWithAuth("/api/enterprises/options?business_type=P").then((r) => (r.ok ? r.json() : [])),
+    ])
+      .then(([companies, projects]) => {
+        setAllCompanies(Array.isArray(companies) ? companies : []);
+        setAllProjects(Array.isArray(projects) ? projects : []);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Selecting a Company narrows the Project list; switching Company clears a
+  // Project selection that's no longer in scope.
+  const projectOptions = companyId ? allProjects.filter((p) => projectBelongsToCompany(p, companyId)) : allProjects;
+  const handleCompanyChange = (id: number | null) => {
+    setCompanyId(id);
+    if (id && projectId) {
+      const stillInScope = allProjects.some((p) => p.id === projectId && projectBelongsToCompany(p, id));
+      if (!stillInScope) setProjectId(null);
+    }
+  };
+
   const headId = selectedHead?.Id ?? null;
 
   // Party-scoped queries — only run once a specific head is picked.
   const summaryQuery = useQuery({
-    queryKey: ["vendor-ledger-summary", headId, fromDate, toDate],
-    queryFn: () => getLedgerSummary(headId as number, { from: fromDate || undefined, to: toDate || undefined }),
+    queryKey: ["vendor-ledger-summary", headId, fromDate, toDate, companyId, projectId],
+    queryFn: () =>
+      getLedgerSummary(headId as number, {
+        from: fromDate || undefined,
+        to: toDate || undefined,
+        companyId: companyId || undefined,
+        projectId: projectId || undefined,
+      }),
     enabled: !!headId,
   });
   const transactionsQuery = useQuery({
-    queryKey: ["vendor-ledger-transactions", headId, fromDate, toDate],
-    queryFn: () => getLedgerTransactions(headId as number, { from: fromDate || undefined, to: toDate || undefined, limit: 2000 }),
+    queryKey: ["vendor-ledger-transactions", headId, fromDate, toDate, companyId, projectId],
+    queryFn: () =>
+      getLedgerTransactions(headId as number, {
+        from: fromDate || undefined,
+        to: toDate || undefined,
+        limit: 2000,
+        companyId: companyId || undefined,
+        projectId: projectId || undefined,
+      }),
     enabled: !!headId,
   });
 
   // Unfiltered, all-parties view — the default before anything is picked.
   const allTransactionsQuery = useQuery({
-    queryKey: ["vendor-ledger-all-transactions", fromDate, toDate],
-    queryFn: () => getAllLedgerTransactions({ from: fromDate || undefined, to: toDate || undefined, limit: 1000 }),
+    queryKey: ["vendor-ledger-all-transactions", fromDate, toDate, companyId, projectId],
+    queryFn: () =>
+      getAllLedgerTransactions({
+        from: fromDate || undefined,
+        to: toDate || undefined,
+        limit: 1000,
+        companyId: companyId || undefined,
+        projectId: projectId || undefined,
+      }),
     enabled: !headId,
   });
+
+  // Export must pull every matching transaction, not just the 1000/2000-row
+  // display cap (see the warning banner below) — re-requests with a much
+  // higher limit instead of reusing the already-capped query data.
+  const fetchAllTransactionsForExport = React.useCallback(async (): Promise<Record<string, unknown>[]> => {
+    const scope = { companyId: companyId || undefined, projectId: projectId || undefined };
+    if (headId) {
+      const res = await getLedgerTransactions(headId, { from: fromDate || undefined, to: toDate || undefined, limit: 100000, ...scope });
+      return res.transactions as unknown as Record<string, unknown>[];
+    }
+    const res = await getAllLedgerTransactions({ from: fromDate || undefined, to: toDate || undefined, limit: 10000, ...scope });
+    return res.transactions as unknown as Record<string, unknown>[];
+  }, [headId, fromDate, toDate, companyId, projectId]);
 
   const showParty = !headId;
   const transactions: LedgerEntry[] = showParty
@@ -255,13 +375,13 @@ export function VendorLedgerReportBody() {
           own z-20. */}
       <div className="relative z-30 glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
         <div className="flex items-center justify-between gap-2">
-          <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
+          <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
             Search Party / General Ledger
           </label>
           <button
             onClick={refreshAll}
             disabled={loading}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border text-[10px] text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
+            className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border text-[0.625rem] text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
           >
             <RefreshCw size={10} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
@@ -273,7 +393,7 @@ export function VendorLedgerReportBody() {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setShowResults(true); }}
             onFocus={() => setShowResults(true)}
-            placeholder="Type a vendor, customer, contractor, broker, or GL account name…"
+            placeholder="Type a supplier or contractor name…"
             className="w-full h-9 pl-8 pr-8 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
           />
           {(query || selectedHead) && (
@@ -311,9 +431,9 @@ export function VendorLedgerReportBody() {
                       <Icon size={14} className={`shrink-0 ${m.color}`} />
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm text-foreground truncate">{h.Name}</span>
-                        {h.CompanyName && <span className="block text-[10px] text-muted-foreground truncate">{h.CompanyName}</span>}
+                        {h.CompanyName && <span className="block text-[0.625rem] text-muted-foreground truncate">{h.CompanyName}</span>}
                       </span>
-                      <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted ${m.color}`}>
+                      <span className={`shrink-0 text-[0.625rem] font-medium px-1.5 py-0.5 rounded-full bg-muted ${m.color}`}>
                         {m.label}
                       </span>
                     </button>
@@ -334,7 +454,7 @@ export function VendorLedgerReportBody() {
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground truncate">{selectedHead.Name}</p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 {meta.label}{selectedHead.CompanyName ? ` · ${selectedHead.CompanyName}` : ""}{selectedHead.Code ? ` · ${selectedHead.Code}` : ""}
               </p>
             </div>
@@ -342,11 +462,41 @@ export function VendorLedgerReportBody() {
         </div>
       )}
 
+      {/* ── Company / Project filters (applies to both views) ── */}
+      <div className="glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
+        <div className="flex flex-wrap items-end gap-3">
+          <FilterSelect
+            label="Company"
+            icon={Briefcase}
+            value={companyId}
+            onChange={handleCompanyChange}
+            options={allCompanies}
+            placeholder="All companies"
+          />
+          <FilterSelect
+            label="Project"
+            icon={FolderKanban}
+            value={projectId}
+            onChange={setProjectId}
+            options={projectOptions}
+            placeholder="All projects"
+          />
+          {(companyId || projectId) && (
+            <button
+              onClick={() => { setCompanyId(null); setProjectId(null); }}
+              className="h-8 shrink-0 flex items-center gap-1 px-2.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all"
+            >
+              <X size={11} /> Clear
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* ── Date range (applies to both views) ── */}
       <div className="glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
         <div className="flex flex-col lg:flex-row lg:items-end gap-3">
           <div className="flex-1 min-w-0">
-            <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">Range</label>
+            <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">Range</label>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               {([
                 ["today", "Today"],
@@ -358,9 +508,9 @@ export function VendorLedgerReportBody() {
                 <button
                   key={key}
                   onClick={() => applyPreset(key)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-medium border transition-all whitespace-nowrap ${
+                  className={`shrink-0 px-3 py-1.5 rounded-full text-[0.6875rem] font-medium border transition-all whitespace-nowrap ${
                     activePreset === key
-                      ? "bg-primary text-primary-foreground border-primary"
+                      ? "btn-module text-white border-primary"
                       : "bg-background text-muted-foreground border-border hover:border-primary/50"
                   }`}
                 >
@@ -371,9 +521,8 @@ export function VendorLedgerReportBody() {
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="flex-1 min-w-[140px] lg:flex-none">
-              <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">From</label>
-              <input
-                type="date"
+              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">From</label>
+              <DateInput
                 value={fromDate}
                 onChange={(e) => { setFromDate(e.target.value); setActivePreset("custom"); }}
                 max={toDate || undefined}
@@ -381,9 +530,8 @@ export function VendorLedgerReportBody() {
               />
             </div>
             <div className="flex-1 min-w-[140px] lg:flex-none">
-              <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">To</label>
-              <input
-                type="date"
+              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">To</label>
+              <DateInput
                 value={toDate}
                 onChange={(e) => { setToDate(e.target.value); setActivePreset("custom"); }}
                 min={fromDate || undefined}
@@ -406,10 +554,10 @@ export function VendorLedgerReportBody() {
       {selectedHead && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { label: "Opening Balance", value: formatINR(summaryQuery.data?.windowOpeningBalance ?? 0), icon: Wallet, color: "text-primary", bg: "bg-primary/10", ring: "ring-primary/15", borderL: "border-l-primary" },
+            { label: "Opening Balance", value: fmtBalance(summaryQuery.data?.windowOpeningBalance ?? 0), icon: Wallet, color: "text-primary", bg: "bg-primary/10", ring: "ring-primary/15", borderL: "border-l-primary" },
             { label: "Total Debit", value: formatINR(summaryQuery.data?.periodDebit ?? 0), icon: TrendingUp, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/15", borderL: "border-l-emerald-500" },
             { label: "Total Credit", value: formatINR(summaryQuery.data?.periodCredit ?? 0), icon: TrendingDown, color: "text-rose-500", bg: "bg-rose-500/10", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
-            { label: "Closing Balance", value: formatINR(summaryQuery.data?.currentBalance ?? 0), icon: CircleDollarSign, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
+            { label: "Closing Balance", value: fmtBalance(summaryQuery.data?.currentBalance ?? 0), icon: CircleDollarSign, color: "text-amber-500", bg: "bg-[#ffe2021a]", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
           ].map(({ label, value, icon: Icon, color, bg, ring, borderL }) => (
             <div key={label} className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}>
               <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
@@ -419,7 +567,7 @@ export function VendorLedgerReportBody() {
                 <p className="text-lg font-bold font-heading text-foreground leading-none truncate">
                   {summaryQuery.isFetching && !summaryQuery.data ? <Loader2 size={14} className="animate-spin" /> : value}
                 </p>
-                <p className="text-[10px] text-muted-foreground mt-1 font-heading uppercase tracking-wide">{label}</p>
+                <p className="text-[0.625rem] text-muted-foreground mt-1 font-heading uppercase tracking-wide">{label}</p>
               </div>
             </div>
           ))}
@@ -431,12 +579,13 @@ export function VendorLedgerReportBody() {
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-4 border-b border-border/60">
           <p className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
             <Receipt size={12} /> {selectedHead ? "Transactions" : "All Transactions"}
-            <span className="ml-1 text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full normal-case tracking-normal font-normal">
+            <span className="ml-1 text-[0.625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full normal-case tracking-normal font-normal">
               {transactions.length}
             </span>
           </p>
           <ExportMenu
             data={transactions as unknown as Record<string, unknown>[]}
+            fetchData={fetchAllTransactionsForExport}
             columns={exportColumns(showParty, !showParty)}
             title={selectedHead ? `Vendor Ledger — ${selectedHead.Name ?? ""}` : "Vendor Ledger — All Transactions"}
             filename="vendor-ledger-report"
@@ -454,18 +603,20 @@ export function VendorLedgerReportBody() {
         ) : (
           <>
             {transactions.length >= (showParty ? 1000 : 2000) && (
-              <div className="px-5 py-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
+              <div className="px-5 py-2 text-xs text-amber-700 dark:text-amber-400 bg-[#ffe2021a] border-b border-amber-500/20">
                 Showing the most recent {transactions.length.toLocaleString("en-IN")} transactions — apply a date filter to narrow results.
               </div>
             )}
             <div className="overflow-x-auto">
               <table className="w-full text-xs min-w-[760px]">
                 <thead>
-                  <tr className="border-b border-border/60 text-muted-foreground uppercase tracking-wide text-[10px] font-heading">
+                  <tr className="border-b border-border/60 text-muted-foreground uppercase tracking-wide text-[0.625rem] font-heading">
                     <th className="text-left px-4 sm:px-5 py-2.5">Date</th>
                     {showParty && <th className="text-left px-3 py-2.5">Party</th>}
+                    <th className="text-left px-3 py-2.5">Doc Number</th>
                     <th className="text-left px-3 py-2.5">Type</th>
-                    <th className="text-left px-3 py-2.5">Reference</th>
+                    <th className="text-left px-3 py-2.5">Vendor Invoice No</th>
+                    <th className="text-left px-3 py-2.5">Vendor Invoice Date</th>
                     <th className="text-left px-3 py-2.5">Narration</th>
                     <th className="text-right px-3 py-2.5">Debit</th>
                     <th className="text-right px-3 py-2.5">Credit</th>
@@ -492,14 +643,24 @@ export function VendorLedgerReportBody() {
                             </button>
                           </td>
                         )}
+                        <td className="px-3 py-2.5 whitespace-nowrap font-mono text-muted-foreground">{ref ?? "—"}</td>
                         <td className="px-3 py-2.5 whitespace-nowrap">
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${m.bg} ${m.color}`}>
                             <Icon size={11} /> {m.label}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 whitespace-nowrap font-mono text-muted-foreground">{ref ?? "—"}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap font-mono text-muted-foreground">{t.VendorInvoiceNo ?? "—"}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground">{fmtDate(t.VendorInvoiceDate)}</td>
                         <td className="px-3 py-2.5 text-foreground max-w-[280px] truncate" title={t.Narration ?? ""}>
-                          {t.Narration || "—"}
+                          {/* Normalized "{Type} of ₹X" instead of each
+                              source's own raw narration text (which varied
+                              wildly — "PAY-... — payment made",
+                              "Invoice Posting: ... — Supplier/Cr...",
+                              "Excess ₹X from ... on invoice ..." — same
+                              meaning, different wording depending on which
+                              code path posted it). Full original narration
+                              is still on hover via the title attribute. */}
+                          {m.label} of {formatINR(Number(t.DebitAmount) > 0 ? Number(t.DebitAmount) : Number(t.CreditAmount) || 0)}
                           {t.CostCenterName && <span className="text-muted-foreground"> · {t.CostCenterName}</span>}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
@@ -510,7 +671,7 @@ export function VendorLedgerReportBody() {
                         </td>
                         {!showParty && (
                           <td className="px-4 sm:px-5 py-2.5 text-right tabular-nums font-semibold text-foreground">
-                            {formatINR(Number(t.RunningBalance ?? 0))}
+                            {fmtBalance(Number(t.RunningBalance ?? 0))}
                           </td>
                         )}
                       </tr>
@@ -534,7 +695,7 @@ export default function VendorLedgerReport() {
       <Breadcrumbs items={["Dashboard", "Reports", "Vendor Ledger Report"]} />
       <FinanceShell
         title="Vendor Ledger Report"
-        subtitle="Every transaction posted against a supplier, customer, contractor, broker or any GL head"
+        subtitle="Every transaction posted against a supplier or contractor"
         icon={Users}
       >
         <VendorLedgerReportBody />

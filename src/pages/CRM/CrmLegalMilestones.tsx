@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -8,11 +8,13 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, CheckCircle2, Circle, ExternalLink, Lock, FileCheck, ChevronRight } from "lucide-react";
+import { Plus, CheckCircle2, Circle, ExternalLink, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/legal-milestones";
-const BKG_API = "/api/crm/bookings";
 
 // Agreement workflow — 8 steps, most auto-synced from Agreement page actions.
 // DirectorMeeting is the only manual step (an in-person meeting with no digital trace).
@@ -23,7 +25,7 @@ const AGREEMENT_STEPS = [
   { key: "InternalApproval", label: "Internal Approval",        hint: "Get senior approval on the agreement" },
   { key: "DocShared",        label: "Document Shared",          hint: "Send the agreement to the customer" },
   { key: "MutualAgreement",  label: "Customer Approval",        hint: "Customer approves the agreement in their portal" },
-  { key: "DirectorMeeting",  label: "Director Meeting",         hint: "" },
+  { key: "DirectorMeeting",  label: "Director Meeting",         hint: "Hold the in-person director meeting, then mark it done here" },
   { key: "FinalExecution",   label: "Final Execution",          hint: "Mark the agreement Executed" },
 ] as const;
 const MANUAL_STEPS = new Set(["DirectorMeeting"]);
@@ -33,31 +35,73 @@ async function fetchAll(): Promise<any[]> {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load legal workflows (HTTP ${r.status})`);
   return r.json();
 }
-async function fetchBookings(): Promise<any[]> {
-  const r = await fetchWithAuth(BKG_API);
+
+const PAGE_SIZE = 20;
+interface LegalMilestoneListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchLegalMilestonesList(filters: LegalMilestoneListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  const r = await fetchWithAuth(`${API}?${params}`);
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load legal workflows (HTTP ${r.status})`);
+  const data = await r.json();
+  return { rows: data.rows || [], total: data.total || 0 };
+}
+async function fetchEligibleBookings(): Promise<any[]> {
+  const r = await fetchWithAuth(`${API}/eligible-bookings`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load bookings (HTTP ${r.status})`);
   return r.json();
 }
+async function fetchTrackerByBooking(bookingId: string): Promise<any | null> {
+  try {
+    const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+//
+// One flat "Stage" shape for EVERY step in the journey — Agreement's own 8
+// sub-steps included. The old page rendered Agreement as a visually distinct
+// numbered-circle tracker and everything after it as a different-looking set
+// of "phase cards" with a different action model (navigate-only). Reading it
+// felt like two unrelated trackers bolted together, and it was genuinely easy
+// to misread where one ended and the next began — that's the "confusing
+// layout / wrong order" complaint. Now every stage, from Document Collection
+// through Mutation, renders through the exact same StageRow component in one
+// continuous connected timeline, split only by light section headers.
+
+type StageAction =
+  | { kind: "navigate"; path: string }   // clicking routes to the owning feature page
+  | { kind: "manual"; onAction: () => void } // an in-app action with no dedicated page (e.g. Director Meeting)
+  | { kind: "auto" };                    // ticks itself from another page's action — nothing to click here
 
 interface Stage {
   key: string;
   label: string;
   sublabel: string;
-  path: string;
   no: string | null;
   status: string | null;
   isDone: boolean;
   isLocked: boolean;
   unlockedHint: string;
+  isApplicable?: boolean;         // false → renders as a dimmed "Not applicable" row instead of a normal action row
+  notApplicableReason?: string;
+  action: StageAction;
 }
 
-interface Phase {
+interface Section {
   key: string;
   title: string;
   description: string;
-  isApplicable: boolean;      // false → phase renders as a "Not applicable" placeholder
+  isApplicable: boolean;      // false → section renders as a "Not applicable" placeholder
   notApplicableReason?: string;
   stages: Stage[];
 }
@@ -67,15 +111,17 @@ interface WorkflowModel {
   // doc comment). Never gates Agreement, AFS, NOC, or Pre-Possession.
   isPhysicallyComplete: boolean;
   agreementDone: boolean;
-  phases: Phase[];                 // Phase 2 onward — everything after Agreement signing
+  sections: Section[];             // the ENTIRE journey, Agreement Signing included as sections[0]
   progressChecks: { label: string; done: boolean }[];
   journeyLabel: { text: string; done: boolean };
+  doneCount: number;
+  totalCount: number;
 }
 
 // ─── The single source of truth ──────────────────────────────────────────────
 //
-// Every other part of this page (left-panel card, progress dots, Phase 1
-// card, Phase 2+ sections) reads from ONE WorkflowModel built here — one
+// Every other part of this page (left-panel card, progress bar/dots, the
+// section timeline) reads from ONE WorkflowModel built here — one
 // computation, consumed everywhere, instead of each place re-deriving its
 // own slightly-different copy of the same logic.
 //
@@ -93,40 +139,71 @@ interface WorkflowModel {
 // the Sale Deed is drafted — see isPhysicallyComplete below, used only for
 // that one informational note. It never gates Agreement, AFS, NOC, or
 // Pre-Possession.
-function buildWorkflowModel(t: any): WorkflowModel {
+function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): WorkflowModel {
   const isPhysicallyComplete = t.ProjectType === "ReadyToMove" || t.ProjectStatus === "Completed";
 
   const agreementDone = t.FinalExecutionStatus === "Completed";
+  const agreementCurrentStep = t.CurrentStep ?? 1;
+
+  // Agreement's own 8 sub-steps, now expressed as ordinary Stage objects so
+  // they render through the exact same timeline row as everything after
+  // them — no more visually distinct "numbered circle" tracker bolted onto
+  // the front of a different-looking phase list.
+  const agreementStages: Stage[] = AGREEMENT_STEPS.map((s, idx) => {
+    const stepStatus = t[`${s.key}Status`];
+    const stepDone = t[`${s.key}Done`];
+    const isDone = stepStatus === "Completed";
+    const isCurrent = agreementCurrentStep === idx + 1;
+    const isLocked = idx + 1 > agreementCurrentStep;
+    const isManual = MANUAL_STEPS.has(s.key);
+    const action: StageAction = isManual && isCurrent && !isDone
+      ? { kind: "manual", onAction: () => onManualStep?.(s.key) }
+      : !isManual && isCurrent && !isDone
+      ? { kind: "auto" }
+      : { kind: "navigate", path: "/crm/agreements" };
+    return {
+      key: s.key,
+      label: s.label,
+      sublabel: isDone
+        ? (stepDone ? `Completed ${String(stepDone).slice(0, 10)}` : "Completed")
+        : (s.hint || "Not started yet"),
+      no: null,
+      status: isDone ? "Completed" : null,
+      isDone,
+      isLocked,
+      unlockedHint: "Complete the previous step first",
+      action,
+    };
+  });
 
   // The AFS-registration gate that everything downstream keys off.
   const afsRegistered = t.AgreementStatus === "Registered";
   const afsGate = afsRegistered;
 
+  // No Objection Certificate is a SINGLE step per booking — the bank's NOC
+  // and the developer's NOC serve the same purpose (clearing the booking for
+  // Possession/Handover); a booking only ever needs one, never both. Which
+  // one is resolved server-side (see resolveNocType in crmWorkflowGuards.js /
+  // the NocResolvedType column in LM_SELECT) and mirrored here as a single
+  // "noc" stage rather than two separate rows.
+  const nocType: "Bank" | "Organisation" = t.NocResolvedType === "Bank" ? "Bank" : "Organisation";
+  const isLoanFinanced = nocType === "Bank";
+  const nocNo     = nocType === "Bank" ? t.BankNocNo     : t.OrgNocNo;
+  const nocStatus = nocType === "Bank" ? t.BankNocStatus : t.OrgNocStatus;
+
   const deedStatus = t.DeedRegistrationNo ? "Registered"
     : t.DeedExecutedBy ? "Executed"
-    : t.SalesDeedId ? "Drafted"
+    : t.SalesDeedId != null ? "Drafted"
     : null;
 
-  const phases: Phase[] = [
-    // ── Allotment Letter ──────────────────────────────────────────────────
+  const sections: Section[] = [
+    // ── Agreement Preparation & Signing ───────────────────────────────────
     {
-      key: "allotment",
-      title: "Allotment Letter",
+      key: "agreement",
+      title: "Agreement Preparation & Signing",
       isApplicable: true,
-      description: "Issued to the buyer after at least 10% of the total consideration has been received. The buyer signs and returns it; this acknowledgement starts the 30-day Agreement for Sale clock under RERA.",
-      stages: [
-        {
-          key: "allotmentLetter",
-          label: "Allotment Letter",
-          sublabel: "Issued after 10% payment; buyer acknowledges receipt",
-          path: "/crm/allotment-letter",
-          no: t.AlNo || null,
-          status: t.AllotmentLetterStatus || null,
-          isDone: t.AllotmentLetterStatus === "Acknowledged",
-          isLocked: false,
-          unlockedHint: "",
-        },
-      ],
+      description: "Internal 8-step process to prepare and get the Agreement for Sale signed by both parties.",
+      stages: agreementStages,
     },
 
     // ── Sub-Registrar Visit 1 — AFS Registration ─────────────────────────
@@ -140,55 +217,48 @@ function buildWorkflowModel(t: any): WorkflowModel {
           key: "afsQP",
           label: "Agreement Registration Fees",
           sublabel: "Stamp duty & registration fee due before Visit 1",
-          path: "/crm/afs-query-payment",
           no: t.AfsQPNo || null,
           status: t.AfsQPStatus || null,
           isDone: t.AfsQPStatus === "Confirmed" || afsRegistered,
           isLocked: !agreementDone,
-          unlockedHint: "Unlocks once the Agreement is executed (Phase 1)",
+          unlockedHint: "Unlocks once the Agreement is Executed (previous section)",
+          action: { kind: "navigate", path: "/crm/agreements?tab=afs-payment" },
         },
         {
           key: "afsReg",
           label: "Agreement Registration Visit",
           sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 1) — Agreement becomes Registered",
-          path: "/crm/afs-registry",
           no: t.AfsRegNo || null,
           status: t.AfsRegistryStatus || null,
           isDone: afsRegistered,
           isLocked: !agreementDone || (t.AfsQPStatus !== "Confirmed" && !afsRegistered),
           unlockedHint: "Requires Agreement Registration Fees to be Confirmed first",
+          action: { kind: "navigate", path: "/crm/agreements?tab=afs-registry" },
         },
       ],
     },
 
-    // ── NOC ───────────────────────────────────────────────────────────────
+    // ── NOC — a single step; Bank or Organisation, never both ──────────────
     {
       key: "noc",
-      title: "No Objection Certificates",
+      title: "No Objection Certificate",
       isApplicable: true,
-      description: "Once the Agreement for Sale is registered, the legal team obtains No Objection Certificates from the bank (for loan-financed buyers, confirming the lender has no objection) and from the developer organisation (confirming no outstanding dues).",
+      description: isLoanFinanced
+        ? "Once the Agreement for Sale is registered, the legal team obtains a No Objection Certificate from the bank — confirming the lender has no objection, since this booking is loan-financed."
+        : "Once the Agreement for Sale is registered, the legal team obtains a No Objection Certificate from the developer organisation — confirming no outstanding dues, since this booking is self-funded.",
       stages: [
         {
-          key: "bankNoc",
-          label: "No Objection Certificate — Bank",
-          sublabel: "Bank confirms it has no objection to the AFS registration (loan-case NOC)",
-          path: "/crm/noc?nocType=Bank",
-          no: t.BankNocNo || null,
-          status: t.BankNocStatus || null,
-          isDone: t.BankNocStatus === "Issued",
+          key: "noc",
+          label: isLoanFinanced ? "No Objection Certificate — Bank" : "No Objection Certificate — Organisation",
+          sublabel: isLoanFinanced
+            ? "Bank confirms it has no objection to the AFS registration (loan-case NOC)"
+            : "Developer confirms no outstanding dues or objections (self-funded case NOC)",
+          no: nocNo || null,
+          status: nocStatus || null,
+          isDone: nocStatus === "Issued",
           isLocked: !afsGate,
           unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
-        },
-        {
-          key: "orgNoc",
-          label: "No Objection Certificate — Organisation",
-          sublabel: "Developer confirms no outstanding dues or objections",
-          path: "/crm/noc?nocType=Organisation",
-          no: t.OrgNocNo || null,
-          status: t.OrgNocStatus || null,
-          isDone: t.OrgNocStatus === "Issued",
-          isLocked: !afsGate,
-          unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
+          action: { kind: "navigate", path: `/crm/noc?nocType=${nocType}` },
         },
       ],
     },
@@ -204,42 +274,41 @@ function buildWorkflowModel(t: any): WorkflowModel {
           key: "ocCc",
           label: "OC / CC",
           sublabel: "Project's Occupancy or Completion Certificate from the authority — a project-level record, not gated on any single booking's progress (the backend has no per-booking gate on this)",
-          path: "/crm/oc-cc",
           no: null,
           status: null,
           isDone: t.OcCcReceived === 1,
           isLocked: false,
           unlockedHint: "",
+          action: { kind: "navigate", path: "/crm/oc-cc" },
         },
         {
           key: "prePossession",
           label: "Pre-Possession Inspection",
           sublabel: "Site inspection and snag list before offering possession to the buyer",
-          path: "/crm/pre-possession",
           no: null,
           status: t.PrePossessionStatus || null,
           isDone: t.PrePossessionStatus === "Ready",
           isLocked: !afsGate || t.OcCcReceived !== 1,
           unlockedHint: "Unlocks once AFS is registered and OC/CC is received",
+          action: { kind: "navigate", path: "/crm/pre-possession" },
         },
         {
           key: "possessionNotice",
           label: "Possession Notice",
           sublabel: "Developer issues notice with offered possession date; buyer acknowledges or disputes",
-          path: "/crm/possession-notice",
           no: null,
           status: t.PossessionNoticeStatus || null,
           isDone: t.PossessionNoticeStatus === "Acknowledged",
           isLocked: t.PrePossessionStatus !== "Ready",
           unlockedHint: "Unlocks once Pre-Possession Inspection is Ready",
+          action: { kind: "navigate", path: "/crm/possession-notice" },
         },
         {
           key: "handover",
           label: "Handover",
           sublabel: isPhysicallyComplete
-            ? "Physical key handover — all NOCs issued, no open snags, no outstanding dues. Project already complete, so this can happen same-day as Sale Deed registration."
-            : "Physical key handover — all NOCs issued, no open snags, no outstanding dues",
-          path: "/crm/handover",
+            ? "Physical key handover — NOC issued, no open snags, no outstanding dues. Project already complete, so this can happen same-day as Sale Deed registration."
+            : "Physical key handover — NOC issued, no open snags, no outstanding dues",
           no: null,
           status: t.HandoverStatus || null,
           isDone: t.HandoverStatus === "Completed",
@@ -249,18 +318,16 @@ function buildWorkflowModel(t: any): WorkflowModel {
           // would reject the submission.
           isLocked: !afsGate
             || t.PossessionNoticeStatus !== "Acknowledged"
-            || ["Pending", "Approved"].includes(t.BankNocStatus)
-            || ["Pending", "Approved"].includes(t.OrgNocStatus)
+            || ["Pending", "Approved"].includes(nocStatus)
             || t.HasOutstandingDues === 1,
           unlockedHint: !afsGate
             ? "Requires the Agreement for Sale to be Registered"
             : t.PossessionNoticeStatus !== "Acknowledged"
               ? "Unlocks once the Possession Notice is Acknowledged by the customer"
-              : ["Pending", "Approved"].includes(t.BankNocStatus)
-                ? "Requires the Bank NOC to be Issued first"
-                : ["Pending", "Approved"].includes(t.OrgNocStatus)
-                  ? "Requires the Organisation NOC to be Issued first"
-                  : "Requires all payment milestones to be paid or waived first",
+              : ["Pending", "Approved"].includes(nocStatus)
+                ? `Requires the ${nocType} NOC to be Issued first`
+                : "Requires all payment milestones to be paid or waived first",
+          action: { kind: "navigate", path: "/crm/handover" },
         },
       ],
     },
@@ -277,12 +344,12 @@ function buildWorkflowModel(t: any): WorkflowModel {
           key: "salesDeed",
           label: "Sale Deed",
           sublabel: "Ownership-transfer document — internal drafting, approvals, execution & registration",
-          path: "/crm/sales-deed",
           no: t.DeedNo || null,
           status: deedStatus,
-          isDone: !!t.SalesDeedId,
+          isDone: t.SalesDeedId != null,
           isLocked: !afsGate,
           unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
+          action: { kind: "navigate", path: "/crm/sales-deed" },
         },
       ],
     },
@@ -296,25 +363,25 @@ function buildWorkflowModel(t: any): WorkflowModel {
       stages: [
         {
           key: "queryPayment",
-          label: "Sale Deed Registration Fees",
+          label: "Query Payment (Stamp Duty & Reg. Fee)",
           sublabel: "Net stamp duty & registration fee due before Visit 2 (AFS credit applied)",
-          path: "/crm/query-payment",
           no: t.QPNo || null,
           status: t.QueryPaymentStatus || null,
           isDone: t.QueryPaymentStatus === "Confirmed",
-          isLocked: !t.SalesDeedId || t.DeedDirectorApprovalStatus !== "Approved",
+          isLocked: t.SalesDeedId == null || t.DeedDirectorApprovalStatus !== "Approved",
           unlockedHint: "Requires the Sale Deed to be Director Approved first",
+          action: { kind: "navigate", path: "/crm/sales-deed?tab=Query+Payment" },
         },
         {
           key: "registry",
-          label: "Sale Deed Registration Visit",
+          label: "Registry (Sub-Registrar Visit)",
           sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 2) — ownership transferred",
-          path: "/crm/registry",
           no: t.RegNo || null,
           status: t.RegistryStatus || null,
           isDone: t.RegistryStatus === "Completed",
-          isLocked: !t.SalesDeedId || t.QueryPaymentStatus !== "Confirmed",
-          unlockedHint: "Requires Sale Deed Registration Fees to be Confirmed first",
+          isLocked: t.SalesDeedId == null || t.QueryPaymentStatus !== "Confirmed",
+          unlockedHint: "Requires Query Payment to be Confirmed first",
+          action: { kind: "navigate", path: "/crm/sales-deed?tab=Registry" },
         },
       ],
     },
@@ -330,38 +397,43 @@ function buildWorkflowModel(t: any): WorkflowModel {
           key: "mutation",
           label: "Property Mutation (Khata Transfer)",
           sublabel: "Municipal land records updated to the new owner — mandatory post Sale Deed registration",
-          path: "/crm/mutation",
           no: t.MutationNo || null,
           status: t.MutationStatus || null,
           isDone: t.MutationStatus === "Approved",
           isLocked: t.RegistryStatus !== "Completed",
           unlockedHint: "Requires Sale Deed Registration Visit to be Completed first",
+          action: { kind: "navigate", path: "/crm/mutation" },
         },
       ],
     },
   ];
 
-  // Flat list of every applicable stage across every applicable phase —
-  // the single feed for both the progress dots and the left-panel journey
-  // label, so those two views can never drift out of sync with each other
-  // or with what the detail panel actually shows.
-  const applicableStages = phases.filter((p) => p.isApplicable).flatMap((p) => p.stages);
+  // Flat list of every applicable stage across every applicable section —
+  // the single feed for the progress bar, progress dots, and the left-panel
+  // journey label, so none of those views can ever drift out of sync with
+  // each other or with what the detail panel actually shows. A stage marked
+  // isApplicable: false (e.g. Bank NOC for a self-funded booking) is
+  // excluded here too — it must never count as a pending item blocking
+  // "Journey Complete" for a step that was never going to happen.
+  const applicableStages = sections.filter((sec) => sec.isApplicable).flatMap((sec) => sec.stages).filter((s) => s.isApplicable !== false);
+  const doneCount = applicableStages.filter((s) => s.isDone).length;
+  const totalCount = applicableStages.length;
 
-  const progressChecks = [
-    { label: "Agreement signed", done: agreementDone },
-    ...applicableStages.map((s) => ({ label: s.label, done: s.isDone })),
-  ];
+  // One progress dot per SECTION (not per stage) — a section counts as done
+  // only when every one of its own applicable stages is done. Keeps the
+  // header readable (7 dots, not 16) while staying perfectly consistent
+  // with the detail timeline below it.
+  const progressChecks = sections.filter((sec) => sec.isApplicable).map((sec) => {
+    const secStages = sec.stages.filter((s) => s.isApplicable !== false);
+    return { label: sec.title, done: secStages.length > 0 && secStages.every((s) => s.isDone) };
+  });
 
-  let journeyLabel: { text: string; done: boolean };
-  if (!agreementDone) {
-    const stepLabel = AGREEMENT_STEPS[(t.CurrentStep ?? 1) - 1]?.label ?? "Agreement Preparation";
-    journeyLabel = { text: `Agreement: ${stepLabel}`, done: false };
-  } else {
-    const pending = applicableStages.find((s) => !s.isDone);
-    journeyLabel = pending ? { text: `${pending.label} pending`, done: false } : { text: "Journey Complete", done: true };
-  }
+  const pending = applicableStages.find((s) => !s.isDone);
+  const journeyLabel: { text: string; done: boolean } = pending
+    ? { text: `${pending.label} pending`, done: false }
+    : { text: "Journey Complete", done: true };
 
-  return { isPhysicallyComplete, agreementDone, phases, progressChecks, journeyLabel };
+  return { isPhysicallyComplete, agreementDone, sections, progressChecks, journeyLabel, doneCount, totalCount };
 }
 
 // ─── Status colour map ────────────────────────────────────────────────────────
@@ -377,21 +449,56 @@ const statusColor: Record<string, string> = {
   Scheduled:  "text-blue-700 bg-blue-50 border-blue-200",
   Issued:     "text-green-700 bg-green-50 border-green-200",
   Approved:   "text-green-700 bg-green-50 border-green-200",
-  Applied:    "text-orange-700 bg-orange-50 border-orange-200",
+  Applied:    "text-sky-700 bg-sky-50 border-sky-200",
   Draft:      "text-orange-700 bg-orange-50 border-orange-200",
 };
 
 // ─── Stage row component ──────────────────────────────────────────────────────
+// The one row type for EVERY stage in the journey — Agreement's own 8
+// sub-steps render through this exact same component as AFS/NOC/Possession/
+// Sale Deed/Registry/Mutation, so the whole page reads as one continuous,
+// consistently-styled timeline instead of two visually different trackers.
 
 const StageRow: React.FC<{
   stage: Stage;
   isLast: boolean;
   bookingId: number;
   navigate: (path: string) => void;
-}> = ({ stage, isLast, bookingId, navigate }) => {
-  const { isDone, isLocked } = stage;
+  canEdit: boolean;
+}> = ({ stage, isLast, bookingId, navigate, canEdit }) => {
+  const { isDone, isLocked, action } = stage;
   const hasRecord = !!stage.status;
-  const actionLabel = isDone ? "Open" : hasRecord ? "Continue" : isLocked ? "View" : "Start →";
+  const isAuto = action.kind === "auto";
+  const isManual = action.kind === "manual";
+  const actionLabel = isManual ? "Mark Done" : isAuto ? "Auto-synced" : isDone ? "Open" : hasRecord ? "Continue" : isLocked ? "View" : "Start →";
+
+  const handleClick = () => {
+    if (action.kind === "manual") { action.onAction(); return; }
+    if (action.kind === "navigate") {
+      navigate(`${action.path}${action.path.includes("?") ? "&" : "?"}bookingId=${bookingId}`);
+    }
+  };
+
+  // Not applicable to this specific booking (e.g. Bank NOC for a self-funded
+  // purchase) — render as a plainly dimmed, non-actionable row instead of a
+  // normal Start/Continue action, so staff never gets an inviting "Start →"
+  // button for a step that will never happen for this booking.
+  if (stage.isApplicable === false) {
+    return (
+      <div className="relative flex gap-4 pb-5 last:pb-0">
+        {!isLast && <div className="absolute left-[15px] top-8 bottom-0 w-0.5 bg-border" />}
+        <div className="shrink-0 z-10 mt-1">
+          <div className="w-8 h-8 rounded-full bg-muted/40 border-2 border-dashed border-border flex items-center justify-center">
+            <span className="text-muted-foreground/50 text-xs">—</span>
+          </div>
+        </div>
+        <div className="flex-1 rounded-xl border border-dashed border-border bg-muted/10 px-4 py-3 opacity-70">
+          <span className="text-sm font-semibold text-muted-foreground line-through decoration-muted-foreground/40">{stage.label}</span>
+          <div className="text-[0.75rem] text-muted-foreground mt-0.5">Not applicable — {stage.notApplicableReason}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex gap-4 pb-5 last:pb-0">
@@ -428,114 +535,36 @@ const StageRow: React.FC<{
               <span className={`text-sm font-semibold leading-tight ${isLocked ? "text-muted-foreground" : isDone ? "text-green-700 dark:text-green-300" : "text-foreground"}`}>
                 {stage.label}
               </span>
-              {stage.no && <span className="text-[11px] font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">{stage.no}</span>}
+              {stage.no && <span className="text-[0.6875rem] font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">{stage.no}</span>}
               {stage.status && (
-                <span className={`text-[11px] px-2 py-0.5 rounded-lg border font-semibold ${statusColor[stage.status] || ""}`}>
+                <span className={`text-[0.6875rem] px-2 py-0.5 rounded-lg border font-semibold ${statusColor[stage.status] || ""}`}>
                   {stage.status}
                 </span>
               )}
             </div>
-            <div className={`text-[12px] mt-0.5 leading-snug ${isLocked ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+            <div className={`text-[0.75rem] mt-0.5 leading-snug ${isLocked ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
               {isLocked
                 ? <span className="flex items-center gap-1"><Lock size={9} className="shrink-0" /> Waiting: {stage.unlockedHint}</span>
                 : stage.sublabel}
             </div>
           </div>
-          <button
-            onClick={() => navigate(`${stage.path}${stage.path.includes("?") ? "&" : "?"}bookingId=${bookingId}`)}
-            className={`shrink-0 flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-              isDone
-                ? "border-green-300 text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:border-green-800 dark:text-green-300"
-                : isLocked
-                ? "border-border text-muted-foreground hover:bg-muted"
-                : "border-primary bg-primary text-primary-foreground hover:bg-primary/90"
-            }`}
-          >
-            {actionLabel} <ExternalLink size={11} />
-          </button>
+          {isAuto ? (
+            <span className="shrink-0 text-[0.625rem] text-muted-foreground bg-muted/60 border border-border rounded-lg px-2.5 py-1.5 whitespace-nowrap">Auto-synced</span>
+          ) : (isManual && !canEdit) ? null : (
+            <button
+              onClick={handleClick}
+              className={`shrink-0 flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
+                isDone
+                  ? "border-green-300 text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:border-green-800 dark:text-green-300"
+                  : isLocked
+                  ? "border-border text-muted-foreground hover:bg-muted"
+                  : "border-primary btn-module text-white "
+              }`}
+            >
+              {actionLabel} {!isManual && <ExternalLink size={11} />}
+            </button>
+          )}
         </div>
-      </div>
-    </div>
-  );
-};
-
-// ─── Phase 1 (Agreement Signing) card ─────────────────────────────────────────
-// Always applicable — the Agreement for Sale + AFS Registration is mandatory
-// for every booking, regardless of project type.
-
-const AgreementPhaseCard: React.FC<{ model: WorkflowModel; t: any; onStepUpdate: (step: string, status: string) => void; canEdit: boolean }> =
-  ({ model, t, onStepUpdate, canEdit }) => {
-  const { agreementDone } = model;
-  return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className={`px-5 py-3.5 border-b border-border flex items-center justify-between gap-3 ${agreementDone ? "bg-green-500/[0.06]" : "bg-primary/[0.04]"}`}>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${agreementDone ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-400" : "bg-primary/10 border-primary/30 text-primary"}`}>PHASE 1</span>
-            <h3 className="text-sm font-bold">Agreement Preparation &amp; Signing</h3>
-            {agreementDone && <CheckCircle2 size={14} className="text-green-500" />}
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-0.5">Internal 8-step process to prepare and get the Agreement for Sale signed by both parties</p>
-        </div>
-        <span className={`shrink-0 text-[11px] px-2.5 py-1 rounded-lg border font-semibold ${agreementDone ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30" : "bg-muted/40 border-border text-muted-foreground"}`}>
-          {AGREEMENT_STEPS.filter((s) => t[`${s.key}Status`] === "Completed").length}/{AGREEMENT_STEPS.length} steps
-        </span>
-      </div>
-      <div className="p-5 space-y-0">
-        {AGREEMENT_STEPS.map((s, idx) => {
-          const stepStatus = t[`${s.key}Status`];
-          const done = t[`${s.key}Done`];
-          const isDone = stepStatus === "Completed";
-          const isCurrent = t.CurrentStep === idx + 1;
-          const isLast = idx === AGREEMENT_STEPS.length - 1;
-          return (
-            <div key={s.key} className="relative flex gap-4 pb-4 last:pb-0">
-              {!isLast && (
-                <div className={`absolute left-[15px] top-8 bottom-0 w-0.5 ${isDone ? "bg-green-300" : "bg-border"}`} />
-              )}
-              <div className="shrink-0 z-10 mt-1">
-                {isDone ? (
-                  <div className="w-8 h-8 rounded-full bg-green-100 border-2 border-green-400 dark:bg-green-900/40 dark:border-green-600 flex items-center justify-center">
-                    <CheckCircle2 size={15} className="text-green-600 dark:text-green-400" />
-                  </div>
-                ) : (
-                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-[11px] font-bold ${isCurrent ? "bg-primary text-primary-foreground border-primary" : "bg-muted border-border text-muted-foreground/60"}`}>
-                    {idx + 1}
-                  </div>
-                )}
-              </div>
-              <div className={`flex-1 rounded-xl border px-4 py-2.5 flex items-center justify-between gap-3 ${
-                isDone ? "border-green-200 bg-green-500/[0.04] dark:border-green-900/50"
-                : isCurrent ? "border-primary/40 bg-primary/[0.04]"
-                : "border-border bg-muted/10 opacity-60"
-              }`}>
-                <div>
-                  <div className={`text-sm font-semibold ${isDone ? "text-green-700 dark:text-green-300" : isCurrent ? "text-foreground" : "text-muted-foreground"}`}>
-                    {s.label}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5">
-                    {isDone
-                      ? <span className="text-green-600 dark:text-green-400">{done ? `Completed ${String(done).slice(0, 10)}` : "Completed"}</span>
-                      : isCurrent
-                      ? <span className="text-primary flex items-center gap-1"><ChevronRight size={10} /> {s.hint || "In progress"}</span>
-                      : "Not started yet"}
-                  </div>
-                </div>
-                {canEdit && !isDone && MANUAL_STEPS.has(s.key) && isCurrent && (
-                  <button
-                    onClick={() => onStepUpdate(s.key, "Completed")}
-                    className="text-xs px-3 py-1.5 bg-primary text-primary-foreground border border-primary rounded-lg font-semibold hover:bg-primary/90 whitespace-nowrap shrink-0"
-                  >
-                    Mark Done
-                  </button>
-                )}
-                {!isDone && !MANUAL_STEPS.has(s.key) && isCurrent && (
-                  <span className="text-[10px] text-muted-foreground bg-muted/60 border border-border rounded px-2 py-1 whitespace-nowrap shrink-0">Auto-synced</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -549,33 +578,72 @@ const CrmLegalMilestones: React.FC = () => {
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedTracker, setSelectedTracker] = useState<any | null>(null);
   const [newDialog, setNewDialog] = useState(false);
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
-  const { data: trackers = [], isLoading, isFetching, dataUpdatedAt, refetch, isError, error } = useQuery({
-    queryKey: ["crm-legal-milestones"],
-    queryFn: fetchAll,
+  const listFilters: LegalMilestoneListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, isFetching, dataUpdatedAt, refetch, isError, error } = useQuery({
+    queryKey: ["crm-legal-milestones", listFilters, page],
+    queryFn: () => fetchLegalMilestonesList(listFilters, page),
     staleTime: 30_000,
   });
+  const trackers = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: bookings = [] } = useQuery({
-    queryKey: ["crm-bookings"],
-    queryFn: fetchBookings,
-    staleTime: 5 * 60_000,
+    queryKey: ["crm-legal-milestones-eligible-bookings"],
+    queryFn: fetchEligibleBookings,
+    staleTime: 60_000,
+    enabled: newDialog,
   });
 
-  // Auto-select from ?bookingId= URL param (deep-link from stage buttons on this page)
+  // Auto-select from ?bookingId= URL param (deep-link from stage buttons on
+  // this page). Resolved via the dedicated /booking/:bookingId lookup
+  // rather than scanning `trackers` — that list is now paginated, so the
+  // deep-linked tracker could easily not be on the current page (same class
+  // of bug fixed on CrmHandover.tsx earlier this rollout).
+  const [deepLinkResolved, setDeepLinkResolved] = useState(false);
   useEffect(() => {
     const urlBookingId = sp.get("bookingId");
-    if (!urlBookingId || !(trackers as any[]).length) return;
-    const match = (trackers as any[]).find((t: any) => String(t.BookingId) === urlBookingId);
-    if (match) setSelectedId(match.Id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp, trackers]);
+    if (!urlBookingId || deepLinkResolved) return;
+    setDeepLinkResolved(true);
+    fetchTrackerByBooking(urlBookingId).then((t) => {
+      if (t) { setSelectedId(t.Id); setSelectedTracker(t); }
+      else { setSp((prev) => { prev.delete("bookingId"); return prev; }, { replace: true }); }
+    });
+  }, [sp, deepLinkResolved]);
 
-  const selected = (trackers as any[]).find((t: any) => t.Id === selectedId);
-  const trackedBookingIds = new Set((trackers as any[]).map((t: any) => t.BookingId));
-  const startableBookings = (bookings as any[]).filter((b: any) => !trackedBookingIds.has(b.Id));
+  // A regular row click sets both the id and the full row object directly
+  // (selectRow below) so selection never depends on the object still being
+  // present in the current page/filter — only the deep-link path above
+  // needs the dedicated lookup.
+  const selected = selectedTracker && selectedTracker.Id === selectedId
+    ? selectedTracker
+    : (trackers as any[]).find((t: any) => t.Id === selectedId);
+  const selectRow = (t: any) => { setSelectedId(t.Id); setSelectedTracker(t); setSp({ bookingId: String(t.BookingId) }, { replace: true }); };
+
+  // Open the first booking's journey by default (instead of an empty "select
+  // a booking" panel); the user can still pick any other row. Skipped while a
+  // ?bookingId= deep link is being resolved above.
+  useEffect(() => {
+    if (selectedId != null || sp.get("bookingId")) return;
+    const first = (trackers as any[])[0];
+    if (first) { setSelectedId(first.Id); setSelectedTracker(first); }
+  }, [trackers, selectedId, sp]);
+  // /eligible-bookings already applies the real POST gate (Approved, active,
+  // not frozen, has an Agreement, no tracker yet) — no client-side filtering needed.
+  const startableBookings = bookings as any[];
 
   const handleStart = async () => {
     if (!bookingId) { toast.error("Booking is required"); return; }
@@ -592,6 +660,7 @@ const CrmLegalMilestones: React.FC = () => {
       setNewDialog(false);
       setBookingId("");
       qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
+      qc.invalidateQueries({ queryKey: ["crm-legal-milestones-eligible-bookings"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -600,7 +669,7 @@ const CrmLegalMilestones: React.FC = () => {
   };
 
   const handleStepUpdate = async (step: string, status: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/${step}`, {
         method: "PUT",
@@ -614,7 +683,7 @@ const CrmLegalMilestones: React.FC = () => {
     }
   };
 
-  const model = selected ? buildWorkflowModel(selected) : null;
+  const model = selected ? buildWorkflowModel(selected, (step) => handleStepUpdate(step, "Completed")) : null;
 
   return (
     <>
@@ -628,7 +697,7 @@ const CrmLegalMilestones: React.FC = () => {
             {rights.canCreate && (
             <button
               onClick={() => setNewDialog(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
+              className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg "
             >
               <Plus size={14} /> Start Workflow
             </button>
@@ -638,7 +707,15 @@ const CrmLegalMilestones: React.FC = () => {
       >
         <div className="flex gap-4 h-[calc(100vh-220px)]">
           {/* ── Left panel: booking list ── */}
-          <div className="w-80 shrink-0 overflow-y-auto thin-scroll space-y-1.5">
+          <div className="w-80 shrink-0 flex flex-col gap-2">
+          <div className="relative">
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+              placeholder="Search customer, booking... (Enter to search)"
+              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+          </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+          <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5">
             {isLoading ? (
               <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
             ) : isError ? (
@@ -651,22 +728,28 @@ const CrmLegalMilestones: React.FC = () => {
               return (
                 <button
                   key={t.Id}
-                  onClick={() => { setSelectedId(t.Id); setSp({ bookingId: String(t.BookingId) }, { replace: true }); }}
+                  onClick={() => selectRow(t)}
                   className={`w-full text-left rounded-lg border overflow-hidden transition-colors ${
                     selectedId === t.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"
                   }`}
                 >
                   <div className="flex">
-                    <div className={`w-[3px] shrink-0 self-stretch ${done ? "bg-green-500" : m.agreementDone ? "bg-blue-500" : "bg-amber-400"}`} />
+                    <div className={`w-[3px] shrink-0 self-stretch ${done ? "bg-green-500" : m.agreementDone ? "bg-blue-500" : "bg-sky-400"}`} />
                     <div className="flex-1 min-w-0 p-3 space-y-1">
                       <div className="flex items-center gap-1.5">
                         <div className="text-sm font-semibold truncate">{t.ApplicantName}</div>
                         {m.isPhysicallyComplete && (
-                          <span className="shrink-0 text-[9px] px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete — Handover doesn't have to wait on the Sale Deed">Completed</span>
+                          // Bare "Completed" here read as if THIS BOOKING'S journey
+                          // were done — sitting right next to a "Document Collection
+                          // pending" line one row below made that reading actively
+                          // contradictory. This flag is about the PROJECT (Ready-to-
+                          // Move / physically finished construction), not this
+                          // booking's own progress — labelled accordingly.
+                          <span className="shrink-0 text-[0.5625rem] px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="This booking's PROJECT is already physically complete (Ready-to-Move) — Handover doesn't have to wait on the Sale Deed. Does not mean this booking's own legal journey is finished.">Project Ready</span>
                         )}
                       </div>
-                      <div className="text-[11px] text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
-                      <div className={`text-[11px] font-medium flex items-center gap-1 ${done ? "text-green-600" : "text-muted-foreground"}`}>
+                      <div className="text-[0.6875rem] text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
+                      <div className={`text-[0.6875rem] font-medium flex items-center gap-1 ${done ? "text-green-600" : "text-muted-foreground"}`}>
                         {done ? <CheckCircle2 size={10} /> : <Circle size={10} />}
                         {text}
                       </div>
@@ -675,6 +758,8 @@ const CrmLegalMilestones: React.FC = () => {
                 </button>
               );
             })}
+          </div>
+          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
           </div>
 
           {/* ── Right panel: journey detail ── */}
@@ -690,29 +775,16 @@ const CrmLegalMilestones: React.FC = () => {
                   <div className="px-5 py-4 flex items-center justify-between gap-3 border-b border-border bg-muted/20">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="font-heading font-bold text-[15px] truncate">{selected.ApplicantName}</h2>
+                        <h2 className="font-heading font-bold text-[0.9375rem] truncate">{selected.ApplicantName}</h2>
                         {model.isPhysicallyComplete && (
-                          <span className="shrink-0 text-[10px] px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete — Handover doesn't have to wait on the Sale Deed. Agreement/AFS Registration is still required as normal.">
+                          <span className="shrink-0 text-[0.625rem] px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete — Handover doesn't have to wait on the Sale Deed. Agreement/AFS Registration is still required as normal.">
                             Project Completed
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">{selected.BookingNo} · {selected.UnitNo}</div>
+                      <div className="text-[0.6875rem] text-muted-foreground mt-0.5">{selected.BookingNo} · {selected.UnitNo}</div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                      {selected.AllotmentLetterId && (
-                        <button
-                          onClick={() => navigate(`/crm/allotment-letter?bookingId=${selected.BookingId}`)}
-                          className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-semibold transition-colors ${
-                            selected.AllotmentLetterStatus === "Acknowledged"
-                              ? "border-green-300 text-green-700 bg-green-50 dark:bg-green-900/30 dark:border-green-800"
-                              : "border-amber-300 text-amber-700 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-800"
-                          }`}
-                        >
-                          <FileCheck size={11} />
-                          Allotment Letter · {selected.AllotmentLetterStatus ?? "Issued"}
-                        </button>
-                      )}
                       <button
                         onClick={() => navigate(`/crm/agreements?bookingId=${selected.BookingId}`)}
                         className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground hover:bg-muted font-semibold"
@@ -721,15 +793,28 @@ const CrmLegalMilestones: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  {/* Overall progress dots — driven entirely by model.progressChecks,
-                      which already excludes not-applicable stages, so this can
-                      never show a false "AFS pending" pill for a Ready-to-Move booking. */}
-                  <div className="px-5 py-3 flex items-center gap-2">
-                    <span className="text-[11px] text-muted-foreground font-medium shrink-0">Journey progress:</span>
-                    <div className="flex items-center gap-1 flex-wrap">
+                  {/* One continuous progress bar (doneCount/totalCount, every
+                      applicable stage across the WHOLE journey) plus a row of
+                      per-section dots underneath — replaces the old two
+                      different progress indicators (Phase-1-only step count +
+                      a separate Phase-2+ dot row) that made it easy to think
+                      the journey was further along, or less along, than it
+                      really was. */}
+                  <div className="px-5 py-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[0.6875rem] text-muted-foreground font-medium">Overall journey progress</span>
+                      <span className="text-[0.6875rem] font-semibold text-foreground">{model.doneCount}/{model.totalCount} steps</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${model.journeyLabel.done ? "bg-green-500" : "bg-primary"}`}
+                        style={{ width: `${model.totalCount ? Math.round((model.doneCount / model.totalCount) * 100) : 0}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 flex-wrap pt-0.5">
                       {model.progressChecks.map((p) => (
                         <span key={p.label} title={p.label}
-                          className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${
+                          className={`flex items-center gap-1 text-[0.625rem] px-2 py-0.5 rounded-full border font-medium ${
                             p.done ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-300" : "bg-muted/40 border-border text-muted-foreground/60"
                           }`}>
                           {p.done ? <CheckCircle2 size={9} /> : <Circle size={9} />}
@@ -740,62 +825,51 @@ const CrmLegalMilestones: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Phase 1 — Agreement Signing: the full 8-step tracker,
-                    driven by the model. Always applicable. */}
-                <AgreementPhaseCard model={model} t={selected} onStepUpdate={handleStepUpdate} canEdit={rights.canEdit} />
-
-                {/* Phase 2 onward */}
-                {!model.agreementDone ? (
-                  <div className="rounded-xl border border-border bg-card p-5 flex items-start gap-3">
-                    <div className="w-8 h-8 shrink-0 rounded-full bg-muted/60 border-2 border-border flex items-center justify-center">
-                      <Lock size={13} className="text-muted-foreground/50" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-muted-foreground">Phases 2 onward are locked</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Registration, Sale Deed, Mutation and NOC steps will appear here once Phase 1 (Agreement Signing) reaches Final Execution.</p>
-                    </div>
-                  </div>
-                ) : (
-                  model.phases.map((phase, sIdx) => (
-                    <div key={phase.key} className="rounded-xl border border-border bg-card overflow-hidden">
-                      <div className="px-5 py-3.5 border-b border-border bg-muted/20 flex items-start gap-3">
-                        <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border mt-0.5 ${
-                          phase.isApplicable ? "bg-muted/60 border-border text-muted-foreground" : "bg-emerald-100 border-emerald-300 text-emerald-700 dark:bg-emerald-900/30 dark:border-emerald-700"
-                        }`}>PHASE {sIdx + 2}</span>
-                        <div>
-                          <h3 className="text-sm font-bold">{phase.title}</h3>
-                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                            {phase.isApplicable ? phase.description : phase.notApplicableReason}
-                          </p>
-                        </div>
+                {/* The ENTIRE journey — Agreement's 8 sub-steps included — as
+                    one continuous list of sections, every section using the
+                    exact same StageRow component. No separate "Phase 1 card"
+                    with different visuals, and nothing hidden behind a locked
+                    placeholder: a section not yet reachable simply shows its
+                    stages as locked rows (with the real reason why), so
+                    staff can always see the full remaining journey at a
+                    glance instead of it appearing to vanish. */}
+                {model.sections.map((section) => (
+                  <div key={section.key} className="rounded-xl border border-border bg-card overflow-hidden">
+                    <div className="px-5 py-3.5 border-b border-border bg-muted/20 flex items-start gap-3">
+                      <div>
+                        <h3 className="text-sm font-bold">{section.title}</h3>
+                        <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-relaxed">
+                          {section.isApplicable ? section.description : section.notApplicableReason}
+                        </p>
                       </div>
-                      {phase.isApplicable && (
-                        <div className="p-5 space-y-0">
-                          {phase.stages.map((stage, idx) => (
-                            <StageRow
-                              key={stage.key}
-                              stage={stage}
-                              isLast={idx === phase.stages.length - 1}
-                              bookingId={selected.BookingId}
-                              navigate={navigate}
-                            />
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  ))
-                )}
+                    {section.isApplicable && (
+                      <div className="p-5 space-y-0">
+                        {section.stages.map((stage, idx) => (
+                          <StageRow
+                            key={stage.key}
+                            stage={stage}
+                            isLast={idx === section.stages.length - 1}
+                            bookingId={selected.BookingId}
+                            navigate={navigate}
+                            canEdit={rights.canEdit}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
         </div>
 
         <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading">Start Legal Workflow</DialogTitle></DialogHeader>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select
+              <SearchableNativeSelect
                 value={bookingId}
                 onChange={(e) => setBookingId(e.target.value)}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
@@ -804,10 +878,10 @@ const CrmLegalMilestones: React.FC = () => {
                 {startableBookings.map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
               {startableBookings.length === 0 && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Every booking either already has a legal workflow or has no agreement yet — trackers start automatically once an agreement (or, for Ready-to-Move units, a Sale Deed) is created.
+                  No booking is eligible right now — a booking needs to be fully Approved, active, unfrozen, have an Agreement on file, and not already have a legal workflow tracker.
                 </p>
               )}
             </div>
@@ -816,7 +890,7 @@ const CrmLegalMilestones: React.FC = () => {
               <button
                 onClick={handleStart}
                 disabled={saving || startableBookings.length === 0}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40"
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40"
               >
                 {saving ? "Starting..." : "Start"}
               </button>

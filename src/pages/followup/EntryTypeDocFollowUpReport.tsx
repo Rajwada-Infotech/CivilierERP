@@ -33,8 +33,10 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import type { ExportColumn } from "@/lib/export";
+import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const REPORT_API = "/api/entry-type-doc-followup-report";
 const ACCENT = "#0d9488";
@@ -165,7 +167,7 @@ function formatDateTime(value: string | null): string {
 
 function useGlass() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const cardStyle = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
     border: `1px solid ${ACCENT}26`,
@@ -181,7 +183,7 @@ function useGlass() {
 function Badge({ label, color }: { label: string; color: string }) {
   return (
     <span
-      className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
+      className="inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
       style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
     >
       {label}
@@ -228,7 +230,7 @@ const inputCls =
 function FilterField({ icon: Icon, label, children }: { icon: React.ElementType; label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <label className="block text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
+      <label className="block text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
       <div className="relative">
         <Icon size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
         {children}
@@ -382,7 +384,7 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
 
       <div id="etdf-printable">
         {!isLoading && rows.length === 0 && (
-          <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 flex items-center gap-2 text-sm text-amber-600 mb-5">
+          <div className="rounded-xl border border-amber-400/30 bg-[#ffe2021a] px-4 py-3 flex items-center gap-2 text-sm text-amber-600 mb-5">
             <AlertCircle size={16} className="shrink-0" />
             <span>No follow-up records match the selected filters.</span>
           </div>
@@ -408,8 +410,8 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
         {/* ── Filters ──────────────────────────────────────────────────── */}
         <div className="no-print rounded-xl p-4 my-5" style={cardStyle}>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT }}>Filters</p>
-            <button onClick={resetFilters} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+            <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT }}>Filters</p>
+            <button onClick={resetFilters} className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors">
               <RotateCcw size={11} /> Reset
             </button>
           </div>
@@ -439,10 +441,10 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
               </select>
             </FilterField>
             <FilterField icon={Users} label="User">
-              <select className={selectCls} value={filters.userId} onChange={(e) => updateFilter({ userId: e.target.value })}>
+              <SearchableNativeSelect className={selectCls} value={filters.userId} onChange={(e) => updateFilter({ userId: e.target.value })}>
                 <option value="">All Users</option>
                 {users.map((u) => <option key={u.id} value={String(u.id)}>{u.name}</option>)}
-              </select>
+              </SearchableNativeSelect>
             </FilterField>
             <FilterField icon={Activity} label="Status">
               <select className={selectCls} value={filters.status} onChange={(e) => updateFilter({ status: e.target.value })}>
@@ -452,8 +454,8 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
             </FilterField>
             <FilterField icon={Clock} label="Date Range">
               <div className="flex gap-1">
-                <input type="date" className={inputCls} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} />
-                <input type="date" className={inputCls} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} />
+                <DateInput className={inputCls} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} />
+                <DateInput className={inputCls} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} />
               </div>
             </FilterField>
           </div>
@@ -482,7 +484,7 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
                       </button>
                       <Layers size={13} style={{ color: ACCENT }} className="shrink-0" />
                       <span className="text-sm font-semibold text-foreground flex-1 truncate">{g.label}</span>
-                      <span className="text-[11px] text-muted-foreground">{g.docs.length} doc{g.docs.length === 1 ? "" : "s"}</span>
+                      <span className="text-[0.6875rem] text-muted-foreground">{g.docs.length} doc{g.docs.length === 1 ? "" : "s"}</span>
                       <button
                         type="button"
                         onClick={() => setDetailGroup({ title: g.label, rows: g.rows })}
@@ -501,7 +503,7 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => setDetailGroup({ title: `${g.label} — ${d.label}`, rows: d.rows })}
-                              className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-md hover:underline"
+                              className="text-[0.6875rem] font-mono font-semibold px-2 py-0.5 rounded-md hover:underline"
                               style={{ color: ACCENT, background: `${ACCENT}14` }}
                             >
                               {d.rows.length}

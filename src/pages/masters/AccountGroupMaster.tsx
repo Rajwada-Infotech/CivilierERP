@@ -3,7 +3,7 @@ import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -14,8 +14,11 @@ import {
   AccountGroupDeleteError,
 } from "@/api/accountApi";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
+import { AccountGroupAuditTrailModal } from "./components/AccountGroupAuditTrailModal";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import {
   ChevronRight,
   ChevronDown,
@@ -33,7 +36,9 @@ import {
   Eye,
   XCircle,
   AlertCircle,
+  History,
 } from "lucide-react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -182,7 +187,7 @@ function TreeRow({
               {node.name}
             </span>
             {hasChildren && (
-              <span className="text-[10px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-medium">
+              <span className="text-[0.625rem] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-medium">
                 {node.children.length}
               </span>
             )}
@@ -281,7 +286,8 @@ const AccountGroupMaster: React.FC = () => {
   const rights = usePageRights("account-head");
   const queryClient = useQueryClient();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
+  const [auditTrailOpen, setAuditTrailOpen] = useState(false);
 
   const {
     data: dbData,
@@ -304,6 +310,18 @@ const AccountGroupMaster: React.FC = () => {
   }, [dbData]);
 
   const tree = useMemo(() => buildTree(allGroups), [allGroups]);
+
+  const accountGroupExportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Group Name", accessor: "name" },
+      { header: "Code", accessor: "code" },
+      {
+        header: "Belongs To",
+        accessor: (row: any) => getBelongsTo(row._id, allGroups) || "—",
+      },
+    ],
+    [allGroups],
+  );
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -487,12 +505,21 @@ const AccountGroupMaster: React.FC = () => {
         title="Account Group Master"
         subtitle="Organise accounts into parent groups and sub-groups"
         action={
-          <span
-            className="text-xs font-heading px-3 py-1.5 rounded-lg"
-            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
-          >
-            {rootCount} Parent · {subCount} Sub
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAuditTrailOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-heading px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground border border-border hover:border-border/80 transition-colors"
+            >
+              <History size={13} /> Audit Trail
+            </button>
+            <span
+              className="text-xs font-heading px-3 py-1.5 rounded-lg"
+              style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
+            >
+              {rootCount} Parent · {subCount} Sub
+            </span>
+          </div>
         }
       >
 
@@ -523,7 +550,7 @@ const AccountGroupMaster: React.FC = () => {
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Account Group" : "Add Account Group"}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are required
               </p>
             </div>
@@ -536,7 +563,7 @@ const AccountGroupMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Layers size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Group Details
                 </p>
               </div>
@@ -602,7 +629,7 @@ const AccountGroupMaster: React.FC = () => {
                     allGroups={allGroups}
                     invalidParents={invalidParents}
                   />
-                  <p className="text-[11px] text-muted-foreground mt-1">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">
                     {selectedParentPath ? (
                       <>
                         Will nest under:{" "}
@@ -621,7 +648,7 @@ const AccountGroupMaster: React.FC = () => {
 
           {/* Card footer — actions */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave
                 ? <span className="text-emerald-500 font-medium">Ready to save</span>
                 : "Fill in the required fields to save"}
@@ -684,6 +711,13 @@ const AccountGroupMaster: React.FC = () => {
                 </button>
               </div>
             )}
+            <ExportMenu
+              data={allGroups as unknown as Record<string, unknown>[]}
+              columns={accountGroupExportColumns}
+              title="Account Group Master"
+              filename="account-group-master"
+              disabled={!rights.canExport || allGroups.length === 0}
+            />
           </div>
 
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
@@ -700,13 +734,13 @@ const AccountGroupMaster: React.FC = () => {
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="bg-muted/30 border-b border-border">
-                    <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                    <th className="px-4 py-3 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
                       Group Name
                     </th>
-                    <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                    <th className="px-4 py-3 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
                       Code
                     </th>
-                    <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                    <th className="px-4 py-3 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
                       Belongs To
                     </th>
                     <th className="px-4 py-3 w-24" />
@@ -743,7 +777,7 @@ const AccountGroupMaster: React.FC = () => {
                                   {g.name}
                                 </span>
                                 {g.parentId && (
-                                  <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
+                                  <span className="text-[0.625rem] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
                                     sub
                                   </span>
                                 )}
@@ -768,7 +802,7 @@ const AccountGroupMaster: React.FC = () => {
                             </td>
                             <td className="py-2.5 px-4 text-right">
                               <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
+                                <button data-row-view
                                   onClick={() => setViewRecord(g)}
                                   className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
                                   title="View details"
@@ -851,7 +885,7 @@ const AccountGroupMaster: React.FC = () => {
       </FinanceShell>
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -879,7 +913,7 @@ const AccountGroupMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Group Name
                 </p>
                 <p className="text-sm font-medium text-foreground">
@@ -887,7 +921,7 @@ const AccountGroupMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Code
                 </p>
                 <p className="font-mono text-sm font-semibold text-primary flex items-center gap-1">
@@ -896,7 +930,7 @@ const AccountGroupMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Belongs To
                 </p>
                 {(() => {
@@ -911,7 +945,7 @@ const AccountGroupMaster: React.FC = () => {
                 })()}
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Type
                 </p>
                 {(() => {
@@ -947,7 +981,7 @@ const AccountGroupMaster: React.FC = () => {
                 if (children.length === 0) return null;
                 return (
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-2">
+                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-2">
                       Sub-Groups ({children.length})
                     </p>
                     <div className="space-y-1">
@@ -963,7 +997,7 @@ const AccountGroupMaster: React.FC = () => {
                           <span className="text-xs text-foreground flex-1">
                             {c.name}
                           </span>
-                          <span className="font-mono text-[10px] text-muted-foreground">
+                          <span className="font-mono text-[0.625rem] text-muted-foreground">
                             {c.code}
                           </span>
                         </div>
@@ -991,8 +1025,10 @@ const AccountGroupMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
+
+      <AccountGroupAuditTrailModal open={auditTrailOpen} onClose={() => setAuditTrailOpen(false)} />
     </>
   );
 };

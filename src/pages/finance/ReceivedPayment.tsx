@@ -2,8 +2,9 @@ import React from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { StatusBadge } from "@/components/StatusBadge";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
@@ -67,7 +68,14 @@ import {
   type ReceivedPaymentPosting,
 } from "@/api/receivedPaymentApi";
 import { useSearchParams } from "react-router-dom";
-import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
+import {
+  getPayableEmis,
+  payLoan,
+  getUndisbursedIncomingLoans,
+  disburseLoan,
+  type PayableEmi,
+  type UndisbursedIncomingLoan,
+} from "@/api/loanSanctionApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { getContractOptions, type ContractOption } from "@/api/contractApi";
@@ -77,9 +85,13 @@ import {
   fetchNextDocNumber,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { formatINR } from "@/utils/formatCurrency";
+import { printStatusLabel } from "@/utils/printStatus";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { usePageRights } from "@/hooks/usePageRights";
+import { DepositBankAssignPanel } from "./DepositBankAssignPanel";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -95,8 +107,8 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Customer", accessor: (r) => String(r.customerName || r.receivedFrom || "—") },
   { header: "Mode", accessor: "mode" },
   { header: "Deposit Bank", accessor: "depositBankName" },
-  { header: "Amount", accessor: (r) => formatINR(Number(r.amount || 0)) },
-  { header: "Status", accessor: "status" },
+  { header: "Amount", accessor: (r) => Number(r.amount || 0) },
+  { header: "Status", accessor: (r) => printStatusLabel(r.status as string) },
   { header: "Transaction / Cheque Ref", accessor: (r) => String(r.transactionId || r.checkNumber || "") },
 ];
 
@@ -116,6 +128,7 @@ export type PaymentMode =
 export type ReceivedPayment = {
   id: string;
   docNo: string;
+  createdByName?: string;
   companyId?: number;
   companyName: string;
   projectId?: number;
@@ -137,6 +150,9 @@ export type ReceivedPayment = {
   remarks?: string;
   status: "Draft" | "Pending" | "Approved" | "Rejected";
   createdAt: string;
+  // set when this payment came from CRM (milestone / on-account / token) —
+  // Accounts assigns its deposit bank here before approval
+  crmBookingId?: number;
 };
 
 interface CustomerOption {
@@ -152,6 +168,7 @@ function mapReceivedPaymentRow(r: ReceivedPaymentRecord): ReceivedPayment {
   return {
     id: String(r.RPPaymentID),
     docNo: (r as any).RPDocNo || `REC/${String(r.RPPaymentID).padStart(6, "0")}`,
+    createdByName: r.CreatedByName || r.RPCreatedBy || undefined,
     companyId: (r as any).RPCompanyId ?? undefined,
     companyName: r.RPCompanyName ?? "",
     projectId: (r as any).RPProjectId ?? undefined,
@@ -173,6 +190,7 @@ function mapReceivedPaymentRow(r: ReceivedPaymentRecord): ReceivedPayment {
     remarks: r.RPRemarks ?? undefined,
     status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
     createdAt: r.RPCreatedAt,
+    crmBookingId: (r as any).CrmBookingId ?? undefined,
   };
 }
 
@@ -195,46 +213,6 @@ const normalizeCompanyName = (value: string | null | undefined) =>
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
-
-// Customer Bank Name was a free-text field — switched to a picker of common
-// Indian banks (grouped Major/Other) so entries stay consistent for
-// reporting, while still allowing any bank via "Other" for names not listed.
-const MAJOR_BANKS = [
-  "State Bank of India",
-  "HDFC Bank",
-  "ICICI Bank",
-  "Axis Bank",
-  "Kotak Mahindra Bank",
-  "Punjab National Bank",
-  "Bank of Baroda",
-  "Canara Bank",
-  "Union Bank of India",
-  "IndusInd Bank",
-  "IDBI Bank",
-  "Yes Bank",
-  "Bank of India",
-  "Indian Bank",
-  "Central Bank of India",
-];
-const MINOR_BANKS = [
-  "IDFC FIRST Bank",
-  "Federal Bank",
-  "South Indian Bank",
-  "Karnataka Bank",
-  "RBL Bank",
-  "Bandhan Bank",
-  "City Union Bank",
-  "DCB Bank",
-  "Karur Vysya Bank",
-  "Tamilnad Mercantile Bank",
-  "Bank of Maharashtra",
-  "UCO Bank",
-  "Punjab & Sind Bank",
-  "AU Small Finance Bank",
-  "Equitas Small Finance Bank",
-  "Ujjivan Small Finance Bank",
-];
-const OTHER_BANK_VALUE = "__other__";
 
 const modeIcon = (mode: string) => {
   if (mode === "Cash")
@@ -297,7 +275,7 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[11px] uppercase tracking-widest font-heading font-semibold text-muted-foreground mb-1.5">
+    <label className="block text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-muted-foreground mb-1.5">
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -414,7 +392,7 @@ function EmptyState() {
 
 export default function ReceivedPaymentPage() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const { finYears } = useFinYear();
   const rights = usePageRights("received-payment");
 
@@ -429,10 +407,35 @@ export default function ReceivedPaymentPage() {
   const [summary, setSummary] = useState({ totalAmount: 0, approvedCount: 0, draftCount: 0, pendingCount: 0, rejectedCount: 0 });
   const [apiLoading, setApiLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Bumped on every reset/add/edit so BankNamePicker remounts fresh —
+  // editingId alone repeats "null" across successive Add clicks and
+  // wouldn't force a remount, leaving a previously-typed "Other" bank name
+  // stuck in the picker's own internal state.
+  const [bankPickerKey, setBankPickerKey] = useState(0);
   const [actionLoading, setActionLoading] = useState(false);
   const [viewingPayment, setViewingPayment] = useState<ReceivedPayment | null>(
     null,
   );
+  // Deposit-bank options for the CRM assign panel below. Resolved server-side
+  // by /api/crm/project-banks/for-project/:id — the SAME rule every CRM payment
+  // picker uses (banks tagged to the project, else every active bank). Keeps
+  // Accounts and CRM showing an identical list instead of this page inventing
+  // its own client-side company-name match.
+  const [crmProjectBanks, setCrmProjectBanks] = useState<any[]>([]);
+  const crmPanelProjectId =
+    viewingPayment?.status === "Pending" && viewingPayment?.crmBookingId != null
+      ? viewingPayment.projectId
+      : undefined;
+  useEffect(() => {
+    if (crmPanelProjectId == null) { setCrmProjectBanks([]); return; }
+    let cancelled = false;
+    fetchWithAuth(`/api/crm/project-banks/for-project/${crmPanelProjectId}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => { if (!cancelled) setCrmProjectBanks(Array.isArray(d) ? d : []); })
+      .catch(() => { if (!cancelled) setCrmProjectBanks([]); });
+    return () => { cancelled = true; };
+  }, [crmPanelProjectId]);
+
   const [detailTab, setDetailTab] = useState<"details" | "posting">("details");
   const [postingData, setPostingData] = useState<ReceivedPaymentPosting | null>(null);
   const [postingLoading, setPostingLoading] = useState(false);
@@ -463,11 +466,17 @@ export default function ReceivedPaymentPage() {
   useEffect(() => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
-    getReceivedPayment(Number(viewId))
-      .then((row) => setViewingPayment(mapReceivedPaymentRow(row)))
-      .catch(() => toast.error(`Received payment #${viewId} not found`));
+    // Clear the param first — do it synchronously before the async fetch so
+    // a slow network or back-navigation can't retrigger the same open.
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
+    // Number("0") === 0 — a non-positive id is invalid; don't fire a bad request.
+    const id = Number(viewId);
+    if (id > 0) {
+      getReceivedPayment(id)
+        .then((row) => setViewingPayment(mapReceivedPaymentRow(row)))
+        .catch(() => toast.error(`Received payment #${id} not found`));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -479,13 +488,6 @@ export default function ReceivedPaymentPage() {
   const [form, setForm] = useDraftForm("received-payment", EMPTY_FORM, {
     skip: editingId !== null,
   });
-  // Customer Bank Name's free-text fallback only activates once "Other" is
-  // explicitly picked from the dropdown — not by default, and not just
-  // because form.bankName happens to be empty (which is also the initial,
-  // nothing-selected state).
-  const [customBank, setCustomBank] = useState(
-    !!form.bankName && !MAJOR_BANKS.includes(form.bankName) && !MINOR_BANKS.includes(form.bankName),
-  );
 
   // ── Loan Repayment (every loan type) ────────────────────────────────────
   // Repayment of every loan type — Customer Loan, Inter-Company, Bank Loan
@@ -544,13 +546,19 @@ export default function ReceivedPaymentPage() {
     setLoanLateFee("");
     setLoanPaymentNotes("");
     // form.companyId (the page's own top-level company selector, already
-    // scoped server-side by /emi-payable) is left untouched — for Customer
-    // Loan/Inter-Company it's already the lender receiving repayment; for
-    // Bank Loan it's already the borrower (us) settling with the external
-    // bank. "Customer Name" here means "who this settlement is with," so
-    // it needs the OPPOSITE party for Bank Loan: the lender (the bank),
-    // not the borrower (us).
-    const counterpartyName = emi.LoanType === "Bank Loan" ? emi.LenderName : emi.BorrowerName;
+    // scoped server-side by /emi-payable) is left untouched — for the
+    // original Customer Loan direction/Inter-Company it's already the
+    // lender receiving repayment; for Bank Loan and the newer "Customer to
+    // Company" Customer Loan direction (migration 402) it's already the
+    // borrower (us) settling with the external party. "Customer Name" here
+    // means "who this settlement is with," so it needs the OPPOSITE party
+    // whenever we're the borrower: the lender (bank or customer), not us.
+    // Inter-Company rows in this list are always ones where we're the
+    // LENDER (the query only matches Inter-Company via LenderCompanyId —
+    // see /emi-payable), so BorrowerCompanyName being set doesn't mean
+    // "we're the borrower" there the way it does for Customer Loan.
+    const weAreBorrower = emi.LoanType === "Bank Loan" || (emi.LoanType === "Customer Loan" && !!emi.BorrowerCompanyName);
+    const counterpartyName = weAreBorrower ? emi.LenderName : emi.BorrowerName;
     setForm((prev) => ({
       ...prev,
       customerName: counterpartyName || prev.customerName,
@@ -567,6 +575,43 @@ export default function ReceivedPaymentPage() {
       setForm((f) => ({ ...f, amount: String(total) }));
       return next;
     });
+  };
+
+  // ── Bank Loan Disbursement — "we are the BORROWER, money comes IN from
+  // an external bank" ───────────────────────────────────────────────────
+  // The counterpart to Payment.tsx's "Loan Disbursement" picker (Inter-
+  // Company/Customer Loan, money OUT). Selecting one pre-fills the
+  // counterparty + amount here; the rest of the form (deposit bank, mode,
+  // date) is filled normally, and POST /:id/disburse links the two once
+  // this Received Payment is saved.
+  const [undisbursedBankLoans, setUndisbursedBankLoans] = useState<UndisbursedIncomingLoan[]>([]);
+  const [undisbursedBankLoansLoading, setUndisbursedBankLoansLoading] = useState(false);
+  const [disbursingBankLoan, setDisbursingBankLoan] = useState<UndisbursedIncomingLoan | null>(null);
+
+  const refetchUndisbursedBankLoans = useCallback(() => {
+    const companyId = Number(form.companyId) || null;
+    if (!companyId) {
+      setUndisbursedBankLoans([]);
+      return;
+    }
+    setUndisbursedBankLoansLoading(true);
+    getUndisbursedIncomingLoans(companyId)
+      .then(setUndisbursedBankLoans)
+      .catch(() => setUndisbursedBankLoans([]))
+      .finally(() => setUndisbursedBankLoansLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.companyId]);
+
+  useEffect(() => { refetchUndisbursedBankLoans(); }, [refetchUndisbursedBankLoans]);
+
+  const handleSelectBankLoanDisbursement = (loan: UndisbursedIncomingLoan) => {
+    setDisbursingBankLoan(loan);
+    setForm((prev) => ({
+      ...prev,
+      customerName: loan.LenderName || prev.customerName,
+      amount: String(Number(loan.Amount)),
+      remarks: `Loan disbursement — ${loan.LoanNo}`,
+    }));
   };
 
   // Only reopen on an actual browser reload, not a plain in-app navigation
@@ -718,6 +763,21 @@ export default function ReceivedPaymentPage() {
     loadPayments(1);
   }, [loadPayments]);
 
+  // Export must cover every matching record, not just whatever page happens
+  // to be on screen — the list is server-paginated (PAGE_SIZE=20) and the
+  // backend caps ?limit= at 100 per request, so this loops pages of 100
+  // until every record is collected instead of a single capped fetch.
+  const fetchAllPaymentsForExport = useCallback(async (): Promise<Record<string, unknown>[]> => {
+    const FETCH_LIMIT = 100;
+    const first = await getReceivedPayments(1, FETCH_LIMIT);
+    const all = [...first.data];
+    for (let page = 2; page <= first.totalPages; page++) {
+      const res = await getReceivedPayments(page, FETCH_LIMIT);
+      all.push(...res.data);
+    }
+    return all.map(mapReceivedPaymentRow) as unknown as Record<string, unknown>[];
+  }, []);
+
   const setField = (key: keyof typeof EMPTY_FORM, value: string | boolean) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -739,7 +799,7 @@ export default function ReceivedPaymentPage() {
 
   const handleReset = () => {
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
-    setCustomBank(false);
+    setBankPickerKey((k) => k + 1);
     setDate(new Date());
     setDocNoPreview("");
   };
@@ -748,14 +808,14 @@ export default function ReceivedPaymentPage() {
     setView("list");
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
-    setCustomBank(false);
+    setBankPickerKey((k) => k + 1);
   };
 
   // ── Open add form ─────────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
-    setCustomBank(false);
+    setBankPickerKey((k) => k + 1);
     setDate(new Date());
     setDocNoPreview("");
     setView("form");
@@ -784,9 +844,7 @@ export default function ReceivedPaymentPage() {
       remarks: p.remarks ?? "",
       contractId: String((p as { ContractId?: number }).ContractId ?? ""),
     });
-    setCustomBank(
-      !!p.bankName && !MAJOR_BANKS.includes(p.bankName) && !MINOR_BANKS.includes(p.bankName),
-    );
+    setBankPickerKey((k) => k + 1);
     setDate(p.docDate ? new Date(p.docDate) : new Date());
     setDocNoPreview(p.docNo);
     setView("form");
@@ -881,7 +939,24 @@ export default function ReceivedPaymentPage() {
             );
           }
         }
+
+        // This Received Payment IS a Bank Loan disbursement — link it back
+        // to the loan (migration 401) the same way repayment above does,
+        // so the loan-ledger side posts and DisbursedAt reflects a real
+        // bank-side record.
+        if (disbursingBankLoan) {
+          try {
+            const res = await disburseLoan(disbursingBankLoan.LoanId, { receivedPaymentId: created.RPPaymentID });
+            toast.success(`${disbursingBankLoan.LoanNo} disbursed — JV ${res.voucherNo}`);
+            refetchUndisbursedBankLoans();
+          } catch (loanErr: any) {
+            toast.error(
+              `Payment was recorded, but linking it to the loan failed: ${loanErr.message}. Post it manually from Loan Sanction.`,
+            );
+          }
+        }
       }
+      setDisbursingBankLoan(null);
       clearLoanEmiLink();
       setView("list");
       setEditingId(null);
@@ -968,7 +1043,7 @@ export default function ReceivedPaymentPage() {
       sub: "awaiting approval",
       icon: Clock,
       ring: "ring-amber-500/20",
-      bg: "bg-amber-500/10",
+      bg: "bg-[#ffe2021a]",
       blob: "bg-amber-500",
       borderL: "border-l-amber-500",
       color: "text-amber-500",
@@ -1034,7 +1109,7 @@ export default function ReceivedPaymentPage() {
     <div style="text-align:right;">
       <div style="font-size:20px;font-weight:800;color:#10b981;letter-spacing:-0.5px;">RECEIPT</div>
       <div style="margin-top:6px;">
-        <span style="padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">${p.status}</span>
+        <span style="padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">${printStatusLabel(p.status)}</span>
       </div>
       <div style="font-size:11px;color:#6b7280;margin-top:4px;">${p.docDate ? new Date(p.docDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : ""}</div>
     </div>
@@ -1094,6 +1169,7 @@ export default function ReceivedPaymentPage() {
               )}
               <ExportMenu
                 data={payments as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllPaymentsForExport}
                 columns={EXPORT_COLUMNS}
                 title="Received Payments"
                 filename="received-payments"
@@ -1128,10 +1204,10 @@ export default function ReceivedPaymentPage() {
                 <p className="text-lg font-bold font-heading text-foreground leading-none">
                   {s.value}
                 </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
                   {s.label}
                 </p>
-                <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                <p className="text-[0.6875rem] text-muted-foreground font-mono mt-0.5 truncate">
                   {s.sub}
                 </p>
               </div>
@@ -1267,10 +1343,13 @@ export default function ReceivedPaymentPage() {
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge status={p.status} />
+                          {p.status === "Pending" && p.crmBookingId != null && !p.depositBankId && (
+                            <span className="ml-1 inline-block text-[0.5625rem] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1">
-                            <button
+                            <button data-row-view
                               onClick={() => setViewingPayment(p)}
                               title="View (print & edit are here too)"
                               className="p-1.5 rounded-md text-muted-foreground/50 hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors"
@@ -1311,7 +1390,7 @@ export default function ReceivedPaymentPage() {
                         <p className="text-xs text-primary font-heading font-medium">
                           {p.docNo}
                         </p>
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           {p.companyName} · {p.finYear}
                         </p>
                         <p className="text-sm font-semibold text-foreground">
@@ -1327,6 +1406,9 @@ export default function ReceivedPaymentPage() {
                           +{fmt(p.amount)}
                         </p>
                         <StatusBadge status={p.status} />
+                        {p.status === "Pending" && p.crmBookingId != null && !p.depositBankId && (
+                          <span className="ml-1 inline-block text-[0.5625rem] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center justify-between">
@@ -1337,7 +1419,7 @@ export default function ReceivedPaymentPage() {
                         {modeShortLabel(p.mode)}
                       </span>
                       <div className="flex items-center gap-1">
-                        <button
+                        <button data-row-view
                           onClick={() => setViewingPayment(p)}
                           className="p-1.5 text-muted-foreground/50 hover:text-emerald-600"
                           title="View (print & edit are here too)"
@@ -1520,7 +1602,7 @@ export default function ReceivedPaymentPage() {
                     outstanding EMIs is picked. */}
                 {form.companyId && !editingId && (loanEmisLoading || loanEmiOptions.length > 0) && (
                   <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-                    <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-muted-foreground">
+                    <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-muted-foreground">
                       Settle a Loan Repayment
                     </p>
                     {loanEmisLoading ? (
@@ -1542,14 +1624,14 @@ export default function ReceivedPaymentPage() {
                             )}
                           >
                             <Landmark size={11} />
-                            {emi.LoanNo} — {emi.LoanType === "Bank Loan" ? emi.LenderName : emi.BorrowerName}
+                            {emi.LoanNo} — {emi.LoanType === "Bank Loan" || (emi.LoanType === "Customer Loan" && !!emi.BorrowerCompanyName) ? emi.LenderName : emi.BorrowerName}
                           </button>
                         ))}
                       </div>
                     )}
                     {selectedLoanEmi && (
                       <div className="flex items-center justify-between gap-2 pt-1">
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-[0.6875rem] text-muted-foreground">
                           {loanPayMode === "lumpsum"
                             ? "Lump sum"
                             : `${selectedLoanEmiIds.length} EMI${selectedLoanEmiIds.length === 1 ? "" : "s"} selected`}
@@ -1560,14 +1642,14 @@ export default function ReceivedPaymentPage() {
                           <button
                             type="button"
                             onClick={() => setLoanPaymentDetailsOpen(true)}
-                            className="text-[11px] font-medium text-primary hover:underline"
+                            className="text-[0.6875rem] font-medium text-primary hover:underline"
                           >
                             Edit
                           </button>
                           <button
                             type="button"
                             onClick={clearLoanEmiLink}
-                            className="text-[11px] font-medium text-muted-foreground hover:text-destructive"
+                            className="text-[0.6875rem] font-medium text-muted-foreground hover:text-destructive"
                           >
                             Clear
                           </button>
@@ -1577,12 +1659,63 @@ export default function ReceivedPaymentPage() {
                   </div>
                 )}
 
+                {/* Bank Loans / Customer-to-Company Customer Loans not yet
+                    disbursed — "we are the BORROWER, money comes IN from an
+                    external party" (a bank, or now a customer — migration
+                    402). Selecting one pre-fills counterparty + amount;
+                    POST /:id/disburse links it once this Received Payment
+                    is saved. */}
+                {form.companyId && !editingId && (undisbursedBankLoansLoading || undisbursedBankLoans.length > 0) && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                    <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-amber-600 dark:text-amber-400">
+                      Disburse a Loan
+                    </p>
+                    {undisbursedBankLoansLoading ? (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin" /> Checking for undisbursed loans…
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {undisbursedBankLoans.map((loan) => (
+                          <button
+                            key={loan.LoanId}
+                            type="button"
+                            onClick={() => handleSelectBankLoanDisbursement(loan)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                              disbursingBankLoan?.LoanId === loan.LoanId
+                                ? "border-amber-500/50 bg-[#ffe2021a] text-amber-700 dark:text-amber-400"
+                                : "border-border bg-background text-muted-foreground hover:border-amber-500/40",
+                            )}
+                          >
+                            <Landmark size={11} />
+                            {loan.LoanNo} — {formatINR(loan.Amount)}{loan.LenderName ? ` from ${loan.LenderName}` : ""}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {disbursingBankLoan && (
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <p className="text-[0.6875rem] text-amber-700 dark:text-amber-400">
+                          Disbursing <span className="font-semibold">{disbursingBankLoan.LoanNo}</span> — fill in the deposit bank/mode below, then Save.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setDisbursingBankLoan(null)}
+                          className="text-[0.6875rem] font-medium text-muted-foreground hover:text-destructive shrink-0"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Date of Receipt */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <FieldLabel required>Date of Receipt</FieldLabel>
-                    <input
-                      type="date"
+                    <DateInput
                       value={date ? format(date, "yyyy-MM-dd") : ""}
                       onChange={(e) =>
                         setDate(
@@ -1681,20 +1814,35 @@ export default function ReceivedPaymentPage() {
                         />
                       </SelectTrigger>
                       <SelectContent>
+                        {/* Two accounts can share a brand name ("Axis Bank"
+                            at two branches), so every identifying detail is
+                            on the row — branch, masked A/C and IFSC. */}
                         {depositBanks.map((b) => (
                           <SelectItem key={b.BId} value={String(b.BId)}>
-                            <span className="flex items-center gap-2">
+                            <span className="flex items-start gap-2">
                               <Landmark
                                 size={13}
-                                className="text-muted-foreground"
+                                className="text-muted-foreground mt-0.5 shrink-0"
                               />
-                              {b.BName}
-                              {b.BBranch ? ` – ${b.BBranch}` : ""}
-                              {b.BAccountNumber ? (
-                                <span className="text-muted-foreground text-[10px]">
-                                  ···{b.BAccountNumber.slice(-4)}
+                              <span className="flex flex-col leading-tight">
+                                <span className="font-medium">
+                                  {b.BName}
+                                  {b.BBranch ? (
+                                    <span className="text-muted-foreground font-normal">
+                                      {" "}– {b.BBranch}
+                                    </span>
+                                  ) : null}
                                 </span>
-                              ) : null}
+                                {(b.BAccountNumber || b.BIfscCode) && (
+                                  <span className="text-muted-foreground text-[0.625rem] font-mono">
+                                    {b.BAccountNumber
+                                      ? `A/C ••${b.BAccountNumber.slice(-4)}`
+                                      : ""}
+                                    {b.BAccountNumber && b.BIfscCode ? "  ·  " : ""}
+                                    {b.BIfscCode ?? ""}
+                                  </span>
+                                )}
+                              </span>
                             </span>
                           </SelectItem>
                         ))}
@@ -1789,7 +1937,7 @@ export default function ReceivedPaymentPage() {
                         )}
                       </div>
                     )}
-                    <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                    <p className="text-[0.625rem] text-muted-foreground mt-1 font-mono">
                       REC / 000001 / {form.finYear || activeFinYear} — locked on
                       save
                     </p>
@@ -1813,8 +1961,7 @@ export default function ReceivedPaymentPage() {
                         <div className="flex items-end gap-2 mt-2">
                           <div className="flex-1">
                             <FieldLabel>{instrumentLabel} Date</FieldLabel>
-                            <Input
-                              type="date"
+                            <DateInput
                               className="h-9 text-sm"
                               value={form.chequeDate ?? ""}
                               onChange={(e) => {
@@ -1862,52 +2009,13 @@ export default function ReceivedPaymentPage() {
                     )}
                     <div>
                       <FieldLabel>Customer Bank Name</FieldLabel>
-                      <Select
-                        value={
-                          customBank
-                            ? OTHER_BANK_VALUE
-                            : MAJOR_BANKS.includes(form.bankName) || MINOR_BANKS.includes(form.bankName)
-                              ? form.bankName
-                              : ""
-                        }
-                        onValueChange={(v) => {
-                          if (v === OTHER_BANK_VALUE) {
-                            setCustomBank(true);
-                            setField("bankName", "");
-                          } else {
-                            setCustomBank(false);
-                            setField("bankName", v);
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="h-9 text-sm">
-                          <SelectValue placeholder="Select customer's bank…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectLabel>Major Banks</SelectLabel>
-                            {MAJOR_BANKS.map((b) => (
-                              <SelectItem key={b} value={b}>{b}</SelectItem>
-                            ))}
-                          </SelectGroup>
-                          <SelectGroup>
-                            <SelectLabel>Other Banks</SelectLabel>
-                            {MINOR_BANKS.map((b) => (
-                              <SelectItem key={b} value={b}>{b}</SelectItem>
-                            ))}
-                          </SelectGroup>
-                          <SelectItem value={OTHER_BANK_VALUE}>Other (type below)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {customBank && (
-                        <Input
-                          className="h-9 text-sm mt-1.5"
-                          placeholder="Bank of customer"
-                          value={form.bankName}
-                          onChange={(e) => setField("bankName", e.target.value)}
-                          autoFocus
-                        />
-                      )}
+                      <BankNamePicker
+                        key={bankPickerKey}
+                        value={form.bankName}
+                        onChange={(v) => setField("bankName", v)}
+                        placeholder="Select customer's bank…"
+                        otherPlaceholder="Bank of customer"
+                      />
                     </div>
                   </div>
                 )}
@@ -1927,7 +2035,7 @@ export default function ReceivedPaymentPage() {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave
                 ? <span className="text-emerald-500 font-medium">Ready to save</span>
                 : "Fill in the required fields to save"}
@@ -2024,7 +2132,7 @@ export default function ReceivedPaymentPage() {
                         <span className="flex items-center gap-2 text-xs">
                           <input type="checkbox" checked={checked} onChange={() => toggleLoanEmiSelected(e.EMIId)} className="accent-emerald-500" />
                           Installment #{e.InstallmentNo}
-                          {e.IsOverdue && <span className="text-[10px] font-semibold text-destructive">OVERDUE</span>}
+                          {e.IsOverdue && <span className="text-[0.625rem] font-semibold text-destructive">OVERDUE</span>}
                         </span>
                         <span className="font-mono text-xs font-medium">{formatINR(Number(e.EMIAmount))}</span>
                       </label>
@@ -2043,7 +2151,7 @@ export default function ReceivedPaymentPage() {
                     }}
                     className="h-9 text-sm"
                   />
-                  <p className="text-[11px] text-muted-foreground mt-1">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">
                     Outstanding on this loan: <span className="font-mono font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
                   </p>
                 </div>
@@ -2079,8 +2187,8 @@ export default function ReceivedPaymentPage() {
 
       {/* ── View Receipt Modal ───────────────────────────────────────────────── */}
       {viewingPayment && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+        <BodyPortal><div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm bw-modal-topmost"
           onClick={() => setViewingPayment(null)}
         >
           <div
@@ -2098,7 +2206,7 @@ export default function ReceivedPaymentPage() {
                     {viewingPayment.companyName || "Received Payment"}
                   </h3>
                   {viewingPayment.docNo && (
-                    <span className="text-[11px] font-mono text-muted-foreground">
+                    <span className="text-[0.6875rem] font-mono text-muted-foreground">
                       {viewingPayment.docNo}
                     </span>
                   )}
@@ -2146,7 +2254,7 @@ export default function ReceivedPaymentPage() {
             <div className="px-5 pt-4 pb-2">
               <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-4 flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-heading uppercase tracking-wider text-emerald-600/70 mb-1">
+                  <p className="text-[0.625rem] font-heading uppercase tracking-wider text-emerald-600/70 mb-1">
                     Amount Received
                   </p>
                   <p className="text-2xl font-heading font-bold text-emerald-600">
@@ -2154,7 +2262,7 @@ export default function ReceivedPaymentPage() {
                   </p>
                 </div>
                 <div className="text-right space-y-1">
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-[0.6875rem] text-muted-foreground">
                     {viewingPayment.docDate
                       ? new Date(viewingPayment.docDate).toLocaleDateString(
                           "en-IN",
@@ -2168,7 +2276,7 @@ export default function ReceivedPaymentPage() {
                   </p>
                   <StatusBadge status={viewingPayment.status} />
                   <span
-                    className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading ${modeColor[viewingPayment.mode]}`}
+                    className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading ${modeColor[viewingPayment.mode]}`}
                   >
                     {modeIcon(viewingPayment.mode)}
                     {viewingPayment.mode}
@@ -2191,6 +2299,7 @@ export default function ReceivedPaymentPage() {
                 },
                 { label: "Company", value: viewingPayment.companyName },
                 { label: "Project", value: viewingPayment.projectName },
+                { label: "Created By", value: viewingPayment.createdByName || "—" },
                 {
                   label: "Deposit Bank",
                   value: viewingPayment.depositBankName || "—",
@@ -2212,7 +2321,7 @@ export default function ReceivedPaymentPage() {
                   : []),
               ].map(({ label, value }) => (
                 <div key={label} className="space-y-0.5">
-                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                  <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                     {label}
                   </p>
                   <p className="text-xs font-medium text-foreground truncate">
@@ -2222,10 +2331,33 @@ export default function ReceivedPaymentPage() {
               ))}
             </div>
 
+            {/* CRM payment: Accounts assigns the deposit bank, then final approval */}
+            {viewingPayment.status === "Pending" && viewingPayment.crmBookingId != null && (
+              <DepositBankAssignPanel
+                paymentId={Number(viewingPayment.id)}
+                currentBankId={viewingPayment.depositBankId}
+                currentBankName={viewingPayment.depositBankName}
+                banks={
+                  // Project-scoped list from the shared CRM endpoint. Only if the
+                  // payment carries no project at all do we fall back to this
+                  // page's own active bank list.
+                  (crmProjectBanks.length > 0
+                    ? crmProjectBanks
+                    : banks.filter((b) => b.BStatus !== false)) as any
+                }
+                canEdit={rights.canEdit}
+                onUpdated={(bank) => {
+                  setViewingPayment((v) => v ? { ...v, depositBankId: bank.id, depositBankName: bank.name } : v);
+                  loadPayments(currentPage);
+                }}
+                onDecided={() => { setViewingPayment(null); loadPayments(currentPage); }}
+              />
+            )}
+
             {/* Remarks */}
             {viewingPayment.remarks && (
               <div className="px-5 pb-3">
-                <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">
+                <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">
                   Remarks
                 </p>
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-foreground">
@@ -2256,21 +2388,21 @@ export default function ReceivedPaymentPage() {
                 ) : (
                   <div className="rounded-xl border border-border overflow-hidden">
                     <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/40">
-                      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                         {postingData.entries[0]?.docNo}
                       </span>
                       {postingData.isPosted ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+                        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
                           ✓ {postingData.jvNo}
                         </span>
                       ) : (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 font-medium whitespace-nowrap">
+                        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-[#ffe2021a] text-amber-600 border border-amber-500/20 font-medium whitespace-nowrap">
                           Not yet posted
                         </span>
                       )}
                     </div>
                     <div className="divide-y divide-border/50">
-                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
                         <span>Account</span>
                         <span className="text-right">Debit (₹)</span>
                         <span className="text-right">Credit (₹)</span>
@@ -2293,7 +2425,7 @@ export default function ReceivedPaymentPage() {
                         </div>
                       ))}
                       <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
-                        <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                        <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
                         <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(postingData.amount)}</span>
                         <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(postingData.amount)}</span>
                       </div>
@@ -2305,7 +2437,7 @@ export default function ReceivedPaymentPage() {
 
             {/* Footer */}
             <div className="px-5 py-3 border-t border-border bg-muted/10 flex items-center justify-between">
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-[0.625rem] text-muted-foreground">
                 Created{" "}
                 {viewingPayment.createdAt
                   ? new Date(viewingPayment.createdAt).toLocaleString("en-IN", {
@@ -2318,9 +2450,9 @@ export default function ReceivedPaymentPage() {
                   : "—"}
               </p>
               {viewingPayment.status === "Pending" && (
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 font-heading font-medium">
+                <span className="inline-flex items-center gap-1.5 text-[0.6875rem] text-amber-600 font-heading font-medium">
                   <Clock size={12} className="text-amber-500 animate-pulse" />
-                  Awaiting admin approval
+                  {viewingPayment.crmBookingId != null && !viewingPayment.depositBankId ? "Awaiting deposit bank (Accounts)" : "Awaiting admin approval"}
                 </span>
               )}
               {viewingPayment.status === "Draft" && rights.canEdit && (
@@ -2348,7 +2480,7 @@ export default function ReceivedPaymentPage() {
               )}
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

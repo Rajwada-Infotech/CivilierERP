@@ -160,6 +160,9 @@ async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
   const fixedAssetMasters = new Map(masterRes.recordset.map((r) => [r.M_Id, r]));
 
   const docNo = grn.DocNo || grn.GRNNo || `GRN-${grnId}`;
+  // FA Inventory's "eligible items" picker filters batches by Financial Year, so a
+  // batch without one is invisible to manual tagging.
+  const batchFinYear = await deriveFinYear(pool, grn.GRNDate);
   let created = 0;
   let tagged = 0;
 
@@ -196,15 +199,16 @@ async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
         .input("SourceId", sql.Int, grnId)
         .input("SourceItemId", sql.NVarChar(100), itemId)
         .input("GodownId", sql.Int, grn.GodownID ?? null)
+        .input("FinYear", sql.NVarChar(20), batchFinYear)
         .input("CreatedBy", sql.NVarChar(200), userEmail || null)
         .query(`
           INSERT INTO dbo.FixedAssetRecord
-            (DocDate, CompanyId, ProjectId, AssetName, AssetCategory,
+            (DocDate, CompanyId, ProjectId, FinYear, AssetName, AssetCategory,
              PurchaseDate, PurchaseInvoiceRef, SupplierId, PurchaseCost, Quantity,
              AssetStatus, Remarks, SourceType, SourceId, SourceItemId, GodownID, CreatedBy)
           OUTPUT INSERTED.AssetId
           VALUES
-            (@DocDate, @CompanyId, @ProjectId, @AssetName, @AssetCategory,
+            (@DocDate, @CompanyId, @ProjectId, @FinYear, @AssetName, @AssetCategory,
              @PurchaseDate, @PurchaseInvoiceRef, @SupplierId, @PurchaseCost, @Quantity,
              @AssetStatus, @Remarks, @SourceType, @SourceId, @SourceItemId, @GodownId, @CreatedBy)
         `);
@@ -238,4 +242,47 @@ async function autoCreateFixedAssetsFromGRN(pool, grnId, userEmail) {
   return { created, tagged };
 }
 
-module.exports = { autoCreateFixedAssetsFromGRN, autoTagBatch, deriveFinYear };
+// Fixed Asset batches (GRN / Inventory Import) that have received stock but no
+// tags yet, with the reason auto-tagging didn't happen. Feeds FA Inventory's
+// "awaiting tagging" panel so received stock is never silently invisible.
+async function listUntaggedBatches(pool) {
+  const r = await pool.request().query(`
+    SELECT fa.AssetId, fa.AssetName, fa.Quantity, fa.SourceType, fa.SourceItemId,
+           fa.PurchaseInvoiceRef AS SourceDocNo, fa.DocDate,
+           fa.CompanyId, co.name AS CompanyName, fa.ProjectId, pr.name AS ProjectName,
+           fa.GodownID AS GodownId, gd.GodownName,
+           CASE WHEN tpl.Id IS NULL THEN 'NO_TEMPLATE' ELSE 'READY' END AS Reason
+    FROM dbo.FixedAssetRecord fa
+    LEFT JOIN dbo.enterprise co ON co.id = fa.CompanyId
+    LEFT JOIN dbo.enterprise pr ON pr.id = fa.ProjectId
+    LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
+    LEFT JOIN dbo.IDTemplateMaster tpl ON tpl.ProjectId = fa.ProjectId AND tpl.IsActive = 1
+    WHERE fa.AssetCode IS NULL AND fa.SourceType IN ('GRN', 'IMPORT')
+      AND fa.AssetStatus = 'Pending' AND fa.Status <> 'Deleted'
+      AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetTagging t WHERE t.AssetId = fa.AssetId AND t.Status = 'Tagged')
+    ORDER BY fa.DocDate DESC, fa.AssetId DESC
+  `);
+  return r.recordset;
+}
+
+// When a project's ID Template is created, tag the fully-untagged batches that
+// were waiting on it (auto-tagging skips a project with no alias configured).
+async function autoTagPendingBatchesForProject(pool, projectId, userEmail) {
+  const batches = (await listUntaggedBatches(pool)).filter((b) => b.ProjectId === projectId && b.Reason === "READY");
+  let tagged = 0;
+  for (const b of batches) {
+    try {
+      const res = await autoTagBatch(pool, {
+        assetId: b.AssetId, itemId: b.SourceItemId, itemName: b.AssetName, qty: Number(b.Quantity),
+        companyId: b.CompanyId, projectId: b.ProjectId, godownId: b.GodownId,
+        docDate: b.DocDate, sourceDocNo: b.SourceDocNo, userEmail,
+      });
+      tagged += res.tagged;
+    } catch (err) {
+      console.error(`[fixedAssetAutoAlloc] retro-tagging batch ${b.AssetId} failed (left Pending):`, err.message);
+    }
+  }
+  return { tagged };
+}
+
+module.exports = { autoCreateFixedAssetsFromGRN, autoTagBatch, deriveFinYear, listUntaggedBatches, autoTagPendingBatchesForProject };

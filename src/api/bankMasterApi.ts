@@ -33,6 +33,7 @@ export interface BankRecord {
   BStatus: boolean;
   BCompanyName: string | null;
   BLBelongsTo: number | null;
+  BCode?: string | null;
   // Project tagging — optional, not-mandatory. A comma-joined list of
   // Project ids/names this bank is currently tagged to (see
   // crmProjectBanks.js's GET /for-project for what tagging actually does:

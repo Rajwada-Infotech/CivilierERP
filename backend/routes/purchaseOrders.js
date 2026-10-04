@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
@@ -28,7 +29,30 @@ const {
   recomputeMRFulfillment,
 } = require("../services/materialRequestFulfillment");
 
-router.use(checkPermissionForMethod("Material", "PurchaseOrders"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Material", "PurchaseOrders")(req, res, next);
+});
+
+// Any route with :id — refuse a PO whose project is outside the user's scope.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const poId = parseInt(id, 10);
+  if (!Number.isFinite(poId)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, poId)
+      .query("SELECT ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id");
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -113,6 +137,49 @@ async function assertNoMixedItemTypes(pool, poItemsArray) {
     err.status = 400;
     throw err;
   }
+}
+
+// The base date + longest lead time (Days of Supply) among the items on this
+// PO — ExpectedDeliveryDate can never be earlier than this, since the
+// slowest item to supply can't arrive any sooner. Mirrors the client-side
+// min-date computation in PurchaseOrderMaster.tsx so a direct API call
+// can't bypass it. Returns null when there's nothing to enforce.
+async function computeMinExpectedDate(pool, baseDate, poItemsArray) {
+  const itemIds = [
+    ...new Set(
+      (Array.isArray(poItemsArray) ? poItemsArray : [])
+        .map((it) => it.itemId)
+        .filter((id) => id && typeof id === "string"),
+    ),
+  ];
+  if (!itemIds.length || !baseDate) return null;
+
+  const hasCol = await pool
+    .request()
+    .query(
+      `SELECT COUNT(1) AS cnt FROM sys.columns
+       WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
+    )
+    .then((r) => r.recordset[0].cnt > 0);
+  if (!hasCol) return null;
+
+  const request = pool.request();
+  const idParams = itemIds.map((id, i) => {
+    const p = `dosItemId${i}`;
+    request.input(p, sql.UniqueIdentifier, id);
+    return `@${p}`;
+  });
+  const result = await request.query(`
+    SELECT MAX(M_DaysOfSupply) AS MaxDays
+    FROM   dbo.Item_Master_Group
+    WHERE  M_Id IN (${idParams.join(",")})
+  `);
+  const maxDays = result.recordset[0]?.MaxDays;
+  if (!maxDays || maxDays <= 0) return null;
+
+  const min = new Date(baseDate);
+  min.setDate(min.getDate() + maxDays);
+  return min;
 }
 
 // Resolve a FinYear.FId from its FName label (e.g. "2026-2027", "FY 2026-27",
@@ -228,7 +295,7 @@ const syncLineItems = async (
       .input("Sort", sqlRef.Int, i)
       .input("ReceivedQty", sqlRef.Decimal(18, 4), 0)
       .input("MRItemId", sqlRef.Int, it.mrItemId ? parseInt(it.mrItemId, 10) : null)
-      .input("CostCenterId", sqlRef.Int, it.costCenterId ? parseInt(it.costCenterId, 10) : null)
+      .input("CostCenterId", sqlRef.Int, it.costCenterId !== undefined && it.costCenterId !== null && it.costCenterId !== "" ? parseInt(it.costCenterId, 10) : null)
       .input("Now", sqlRef.DateTime2, new Date()).query(`
         INSERT INTO dbo.PurchaseOrderItems
           (PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
@@ -314,6 +381,17 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
   }
 
   await assertNoMixedItemTypes(pool, poItemsArray);
+
+  if (ExpectedDeliveryDate) {
+    const minDate = await computeMinExpectedDate(pool, PODate, poItemsArray);
+    if (minDate && new Date(ExpectedDeliveryDate) < minDate) {
+      const err = new Error(
+        `Expected Delivery can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
 
   // Enforce: a PO can only be raised against a paid Sale Invoice
   // (Sale Order workflow — Migration 111).
@@ -482,7 +560,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
       .input(
         "SourceSaleInvoiceId",
         sql.Int,
-        SourceSaleInvoiceId ? parseInt(SourceSaleInvoiceId, 10) : null,
+        SourceSaleInvoiceId !== undefined && SourceSaleInvoiceId !== null && SourceSaleInvoiceId !== "" ? parseInt(SourceSaleInvoiceId, 10) : null,
       )
       .input("SourceSaleInvoiceDocNo", sql.NVarChar(100), SourceSaleInvoiceDocNo || null)
       .input(
@@ -503,7 +581,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
       )
       .input("FyId", sql.Int, fyId);
 
-    if (hasCC) insertReq.input("CostCenterId", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
+    if (hasCC) insertReq.input("CostCenterId", sql.Int, CostCenterId !== undefined && CostCenterId !== null && CostCenterId !== "" ? parseInt(CostCenterId, 10) : null);
     if (hasVID) insertReq.input("VendorInvoiceDate", sql.Date, VendorInvoiceDate || null);
     if (hasVIN) insertReq.input("VendorInvoiceNo", sql.NVarChar(100), VendorInvoiceNo || null);
     if (hasPT) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
@@ -622,6 +700,7 @@ async function getPOSelect(pool) {
     po.Remarks,
     po.Status,
     po.CreatedBy,
+    COALESCE(cu.name, po.CreatedBy) AS CreatedByName,
     po.CreatedAt,
     po.UpdatedAt,
     po.ApprovedBy,
@@ -685,6 +764,7 @@ async function getPOSelect(pool) {
   LEFT JOIN dbo.FinYear           fy ON fy.FId        = po.fy_id
   LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
   LEFT JOIN dbo.Quotations        qt ON qt.QuotationId = po.SourceQTId
+  LEFT JOIN dbo.users             cu ON LOWER(cu.email) = LOWER(po.CreatedBy)
   ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = po.CostCenterId" : ""}
   ${hasPT ? "LEFT JOIN dbo.VendorPaymentTerm pt ON pt.PaymentTermId = po.PaymentTermId" : ""}
 `;
@@ -699,10 +779,7 @@ const mapRow = (po) => ({
 });
 
 // ── GET /  (List with Pagination) ────────────────────────────────────────────
-router.get(
-  "/",
-  cache("purchase-orders", 300, { shared: true }),
-  async (req, res) => {
+const listPurchaseOrders = async (req, res) => {
     try {
       const pool = getPool();
       const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -735,6 +812,11 @@ router.get(
       const companyId = req.query.companyId
         ? parseInt(req.query.companyId, 10) || null
         : null;
+      const projectId = req.query.projectId
+        ? parseInt(req.query.projectId, 10) || null
+        : null;
+
+      const groupByProject = req.query.groupBy === "project";
 
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
@@ -744,6 +826,8 @@ router.get(
       if (poTypeFilter) whereConditions.push("po.POType = @poTypeFilter");
       if (!includeShortClosed) whereConditions.push("ISNULL(po.Status, '') != 'Short Closed'");
       if (companyId) whereConditions.push("po.CompanyId = @companyId");
+      if (projectId) whereConditions.push("po.ProjectId = @projectId");
+      if (req.projectScope) whereConditions.push(projectPredicate(req.projectScope, "po.ProjectId", "").trim());
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
         : "";
@@ -757,14 +841,35 @@ router.get(
         .input("fyId", sql.Int, fyId)
         .input("sourceSaleInvoiceId", sql.Int, sourceSaleInvoiceId)
         .input("poTypeFilter", sql.NVarChar(20), poTypeFilter)
-        .input("companyId", sql.Int, companyId).query(`
+        .input("companyId", sql.Int, companyId)
+        .input("projectId", sql.Int, projectId).query(`
+        ${
+          groupByProject
+            ? `
+        -- groupBy=project pages by PROJECT: each page holds @limit whole
+        -- projects (most recent PO first) with every one of their POs.
+        WITH base AS (
+          ${PO_SELECT}
+          ${whereClause}
+        ),
+        proj AS (
+          SELECT ISNULL(ProjectId, 0) AS PKey, MAX(PurchaseOrderID) AS LastId FROM base GROUP BY ISNULL(ProjectId, 0)
+        ),
+        ranked AS (
+          SELECT PKey, ROW_NUMBER() OVER (ORDER BY LastId DESC) AS rn, COUNT(*) OVER () AS _total FROM proj
+        )
+        SELECT b.*, r._total FROM base b JOIN ranked r ON r.PKey = ISNULL(b.ProjectId, 0)
+        WHERE r.rn > @offset AND r.rn <= @offset + @limit
+        ORDER BY r.rn, b.PurchaseOrderID DESC`
+            : `
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
           ${whereClause}
         ) _po
         ORDER BY _po.PurchaseOrderID DESC
         OFFSET @offset ROWS
-        FETCH NEXT @limit ROWS ONLY
+        FETCH NEXT @limit ROWS ONLY`
+        }
       `);
 
       const total = result.recordset[0]?._total ?? 0;
@@ -790,8 +895,8 @@ router.get(
       if (res.headersSent) return;
       res.status(500).json({ error: err.message });
     }
-  },
-);
+};
+router.get("/", cache("purchase-orders", 300, { shared: true }), listPurchaseOrders);
 
 // ── GET /service-eligible — POs whose items are all Service items ────────────
 // Backs the Invoice page's "PO" tab: goods must go through a GRN first,
@@ -801,7 +906,7 @@ router.get("/service-eligible", async (req, res) => {
   try {
     const pool = getPool();
     const pos = await getServicePurchaseOrders(pool);
-    res.json(pos);
+    res.json(req.projectScope ? pos.filter((po) => projectAllowed(req.projectScope, po.ProjectId)) : pos);
   } catch (err) {
     console.error("GET service-eligible POs error:", err);
     res.status(500).json({ error: err.message });
@@ -809,7 +914,7 @@ router.get("/service-eligible", async (req, res) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+const getPurchaseOrderDetail = async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;
@@ -858,7 +963,8 @@ router.get("/:id", async (req, res) => {
     console.error("GET PurchaseOrder by id error:", err);
     res.status(500).json({ error: err.message });
   }
-});
+};
+router.get("/:id", getPurchaseOrderDetail);
 
 // ── GET /:id/document-chain — PO -> Vehicle In/Out -> GRN tree ───────────────
 router.get("/:id/document-chain", async (req, res) => {
@@ -879,6 +985,7 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
+    if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
 
     const pool = getPool();
     const { PurchaseOrderID: newId, PurchaseOrderNo: finalDocNo } =
@@ -954,6 +1061,7 @@ router.put(
   async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
+    if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
     const {
       PurchaseOrderNo,
       PODate,
@@ -1010,10 +1118,20 @@ router.put(
 
       await assertNoMixedItemTypes(getPool(), poItemsArray);
 
+      if (ExpectedDeliveryDate) {
+        const minDate = await computeMinExpectedDate(getPool(), PODate, poItemsArray);
+        if (minDate && new Date(ExpectedDeliveryDate) < minDate) {
+          return res.status(400).json({
+            error: `Expected Delivery can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+          });
+        }
+      }
+
       const currentStatus = await getRecordStatus("purchase-orders", id);
       const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
       await guardEdit("purchase-orders", id, { allowPostApproval });
       const wasApproved = currentStatus === "Approved";
+      const wasRejected = currentStatus === "Rejected";
 
       const pool = getPool();
 
@@ -1028,6 +1146,11 @@ router.put(
       const beforeSnapshot = wasApproved
         ? await snapshotRow(pool, "dbo.PurchaseOrders", "PurchaseOrderID", id)
         : null;
+      // Editing an already-Approved PO must go back through approval —
+      // ignore whatever status the client sent. Mirrors journalVoucher.js's
+      // wasApproved handling and grns.js's identical fix (PO itself doesn't
+      // post to GL directly, so no reversal needed here — only GRN does).
+      const effectiveStatus = wasApproved ? "Pending" : Status || "Draft";
       const uomMap = await buildUomMap(pool);
       const fyId = await resolveFyId(pool, finYear);
       const { hasCC, hasVID, hasVIN, hasPT } = await getPOCols(pool);
@@ -1062,7 +1185,7 @@ router.put(
         .input("GstType", sql.NVarChar(20), gstType)
         .input("GstRate", sql.Decimal(5, 2), gstRate)
         .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
-        .input("Status", sql.NVarChar(50), Status || "Draft")
+        .input("Status", sql.NVarChar(50), effectiveStatus)
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
         .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
         .input("DocNo", sql.NVarChar(100), DocNo || null)
@@ -1073,7 +1196,7 @@ router.put(
         .input("GST", sql.NVarChar(sql.MAX), gstJson)
         .input("FyId", sql.Int, fyId);
 
-      if (hasCC) updateReq.input("CostCenterId2", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
+      if (hasCC) updateReq.input("CostCenterId2", sql.Int, CostCenterId !== undefined && CostCenterId !== null && CostCenterId !== "" ? parseInt(CostCenterId, 10) : null);
       if (hasVID) updateReq.input("VendorInvoiceDate2", sql.Date, VendorInvoiceDate || null);
       if (hasVIN) updateReq.input("VendorInvoiceNo2", sql.NVarChar(100), VendorInvoiceNo || null);
       if (hasPT) updateReq.input("PaymentTermId2", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
@@ -1142,7 +1265,34 @@ router.put(
         }
       }
 
-      res.json({ message: "Purchase order updated successfully" });
+      // A corrected, previously-Rejected PO goes straight back into the
+      // approval queue on save — no separate "Submit" click. transition()'s
+      // Pending branch writes a fresh Level=0 marker, which restarts
+      // approval at level 1 regardless of what was approved before the
+      // rejection (see approvalService.js's currentCycleCutoffSql).
+      let resubmitted = false;
+      if (wasRejected) {
+        try {
+          await transition("purchase-orders", id, "Pending", userEmail, req.user?.role);
+          resubmitted = true;
+        } catch (resubmitErr) {
+          console.error("[purchase-orders] auto-resubmit after edit failed:", resubmitErr.message);
+          return res.status(207).json({
+            message: "Purchase order updated, but could not be re-submitted for approval — submit it manually.",
+            resubmitError: resubmitErr.message,
+          });
+        }
+      }
+
+      res.json({
+        message: wasApproved
+          ? "Purchase order updated — sent back for approval"
+          : resubmitted
+            ? "Purchase order updated and re-submitted for approval"
+            : "Purchase order updated successfully",
+        reopenedForApproval: wasApproved,
+        resubmitted,
+      });
     } catch (err) {
       try {
         if (transaction) await transaction.rollback();
@@ -1414,7 +1564,11 @@ router.put("/:id/submit", requirePageRight("purchase-orders", "edit"), async (re
   }
 });
 
-router.put("/:id/approve", requirePageRight("purchase-orders", "edit"), async (req, res) => {
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   try {
@@ -1426,6 +1580,8 @@ router.put("/:id/approve", requirePageRight("purchase-orders", "edit"), async (r
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order approved", ...result });
@@ -1436,7 +1592,7 @@ router.put("/:id/approve", requirePageRight("purchase-orders", "edit"), async (r
   }
 });
 
-router.put("/:id/reject", requirePageRight("purchase-orders", "edit"), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   const { note } = req.body;
@@ -1450,8 +1606,23 @@ router.put("/:id/reject", requirePageRight("purchase-orders", "edit"), async (re
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("purchase-orders");
+
+    // A rejected PO no longer holds its Material Request's quantity, so refresh
+    // that MR's status (a Completed MR goes back to Approved / Partially
+    // Fulfilled and can be ordered or transferred again).
+    try {
+      const pool = getPool();
+      const src = await pool.request().input("id", sql.Int, id)
+        .query("SELECT SourceMRId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id");
+      if (src.recordset[0]?.SourceMRId) {
+        await recomputeMRFulfillment(pool, src.recordset[0].SourceMRId, null);
+      }
+    } catch (e) {
+      console.error("MR status update after PO reject failed:", e.message);
+    }
     res.json({ message: "Purchase order rejected", ...result });
   } catch (err) {
     res
@@ -1519,7 +1690,7 @@ function emitPOMessage(poId, comment) {
 }
 
 // ── GET /:id/comments — PO<->supplier chat thread (staff side) ──────────────
-router.get("/:id/comments", async (req, res) => {
+const listPurchaseOrderComments = async (req, res) => {
   const poId = parseInt(req.params.id, 10);
   if (!poId) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -1535,10 +1706,11 @@ router.get("/:id/comments", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+router.get("/:id/comments", listPurchaseOrderComments);
 
 // ── POST /:id/comment — reply in the PO<->supplier chat (staff side) ────────
-router.post("/:id/comment", async (req, res) => {
+const addPurchaseOrderComment = async (req, res) => {
   const poId = parseInt(req.params.id, 10);
   if (!poId) return res.status(400).json({ error: "Invalid id" });
   const comment = (req.body?.comment || "").trim();
@@ -1574,8 +1746,19 @@ router.post("/:id/comment", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+router.post("/:id/comment", addPurchaseOrderComment);
 
 module.exports = router;
 module.exports.createPurchaseOrderInternal = createPurchaseOrderInternal;
+// Reused by Vehicle In/Out and GRN so their PO pickers / chat work under THEIR
+// page right — this router is gated by the separate Purchase Orders right, which
+// a store user may not have. The gate lives on the router, so these bare handlers
+// are not gated here; the mounting router must enforce its own permission.
+module.exports.poHandlers = {
+  list: listPurchaseOrders,
+  detail: getPurchaseOrderDetail,
+  listComments: listPurchaseOrderComments,
+  addComment: addPurchaseOrderComment,
+};
 

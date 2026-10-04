@@ -374,7 +374,7 @@ export default function BlueprintAnnotationEditor({
           <div className="flex-1 flex flex-col items-center justify-center gap-2 py-20 text-center px-6">
             <FileText size={28} className="text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
-              No blueprint uploaded for this room yet — upload one from Setup &gt; Room Master, then come back here to mark it up.
+              No blueprint uploaded for this room yet — upload one from Setup &gt; Flat Master, then come back here to mark it up.
             </p>
           </div>
         ) : isPdf ? (
@@ -403,7 +403,7 @@ export default function BlueprintAnnotationEditor({
                     type="button"
                     title={t.label}
                     onClick={() => setTool(t.id)}
-                    className={`p-1.5 rounded-md transition-colors ${tool === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                    className={`p-1.5 rounded-md transition-colors ${tool === t.id ? "btn-module text-white" : "text-muted-foreground hover:bg-muted"}`}
                   >
                     <t.icon size={15} />
                   </button>
@@ -448,13 +448,13 @@ export default function BlueprintAnnotationEditor({
             {(annotation?.updatedBy || (referenceContext && referenceShapesDisplay.length > 0)) && (
               <div className="px-5 py-1.5 border-b border-border shrink-0 bg-muted/20 flex flex-wrap items-center gap-x-4 gap-y-1">
                 {annotation?.updatedBy && (
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-[0.6875rem] text-muted-foreground">
                     Last marked up by <span className="font-medium text-foreground">{annotation.updatedBy}</span>
                     {annotation.updatedAt && ` on ${new Date(annotation.updatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`}
                   </p>
                 )}
                 {referenceContext && referenceShapesDisplay.length > 0 && (
-                  <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                  <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1.5">
                     <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: REFERENCE_COLOR, opacity: REFERENCE_OPACITY }} />
                     Grey markup shown underneath is {CONTEXT_LABEL[referenceContext]}'s — locked, for reference only
                   </p>
@@ -520,7 +520,7 @@ export default function BlueprintAnnotationEditor({
             <button
               onClick={() => saveMutation.mutate()}
               disabled={saveMutation.isPending}
-              className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-opacity whitespace-nowrap"
+              className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-opacity whitespace-nowrap"
             >
               {saveMutation.isPending ? (
                 <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

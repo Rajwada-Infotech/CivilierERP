@@ -31,6 +31,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,12 +153,12 @@ const registerAttachmentCacheCleanup = () => {
 const priorityConfig: Record<string, { cls: string; dot: string; bar: string }> = {
   Urgent: { cls: "bg-red-500/10 text-red-600 border-red-400/20", dot: "bg-red-500", bar: "bg-red-500" },
   High: { cls: "bg-orange-500/10 text-orange-600 border-orange-400/20", dot: "bg-orange-500", bar: "bg-orange-500" },
-  Medium: { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20", dot: "bg-amber-400", bar: "bg-amber-400" },
+  Medium: { cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20", dot: "bg-amber-400", bar: "bg-amber-400" },
   Low: { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20", dot: "bg-blue-400", bar: "bg-blue-400" },
 };
 
 const statusConfig: Record<string, { cls: string; label: string; icon: React.ElementType }> = {
-  Pending: { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20", label: "Pending", icon: Clock },
+  Pending: { cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20", label: "Pending", icon: Clock },
   InProgress: { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20", label: "In Progress", icon: RefreshCw },
   Resolved: { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", label: "Resolved", icon: CheckCircle2 },
   Closed: { cls: "bg-slate-500/10 text-slate-500 border-slate-400/20", label: "Closed", icon: XCircle },
@@ -166,7 +167,7 @@ const statusConfig: Record<string, { cls: string; label: string; icon: React.Ele
 function PriorityBadge({ priority }: { priority: string }) {
   const cfg = priorityConfig[priority] ?? { cls: "bg-muted text-muted-foreground border-border", dot: "bg-muted" };
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cfg.cls}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
       {priority}
     </span>
@@ -177,7 +178,7 @@ function StatusBadge({ status }: { status: string }) {
   const cfg = statusConfig[status] ?? { cls: "bg-muted text-muted-foreground border-border", label: status, icon: Clock };
   const Icon = cfg.icon;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cfg.cls}`}>
       <Icon size={10} />
       {cfg.label}
     </span>
@@ -216,8 +217,8 @@ function AuthenticatedAttachmentImage({ url, alt, className, onClick }: { url: s
   }, [url]);
 
   const filename = url.split("/").pop()?.split("?")[0] ?? "file";
-  if (isNonImage) return <button type="button" onClick={onClick} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"><Paperclip size={10} /> {filename.length > 20 ? "File" : filename}</button>;
-  if (failed) return <button type="button" onClick={onClick} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground hover:bg-muted/80 transition-colors"><Paperclip size={10} /> {filename.length > 20 ? "Attachment" : filename}</button>;
+  if (isNonImage) return <button type="button" onClick={onClick} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[0.6875rem] text-primary hover:bg-muted transition-colors"><Paperclip size={10} /> {filename.length > 20 ? "File" : filename}</button>;
+  if (failed) return <button type="button" onClick={onClick} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted text-[0.6875rem] text-muted-foreground hover:bg-muted/80 transition-colors"><Paperclip size={10} /> {filename.length > 20 ? "Attachment" : filename}</button>;
   if (!src) return <div className="h-24 min-w-24 rounded-lg border border-border bg-muted animate-pulse" />;
   return <img src={src} alt={alt} className={className} onClick={onClick} />;
 }
@@ -260,9 +261,9 @@ function DbAttachmentList({ attachments }: { attachments: TicketAttachment[] }) 
       {attachments.map((a) => {
         const isPdf = a.mime_type === "application/pdf" || a.filename.toLowerCase().endsWith(".pdf");
         const isImage = a.mime_type.startsWith("image/");
-        if (isPdf) return <button key={a.id} onClick={() => openAttachmentViewer(a.url, a.filename)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"><Paperclip size={10} /> {a.filename.length > 20 ? "PDF" : a.filename}</button>;
+        if (isPdf) return <button key={a.id} onClick={() => openAttachmentViewer(a.url, a.filename)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[0.6875rem] text-primary hover:bg-muted transition-colors"><Paperclip size={10} /> {a.filename.length > 20 ? "PDF" : a.filename}</button>;
         if (isImage) return <AuthenticatedAttachmentImage key={a.id} url={a.url} alt={a.filename} className="h-20 w-auto rounded-lg border border-border object-cover cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-primary/40 transition-all" onClick={() => openAttachmentViewer(a.url, a.filename)} />;
-        return <button key={a.id} onClick={() => openAttachmentViewer(a.url, a.filename)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11px] text-primary hover:bg-muted transition-colors"><Paperclip size={10} /> {a.filename.length > 24 ? a.filename.slice(0, 24) + "…" : a.filename}</button>;
+        return <button key={a.id} onClick={() => openAttachmentViewer(a.url, a.filename)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[0.6875rem] text-primary hover:bg-muted transition-colors"><Paperclip size={10} /> {a.filename.length > 24 ? a.filename.slice(0, 24) + "…" : a.filename}</button>;
       })}
     </div>
   );
@@ -283,28 +284,28 @@ function TicketListCard({ ticket, onClick }: { ticket: Ticket; onClick: () => vo
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] text-muted-foreground/50">#{ticket.id}</span>
+                <span className="font-mono text-[0.625rem] text-muted-foreground/50">#{ticket.id}</span>
                 <h3 className="text-sm font-semibold text-foreground leading-snug truncate">{ticket.subject}</h3>
               </div>
               <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                   <User size={10} />
                   <span>{ticket.customer_name || "—"}</span>
                 </div>
                 {ticket.customer_phone && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <Phone size={10} />
                     <span>{ticket.customer_phone}</span>
                   </div>
                 )}
                 {fmtDate(ticket.created_at) && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <CalendarDays size={10} />
                     <span>{fmtDate(ticket.created_at)}</span>
                   </div>
                 )}
                 {(ticket.comment_count ?? 0) > 0 && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <MessageCircle size={10} />
                     <span>{ticket.comment_count}</span>
                   </div>
@@ -377,7 +378,7 @@ function TicketDetailView({
 
   const uploadFiles = async (files: File[]): Promise<number[]> => {
     if (files.length === 0) return [];
-    const token = localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+    const token = sessionStorage.getItem("token") || "";
     const allIds: number[] = [];
     for (const file of files) {
       const formData = new FormData();
@@ -574,14 +575,14 @@ function TicketDetailView({
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[11px] text-muted-foreground/50">#{ticket.id}</span>
+                <span className="font-mono text-[0.6875rem] text-muted-foreground/50">#{ticket.id}</span>
                 <h1 className="text-lg font-bold text-foreground leading-tight">{ticket.subject}</h1>
               </div>
               <div className="flex items-center gap-3 mt-1 flex-wrap">
-                <div className="flex items-center gap-1 text-[11px] text-muted-foreground"><User size={10} /><span>{ticket.customer_name}</span></div>
-                {ticket.customer_phone && <div className="flex items-center gap-1 text-[11px] text-muted-foreground"><Phone size={10} /><span>{ticket.customer_phone}</span></div>}
-                {ticket.created_at && <div className="flex items-center gap-1 text-[11px] text-muted-foreground"><CalendarDays size={10} /><span>{fmtDateTime(ticket.created_at)}</span></div>}
-                {ticket.assigned_to && <span className="text-[11px] text-muted-foreground">→ {ticket.assigned_to}</span>}
+                <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"><User size={10} /><span>{ticket.customer_name}</span></div>
+                {ticket.customer_phone && <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"><Phone size={10} /><span>{ticket.customer_phone}</span></div>}
+                {ticket.created_at && <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"><CalendarDays size={10} /><span>{fmtDateTime(ticket.created_at)}</span></div>}
+                {ticket.assigned_to && <span className="text-[0.6875rem] text-muted-foreground">→ {ticket.assigned_to}</span>}
               </div>
             </div>
             <div className="flex items-center gap-1.5">
@@ -601,7 +602,7 @@ function TicketDetailView({
             <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{ticket.issue_details}</p>
             {ticketAttachments.length > 0 && (
               <div className="mt-3">
-                <p className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1.5">
+                <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1 mb-1.5">
                   <Paperclip size={10} />{ticketAttachments.length > 1 ? `${ticketAttachments.length} Attachments` : "Attachment"}
                 </p>
                 <DbAttachmentList attachments={ticketAttachments} />
@@ -654,7 +655,7 @@ function TicketDetailView({
                   <div key={c.id} className="flex justify-center">
                     <div className="bg-emerald-500/5 border border-emerald-400/15 rounded-xl px-4 py-2.5 max-w-sm text-center">
                       <p className="text-xs text-emerald-600 font-medium">{textOnly || c.comment}</p>
-                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">{c.author_name} · {fmtDateTime(c.created_at)}</p>
+                      <p className="text-[0.625rem] text-muted-foreground/60 mt-0.5">{c.author_name} · {fmtDateTime(c.created_at)}</p>
                     </div>
                   </div>
                 );
@@ -664,9 +665,9 @@ function TicketDetailView({
                   <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5"><User size={12} className="text-muted-foreground" /></div>
                   <div className={`max-w-[75%] flex flex-col gap-0.5 ${isMe ? "items-end" : "items-start"}`}>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-muted-foreground font-medium">{c.author_name}</span>
-                      <span className="text-[9px] text-muted-foreground/50 capitalize">{c.author_role}</span>
-                      <span className="text-[10px] text-muted-foreground/40">{fmtDateTime(c.created_at)}</span>
+                      <span className="text-[0.625rem] text-muted-foreground font-medium">{c.author_name}</span>
+                      <span className="text-[0.5625rem] text-muted-foreground/50 capitalize">{c.author_role}</span>
+                      <span className="text-[0.625rem] text-muted-foreground/40">{fmtDateTime(c.created_at)}</span>
                     </div>
                     {textOnly && (
                       <div className={`px-3 py-2 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${isMe ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted text-foreground rounded-tl-sm"}`}>
@@ -694,7 +695,7 @@ function TicketDetailView({
                       {isImg ? (
                         <img src={URL.createObjectURL(f)} alt={f.name} className="h-14 w-auto rounded-lg border border-border object-cover" />
                       ) : (
-                        <div className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-border bg-muted text-[11px] text-muted-foreground ${isPdf ? "text-primary border-primary/30 bg-primary/5" : ""}`}>
+                        <div className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border border-border bg-muted text-[0.6875rem] text-muted-foreground ${isPdf ? "text-primary border-primary/30 bg-primary/5" : ""}`}>
                           <Paperclip size={10} />{f.name.length > 18 ? f.name.slice(0, 18) + "…" : f.name}
                         </div>
                       )}
@@ -718,7 +719,7 @@ function TicketDetailView({
                 style={{ minHeight: "36px", maxHeight: "120px", height: "36px" }}
                 className="flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden"
               />
-              <button onClick={handleSend} disabled={isSending || (!commentText.trim() && adminAttachFiles.length === 0)} className="w-9 h-9 flex items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0">
+              <button onClick={handleSend} disabled={isSending || (!commentText.trim() && adminAttachFiles.length === 0)} className="w-9 h-9 flex items-center justify-center rounded-xl btn-module text-white hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0">
                 {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               </button>
             </div>
@@ -775,13 +776,13 @@ function TicketDetailView({
             {SENTIMENTS.map((s) => (
               <button key={s.value} onClick={() => setSentiment(sentiment === s.value ? 0 : s.value)} className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl border text-center transition-all text-muted-foreground ${sentiment === s.value ? "border-primary bg-primary/5 scale-105" : "border-border hover:border-border/60 hover:bg-muted"}`}>
                 <s.Icon active={sentiment === s.value} />
-                <span className="text-[10px] font-medium">{s.label}</span>
+                <span className="text-[0.625rem] font-medium">{s.label}</span>
               </button>
             ))}
           </div>
           <textarea value={reviewRemarks} onChange={(e) => { setReviewRemarks(e.target.value); autoExpand(e.target); }} placeholder="Add a comment about your experience… (optional)" rows={1} style={{ minHeight: "36px", maxHeight: "120px", height: "36px" }} className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all overflow-hidden" />
           <div className="flex items-center gap-2">
-            <button onClick={submitReview} disabled={reviewSubmitting} className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50">
+            <button onClick={submitReview} disabled={reviewSubmitting} className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium btn-module text-white hover:opacity-90 transition-opacity disabled:opacity-50">
               {reviewSubmitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
               {reviewSubmitting ? "Submitting…" : "Submit Review"}
             </button>
@@ -799,7 +800,7 @@ function TicketDetailView({
 
       {/* Camera modal */}
       {showCamera && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <BodyPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2"><Camera size={15} className="text-muted-foreground" /><h2 className="text-sm font-semibold text-foreground">Capture Photo</h2></div>
@@ -821,7 +822,7 @@ function TicketDetailView({
               <button onClick={() => setShowCamera(false)} className="flex-1 px-4 py-2 rounded-xl text-sm border border-border text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </div>
   );
@@ -942,11 +943,11 @@ const PendingTickets: React.FC = () => {
             <button
               key={tab}
               onClick={() => setStatusFilter(tab)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${statusFilter === tab ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${statusFilter === tab ? "btn-module text-white" : "border border-border text-muted-foreground hover:bg-muted"}`}
             >
               {TAB_LABELS[tab]}
               {!isLoading && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${statusFilter === tab ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"}`}>
+                <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full font-mono ${statusFilter === tab ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"}`}>
                   {tabCounts[tab]}
                 </span>
               )}
@@ -971,12 +972,12 @@ const PendingTickets: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[11px] text-muted-foreground font-medium">Priority:</span>
+            <span className="text-[0.6875rem] text-muted-foreground font-medium">Priority:</span>
             {(["All", "Urgent", "High", "Medium", "Low"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPriorityFilter(p)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${priorityFilter === p ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}
+                className={`px-2.5 py-1 rounded-lg text-[0.6875rem] font-medium transition-all ${priorityFilter === p ? "btn-module text-white" : "border border-border text-muted-foreground hover:bg-muted"}`}
               >
                 {p}
               </button>

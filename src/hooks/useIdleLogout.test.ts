@@ -12,11 +12,20 @@ const TOTAL_MS = WARNING_AFTER_MS + COUNTDOWN_MS;
 describe("useIdleLogout", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    localStorage.clear();
+    // Node 25's experimental localStorage global shadows jsdom's and has no
+    // working methods — use a plain in-memory stub instead.
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, String(v)),
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+    });
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("does nothing while disabled", () => {
@@ -130,14 +139,15 @@ describe("useIdleLogout", () => {
     // localStorage.getItem/setItem throw a SecurityError. The interval tick
     // must not propagate an uncaught exception, and idle detection should
     // keep working via the in-memory fallback.
-    const originalGetItem = Storage.prototype.getItem;
-    const originalSetItem = Storage.prototype.setItem;
-    Storage.prototype.getItem = () => {
+    const throwing = () => {
       throw new Error("SecurityError: storage disabled");
     };
-    Storage.prototype.setItem = () => {
-      throw new Error("SecurityError: storage disabled");
-    };
+    vi.stubGlobal("localStorage", {
+      getItem: throwing,
+      setItem: throwing,
+      removeItem: throwing,
+      clear: throwing,
+    });
 
     try {
       const onTimeout = vi.fn();
@@ -159,8 +169,7 @@ describe("useIdleLogout", () => {
 
       expect(onTimeout).toHaveBeenCalledTimes(1);
     } finally {
-      Storage.prototype.getItem = originalGetItem;
-      Storage.prototype.setItem = originalSetItem;
+      vi.unstubAllGlobals();
     }
   });
 });

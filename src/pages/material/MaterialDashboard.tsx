@@ -4,8 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { formatCompactINR } from "@/utils/formatCurrency";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import {
   MaterialShell,
@@ -140,7 +141,7 @@ const statusColors: Record<string, string> = {
   "Fully Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   Ordered: "bg-violet-500/10 text-violet-600 border-violet-400/20",
   "Partially Ordered": "bg-purple-500/10 text-purple-600 border-purple-400/20",
-  Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+  Pending: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
   Draft: "bg-muted text-muted-foreground border-border",
   Open: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   "Partially Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
@@ -153,7 +154,7 @@ function StatusBadge({ status }: { status: string }) {
     statusColors[status] ?? "bg-muted text-muted-foreground border-border";
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cls}`}
     >
       {status || "Draft"}
     </span>
@@ -182,7 +183,7 @@ function StatCard({
   onClick?: () => void;
 }) {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   return (
     <div
       onClick={onClick}
@@ -205,7 +206,7 @@ function StatCard({
       <div className="absolute top-0 left-0 right-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accentColor}50, transparent)` }} />
       <div className="relative z-10 p-4 flex flex-col gap-3">
         <div className="flex items-start justify-between gap-2">
-          <span className="text-[10px] font-heading font-semibold uppercase tracking-widest leading-tight" style={{ color: accentColor, opacity: 0.85 }}>
+          <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest leading-tight" style={{ color: accentColor, opacity: 0.85 }}>
             {label}
           </span>
           <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${accentColor}18`, border: `1px solid ${accentColor}30` }}>
@@ -223,7 +224,7 @@ function StatCard({
             {trend === "down" && (
               <ArrowDownRight size={12} className="text-red-500" />
             )}
-            <span className="text-[11px] text-muted-foreground leading-tight">
+            <span className="text-[0.6875rem] text-muted-foreground leading-tight">
               {sub}
             </span>
           </div>
@@ -255,6 +256,7 @@ function DonutCard({
   title: string; icon: React.ElementType; accentColor: string; data: DonutPoint[];
   isDark: boolean; glassStyle: React.CSSProperties; formatValue?: (n: number) => string;
 }) {
+  const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <div className="rounded-xl overflow-hidden" style={glassStyle}>
@@ -272,7 +274,7 @@ function DonutCard({
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2} strokeWidth={0}>
-                  {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+                  {data.map((d, i) => <Cell key={i} fill={bwChartColor(theme, i, d.color)} />)}
                 </Pie>
                 <Tooltip
                   content={({ active, payload }) => {
@@ -289,9 +291,9 @@ function DonutCard({
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d) => (
+              {data.map((d, i) => (
                 <div key={d.name} className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: bwChartColor(theme, i, d.color) }} />
                   <span className="text-xs text-foreground whitespace-nowrap">{d.name}</span>
                   <span className="text-xs text-muted-foreground ml-auto sm:ml-3">{formatValue(d.value)}</span>
                 </div>
@@ -313,6 +315,7 @@ function TrendCard({
   data: { date: string; [key: string]: number | string }[]; series: TrendSeries[];
   isDark: boolean; glassStyle: React.CSSProperties;
 }) {
+  const { theme } = useTheme();
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
     <div className="rounded-xl overflow-hidden" style={glassStyle}>
@@ -339,7 +342,7 @@ function TrendCard({
               <YAxis
                 tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
                 axisLine={false} tickLine={false} width={40}
-                tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
+                tickFormatter={formatCompactINR}
               />
               <Tooltip
                 labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
@@ -350,8 +353,8 @@ function TrendCard({
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              {series.map((s) => (
-                <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+              {series.map((s, i) => (
+                <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={bwChartColor(theme, i, s.color)} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
               ))}
             </LineChart>
           </ResponsiveContainer>
@@ -392,7 +395,7 @@ function SectionHeader({
           {title}
         </span>
         {sub && (
-          <span className="text-[10px] text-muted-foreground hidden sm:inline">
+          <span className="text-[0.625rem] text-muted-foreground hidden sm:inline">
             {sub}
           </span>
         )}
@@ -400,7 +403,7 @@ function SectionHeader({
       {action && onAction && (
         <button
           onClick={onAction}
-          className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+          className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
           style={{ color: accentColor }}
         >
           {action} →
@@ -657,7 +660,7 @@ const REQUEST_DASH_COLS: ColumnDef<any, unknown>[] = [
             : "bg-muted text-muted-foreground border-border";
       return (
         <span
-          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cls}`}
         >
           {p || "Normal"}
         </span>
@@ -745,7 +748,7 @@ export default function MaterialDashboard() {
   const rights = usePageRights("material-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [openModal, setOpenModal] = useState<ModalKey>(null);
 
   // Reusable theme-aware glass panel style
@@ -1403,11 +1406,11 @@ export default function MaterialDashboard() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-[10px] text-emerald-600 font-medium">
+                      <span className="text-[0.625rem] text-emerald-600 font-medium">
                         +{fmtNum(item.TotalIn)}
                       </span>
                       {item.TotalOut > 0 && (
-                        <span className="text-[10px] text-red-500 font-medium">
+                        <span className="text-[0.625rem] text-red-500 font-medium">
                           -{fmtNum(item.TotalOut)}
                         </span>
                       )}

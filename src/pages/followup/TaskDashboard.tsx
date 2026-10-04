@@ -33,9 +33,11 @@ import { FollowupShell } from "@/components/followup/FollowupShell";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { GlassCard, GlassSection, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const REPORT_API = "/api/task-performance-report";
 const ACCENT = "#0d9488";
@@ -146,7 +148,7 @@ async function fetchReport(filters: Filters): Promise<ReportRow[]> {
 
 function useGlass() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const cardStyle = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
     border: `1px solid ${ACCENT}26`,
@@ -173,6 +175,7 @@ const DonutCard: React.FC<{
   isDark: boolean;
   cardStyle: React.CSSProperties;
 }> = ({ title, icon: Icon, data, isDark, cardStyle }) => {
+  const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <div className="rounded-xl overflow-hidden" style={cardStyle}>
@@ -191,7 +194,7 @@ const DonutCard: React.FC<{
               <PieChart>
                 <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2} strokeWidth={0}>
                   {data.map((d, i) => (
-                    <Cell key={i} fill={d.color} />
+                    <Cell key={i} fill={bwChartColor(theme, i, d.color)} />
                   ))}
                 </Pie>
                 <Tooltip
@@ -211,11 +214,11 @@ const DonutCard: React.FC<{
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d) => {
+              {data.map((d, i) => {
                 const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : "0";
                 return (
                   <div key={d.name} className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: bwChartColor(theme, i, d.color) }} />
                     <span className="text-xs text-foreground whitespace-nowrap">{d.name}</span>
                     <span className="text-xs text-muted-foreground ml-auto sm:ml-3">
                       {d.value} <span className="opacity-60">({pct}%)</span>
@@ -247,6 +250,7 @@ const UserPerformanceChart: React.FC<{ data: UserPerf[]; isDark: boolean; cardSt
   isDark,
   cardStyle,
 }) => {
+  const { theme } = useTheme();
   const chartData = [...data].sort((a, b) => b.assigned - a.assigned).slice(0, 10);
   return (
     <div className="rounded-xl overflow-hidden" style={cardStyle}>
@@ -282,9 +286,9 @@ const UserPerformanceChart: React.FC<{ data: UserPerf[]; isDark: boolean; cardSt
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              <Bar dataKey="completed" name="Completed" fill="#22c55e" radius={[0, 3, 3, 0]} />
-              <Bar dataKey="pending" name="Pending" fill="#f59e0b" radius={[0, 3, 3, 0]} />
-              <Bar dataKey="overdue" name="Overdue" fill="#ef4444" radius={[0, 3, 3, 0]} />
+              <Bar dataKey="completed" name="Completed" fill={theme === "bw" ? "#008000" : "#22c55e"} radius={[0, 3, 3, 0]} />
+              <Bar dataKey="pending" name="Pending" fill={theme === "bw" ? "#FFA500" : "#f59e0b"} radius={[0, 3, 3, 0]} />
+              <Bar dataKey="overdue" name="Overdue" fill={theme === "bw" ? "#800000" : "#ef4444"} radius={[0, 3, 3, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -301,7 +305,7 @@ const inputCls =
 function FilterField({ icon: Icon, label, children }: { icon: React.ElementType; label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <label className="block text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
+      <label className="block text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
       <div className="relative">
         <Icon size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
         {children}
@@ -484,8 +488,8 @@ const TaskDashboard: React.FC = () => {
       {/* ── Filters ──────────────────────────────────────────────────────── */}
       <div className="rounded-xl p-4" style={cardStyle}>
         <div className="flex items-center justify-between mb-3">
-          <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT }}>Filters</p>
-          <button onClick={resetFilters} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+          <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT }}>Filters</p>
+          <button onClick={resetFilters} className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors">
             <RotateCcw size={11} /> Reset
           </button>
         </div>
@@ -503,10 +507,10 @@ const TaskDashboard: React.FC = () => {
             </select>
           </FilterField>
           <FilterField icon={Users} label="User">
-            <select className={selectCls} value={filters.userId} onChange={(e) => updateFilter({ userId: e.target.value })}>
+            <SearchableNativeSelect className={selectCls} value={filters.userId} onChange={(e) => updateFilter({ userId: e.target.value })}>
               <option value="">All Users</option>
               {users.map((u) => <option key={u.id} value={String(u.id)}>{u.name}</option>)}
-            </select>
+            </SearchableNativeSelect>
           </FilterField>
           <FilterField icon={Flag} label="Priority">
             <select className={selectCls} value={filters.priority} onChange={(e) => updateFilter({ priority: e.target.value })}>
@@ -522,8 +526,8 @@ const TaskDashboard: React.FC = () => {
           </FilterField>
           <FilterField icon={Clock} label="Date Range">
             <div className="flex gap-1">
-              <input type="date" className={`${inputCls} pl-2`} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} />
-              <input type="date" className={`${inputCls} pl-2`} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} />
+              <DateInput className={`${inputCls} pl-2`} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} />
+              <DateInput className={`${inputCls} pl-2`} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} />
             </div>
           </FilterField>
         </div>

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -8,7 +9,8 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -20,7 +22,10 @@ function decodeBase64File(f, label) {
   const buffer = Buffer.from(f.base64, "base64");
   if (!buffer.length) throw new Error(`${label}: file is empty`);
   if (buffer.length > MAX_FILE_BYTES) throw new Error(`${label}: ${f.fileName} is too large (max ${(MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB)`);
-  return { fileName: f.fileName, mimeType: f.mimeType || "application/octet-stream", buffer };
+  const mimeType = f.mimeType || "application/octet-stream";
+  const sigErr = verifyFileMatchesDeclaredType({ buffer, mimetype: mimeType });
+  if (sigErr) throw new Error(`${label}: ${sigErr}`);
+  return { fileName: f.fileName, mimeType, buffer };
 }
 
 // Amount (StampDuty + RegistrationFee) is stored on this record — unlike the
@@ -44,10 +49,19 @@ router.get("/", requirePageRight("crm-afs-query-payment", "view"), async (req, r
   try {
     const pool = getPool();
     const { status } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const where = [];
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("aqp.Status = @st"); }
-    const result = await req0.query(`${AQP_SELECT} ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY aqp.CreatedAt DESC`);
+    // Not paginated — status counts are computed client-side from the full
+    // set (see CrmAfsQueryPayment.tsx), same reasoning as CrmDemands.
+    // Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
+    const result = await req0.query(`${AQP_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY aqp.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-afs-query-payment] GET error:", e.message);
@@ -59,11 +73,43 @@ router.get("/booking/:bookingId", requirePageRight("crm-afs-query-payment", "vie
   try {
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId, 10);
+    if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${AQP_SELECT} WHERE aqp.BookingId = @bid`);
     res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-afs-query-payment] GET /booking/:id error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /eligible-bookings — bookings the "Start" dialog should offer. Mirrors
+// the real POST / gate exactly (Agreement Executed/Registered, no tracker
+// yet) instead of the frontend fetching the generic /api/crm/bookings list
+// and filtering client-side against an AgreementStatus field — the same
+// drift risk fixed for Legal Milestones/Query Payment/Mutation this session:
+// a client-side filter can silently fall out of sync with the real gate.
+// MUST be registered before GET /:id below — Express matches routes in
+// registration order, and ":id" would otherwise swallow this literal path
+// (treating "eligible-bookings" as the :id value), the exact bug already
+// found and fixed once this session in crmQueryPayment.js.
+router.get("/eligible-bookings", requirePageRight("crm-afs-query-payment", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
+             ag.AgreementNo, ag.Id AS AgreementId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id AND ag.Status IN ('Executed', 'Registered')
+      WHERE b.Status = 'Approved' AND b.IsActive = 1
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmAfsQueryPayment WHERE BookingId = b.Id)
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-afs-query-payment] eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -71,7 +117,8 @@ router.get("/booking/:bookingId", requirePageRight("crm-afs-query-payment", "vie
 router.get("/:id", requirePageRight("crm-afs-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`${AQP_SELECT} WHERE aqp.Id = @id`);
     if (!result.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
 
@@ -97,7 +144,10 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
 
-    const activeErr = await requireActiveBooking(pool, bookingId);
+    // Same upgrade as crmQueryPayment.js — requireActiveBooking allowed
+    // Expired/Pending bookings through; this whole module only ever starts
+    // once an Agreement is Executed, so the booking should still be Approved.
+    const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     // Agreement must exist and be at least Executed — that's when both sides
@@ -111,6 +161,12 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
     if (![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.Status)) {
       return res.status(400).json({ error: `AFS Query Payment requires the Agreement for Sale to be Executed or Registered first (current status: ${agr.Status})` });
     }
+
+    // The amount may be left blank at creation (the UI now lets staff open the
+    // tracker first and fill the government-calculated figure in before it is
+    // sent to the customer). It is instead enforced at POST /:id/info below —
+    // paperwork cannot be sent to the customer with no fee on record — so a
+    // tracker with a blank amount can never actually reach them.
 
     const aqpNo = await getNextDocNumber(pool, "AQP", "AQP");
     const result = await pool.request()
@@ -140,13 +196,14 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
 router.put("/:id", requirePageRight("crm-afs-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
     const row = cur.recordset[0];
-    const activeErr = await requireActiveBooking(pool, row.BookingId);
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
     if (row.Status !== CrmStatus.PENDING) {
       return res.status(400).json({ error: "Stamp Duty and Registration Fee can no longer be edited once the paperwork has been sent to the customer" });
@@ -177,13 +234,23 @@ router.put("/:id", requirePageRight("crm-afs-query-payment", "edit"), async (req
 router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId, Status FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
+      .query("SELECT BookingId, Status, StampDuty, RegistrationFee FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
     const row = cur.recordset[0];
-    const activeErr = await requireActiveBooking(pool, row.BookingId);
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    // The fee amount is optional at creation but mandatory here — the customer
+    // is being told what to pay at the Sub-Registrar, so there must be a
+    // figure on record before the paperwork goes out.
+    if (row.Status === CrmStatus.PENDING
+        && (row.StampDuty == null || Number(row.StampDuty) === 0)
+        && (row.RegistrationFee == null || Number(row.RegistrationFee) === 0)) {
+      return res.status(400).json({ error: "Enter the Stamp Duty or Registration Fee amount before sending the details to the customer." });
+    }
 
     const rawFiles = Array.isArray(req.body.files) ? req.body.files : [];
     if (!rawFiles.length) return res.status(400).json({ error: "At least one file is required" });
@@ -195,34 +262,46 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
     }
 
     const actor = actorId(req);
-    for (const file of files) {
-      await pool.request()
-        .input("aqpid", sql.Int,            id)
-        .input("dtype", sql.NVarChar(20),   "Info")
-        .input("fname", sql.NVarChar(255),  file.fileName)
-        .input("mtype", sql.NVarChar(100),  file.mimeType)
-        .input("fsize", sql.Int,            file.buffer.length)
-        .input("fdata", sql.VarBinary(sql.MAX), file.buffer)
-        .input("ub",    sql.Int,            actor)
-        .query(`
-          INSERT INTO dbo.CrmAfsQueryPaymentAttachments (AfsQueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
-          VALUES (@aqpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+    // Multiple attachment INSERTs + the Status flip + comm log — wrapped so
+    // a failure partway through a multi-file upload can't leave some files
+    // attached and others missing while the status already reads InfoSent.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      for (const file of files) {
+        await tx.request()
+          .input("aqpid", sql.Int,            id)
+          .input("dtype", sql.NVarChar(20),   "Info")
+          .input("fname", sql.NVarChar(255),  file.fileName)
+          .input("mtype", sql.NVarChar(100),  file.mimeType)
+          .input("fsize", sql.Int,            file.buffer.length)
+          .input("fdata", sql.VarBinary(sql.MAX), file.buffer)
+          .input("ub",    sql.Int,            actor)
+          .query(`
+            INSERT INTO dbo.CrmAfsQueryPaymentAttachments (AfsQueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
+            VALUES (@aqpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          `);
+      }
+
+      if (row.Status === CrmStatus.PENDING) {
+        await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
+          UPDATE dbo.CrmAfsQueryPayment SET Status = 'InfoSent', InfoSentAt = SYSDATETIME(), InfoSentBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
         `);
-    }
+      }
 
-    if (row.Status === CrmStatus.PENDING) {
-      await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
-        UPDATE dbo.CrmAfsQueryPayment SET Status = 'InfoSent', InfoSentAt = SYSDATETIME(), InfoSentBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    }
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Outbound",
+        subject: "AFS stamp duty / registration fee details sent to customer",
+        summary: "Required government payment amount and paperwork for AFS registration shared with the customer.",
+        createdBy: actor,
+      });
 
-    await logCommunication(pool, {
-      bookingId: row.BookingId, direction: "Outbound",
-      subject: "AFS stamp duty / registration fee details sent to customer",
-      summary: "Required government payment amount and paperwork for AFS registration shared with the customer.",
-      createdBy: actor,
-    });
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     res.json({ success: true, count: files.length });
   } catch (e) {
@@ -237,7 +316,8 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
 router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id)
@@ -248,7 +328,7 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     if (row.Status !== "InfoSent") {
       return res.status(400).json({ error: "Payment details must be sent to the customer (InfoSent) before confirming — the customer must know what they paid and why" });
     }
-    const activeErr = await requireActiveBooking(pool, row.BookingId);
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     let proof = null;
@@ -261,40 +341,52 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     }
 
     const actor = actorId(req);
-    if (proof) {
-      await pool.request()
-        .input("aqpid", sql.Int,            id)
-        .input("dtype", sql.NVarChar(20),   "Proof")
-        .input("fname", sql.NVarChar(255),  proof.fileName)
-        .input("mtype", sql.NVarChar(100),  proof.mimeType)
-        .input("fsize", sql.Int,            proof.buffer.length)
-        .input("fdata", sql.VarBinary(sql.MAX), proof.buffer)
-        .input("ub",    sql.Int,            actor)
+    // Proof attachment INSERT + Status flip to Confirmed + comm log — wrapped
+    // so a failure between them can't leave the confirmation recorded with no
+    // proof attached, or vice versa.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (proof) {
+        await tx.request()
+          .input("aqpid", sql.Int,            id)
+          .input("dtype", sql.NVarChar(20),   "Proof")
+          .input("fname", sql.NVarChar(255),  proof.fileName)
+          .input("mtype", sql.NVarChar(100),  proof.mimeType)
+          .input("fsize", sql.Int,            proof.buffer.length)
+          .input("fdata", sql.VarBinary(sql.MAX), proof.buffer)
+          .input("ub",    sql.Int,            actor)
+          .query(`
+            INSERT INTO dbo.CrmAfsQueryPaymentAttachments (AfsQueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
+            VALUES (@aqpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          `);
+      }
+
+      await tx.request()
+        .input("id",  sql.Int,           id)
+        .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null && b.ConfirmedAmount !== "" ? parseFloat(b.ConfirmedAmount) : null)
+        .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+        .input("ub",  sql.Int,           actor)
         .query(`
-          INSERT INTO dbo.CrmAfsQueryPaymentAttachments (AfsQueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
-          VALUES (@aqpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          UPDATE dbo.CrmAfsQueryPayment SET
+            Status = 'Confirmed', ConfirmedAt = SYSDATETIME(), ConfirmedBy = @ub,
+            ConfirmedAmount = @amt, Remarks = ISNULL(@rem, Remarks),
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
         `);
+
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Inbound",
+        subject: "AFS government payment confirmed",
+        summary: "Staff confirmed the customer has remitted AFS stamp duty and registration fee to the Sub-Registrar Office.",
+        createdBy: actor,
+      });
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
-
-    await pool.request()
-      .input("id",  sql.Int,           id)
-      .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null ? parseFloat(b.ConfirmedAmount) : null)
-      .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
-      .input("ub",  sql.Int,           actor)
-      .query(`
-        UPDATE dbo.CrmAfsQueryPayment SET
-          Status = 'Confirmed', ConfirmedAt = SYSDATETIME(), ConfirmedBy = @ub,
-          ConfirmedAmount = @amt, Remarks = ISNULL(@rem, Remarks),
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-
-    await logCommunication(pool, {
-      bookingId: row.BookingId, direction: "Inbound",
-      subject: "AFS government payment confirmed",
-      summary: "Staff confirmed the customer has remitted AFS stamp duty and registration fee to the Sub-Registrar Office.",
-      createdBy: actor,
-    });
 
     res.json({ success: true });
   } catch (e) {
@@ -306,7 +398,8 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
 router.get("/attachment/:attachId", requirePageRight("crm-afs-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const attachId = parseInt(req.params.attachId, 10);
+    const attachId = parseId(req.params.attachId);
+    if (attachId === null) return res.status(400).json({ error: "Invalid attachId" });
     const result = await pool.request().input("id", sql.Int, attachId)
       .query("SELECT FileName, MimeType, FileData FROM dbo.CrmAfsQueryPaymentAttachments WHERE AttachmentId = @id");
     const attachment = result.recordset[0];

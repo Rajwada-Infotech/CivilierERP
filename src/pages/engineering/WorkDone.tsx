@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
@@ -16,6 +17,9 @@ import {
 import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { Button } from "@/components/ui/button";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
+import { printStatusLabel } from "@/utils/printStatus";
 import {
   Hammer,
   Plus,
@@ -33,6 +37,8 @@ import {
   Printer,
   X,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Style constants ──────────────────────────────────────────────────────────
 const inputCls =
@@ -440,7 +446,7 @@ function WorkDoneForm({
                     ? projects.filter(
                         (p) =>
                           !p.company_id ||
-                          p.company_id === parseInt(form.companyId),
+                          projectBelongsToCompany(p as any, form.companyId),
                       )
                     : projects
                   ).map((o) => (
@@ -518,8 +524,7 @@ function WorkDoneForm({
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   size={14}
                 />
-                <input
-                  type="date"
+                <DateInput
                   value={form.docDate}
                   onChange={(e) => setField("docDate", e.target.value)}
                   className={`w-full pl-8 pr-3 py-2.5 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-red-400" : "border-border"}`}
@@ -643,7 +648,7 @@ function WorkDoneForm({
               </select>
             )}
             {woSummaryLoading && (
-              <p className="text-[10px] text-muted-foreground mt-1 animate-pulse">
+              <p className="text-[0.625rem] text-muted-foreground mt-1 animate-pulse">
                 Loading WO summary…
               </p>
             )}
@@ -678,7 +683,7 @@ function WorkDoneForm({
                     key={label}
                     className="rounded-lg bg-muted/40 border border-border/60 px-2.5 py-2"
                   >
-                    <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                    <p className="text-[0.5625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
                       {label}
                     </p>
                     <p className={`text-xs font-bold ${cls}`}>
@@ -727,8 +732,7 @@ function WorkDoneForm({
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   size={14}
                 />
-                <input
-                  type="date"
+                <DateInput
                   value={form.PeriodFrom}
                   onChange={(e) => setField("PeriodFrom", e.target.value)}
                   className="w-full pl-8 pr-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
@@ -742,8 +746,7 @@ function WorkDoneForm({
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   size={14}
                 />
-                <input
-                  type="date"
+                <DateInput
                   value={form.PeriodTo}
                   onChange={(e) => setField("PeriodTo", e.target.value)}
                   className="w-full pl-8 pr-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
@@ -897,7 +900,7 @@ function WorkDoneForm({
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">
                     Labour
                   </p>
                   <p className="text-sm font-bold text-blue-600 mt-0.5">
@@ -912,7 +915,7 @@ function WorkDoneForm({
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">
                     Material
                   </p>
                   <p className="text-sm font-bold text-amber-600 mt-0.5">
@@ -925,7 +928,7 @@ function WorkDoneForm({
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">
                     Gross Amount
                   </p>
                   <p className="text-sm font-bold text-foreground mt-0.5">
@@ -933,7 +936,7 @@ function WorkDoneForm({
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">
                     Certified Amount
                   </p>
                   <p className="text-sm font-bold text-emerald-600 mt-0.5">
@@ -1012,7 +1015,7 @@ const WorkDoneRowActions: React.FC<{
 }> = ({ record, canEdit, canPrint, onView, onPrint, onEdit, onRefresh }) => {
   return (
     <div className="flex items-center gap-1">
-      <button
+      <button data-row-view
         onClick={onView}
         title="View details"
         className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-primary"
@@ -1032,7 +1035,7 @@ const WorkDoneRowActions: React.FC<{
       {canEdit && (
         <button
           onClick={onEdit}
-          className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
+          className="text-[0.625rem] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
         >
           <PenSquare size={11} /> Edit
         </button>
@@ -1134,6 +1137,13 @@ export default function WorkDone() {
       ? entries
       : entries.filter((e) => e.Status === statusFilter);
 
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: approvalTrails, isLoading: approvalTrailsLoading } = useApprovalTrailsBulk(
+    "WorkDone",
+    filtered.map((e) => e.ID),
+  );
+
   const totalCertified = filtered.reduce(
     (sum, e) => sum + (e.CertifiedAmount ?? 0),
     0,
@@ -1215,7 +1225,7 @@ export default function WorkDone() {
   <div class="doc-block">
     <div class="doc-label">Document No</div>
     <div class="doc-no">${r.DocNo || "—"}</div>
-    <div style="margin-top:6px"><span class="status-badge">${r.Status || "Draft"}</span></div>
+    <div style="margin-top:6px"><span class="status-badge">${printStatusLabel(r.Status) || "Draft"}</span></div>
   </div>
 </div>
 
@@ -1274,7 +1284,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
       accessorKey: "DocNo",
       header: "Doc No",
       cell: ({ getValue }) => (
-        <span className="font-mono text-[11px] text-primary font-medium">
+        <span className="font-mono text-[0.6875rem] text-primary font-medium">
           {(getValue() as string) || "—"}
         </span>
       ),
@@ -1345,7 +1355,13 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
       header: "Status",
       cell: ({ getValue, row }) => (
         <div>
-          <ApprovalStatusChain table="WorkDone" recordId={row.original.ID} />
+          <ApprovalStatusChain
+            table="WorkDone"
+            recordId={row.original.ID}
+            fallback={<StatusBadge status={getValue() as string} />}
+            preloaded={approvalTrails.get(String(row.original.ID)) ?? null}
+            preloadedLoading={approvalTrailsLoading}
+          />
         </div>
       ),
     },
@@ -1502,6 +1518,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                   searchable
                   paginated
                   emptyMessage="No work done entries found."
+                  getRowId={(r: any) => String(r.ID)}
                 />
               )}
             </div>
@@ -1522,7 +1539,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
 
         {/* ── View Modal ── */}
         {viewRecord && (
-          <div
+          <BodyPortal><div
             className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
             onClick={() => setViewRecord(null)}
           >
@@ -1605,7 +1622,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                       ],
                     ].map(([label, value]) => (
                       <div key={label}>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">
+                        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">
                           {label}
                         </p>
                         <p className="text-sm text-foreground font-medium">
@@ -1630,7 +1647,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                       ["Rate Per Unit", fmt(viewRecord.RatePerUnit)],
                     ].map(([label, value]) => (
                       <div key={label}>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">
+                        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">
                           {label}
                         </p>
                         <p className="text-sm text-foreground font-medium">
@@ -1641,7 +1658,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                   </div>
                   {viewRecord.DescriptionOfWork && (
                     <div className="px-4 pb-4">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">
+                      <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">
                         Description of Work
                       </p>
                       <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2.5 leading-relaxed">
@@ -1685,7 +1702,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                 {/* Remarks */}
                 {viewRecord.Remarks && (
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">
                       Remarks
                     </p>
                     <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2.5">
@@ -1695,13 +1712,13 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                 )}
 
                 {/* Created info */}
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-2 border-t border-border">
+                <div className="flex items-center justify-between text-[0.625rem] text-muted-foreground pt-2 border-t border-border">
                   <span>Created by {viewRecord.CreatedBy || "—"}</span>
                   <span>{fmtDate(viewRecord.CreatedAt)}</span>
                 </div>
               </div>
             </div>
-          </div>
+          </div></BodyPortal>
         )}
       </EngineeringShell>
     </>

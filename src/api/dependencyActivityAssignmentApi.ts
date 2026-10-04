@@ -64,6 +64,64 @@ export interface AssignmentCheckpoint {
   // Snapshotted off the master checkpoint (see migration 354) at the
   // moment it's attached to this rung — null means checkable any time.
   minWaitDays?: number | null;
+  /** The master flags it "daily" (Work Checkpoint Master) — shows a calendar + live
+   *  camera for one photo update per day. Snapshotted, decided by the server. */
+  isDaily?: boolean;
+  /** How many days already have an update logged (server-provided). */
+  updateCount?: number;
+}
+
+export interface CheckpointUpdate {
+  id: number;
+  /** YYYY-MM-DD */
+  date: string;
+  hasPhoto: boolean;
+  note: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export const getCheckpointUpdates = async (checkpointId: number): Promise<CheckpointUpdate[]> => {
+  const res = await fetchWithAuth(`${BASE}/checkpoint/${checkpointId}/updates`);
+  return handleResponse<CheckpointUpdate[]>(res);
+};
+
+/** Log (or replace) the update for one date. */
+export const saveCheckpointUpdate = async (
+  checkpointId: number,
+  input: { date: string; photo?: Blob; note?: string },
+): Promise<{ success: boolean; id: number; replaced: boolean }> => {
+  const form = new FormData();
+  form.append("date", input.date);
+  if (input.note) form.append("note", input.note);
+  if (input.photo) form.append("photo", input.photo, `checkpoint-${input.date}.jpg`);
+  const res = await fetchWithAuth(`${BASE}/checkpoint/${checkpointId}/updates`, { method: "POST", body: form });
+  return handleResponse(res);
+};
+
+export const deleteCheckpointUpdate = async (id: number): Promise<{ success: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/checkpoint-update/${id}`, { method: "DELETE" });
+  return handleResponse<{ success: boolean }>(res);
+};
+
+/** The photo needs the auth header, so it's fetched as a blob and shown via an object URL. */
+export const fetchCheckpointUpdatePhoto = async (id: number): Promise<string> => {
+  const res = await fetchWithAuth(`${BASE}/checkpoint-update/${id}/photo`);
+  if (!res.ok) throw new Error("Photo not available");
+  return URL.createObjectURL(await res.blob());
+};
+
+// A per-assignment approval level — same shape as Approval Setup's own
+// ApprovalLevel (src/pages/admin/ApprovalSetup.tsx), just scoped to this one
+// activity assignment instead of a module-wide workflow. "all" levels are
+// sequential steps (each must approve in turn); a level with mode "any"
+// lets any ONE of its userIds approve to clear that step — the "one by one
+// then either" case is a run of "all" levels ending in one "any" level.
+export interface ApprovalLevel {
+  id: string;
+  label: string;
+  userIds: number[];
+  mode: "all" | "any";
 }
 
 export interface RungAssignmentDetail {
@@ -72,6 +130,8 @@ export interface RungAssignmentDetail {
   candidateItems: CandidateItem[];
   assignment: {
     engineerIds: number[];
+    qcUserIds: number[];
+    approvalLevels: ApprovalLevel[];
     startDate: string | null;
     days: number | null;
     endDate: string | null;
@@ -88,6 +148,8 @@ export interface RungAssignmentDetail {
 
 export interface RungAssignmentPayload {
   engineerIds: number[];
+  qcUserIds: number[];
+  approvalLevels: ApprovalLevel[];
   startDate: string | null;
   days: number | null;
   endDate: string | null;
@@ -136,6 +198,7 @@ export const saveRungAssignment = async (
 // constraint (see migration 334).
 export const ASSIGNMENT_STATUSES = [
   "PENDING",
+  "ALLOCATED",
   "IN_PROGRESS",
   "HOLD",
   "CANCELLED",
@@ -150,26 +213,82 @@ export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-slate-500/10 text-slate-600 dark:text-slate-400" },
+  // Set automatically the moment an engineer is assigned (Work
+  // Allocation) — the activity sits here until that engineer reports
+  // progress for the first time, which is what actually flips it to
+  // IN_PROGRESS (see dependencyActivityAssignment.js's PATCH
+  // /:rungId/status autoStatus branch).
+  ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
   IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
-  HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+  HOLD: { label: "Hold", className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400" },
   CANCELLED: { label: "Cancelled", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
   APPROVED: { label: "Approved", className: "bg-teal-500/10 text-teal-600 dark:text-teal-400" },
   REWORK: { label: "Rework", className: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400" },
   COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
 };
 
+// The status dropdown is an In Progress <-> Hold toggle, plus Cancelled —
+// which is reachable from any stage, including a terminal one (Completed/
+// Approved), per explicit instruction. Completed is set automatically by
+// dragging the progress bar to 100% (see ActivityDetailModal's
+// ProgressDragBar); a QC decision can only ever land back on Completed
+// ("QC Passed") or fork to Rework — Approved is reachable only from an
+// explicit approval action afterwards (dependencyActivityAssignment.js's
+// handleApproveLevel — a named approver, or a super_admin when no approval
+// levels are configured), never automatically from QC passing on its own.
+// Rework's one way out is manually re-opening it to In Progress to redo
+// the work.
+// A single-element result means "read-only badge, no dropdown" — see
+// AssignmentStatusSelect (only Cancelled itself is truly terminal). Mirrored
+// server-side in dependencyActivityAssignment.js's status route — keep the
+// two in sync.
+export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus[] {
+  if (current === "CANCELLED") return ["CANCELLED"];
+  if (current === "REWORK") return ["REWORK", "IN_PROGRESS", "CANCELLED"];
+  if (current === "PENDING" || current === "ALLOCATED" || current === "IN_PROGRESS" || current === "HOLD") {
+    return ["IN_PROGRESS", "HOLD", "CANCELLED"];
+  }
+  return [current, "CANCELLED"];
+}
+
 export interface ReportedAssignment {
   assignmentId: number;
   rungId: number;
   engineerNames: string | null;
+  qcNames: string | null;
   startDate: string | null;
   days: number | null;
   endDate: string | null;
+  // The date the assigned engineer actually reported progress for the
+  // first time — set once and never overwritten (see
+  // dependencyActivityAssignment.js's isFirstReport). StartDate is only
+  // ever a tentative plan; (firstReportedAt - startDate) is the real delay
+  // before work began. Null until that first report happens.
+  firstReportedAt: string | null;
   labourSource: SourceType | null;
   materialSource: SourceType | null;
   description: string | null;
   remarks: string | null;
   status: AssignmentStatus;
+  // What Status was right before this activity got Cancelled — only ever
+  // non-null while status === "CANCELLED". Determines what restoring it
+  // (super_admin only) puts it back to: APPROVED if that's genuinely what
+  // it was, IN_PROGRESS otherwise.
+  preCancelStatus: AssignmentStatus | null;
+  progressPercent: number;
+  // Latest QC decision, if this activity has ever been inspected — drives
+  // the "QC Checked" badge shown everywhere this row appears, and (once
+  // APPROVED) means it's no longer the Quality Check page's job, it's
+  // awaiting the approval workflow or already finalized.
+  qcStatus: "APPROVED" | "REWORK" | null;
+  // Rework forks a brand-new attempt rather than mutating the rejected one
+  // in place (see migration 488) — attemptNo counts which attempt this is,
+  // and reworkFromAssignmentId/reworkReason/reworkSource describe why the
+  // attempt before this one exists at all (both null on a first attempt).
+  attemptNo: number;
+  reworkFromAssignmentId: number | null;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
   updatedAt: string;
   sequenceNo: number;
   activityId: number;
@@ -190,10 +309,94 @@ export interface ReportedAssignment {
   materials: { name: string; quantity: number; uom: string | null }[];
 }
 
-export const getReportedAssignments = async (dependencyMasterId?: number): Promise<ReportedAssignment[]> => {
-  const url = dependencyMasterId ? `${BASE}?dependencyMasterId=${dependencyMasterId}` : BASE;
-  const res = await fetchWithAuth(url);
+// roomId is the one that matters at production scale — scopes to a single
+// room's activities (typically a handful) instead of ever fetching every
+// IsCurrent activity in the system. See getActivityScopeSummary below for
+// how Reporting now builds its location tree without needing this at all
+// until a room is actually expanded.
+export const getReportedAssignments = async (params?: {
+  dependencyMasterId?: number;
+  // A ScopeSummaryRoom's roomId is `null` for the "No room" bucket — pass
+  // that through as-is (not just omitted) so the request scopes to rungs
+  // with no room at all, instead of falling through to "every activity".
+  roomId?: number | null;
+  status?: AssignmentStatus;
+}): Promise<ReportedAssignment[]> => {
+  const qs = new URLSearchParams();
+  if (params?.dependencyMasterId) qs.set("dependencyMasterId", String(params.dependencyMasterId));
+  if (params && "roomId" in params && params.roomId !== undefined) {
+    qs.set("roomId", params.roomId === null ? "null" : String(params.roomId));
+  }
+  if (params?.status) qs.set("status", params.status);
+  const query = qs.toString();
+  const res = await fetchWithAuth(query ? `${BASE}?${query}` : BASE);
   return handleResponse<ReportedAssignment[]>(res);
+};
+
+// ── Scope summary ────────────────────────────────────────────────────────
+// Builds Reporting's Project > Tower > Floor > Unit > Room tree and its
+// status-tile counts from cheap server-side GROUP BYs instead of fetching
+// every activity in the system to count client-side — see the backend
+// route's own comment for why that stopped being viable at production
+// scale (342,000+ rows).
+export interface ScopeSummaryRoom {
+  projectId: number;
+  projectName: string | null;
+  towerId: number;
+  towerName: string | null;
+  floor: string;
+  flatId: number;
+  flatName: string | null;
+  roomId: number | null;
+  roomName: string | null;
+  activityCount: number;
+}
+export interface ActivityScopeSummary {
+  statusCounts: Partial<Record<AssignmentStatus, number>>;
+  total: number;
+  rooms: ScopeSummaryRoom[];
+}
+export const getActivityScopeSummary = async (params?: {
+  status?: AssignmentStatus;
+  search?: string;
+}): Promise<ActivityScopeSummary> => {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.search) qs.set("search", params.search);
+  const query = qs.toString();
+  const res = await fetchWithAuth(`${BASE}/scope-summary${query ? `?${query}` : ""}`);
+  return handleResponse<ActivityScopeSummary>(res);
+};
+
+// StartDate is only ever a tentative plan — the real measure of how
+// promptly work began is (firstReportedAt - startDate), the gap between
+// the plan and the engineer's own first progress report. <= 0 reads as
+// On time (started on or before the planned date); positive is that many
+// days late. Null until there's actually been a first report. Shared by
+// ActivityReporting.tsx's table and ActivityDetailModal's Overview tab.
+export function startDelayInfo(
+  startDate: string | null,
+  firstReportedAt: string | null,
+): { label: string; tone: "on-time" | "late" } | null {
+  if (!startDate || !firstReportedAt) return null;
+  const start = new Date(`${startDate.slice(0, 10)}T00:00:00`);
+  const first = new Date(`${firstReportedAt.slice(0, 10)}T00:00:00`);
+  const diffDays = Math.round((first.getTime() - start.getTime()) / 86_400_000);
+  return diffDays <= 0
+    ? { label: "On time", tone: "on-time" }
+    : { label: `${diffDays} day${diffDays === 1 ? "" : "s"} late`, tone: "late" };
+}
+
+// One assigned engineer confirming their own task — id is
+// dbo.DependencyActivityEngineer.Id (from the Approval Inbox row's
+// RecordId), not the assignment or rung id. Once every engineer on the
+// assignment has confirmed, the backend moves the parent Status
+// ALLOCATED -> IN_PROGRESS on its own.
+export const confirmEngineerAssignment = async (
+  id: number,
+): Promise<{ success: boolean; allApproved: boolean; newStatus: AssignmentStatus | null }> => {
+  const res = await fetchWithAuth(`${BASE}/engineer-approval/${id}/confirm`, { method: "PUT" });
+  return handleResponse<{ success: boolean; allApproved: boolean; newStatus: AssignmentStatus | null }>(res);
 };
 
 export const updateAssignmentStatus = async (
@@ -208,19 +411,62 @@ export const updateAssignmentStatus = async (
   return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
 };
 
-// Status and Remarks share one PATCH endpoint but are independent — the
-// Activity Detail modal's status dropdown and its Remarks textarea (saved
-// on blur) each call this with only the field that actually changed.
+// Status, Remarks and ProgressPercent share one PATCH endpoint but are
+// independent — the Activity Detail modal's status dropdown, its Remarks
+// textarea (saved on blur), and its draggable progress bar (saved on
+// drag-release) each call this with only the field that actually changed.
 export const updateAssignmentDetail = async (
   rungId: number,
-  patch: { status?: AssignmentStatus; remarks?: string },
-): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }> => {
+  patch: { status?: AssignmentStatus; remarks?: string; progressPercent?: number },
+): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/status`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }>(res);
+  return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }>(res);
+};
+
+// Work Reporting's audit trail — every past progress-bar/Remarks update on
+// this rung, newest first, with who made it and when.
+export interface ProgressLogEntry {
+  id: number;
+  fromProgressPercent: number | null;
+  toProgressPercent: number | null;
+  remarks: string | null;
+  statusAfter: AssignmentStatus | null;
+  loggedBy: string | null;
+  loggedAt: string;
+}
+
+export const getProgressLog = async (rungId: number): Promise<ProgressLogEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/progress-log`);
+  return handleResponse<ProgressLogEntry[]>(res);
+};
+
+// The actual logbook — one permanent snapshot per day this activity was
+// ever reported on (written by the PATCH /:rungId/status route's own
+// MERGE, see its comment). Read-only here; a day's row is only ever
+// written by that same day's own save.
+export interface DailyLogEntry {
+  id: number;
+  logDate: string;
+  progressPercent: number | null;
+  remarks: string | null;
+  createdBy: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+  photoCount: number;
+}
+
+export const getDailyLog = async (rungId: number): Promise<DailyLogEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/daily-log`);
+  return handleResponse<DailyLogEntry[]>(res);
+};
+
+export const deleteDailyLogEntry = async (rungId: number, logId: number) => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/daily-log/${logId}`, { method: "DELETE" });
+  return handleResponse<{ success: boolean }>(res);
 };
 
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────
@@ -301,6 +547,9 @@ export interface ActivityPhotoMeta {
   note: string | null;
   capturedBy: string | null;
   capturedAt: string;
+  /** The day this photo was taken for — see the Daily Log tab. Null on
+   *  photos uploaded before that column existed. */
+  logDate: string | null;
 }
 
 export interface ActivityPhotos {
@@ -314,8 +563,11 @@ export interface ActivityPhotoData {
   dataBase64: string;
 }
 
-export const getActivityPhotos = async (rungId: number): Promise<ActivityPhotos> => {
-  const res = await fetchWithAuth(`${BASE}/${rungId}/photos`);
+// `date` (YYYY-MM-DD) scopes to just that day's photos — used by the Daily
+// Log tab to show one day's uploads; omit for the full "every photo ever
+// taken for this activity" gallery every other caller already relies on.
+export const getActivityPhotos = async (rungId: number, date?: string): Promise<ActivityPhotos> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos${date ? `?date=${date}` : ""}`);
   return handleResponse<ActivityPhotos>(res);
 };
 
@@ -344,4 +596,191 @@ export const uploadActivityPhoto = async (
 export const deleteActivityPhoto = async (rungId: number, photoId: number): Promise<{ success: boolean }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/photos/${photoId}`, { method: "DELETE" });
   return handleResponse<{ success: boolean }>(res);
+};
+
+// ── Quality Check ────────────────────────────────────────────────────────────
+export type QcRating = "POOR" | "GOOD" | "EXCELLENT";
+
+export interface QcCheckInput {
+  checkpointId: number;
+  rating: QcRating;
+  note?: string;
+}
+
+export interface QcHistoryEntry {
+  id: number;
+  decision: "APPROVED" | "REWORK";
+  remarks: string | null;
+  qcAt: string;
+  qcBy: string | null;
+  checks: { fieldName: string; passed: boolean; rating: QcRating | null; note: string | null }[];
+}
+
+// Quality Check now inspects COMPLETED activities (work dragged to 100%),
+// not IN_PROGRESS ones — an activity only reaches QC once it's actually
+// done, not while it's still being worked on.
+export const getCompletedAssignments = async (): Promise<ReportedAssignment[]> => {
+  const res = await fetchWithAuth(`${BASE}?status=COMPLETED`);
+  return handleResponse<ReportedAssignment[]>(res);
+};
+
+export const getQcHistory = async (rungId: number): Promise<QcHistoryEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/qc/${rungId}/history`);
+  return handleResponse<QcHistoryEntry[]>(res);
+};
+
+export interface QcDecisionResult {
+  success: boolean;
+  status: AssignmentStatus;
+  awaitingApproval: boolean;
+  // Set when decision is REWORK — the id of the brand-new attempt this
+  // decision forked (see forkAssignmentForRework's own comment).
+  reworkAssignmentId: number | null;
+}
+export const submitQcDecision = async (
+  rungId: number,
+  payload: { decision: "APPROVED" | "REWORK"; remarks?: string; checks: QcCheckInput[] },
+): Promise<QcDecisionResult> => {
+  const res = await fetchWithAuth(`${BASE}/qc/${rungId}/decision`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<QcDecisionResult>(res);
+};
+
+// ── Approval workflow ───────────────────────────────────────────────────────
+// Enforces the ApprovalLevel[] set on this same assignment (Work
+// Allocation's mini Approval Setup, see saveRungAssignment) once QC has
+// passed a Completed activity — kept as its own small state, not the
+// module-wide Approval Setup/Approval Inbox (see ApprovalLevel's own
+// comment above).
+export interface ApprovalWorkflowLevel extends ApprovalLevel {
+  satisfied: boolean;
+  current: boolean;
+}
+export interface ApprovalWorkflowEntry {
+  levelId: string;
+  approverUserId: number;
+  approverName: string | null;
+  approvedAt: string;
+}
+export interface ApprovalWorkflowState {
+  status: AssignmentStatus;
+  levels: ApprovalWorkflowLevel[];
+  approvals: ApprovalWorkflowEntry[];
+  currentLevelIndex: number | null;
+  canApprove: boolean;
+}
+
+export const getApprovalWorkflow = async (rungId: number): Promise<ApprovalWorkflowState> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval`);
+  return handleResponse<ApprovalWorkflowState>(res);
+};
+
+export const approveWorkflowLevel = async (
+  rungId: number,
+): Promise<{ success: boolean; fullyApproved: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval/approve`, { method: "POST" });
+  return handleResponse<{ success: boolean; fullyApproved: boolean }>(res);
+};
+
+// The other way a Completed, QC-passed activity gets sent back — an
+// approver at the current level rejects it instead of clearing it.
+// Requires a remark, and forks a brand-new attempt exactly like QC's own
+// REWORK decision does (see forkAssignmentForRework's own comment).
+export const rejectWorkflowLevel = async (
+  rungId: number,
+  remarks: string,
+): Promise<{ success: boolean; reworkAssignmentId: number }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ remarks }),
+  });
+  return handleResponse<{ success: boolean; reworkAssignmentId: number }>(res);
+};
+
+// ── Rework history ───────────────────────────────────────────────────────
+// Every assignment attempt ever made against a rung — the "keep the
+// history of the reworked task" view (migration 488's own comment).
+export interface AssignmentAttempt {
+  assignmentId: number;
+  attemptNo: number;
+  isCurrent: boolean;
+  status: AssignmentStatus;
+  startDate: string | null;
+  endDate: string | null;
+  reworkFromAssignmentId: number | null;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
+  createdAt: string;
+  updatedAt: string | null;
+  engineerNames: string | null;
+}
+export const getAssignmentAttempts = async (rungId: number): Promise<AssignmentAttempt[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/attempts`);
+  return handleResponse<AssignmentAttempt[]>(res);
+};
+
+// How many Completed, QC-passed activities are sitting at a level the
+// current viewer can act on right now — powers the sidebar's Reporting
+// badge (see AppSidebar.tsx's useCivilWorkDprApprovalCount).
+export const getPendingApprovalCount = async (): Promise<number> => {
+  const res = await fetchWithAuth(`${BASE}/approvals/pending-count`);
+  const data = await handleResponse<{ count: number }>(res);
+  return data.count ?? 0;
+};
+
+// ── Amendment log ────────────────────────────────────────────────────────
+// Every superseded assignment attempt (IsCurrent = 0) — each one exists
+// only because it was reworked (see migration 488), so this is already
+// exactly "every reworked activity", across every chain, not scoped to
+// one rung the way getAssignmentAttempts is.
+export interface AmendmentRecord {
+  assignmentId: number;
+  rungId: number;
+  attemptNo: number;
+  status: AssignmentStatus;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
+  startDate: string | null;
+  endDate: string | null;
+  updatedAt: string;
+  sequenceNo: number;
+  activityName: string;
+  dependencyMasterId: number;
+  alias: string;
+  workType: "INTERNAL" | "EXTERNAL";
+  projectId: number;
+  projectName: string | null;
+  towerId: number;
+  towerName: string | null;
+  floor: string;
+  flatId: number;
+  flatName: string | null;
+  roomId: number | null;
+  roomName: string | null;
+  scopePath: string;
+  engineerNames: string | null;
+  // The attempt that replaced this one — null only if the rung's current
+  // attempt was somehow itself deleted (shouldn't normally happen).
+  currentStatus: AssignmentStatus | null;
+  currentAttemptNo: number | null;
+}
+export const getAmendments = async (): Promise<AmendmentRecord[]> => {
+  const res = await fetchWithAuth(`${BASE}/amendments`);
+  return handleResponse<AmendmentRecord[]>(res);
+};
+
+// Bringing a Cancelled activity back — super_admin only (enforced
+// server-side by role, not a page right), and only after reviewing the
+// activity's full detail in ActivityDetailModal, where this is called
+// from. Restores to APPROVED if it genuinely was before being cancelled,
+// otherwise IN_PROGRESS regardless of exactly where it was — see the
+// backend route's own comment.
+export const restoreCancelledActivity = async (
+  rungId: number,
+): Promise<{ success: boolean; status: AssignmentStatus }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/restore`, { method: "POST" });
+  return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
 };

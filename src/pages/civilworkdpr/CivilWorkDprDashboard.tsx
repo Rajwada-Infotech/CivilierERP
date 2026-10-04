@@ -4,13 +4,14 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import {
   GlassShell,
   GlassCard,
   GlassSection,
 } from "@/components/dashboard/GlassShell";
 import { ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
+import { TimelineIcon } from "@/components/icons/TimelineIcon";
 import {
   Pickaxe,
   ClipboardList,
@@ -108,7 +109,7 @@ const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n ?? 0);
 function StatusBadge({ status }: { status: keyof typeof ASSIGNMENT_STATUS_META }) {
   const meta = ASSIGNMENT_STATUS_META[status] ?? ASSIGNMENT_STATUS_META.PENDING;
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-heading font-bold uppercase tracking-wide ${meta.className}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-bold uppercase tracking-wide ${meta.className}`}>
       {meta.label}
     </span>
   );
@@ -158,6 +159,7 @@ function DonutCard({
   title: string; icon: React.ElementType; accentColor: string; data: DonutPoint[];
   glassStyle: React.CSSProperties; emptyLabel?: string;
 }) {
+  const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <div className="rounded-xl overflow-hidden flex-1 flex flex-col" style={glassStyle}>
@@ -179,7 +181,7 @@ function DonutCard({
                   innerRadius={45} outerRadius={75} paddingAngle={2} strokeWidth={0}
                   isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                 >
-                  {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+                  {data.map((d, i) => <Cell key={i} fill={bwChartColor(theme, i, d.color)} />)}
                 </Pie>
                 <Tooltip
                   content={({ active, payload }) => {
@@ -196,9 +198,9 @@ function DonutCard({
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d) => (
+              {data.map((d, i) => (
                 <div key={d.name} className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: bwChartColor(theme, i, d.color) }} />
                   <span className="text-xs text-foreground whitespace-nowrap">{d.name}</span>
                   <span className="text-xs text-muted-foreground ml-auto sm:ml-3">{fmtNum(d.value)}</span>
                 </div>
@@ -220,6 +222,7 @@ function TrendCard({
   data: { date: string; [key: string]: number | string }[]; series: TrendSeries[];
   isDark: boolean; glassStyle: React.CSSProperties;
 }) {
+  const { theme } = useTheme();
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
     <div className="rounded-xl overflow-hidden flex-1 flex flex-col" style={glassStyle}>
@@ -257,9 +260,9 @@ function TrendCard({
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              {series.map((s) => (
+              {series.map((s, i) => (
                 <Line
-                  key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color}
+                  key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={bwChartColor(theme, i, s.color)}
                   strokeWidth={2} dot={false} activeDot={{ r: 4 }}
                   isAnimationActive animationDuration={1100} animationEasing="ease-in-out"
                 />
@@ -287,7 +290,7 @@ export default function CivilWorkDprDashboard() {
   usePageRights("civilworkdpr-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const {
     data: rawData,
@@ -333,7 +336,7 @@ export default function CivilWorkDprDashboard() {
       <GlassShell
         title="Civil Work DPR"
         subtitle="Activities, contractor allocations, and Work Allocation assignments at a glance"
-        icon={Pickaxe}
+        icon={TimelineIcon}
         accentColor={ACCENT}
         secondaryColor={SECONDARY}
         action={
@@ -435,7 +438,7 @@ export default function CivilWorkDprDashboard() {
                 </div>
                 <button
                   onClick={() => navigate("/civilworkdpr/activity-reporting")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: ACCENT }}
                 >
                   View all →
@@ -451,7 +454,7 @@ export default function CivilWorkDprDashboard() {
                         <p className="text-xs font-medium text-foreground truncate max-w-[160px] sm:max-w-[220px]">
                           {a.ActivityName || "—"} · {a.ChainAlias || "—"}
                         </p>
-                        <p className="text-[10px] text-muted-foreground truncate">
+                        <p className="text-[0.625rem] text-muted-foreground truncate">
                           {a.ProjectName || "—"} · {a.EngineerNames || "Unassigned"} · {timeAgo(a.UpdatedAt)}
                         </p>
                       </div>

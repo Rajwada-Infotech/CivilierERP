@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Pickaxe } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface CivilWorkDprShellProps {
   title: string;
@@ -33,7 +33,7 @@ export const CivilWorkDprShell: React.FC<CivilWorkDprShellProps> = ({
   fillHeight,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {
@@ -146,7 +146,12 @@ export const CivilWorkDprShell: React.FC<CivilWorkDprShellProps> = ({
       </motion.div>
 
       {/* ── Page content ────────────────────────────────────────────────── */}
-      <div className={fillHeight ? "relative z-10 flex-1 min-h-0 flex flex-col" : "relative z-10 space-y-5"}>{children}</div>
+      {/* overflow-x-hidden here is the backstop: a wide descendant (e.g.
+          Reporting's per-chain activity table, several columns wide) should
+          only ever scroll within its own overflow-x-auto wrapper, never
+          push this whole page wider and scroll the viewport sideways on a
+          narrow phone screen. */}
+      <div className={fillHeight ? "relative z-10 flex-1 min-h-0 flex flex-col overflow-x-hidden" : "relative z-10 space-y-5 overflow-x-hidden"}>{children}</div>
     </div>
   );
 };
@@ -172,7 +177,7 @@ export const CivilWorkDprGlassCard: React.FC<{
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div
@@ -215,7 +220,7 @@ export const CivilWorkDprGlassCard: React.FC<{
       <div className="relative z-10 p-4">
         <div className="flex items-start justify-between gap-2 mb-3">
           <p
-            className="text-[10px] font-heading font-semibold uppercase tracking-widest"
+            className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest"
             style={{ color: accentColor, opacity: 0.85 }}
           >
             {label}

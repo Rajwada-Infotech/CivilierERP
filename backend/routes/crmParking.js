@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -11,9 +12,9 @@ const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../serv
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
-const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
-const { recalculateBookingGst } = require("../services/crmGst");
+const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -26,7 +27,7 @@ router.use(apiRateLimit);
 // meaningful for unit-linked allotments (BookingId set) — a standalone
 // parking-only sale has no CrmBooking to roll into.
 async function rollupBookingTotals(pool, bookingId) {
-  if (!bookingId) return;
+  if (bookingId == null) return;
   const gst = await recalculateBookingGst(pool, bookingId);
 
   // GrandTotal just moved — every not-yet-settled milestone's ₹/% needs to
@@ -52,7 +53,7 @@ async function rollupBookingTotals(pool, bookingId) {
 // the exact race that was already fixed for Unit bookings in
 // services/crmEntityCreation.js (see the UPDLOCK comment there).
 async function assertSlotAvailable(db, parkingSlotId) {
-  if (!parkingSlotId) return;
+  if (parkingSlotId === null || parkingSlotId === undefined) return;
   const existing = await db.request().input("sid", sql.Int, parkingSlotId)
     .query("SELECT Id FROM dbo.CrmParkingAllotment WITH (UPDLOCK, ROWLOCK) WHERE ParkingSlotId = @sid AND IsActive = 1");
   if (existing.recordset.length) {
@@ -80,7 +81,7 @@ function parkingError(message, status = 400) {
 // (see CrmApplication.tsx ParkingSelectionStep and CrmParkingBooking.tsx)
 // before a request ever reaches this check.
 function assertSlotSelected(parkingType, parkingSlotId) {
-  if (parkingSlotId) return;
+  if (parkingSlotId !== null && parkingSlotId !== undefined) return;
   throw parkingError(`${parkingType} parking must be sold against a specific slot — none is available to select.`);
 }
 
@@ -114,7 +115,11 @@ const ALLOTMENT_SELECT = `
          COALESCE(p.BlockId,     s.BlockId)      AS BlockId,
          s.SlotNo, a.ApplicantName, a.Mobile,
          b.BookingNo, b.Status AS BookingStatus, b.GrandTotal AS BookingGrandTotal,
-         ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0) AS BookingTotalPaid
+         -- Plus unswept On Account balance — under the current "everything
+         -- holds in On Account until an explicit sweep" rule, AmountPaid
+         -- alone would under-report real cash received against the booking.
+         ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0)
+           + ISNULL((SELECT SUM(Amount - ISNULL(AppliedAmount,0)) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS BookingTotalPaid
   FROM dbo.CrmParkingAllotment pa
   LEFT JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
   LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
@@ -127,9 +132,12 @@ const ALLOTMENT_SELECT = `
 // standalone sale, which never has an Agreement to gate on), and again from
 // crmBookingAmendments.js when an approver signs off on a queued request.
 
+// Land is sold without parking; parking belongs to a built unit.
+const PLOT_SALE_NO_PARKING = "A plot sale has no parking — parking can only be added to a unit booking.";
+
 async function applyAddParking(pool, bookingId, b, actorUserId) {
-  if (!b.ParkingMasterId && !b.ParkingType) throw parkingError("ParkingMasterId or ParkingType is required");
-  const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
+  if ((b.ParkingMasterId === undefined || b.ParkingMasterId === null || b.ParkingMasterId === "") && !b.ParkingType) throw parkingError("ParkingMasterId or ParkingType is required");
+  const qty = b.Quantity != null && b.Quantity !== "" ? parseInt(b.Quantity) : 1;
   if (!Number.isFinite(qty) || qty < 1) throw parkingError("Quantity must be at least 1");
 
   const activeErr = await requireActiveBooking(pool, bookingId);
@@ -138,10 +146,13 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   const booking = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id, BookingNo, ApplicationId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
   if (!booking.recordset.length) throw parkingError("Booking not found", 404);
+  const plotSale = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
+  if (plotSale.recordset.length) throw parkingError(PLOT_SALE_NO_PARKING);
 
   let ParkingType, GstRate, Charge;
 
-  if (b.ParkingMasterId) {
+  if (b.ParkingMasterId !== undefined && b.ParkingMasterId !== null && b.ParkingMasterId !== "") {
     const rate = await pool.request().input("pmid", sql.Int, parseInt(b.ParkingMasterId))
       .query("SELECT Charge, GstRate, ParkingType, ProjectId FROM dbo.ParkingMaster WHERE Id = @pmid AND IsActive = 1");
     if (!rate.recordset.length) throw parkingError("Selected parking rate is not active");
@@ -163,10 +174,10 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
     if (b.Charge == null || parseFloat(b.Charge) <= 0) throw parkingError("A price is required for unrated parking types");
     ParkingType = b.ParkingType;
     Charge = parseFloat(b.Charge);
-    GstRate = b.GstRate != null ? parseFloat(b.GstRate) : 0;
+    GstRate = b.GstRate != null && b.GstRate !== "" ? parseFloat(b.GstRate) : 0;
   }
 
-  const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
+  const parkingSlotId = b.ParkingSlotId !== undefined && b.ParkingSlotId !== null && b.ParkingSlotId !== "" ? parseInt(b.ParkingSlotId) : null;
   assertSlotSelected(ParkingType, parkingSlotId);
 
 
@@ -188,8 +199,16 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   //     conversion rolls back too, leaving the slot still held and retryable.
   //     Previously guardAndConvertHold ran outside the tx: a failed INSERT
   //     would permanently orphan the conversion (hold gone, slot unallotted).
-  const tx = pool.transaction();
-  await tx.begin();
+  //
+  // Callers can pass either a plain pool (the normal case — this function
+  // opens and owns its own transaction below) or an already-open Transaction
+  // (e.g. crmBookingAmendments.js's approve route, which needs this INSERT
+  // to commit/rollback together with its own Status='Approved' write). An
+  // mssql Transaction has no .transaction() factory — only ConnectionPool
+  // does — so that's the reliable way to tell which was handed in.
+  const ownsTransaction = typeof pool.transaction === "function";
+  const tx = ownsTransaction ? pool.transaction() : pool;
+  if (ownsTransaction) await tx.begin();
   let allotmentId;
   try {
     await assertSlotAvailable(tx, parkingSlotId);
@@ -198,7 +217,7 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
     const result = await tx.request()
       .input("bid",  sql.Int, bookingId)
       .input("aid",  sql.Int, booking.recordset[0].ApplicationId)
-      .input("pmid", sql.Int, b.ParkingMasterId ? parseInt(b.ParkingMasterId) : null)
+      .input("pmid", sql.Int, b.ParkingMasterId !== undefined && b.ParkingMasterId !== null && b.ParkingMasterId !== "" ? parseInt(b.ParkingMasterId) : null)
       .input("sid",  sql.Int, parkingSlotId)
       .input("slot", sql.NVarChar(50), slotNo)
       .input("qty",  sql.Int, qty)
@@ -215,9 +234,11 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
         VALUES (@bid, @aid, @pmid, @sid, @slot, @qty, @rate, @gstr, @gsta, @tot, 'Pending', @note, @cb, SYSDATETIME())
       `);
     allotmentId = result.recordset[0].Id;
-    await tx.commit();
+    if (ownsTransaction) await tx.commit();
   } catch (txErr) {
-    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    if (ownsTransaction) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    }
     throw txErr;
   }
   // ── END ATOMIC SECTION ──────────────────────────────────────────────────
@@ -239,7 +260,7 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
 }
 
 async function applyEditParking(pool, id, b) {
-  const qty = b.Quantity != null ? parseInt(b.Quantity) : null;
+  const qty = b.Quantity != null && b.Quantity !== "" ? parseInt(b.Quantity) : null;
   if (!qty || qty < 1) throw parkingError("Quantity must be at least 1");
 
   const row = await pool.request().input("id", sql.Int, id)
@@ -247,12 +268,12 @@ async function applyEditParking(pool, id, b) {
   if (!row.recordset.length) throw parkingError("Allotment not found", 404);
   const { BookingId, PaymentStatus, RateSnapshot, GstRateSnapshot } = row.recordset[0];
   if (PaymentStatus === CrmStatus.PAID) throw parkingError("This parking sale has already been paid and cannot be edited", 409);
-  if (BookingId) {
+  if (BookingId != null) {
     const activeErr = await requireActiveBooking(pool, BookingId);
     if (activeErr) throw parkingError(activeErr);
   }
 
-  const milestone = BookingId
+  const milestone = BookingId != null
     ? await pool.request().input("paid", sql.Int, id)
         .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC")
     : { recordset: [] };
@@ -298,11 +319,19 @@ async function applyEditParking(pool, id, b) {
       .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, UpdatedAt = SYSDATETIME() WHERE Id = @mid`);
   }
 
-  if (BookingId) {
+  if (BookingId != null) {
     await rollupBookingTotals(pool, BookingId);
     await syncParkingPaymentStatus(pool, BookingId);
   }
   return { TotalAmount: totalAmount, RateSnapshot: effectiveRate };
+}
+
+async function shouldQueueParkingAmendment(pool, bookingId) {
+  // Queue an amendment only when the Agreement is Executed or Registered
+  // (physically signed). Before that — even at DirectorApproval/Confirmed
+  // workflow stages — parking changes are still in flux and must flow through
+  // directly without an approval queue.
+  return isLegalWorkStarted(pool, bookingId);
 }
 
 
@@ -310,14 +339,19 @@ async function applyEditParking(pool, id, b) {
 // callers below (releaseAllParkingForApplication) keep working unchanged —
 // but the DELETE /:id route always supplies both, since a super_admin-only,
 // audit-logged release is the whole point of that endpoint.
-async function applyReleaseParking(pool, id, actorUserId = null, reason = null) {
+// force=true is used only by the amendment-approval path (post-Agreement,
+// pre-Sale-Deed-Registration). It bypasses the "already paid" guards because
+// an admin has explicitly reviewed and approved this change. If the parking's
+// milestone was already paid, it is removed and the credit amount is returned
+// so the caller can surface it to the accounts team for refund processing.
+async function applyReleaseParking(pool, id, actorUserId = null, reason = null, force = false) {
   const row = await pool.request().input("id", sql.Int, id)
     .query("SELECT BookingId, PaymentStatus FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
   if (!row.recordset.length) throw parkingError("Allotment not found", 404);
   const { BookingId, PaymentStatus } = row.recordset[0];
 
-  if (!BookingId) {
-    if (PaymentStatus === CrmStatus.PAID) {
+  if (BookingId == null) {
+    if (!force && PaymentStatus === CrmStatus.PAID) {
       throw parkingError("This parking sale has already been paid and cannot be released", 409);
     }
     await pool.request().input("id", sql.Int, id)
@@ -338,21 +372,28 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null) 
   // milestone) fall back to the booking-wide settled check instead, since
   // their value has no isolated "paid" point of its own once blended.
   const milestone = await pool.request().input("paid", sql.Int, id)
-    .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC");
+    .query("SELECT TOP 1 Id, Status, AmountDue AS Amount FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC");
+
+  let creditAmount = 0;
+
   if (milestone.recordset.length) {
-    if (milestone.recordset[0].Status === CrmStatus.PAID) {
+    if (!force && milestone.recordset[0].Status === CrmStatus.PAID) {
       throw parkingError("This parking charge has already been paid and cannot be released", 409);
     }
-  } else if (await isBookingFullySettled(pool, BookingId)) {
+    // force path: milestone was paid — record the credit amount for the
+    // caller to surface to the accounts team, then remove the milestone so
+    // the booking total is recalculated without it.
+    if (milestone.recordset[0].Status === CrmStatus.PAID) {
+      creditAmount = Number(milestone.recordset[0].Amount || 0);
+    }
+    await pool.request().input("mid", sql.Int, milestone.recordset[0].Id)
+      .query("DELETE FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
+  } else if (!force && await isBookingFullySettled(pool, BookingId)) {
     throw parkingError("This booking is fully paid off — parking can no longer be released", 409);
   }
 
   await pool.request().input("id", sql.Int, id)
     .query("UPDATE dbo.CrmParkingAllotment SET IsActive = 0 WHERE Id = @id");
-  if (milestone.recordset.length) {
-    await pool.request().input("mid", sql.Int, milestone.recordset[0].Id)
-      .query("DELETE FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
-  }
 
   await rollupBookingTotals(pool, BookingId);
   await syncParkingPaymentStatus(pool, BookingId);
@@ -361,7 +402,7 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null) 
       { field: "ParkingAllotment", oldVal: CrmStatus.ACTIVE, newVal: reason ? `Released — ${reason}` : "Released" },
     ]);
   }
-  return {};
+  return creditAmount > 0 ? { creditAmount, creditNote: `Parking released post-Agreement — ₹${creditAmount.toLocaleString("en-IN")} overpaid. Refund to be processed by accounts team.` } : {};
 }
 
 // Cancellation-time release — unlike applyReleaseParking() above, this is
@@ -432,9 +473,21 @@ router.get("/", requirePageRight("crm-parking-booking", "view"), async (req, res
   try {
     const pool = getPool();
     const { status } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = ["pa.IsActive = 1"];
     if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("pa.PaymentStatus = @st"); }
+    // Not paginated — Pending/Paid totals are computed client-side from the
+    // full set (see CrmParkingBooking.tsx), same reasoning as CrmDemands.
+    // Company resolved via either linkage a row can carry (its Application
+    // directly, or via its Booking); Project/Block use the already-COALESCEd
+    // ParkingMaster/ParkingSlot values (re-expressed here since a WHERE
+    // clause can't reference a SELECT-list alias at the same query level).
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("(a.CompanyId = @companyId OR b.CompanyId = @companyId)"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("COALESCE(p.ProjectId, s.ProjectId) = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("COALESCE(p.BlockId, s.BlockId) = @blockId"); }
     const result = await req0.query(`${ALLOTMENT_SELECT} WHERE ${conds.join(" AND ")} ORDER BY pa.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {
@@ -561,7 +614,8 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
 router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${ALLOTMENT_SELECT} WHERE pa.BookingId = @bid AND pa.IsActive = 1 ORDER BY pa.CreatedAt DESC`);
     res.json(result.recordset);
@@ -582,7 +636,8 @@ router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, 
 router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const applicationId = parseInt(req.params.applicationId);
+    const applicationId = parseId(req.params.applicationId);
+    if (applicationId === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, applicationId)
       .query(`${ALLOTMENT_SELECT} WHERE pa.ApplicationId = @aid AND pa.IsActive = 1 ORDER BY pa.CreatedAt DESC`);
     const allotments = result.recordset.map((r) => ({ ...r, Kind: "Allotment" }));
@@ -593,22 +648,56 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
       JOIN dbo.ParkingSlot s ON s.Id = h.EntityId
       WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
     `);
-    const holds = [];
+
+    // Same fixed bracket rule as recalculateBookingGst (crmGst.js) — Parking
+    // has no independent GST rate any more (ParkingMaster.GstRate is a
+    // legacy column, pre-detach), it shares whichever rate the combined
+    // Unit + Parking (pre-tax) base resolves to. A Hold has no CrmBooking
+    // yet to read/reprice, so this preview has to resolve the same bracket
+    // itself from the Application's own Unit price plus every currently
+    // held/allotted parking base — otherwise a Hold shows the stale 18%
+    // independent rate while the wizard's own GST preview (and the real
+    // rate the Booking will get) correctly shows 1%/5%.
+    const holdLineAmounts = [];
     for (const h of holdRows.recordset) {
       const rate = await resolveParkingRateForSlot(pool, h.ParkingSlotId);
       // A staff-typed RateOverride (see POST /standalone) always wins over
       // the master rate — same "defaults but overridable" figure the real
       // allotment will snapshot once this hold converts at booking creation.
       const lineAmount = h.RateOverride != null ? Number(h.RateOverride) : (rate ? rate.Charge : 0);
-      const gstRate = rate ? rate.GstRate : 0;
-      const gstAmount = Math.round((lineAmount * gstRate) / 100 * 100) / 100;
-      holds.push({
+      holdLineAmounts.push({ h, lineAmount });
+    }
+
+    let unitParkingRate = 0;
+    if (holdLineAmounts.length) {
+      const appRow = await pool.request().input("aid", sql.Int, applicationId).query(`
+        SELECT a.RatePerSqFt, um.AreaSqFt
+        FROM dbo.CrmApplication a
+        LEFT JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId
+        WHERE a.Id = @aid AND a.IsActive = 1
+      `);
+      const appR = appRow.recordset[0];
+      const unitTotal = appR && appR.RatePerSqFt && appR.AreaSqFt ? Math.round(Number(appR.AreaSqFt) * Number(appR.RatePerSqFt)) : 0;
+      const allotmentBase = allotments.reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
+      const holdBase = holdLineAmounts.reduce((s, x) => s + x.lineAmount, 0);
+      const combinedBase = unitTotal + allotmentBase + holdBase;
+      // Through the shared resolver so dbo.CrmGstRule governs here too. This
+      // used to compare against UNIT_PARKING_THRESHOLD directly, which meant
+      // moving the threshold in the master repriced the booking but not this
+      // quote.
+      const hsnCode = (await resolveUnitParkingHsn(pool, combinedBase)).hsnCode;
+      unitParkingRate = await getHsnRate(pool, hsnCode);
+    }
+
+    const holds = holdLineAmounts.map(({ h, lineAmount }) => {
+      const gstAmount = Math.round((lineAmount * unitParkingRate) / 100 * 100) / 100;
+      return {
         Id: h.Id, Kind: "Hold", ParkingSlotId: h.ParkingSlotId, SlotNo: h.SlotNo,
         CurrentParkingType: h.ParkingType, Quantity: 1,
-        RateSnapshot: lineAmount, DefaultRate: rate ? rate.Charge : 0,
+        RateSnapshot: lineAmount, DefaultRate: lineAmount,
         TotalAmount: lineAmount + gstAmount, HoldUntil: h.HoldUntil,
-      });
-    }
+      };
+    });
 
     res.json([...allotments, ...holds]);
   } catch (e) {
@@ -626,13 +715,16 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const pool = getPool();
     const b = req.body;
     if (!b.ApplicationId) return res.status(400).json({ error: "ApplicationId is required — parking must be sold to a real customer/applicant" });
-    if (!b.ParkingMasterId && !b.ParkingType) return res.status(400).json({ error: "ParkingMasterId or ParkingType is required" });
-    const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
+    if ((b.ParkingMasterId === undefined || b.ParkingMasterId === null || b.ParkingMasterId === "") && !b.ParkingType) return res.status(400).json({ error: "ParkingMasterId or ParkingType is required" });
+    const qty = b.Quantity != null && b.Quantity !== "" ? parseInt(b.Quantity) : 1;
     if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
 
     const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
       .query("SELECT Id, ProjectId, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
+    const plotApp = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
+      .query("SELECT TOP 1 1 AS x FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid AND Status = N'Active'");
+    if (plotApp.recordset.length) return res.status(400).json({ error: PLOT_SALE_NO_PARKING });
 
     let ParkingType, Charge, GstRate;
 
@@ -665,7 +757,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
       GstRate = 0;
     }
 
-    const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
+    const parkingSlotId = b.ParkingSlotId !== undefined && b.ParkingSlotId !== null && b.ParkingSlotId !== "" ? parseInt(b.ParkingSlotId) : null;
     assertSlotSelected(ParkingType, parkingSlotId);
 
     const lineAmount = Charge * qty;
@@ -678,7 +770,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const slotNo = slot.recordset[0].SlotNo;
 
     if (!b.Immediate) {
-      if (![CrmStatus.DRAFT, CrmStatus.PENDING].includes(application.recordset[0].Status)) {
+      if (![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(application.recordset[0].Status)) {
         return res.status(400).json({
           error: `Cannot change this application's parking selection once it is ${application.recordset[0].Status} — this is locked after approval.`,
         });
@@ -725,7 +817,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
 
       const result = await tx.request()
         .input("aid",  sql.Int, parseInt(b.ApplicationId))
-        .input("pmid", sql.Int, b.ParkingMasterId ? parseInt(b.ParkingMasterId) : null)
+        .input("pmid", sql.Int, b.ParkingMasterId !== undefined && b.ParkingMasterId !== null && b.ParkingMasterId !== "" ? parseInt(b.ParkingMasterId) : null)
         .input("sid",  sql.Int, parkingSlotId)
         .input("slot", sql.NVarChar(50), slotNo)
         .input("qty",  sql.Int, qty)
@@ -764,7 +856,8 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
 router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const holdId = parseInt(req.params.holdId);
+    const holdId = parseId(req.params.holdId);
+    if (holdId === null) return res.status(400).json({ error: "Invalid holdId" });
     const row = await pool.request().input("id", sql.Int, holdId)
       .query("SELECT EntityType, ApplicationId FROM dbo.CrmInventoryHold WHERE Id = @id AND Status = 'Active'");
     if (!row.recordset.length || row.recordset[0].EntityType !== "Parking") {
@@ -773,7 +866,7 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
     if (row.recordset[0].ApplicationId) {
       const app = await pool.request().input("aid", sql.Int, row.recordset[0].ApplicationId)
         .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
-      if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING].includes(app.recordset[0].Status)) {
+      if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
         return res.status(400).json({
           error: `Cannot change this application's parking selection once it is ${app.recordset[0].Status} — this is locked after approval.`,
         });
@@ -791,13 +884,17 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
 router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    if (await isLegalWorkStarted(pool, bookingId)) {
+    if (await isSaleDeedRegistered(pool, bookingId))
+      return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
+
+    if (await shouldQueueParkingAmendment(pool, bookingId)) {
       if (!b.Reason?.trim()) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ParkingAllotment", action: "Add", targetId: null,
@@ -806,6 +903,8 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
+    // applyAddParking owns its own transaction internally (see the function
+    // for why — slot-lock atomicity), so a plain pool is correct here.
     const result = await applyAddParking(pool, bookingId, b, actorId(req));
     res.status(201).json({ success: true, ...result });
   } catch (e) {
@@ -815,10 +914,11 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 });
 
 // PUT /:id — edit an existing allotment's quantity.
-router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
 
     const existing = await pool.request().input("id", sql.Int, id)
@@ -826,12 +926,15 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     if (!existing.recordset.length) return res.status(404).json({ error: "Allotment not found" });
     const bookingId = existing.recordset[0].BookingId;
 
-    if (bookingId) {
+    if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
     }
 
-    if (bookingId && await isLegalWorkStarted(pool, bookingId)) {
+    if (bookingId != null && await isSaleDeedRegistered(pool, bookingId))
+      return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
+
+    if (bookingId != null && await shouldQueueParkingAmendment(pool, bookingId)) {
       if (!b.Reason?.trim()) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ParkingAllotment", action: "Edit", targetId: id,
@@ -840,8 +943,20 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyEditParking(pool, id, b);
-    res.json({ success: true, ...result });
+    // applyEditParking does UPDATE allotment + (optional) milestone UPDATE +
+    // rollupBookingTotals + syncParkingPaymentStatus — wrapped so a failure
+    // partway through can't leave the allotment's new quantity/rate out of
+    // sync with the booking's rolled-up totals or payment-status flag.
+    const tx = pool.transaction();
+    try {
+      await tx.begin();
+      const result = await applyEditParking(tx, id, b);
+      await tx.commit();
+      res.json({ success: true, ...result });
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
   } catch (e) {
     console.error("[crm-parking] PUT error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
@@ -852,12 +967,13 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
 router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const row = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, PaymentStatus FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
     if (!row.recordset.length) return res.status(404).json({ error: "Allotment not found" });
-    if (row.recordset[0].BookingId) {
+    if (row.recordset[0].BookingId != null) {
       return res.status(400).json({ error: "This parking sale is linked to a booking — record payment through the booking's payment schedule instead" });
     }
 
@@ -897,25 +1013,31 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
 // this server-side check anyone with edit rights could call this endpoint
 // directly and bypass the frontend gate entirely.
 //
-// Reason is mandatory unconditionally and always written to the audit trail.
+// Reason is required only when routing through the amendment queue (agreement
+// Executed/Registered). For direct releases (normal booking workflow) it is
+// optional — recorded in the audit trail when supplied, silent when not.
 router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const reason = (req.query.reason || req.body?.Reason || "").trim();
-    if (!reason) return res.status(400).json({ error: "A reason is required to release a parking allotment" });
 
     const row = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
     if (!row.recordset.length) return res.status(404).json({ error: "Allotment not found" });
     const bookingId = row.recordset[0].BookingId;
 
-    if (bookingId) {
+    if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
     }
 
-    if (bookingId && await isLegalWorkStarted(pool, bookingId)) {
+    if (bookingId != null && await isSaleDeedRegistered(pool, bookingId))
+      return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
+
+    if (bookingId != null && await shouldQueueParkingAmendment(pool, bookingId)) {
+      if (!reason) return res.status(400).json({ error: "A reason is required — the Agreement is executed and this change must go through the amendment queue" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ParkingAllotment", action: "Release", targetId: id,
         proposedChange: {}, reason, requestedBy: actorId(req),
@@ -923,8 +1045,19 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyReleaseParking(pool, id, actorId(req), reason);
-    res.json({ success: true, ...result });
+    // applyReleaseParking does UPDATE allotment + (optional) milestone DELETE
+    // + rollupBookingTotals + syncParkingPaymentStatus + audit log — same
+    // atomicity concern as PUT above.
+    const tx = pool.transaction();
+    try {
+      await tx.begin();
+      const result = await applyReleaseParking(tx, id, actorId(req), reason);
+      await tx.commit();
+      res.json({ success: true, ...result });
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
   } catch (e) {
     console.error("[crm-parking] DELETE error:", e.message);
     res.status(e.status || 500).json({ error: e.message });

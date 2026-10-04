@@ -61,6 +61,18 @@ async function resolveLoansGroupId(pool) {
   return res.recordset[0]?.AGId ?? null;
 }
 
+// SUNDRY DEBTORS (Code='SDS', same resolution accountHeadMaster.js's
+// getSundryDebtorsGroupId already uses) — a customer head sitting here
+// with a CREDIT balance (net < 0) means they've paid more than they
+// currently owe: an advance, a liability, not a debtor. Reclassified
+// per-head into the "Advance from Customers" bucket instead of showing as
+// a negative figure under Sundry Debtors — same sign-flip convention the
+// LOANS AND ADVANCES group above already uses.
+async function resolveSundryDebtorsGroupId(pool) {
+  const res = await pool.request().query(`SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SDS'`);
+  return res.recordset[0]?.AGId ?? null;
+}
+
 async function loadGroups(pool) {
   const res = await pool.request().query(`
     SELECT AGId,
@@ -147,9 +159,19 @@ const RE_CURRENT_LIAB = /current liab/i;
 const RE_INVESTMENT = /investment/i;
 const RE_FICTITIOUS = /fictitious|deferred revenue/i;
 const RE_INTANGIBLE = /intangible/i;
-const RE_TANGIBLE = /\btangible\b|work.?in.?progress/i;
+const RE_TANGIBLE = /\btangible\b/i;
 const RE_LOANS_ADVANCES_GIVEN = /loans?\s*(and|&)?\s*advances?/i;
 const RE_CURRENT_ASSET = /current asset/i;
+// Work-in-Progress used to be folded into RE_TANGIBLE (treating it as
+// "Capital WIP", a self-constructed fixed asset) — wrong for this business:
+// a construction/real-estate developer's WIP is unsold project inventory
+// (Construction Cost - Labour/Land/Materials sit under CURRENT ASSETS
+// already), not a fixed asset. Checked ahead of, and independent of, the
+// group's actual static AccountGroup parent (which may still sit under
+// FIXED ASSETS in the chart of accounts) — same "classify by name,
+// regardless of where the group happens to be nested" precedent every
+// other regex in this file already follows.
+const RE_WIP = /work.?in.?progress/i;
 
 function classifyLiabilitySection(groupMap, groupId, rootId) {
   const names = chainNames(groupMap, groupId);
@@ -166,6 +188,7 @@ function classifyLiabilitySection(groupMap, groupId, rootId) {
 function classifyAssetSection(groupMap, groupId, rootId) {
   const names = chainNames(groupMap, groupId);
   if (chainMatches(names, RE_FICTITIOUS)) return "fictitiousAssets";
+  if (chainMatches(names, RE_WIP)) return "currentAssets";
   if (chainMatches(names, RE_INVESTMENT)) return "investments";
   if (chainMatches(names, RE_LOANS_ADVANCES_GIVEN)) return "investments"; // spec's own "Loans & Advances Given" example
   if (chainMatches(names, RE_INTANGIBLE)) return "fixedAssetsIntangible";
@@ -184,11 +207,12 @@ router.get("/balance-sheet", async (req, res) => {
     const asOf = req.query.asOf || new Date().toISOString().slice(0, 10);
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const costCenterId = req.query.costCenterId ? parseInt(req.query.costCenterId, 10) : null;
+    const costCenterId = req.query.costCenterId !== undefined && req.query.costCenterId !== null && req.query.costCenterId !== "" ? parseInt(req.query.costCenterId, 10) : null;
 
     const groupMap = await loadGroups(pool);
     const rootIds = await resolveRootIds(pool);
     const loansGroupId = await resolveLoansGroupId(pool);
+    const sundryDebtorsGroupId = await resolveSundryDebtorsGroupId(pool);
 
     const headsRes = await pool
       .request()
@@ -205,6 +229,9 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL((
             SELECT SUM(gle.DebitAmount) FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId AND gle.IsReversed = 0
+              -- Pure ledger read: on-account advances already sit in the
+              -- 'Company On Account A/c' asset, so no add-back / exclusion here
+              -- (that used to count the same advance twice and unbalance the sheet).
               AND gle.VoucherDate <= @asOf
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -219,13 +246,25 @@ router.get("/balance-sheet", async (req, res) => {
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
               AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
-          ), 0)
-          + CASE WHEN ahm.LHeadType IN ('S', 'C') THEN ISNULL(ahm.OnAccountBalance, 0) ELSE 0 END
-            AS credit
+          ), 0) AS credit
         FROM dbo.AccountHeadMaster ahm
-        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1
+        -- No LHeadStatus filter — same universe of heads and the same
+        -- opening/txn balance computation trialBalance.js's own main query
+        -- uses (routes/trialBalance.js's headsRes), so a head's balance
+        -- here is never anything other than what Trial Balance would show
+        -- for the same head. Previously this filtered to LHeadStatus = 1,
+        -- which silently dropped any inactive head still carrying a
+        -- nonzero balance — Trial Balance never had that filter, so the
+        -- two statements could show different "Total Assets"/"Total
+        -- Liabilities" even when every individual figure was internally
+        -- correct.
+        WHERE ahm.LBelongsTo IS NOT NULL
       `);
 
+    // Balances are a pure read of the ledger. On-account advances to suppliers
+    // sit in the 'Company On Account A/c' asset, so they are NOT added back
+    // onto the party heads (that counted each advance twice and left the
+    // sheet out of balance by the total advances).
     // Net P&L (income - expenses, life-to-date through asOf) rolls into
     // Partners' Capital as Net Profit — same as any statutory Balance
     // Sheet, since the ledger has no year-end closing/transfer entry to
@@ -246,7 +285,8 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL(SUM(gle.CreditAmount), 0) AS credit
         FROM dbo.AccountHeadMaster ahm
         JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId
-        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1 AND gle.IsReversed = 0
+        -- No LHeadStatus filter — see the headsRes query above for why.
+        WHERE ahm.LBelongsTo IS NOT NULL AND gle.IsReversed = 0
           AND gle.VoucherDate < @fyStart
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -267,7 +307,8 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL(SUM(gle.CreditAmount), 0) AS credit
         FROM dbo.AccountHeadMaster ahm
         JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId
-        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1 AND gle.IsReversed = 0
+        -- No LHeadStatus filter — see the headsRes query above for why.
+        WHERE ahm.LBelongsTo IS NOT NULL AND gle.IsReversed = 0
           AND gle.VoucherDate >= @fyStart AND gle.VoucherDate <= @asOf
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -312,7 +353,8 @@ router.get("/balance-sheet", async (req, res) => {
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
           AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
-        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1
+        -- No LHeadStatus filter — see the headsRes query above for why.
+        WHERE ahm.LBelongsTo IS NOT NULL
         GROUP BY ahm.LHeadId
       `);
     const movementByHeadId = new Map(movementRes.recordset.map((r) => [Number(r.id), r]));
@@ -338,10 +380,27 @@ router.get("/balance-sheet", async (req, res) => {
     };
 
     let incomeSummaryBalance = 0;
-    let capitalOpening = 0;
-    let capitalFurther = 0;
+    const partnerFunds = {
+      capital: { opening: 0, credits: 0, debits: 0, total: 0, heads: [] },
+      current: { opening: 0, credits: 0, debits: 0, total: 0, heads: [] },
+    };
+    // Per-partner roll-forward (Balance b/f + Capital introduced + Share of
+    // profit/remuneration/interest − Drawings), keyed by the partner's base
+    // code (head code minus the -CAP/-CUR suffix) or, for hand-made heads,
+    // the head name.
+    const partnerRows = new Map();
 
     for (const h of headsRes.recordset) {
+      // An OnAccountLedger CREDIT row is the advance itself — paying it
+      // reduces what's owed (or creates a receivable-like position), so it
+      // lands on the DEBIT side of the party's own ledger, not credit. See
+      // vendorLedger.js's mapOnAccountRow: TxnType='CREDIT' rows map to
+      // DebitAmount there. This was flipped to the credit side here
+      // initially, which didn't just fail to fix the Vendor-Ledger-vs-
+      // Balance-Sheet mismatch — it doubled it in the wrong direction.
+      // Pure ledger balance — on-account advances are already a debit
+      // in the 'Company On Account A/c' asset; adding them back onto the
+      // supplier as well counted each advance twice.
       const debit = Number(h.debit) || 0;
       const credit = Number(h.credit) || 0;
       const net = Math.round((debit - credit) * 100) / 100;
@@ -373,6 +432,78 @@ router.get("/balance-sheet", async (req, res) => {
         groupName = net > 0 ? "Loan Receivable" : "Loan Payable";
       }
 
+      // A Sundry Debtors head with a CREDIT balance (net < 0) has paid
+      // more than they currently owe — an advance, a liability, not a
+      // debtor. Reclassified as a group inside Current Liabilities instead
+      // of showing as a negative figure under Sundry Debtors (same
+      // sign-flip convention as the LOANS AND ADVANCES special case
+      // above). Bypasses the normal per-group asset classification
+      // entirely for this head — pushed straight into currentLiabilities
+      // (not its own top-level section) since it's a short-term liability
+      // just like every other group already shown there.
+      if (gid === sundryDebtorsGroupId && net < 0) {
+        pushHead(sectionBuckets.currentLiabilities, gid, "Advance from Customers", { id: h.id, name: h.name, amount: -net });
+        continue;
+      }
+
+      // Partners' funds (Capital + Current Account + Drawings). Resolved
+      // BEFORE the generic asset/liability section logic, and by head
+      // identity first (Partner Master's LHeadType='P' with a -CAP/-CUR
+      // code), then by the group chain / head name for hand-made heads. The
+      // old group-name walk mis-filed these: "Capital Account & Reserve"
+      // matched /reserve/ and landed in Provisions & Reserves, "Current
+      // Account" fell through to Fixed Liabilities, and a Current Account
+      // head under Assets contributed only its FY drawings movement (its
+      // opening balance vanished, so the sheet could never balance).
+      const chain = chainNames(groupMap, gid);
+      const headCode = String(h.code || "");
+      const isPartnerHead = h.type === "P";
+      const isLiab = root === rootIds.LIABILITIES;
+      let partnerKind = null;
+      if (isPartnerHead && /-CAP$/i.test(headCode)) partnerKind = "capital";
+      else if (isPartnerHead && /-CUR$/i.test(headCode)) partnerKind = "current";
+      else if (isLiab && (RE_DRAWINGS.test(h.name || "") || chainMatches(chain, RE_DRAWINGS))) partnerKind = "current";
+      else if (isLiab && chain.some((n) => /^current account$/i.test(n))) partnerKind = "current";
+      else if (isLiab && chain.some((n) => /capital account/i.test(n))) partnerKind = "capital";
+      else if (isLiab && classifyLiabilitySection(groupMap, gid, rootIds.LIABILITIES) === "partnersCapital") partnerKind = "capital";
+
+      if (partnerKind) {
+        const mv = movementByHeadId.get(Number(h.id)) || {};
+        const dPrior = Number(mv.debitPrior) || 0;
+        const cPrior = Number(mv.creditPrior) || 0;
+        const dCur = Number(mv.debitCurrent) || 0;
+        const cCur = Number(mv.creditCurrent) || 0;
+        const f = partnerFunds[partnerKind];
+        f.opening = Math.round((f.opening + cPrior - dPrior) * 100) / 100;
+        f.credits = Math.round((f.credits + cCur) * 100) / 100;
+        f.debits = Math.round((f.debits + dCur) * 100) / 100;
+        f.total = Math.round((f.total - net) * 100) / 100;
+        f.heads.push({ id: h.id, name: h.name, amount: -net });
+        // A hand-made "Partners Drawings" head isn't any one partner's
+        // account — group all of them into a single clearly-labelled
+        // unassigned row instead of showing it as if it were a partner.
+        const isUnassignedDrawings = !isPartnerHead && RE_DRAWINGS.test(h.name || "");
+        const pKey = isPartnerHead
+          ? headCode.replace(/-(CAP|CUR)$/i, "")
+          : isUnassignedDrawings
+            ? "unassigned-drawings"
+            : `n:${String(h.name || "").toLowerCase()}`;
+        if (!partnerRows.has(pKey)) {
+          partnerRows.set(pKey, { key: pKey, name: isUnassignedDrawings ? "Drawings not assigned to a partner" : h.name, opening: 0, capitalIntroduced: 0, credits: 0, drawings: 0, closing: 0 });
+        }
+        const pr = partnerRows.get(pKey);
+        pr.opening += cPrior - dPrior;
+        pr.closing += -net;
+        if (partnerKind === "capital") pr.capitalIntroduced += cCur - dCur;
+        else { pr.credits += cCur; pr.drawings += dCur; }
+        // Drawings drill-down (own note): this FY's debits on the partner's
+        // Current Account / drawings head.
+        if (partnerKind === "current" && dCur > 0.005) {
+          pushHead(sectionBuckets.partnersDrawings, gid, groupName, { id: h.id, name: h.name, amount: dCur });
+        }
+        continue;
+      }
+
       if (root === rootIds.ASSETS) {
         // Asset head: positive (debit) balance is normal. A credit balance
         // on an asset head still reports under Assets, shown as a negative
@@ -381,28 +512,6 @@ router.get("/balance-sheet", async (req, res) => {
         pushHead(sectionBuckets[section], gid, groupName, { id: h.id, name: h.name, amount: net });
       } else if (root === rootIds.LIABILITIES) {
         const section = classifyLiabilitySection(groupMap, gid, rootIds.LIABILITIES);
-
-        if (section === "partnersDrawings") {
-          // "Amounts withdrawn during the period" — current-FY movement
-          // only, not the head's full life-to-date balance.
-          const mv = movementByHeadId.get(Number(h.id));
-          const currentAmt = mv
-            ? Math.round(((Number(mv.debitCurrent) || 0) - (Number(mv.creditCurrent) || 0)) * 100) / 100
-            : net;
-          if (Math.abs(currentAmt) > 0.005) {
-            pushHead(sectionBuckets.partnersDrawings, gid, groupName, { id: h.id, name: h.name, amount: currentAmt });
-          }
-          continue;
-        }
-
-        if (section === "partnersCapital") {
-          const mv = movementByHeadId.get(Number(h.id));
-          if (mv) {
-            capitalOpening = Math.round((capitalOpening + (Number(mv.creditPrior) || 0) - (Number(mv.debitPrior) || 0)) * 100) / 100;
-            capitalFurther = Math.round((capitalFurther + (Number(mv.creditCurrent) || 0) - (Number(mv.debitCurrent) || 0)) * 100) / 100;
-          }
-        }
-
         pushHead(sectionBuckets[section], gid, groupName, { id: h.id, name: h.name, amount: -net });
       }
       // REVENUE/EXPENSES heads never carry a Balance Sheet closing balance in
@@ -428,7 +537,6 @@ router.get("/balance-sheet", async (req, res) => {
     const investments = toRows(sectionBuckets.investments);
     const currentAssets = toRows(sectionBuckets.currentAssets);
     const fictitiousAssets = toRows(sectionBuckets.fictitiousAssets);
-    const capitalHeads = toRows(sectionBuckets.partnersCapital).flatMap((g) => g.heads);
 
     const sumTotal = (rows) => Math.round(rows.reduce((s, g) => s + g.total, 0) * 100) / 100;
     const totalProvisionsReserves = sumTotal(provisionsReserves);
@@ -440,14 +548,95 @@ router.get("/balance-sheet", async (req, res) => {
     const totalCurrentAssets = sumTotal(currentAssets);
     const totalFictitiousAssets = sumTotal(fictitiousAssets);
 
-    // Partners' Capital = Opening + Retained Earnings b/f + Further Capital
-    // + Net Profit (current period) − Drawings, per spec.
+    // Partners' Capital = Opening + Further Capital + Net Profit (current
+    // period) − Drawings. Retained Earnings b/f (prior years' net P&L) is
+    // NOT a partner capital contribution — it's the accumulated result of
+    // invoices/payments posted in earlier financial years, so it's reported
+    // as its own "Reserves & Surplus" liability line instead of being
+    // folded into Partners' Capital.
+    // A hand-made "Partners Drawings" head has no partner of its own — but
+    // each voucher that debits it (e.g. Dr Partners Drawings / Cr Bikash
+    // Current A/c for director remuneration) names the partner on its other
+    // leg. Attribute those debits to that partner so the credit and its
+    // offsetting drawings net inside the partner's block, instead of a
+    // stray "unassigned" row. Vouchers touching more than one partner stay
+    // unassigned rather than being guessed at.
+    const drawAttrib = await pool
+      .request()
+      .input("asOf", sql.Date, asOf)
+      .input("fyStart", sql.Date, fyStart)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("costCenterId", sql.Int, costCenterId).query(`
+        SELECT x.partnerCode,
+          ISNULL(SUM(CASE WHEN x.VoucherDate < @fyStart THEN x.DebitAmount ELSE 0 END), 0) AS debitPrior,
+          ISNULL(SUM(CASE WHEN x.VoucherDate >= @fyStart THEN x.DebitAmount ELSE 0 END), 0) AS debitCurrent
+        FROM (
+          SELECT d.DebitAmount, d.VoucherDate,
+                 (SELECT MIN(pah.LHeadCode) FROM dbo.GeneralLedgerEntry p
+                    JOIN dbo.AccountHeadMaster pah ON pah.LHeadId = p.LHeadId AND pah.LHeadType = 'P'
+                   WHERE p.SourceType = d.SourceType AND p.SourceId = d.SourceId AND p.IsReversed = 0) AS partnerCode,
+                 (SELECT COUNT(DISTINCT REPLACE(REPLACE(pah.LHeadCode, '-CAP', ''), '-CUR', ''))
+                    FROM dbo.GeneralLedgerEntry p
+                    JOIN dbo.AccountHeadMaster pah ON pah.LHeadId = p.LHeadId AND pah.LHeadType = 'P'
+                   WHERE p.SourceType = d.SourceType AND p.SourceId = d.SourceId AND p.IsReversed = 0) AS partnerCount
+          FROM dbo.GeneralLedgerEntry d
+          JOIN dbo.AccountHeadMaster dh ON dh.LHeadId = d.LHeadId
+          WHERE d.IsReversed = 0 AND d.DebitAmount > 0 AND d.VoucherDate <= @asOf
+            AND dh.LHeadType <> 'P' AND dh.LHeadName LIKE '%drawing%'
+            AND (@companyId IS NULL OR d.CompanyId = @companyId)
+            AND (@projectId IS NULL OR d.ProjectId = @projectId)
+            AND (@costCenterId IS NULL OR d.CostCenterId = @costCenterId)
+        ) x
+        WHERE x.partnerCode IS NOT NULL AND x.partnerCount = 1
+        GROUP BY x.partnerCode
+      `);
+    const unassignedRow = partnerRows.get("unassigned-drawings");
+    for (const a of drawAttrib.recordset) {
+      const pKey = String(a.partnerCode).replace(/-(CAP|CUR)$/i, "");
+      const target = partnerRows.get(pKey);
+      const prior = Number(a.debitPrior) || 0;
+      const cur = Number(a.debitCurrent) || 0;
+      if (!target || !unassignedRow) continue;
+      // Dr Partners Drawings / Cr the partner's Current A/c cancel each
+      // other out for that partner — take the matching credit off instead
+      // of also adding the debit as drawings (that showed it in both
+      // places: Add: Share of Profit AND Less: Drawings).
+      target.opening -= prior;
+      target.credits -= cur;
+      target.closing -= prior + cur;
+      unassignedRow.opening += prior;
+      unassignedRow.drawings -= cur;
+      unassignedRow.closing += prior + cur;
+    }
+    const isZeroRow = (p) =>
+      [p.opening, p.capitalIntroduced, p.credits, p.drawings, p.closing].every((n) => Math.abs(n) < 0.005);
+
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const partners = Array.from(partnerRows.values())
+      .filter((p) => !isZeroRow(p))
+      .map((p) => ({
+        key: p.key,
+        name: p.name,
+        opening: r2(p.opening),
+        capitalIntroduced: r2(p.capitalIntroduced),
+        credits: r2(p.credits),
+        drawings: r2(p.drawings),
+        closing: r2(p.closing),
+      }))
+      .sort((a, b) =>
+        (a.key === "unassigned-drawings") - (b.key === "unassigned-drawings") ||
+        String(a.name).localeCompare(String(b.name)));
+    const capitalFunds = partnerFunds.capital;
+    const currentFunds = partnerFunds.current;
+    const capitalOpening = capitalFunds.opening;
+    const capitalFurther = Math.round((capitalFunds.credits - capitalFunds.debits) * 100) / 100;
     const partnersCapitalTotal = Math.round(
-      (capitalOpening + retainedEarningsPrior + capitalFurther + netProfitCurrent - totalDrawings) * 100,
+      (capitalFunds.total + currentFunds.total + netProfitCurrent) * 100,
     ) / 100;
 
     const totalLiabilities = Math.round(
-      (partnersCapitalTotal + totalProvisionsReserves + totalFixedLiabilities + totalCurrentLiabilities) * 100,
+      (partnersCapitalTotal + retainedEarningsPrior + totalProvisionsReserves + totalFixedLiabilities + totalCurrentLiabilities) * 100,
     ) / 100;
     const totalAssets = Math.round(
       (totalFixedAssetsTangible + totalFixedAssetsIntangible + totalInvestments + totalCurrentAssets + totalFictitiousAssets) * 100,
@@ -463,10 +652,14 @@ router.get("/balance-sheet", async (req, res) => {
     }
     const totalNonCurrentAssets = Math.round((totalAssets - totalCurrentAssets) * 100) / 100;
     const totalNonCurrentLiabilities = Math.round((totalFixedLiabilities + totalProvisionsReserves) * 100) / 100;
-    const totalEquity = partnersCapitalTotal;
+    // Equity = Partners' Capital + Reserves & Surplus (retained earnings)
+    // — Retained Earnings b/f no longer nests inside Partners' Capital's
+    // own sub-total (see reservesAndSurplus below), but it's still
+    // genuinely equity, not debt, for ratio purposes.
+    const totalEquity = Math.round((partnersCapitalTotal + retainedEarningsPrior) * 100) / 100;
 
     const safeDiv = (n, d) => (Math.abs(d) < 0.005 ? null : Math.round((n / d) * 10000) / 10000);
-    // Debt = Total Liabilities (all groups) minus Equity (Partners' Capital).
+    // Debt = Total Liabilities (all groups) minus Equity (Partners' Capital + Reserves & Surplus).
     const totalDebt = Math.round((totalLiabilities - totalEquity) * 100) / 100;
     const currentRatio = safeDiv(totalCurrentAssets, totalCurrentLiabilities);
     const quickRatio   = safeDiv(totalCurrentAssets - totalInventories, totalCurrentLiabilities);
@@ -481,16 +674,42 @@ router.get("/balance-sheet", async (req, res) => {
       entityType,
       partnersCapital: {
         openingCapital: capitalOpening,
-        retainedEarningsPrior,
         furtherCapital: capitalFurther,
         netProfitCurrent,
         drawings: totalDrawings,
         total: partnersCapitalTotal,
-        capitalHeads,
+        capitalHeads: capitalFunds.heads,
+        // Full partners' funds roll-forward: Capital A/c (opening + capital
+        // introduced) and Current A/c (opening + credits − drawings), each
+        // with its closing balance and per-partner heads.
+        partners,
+        capitalAccount: {
+          opening: capitalOpening,
+          further: capitalFurther,
+          closing: capitalFunds.total,
+          heads: capitalFunds.heads,
+        },
+        currentAccount: {
+          opening: currentFunds.opening,
+          credits: currentFunds.credits,
+          drawings: currentFunds.debits,
+          closing: currentFunds.total,
+          heads: currentFunds.heads,
+        },
       },
+      // Retained Earnings b/f (prior years' net P&L, adjusted for whatever's
+      // already been transferred via the Income Summary head) — reported as
+      // its own liability line, not folded into Partners' Capital. It's the
+      // result of invoices/payments posted in earlier financial years, not
+      // a partner capital contribution.
+      reservesAndSurplus: { retainedEarningsPrior, total: retainedEarningsPrior },
       partnersDrawings: partnersDrawingsRows,
       provisionsReserves,
       fixedLiabilities,
+      // Includes an "Advance from Customers" group for any Sundry Debtors
+      // head with a credit balance, reclassified here instead of showing
+      // as a negative figure under Sundry Debtors — see the
+      // sundryDebtorsGroupId sign-flip above.
       currentLiabilities,
       fixedAssets: { tangible: fixedAssetsTangible, intangible: fixedAssetsIntangible },
       investments,
@@ -617,7 +836,7 @@ router.get("/profit-loss", async (req, res) => {
     const to = req.query.to || `${fyYear + 1}-03-31`;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const costCenterId = req.query.costCenterId ? parseInt(req.query.costCenterId, 10) : null;
+    const costCenterId = req.query.costCenterId !== undefined && req.query.costCenterId !== null && req.query.costCenterId !== "" ? parseInt(req.query.costCenterId, 10) : null;
 
     const groupMap = await loadGroups(pool);
     const rootIds = await resolveRootIds(pool);
@@ -812,6 +1031,94 @@ router.get("/profit-loss", async (req, res) => {
     });
   } catch (err) {
     console.error("[GET /financial-statements/profit-loss]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /monthly-income?fyStart=YYYY&companyId=&projectId=&costCenterId= ───
+//
+// Twelve month-wise income figures for the financial year (Apr → Mar), each
+// derived straight off dbo.GeneralLedgerEntry the same way /profit-loss
+// derives "Total Income": a head counts as income when its AccountGroup rolls
+// up under the REVENUE Schedule-III root (see rootOf/resolveRootIds), and a
+// month's income is Σ(credit − debit) across those heads for vouchers dated
+// in that month. No dummy data — if nothing is posted for a month it reads 0.
+//
+// Powers the "Monthly Income Growth" bar chart on the Finance Overview
+// dashboard. Because it reads the live ledger, any change to Trial Balance
+// postings is reflected automatically on the next fetch.
+router.get("/monthly-income", async (req, res) => {
+  try {
+    const pool = getPool();
+    const now = new Date();
+    const defaultFyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const fyYear = req.query.fyStart ? parseInt(req.query.fyStart, 10) : defaultFyYear;
+    const from = `${fyYear}-04-01`;
+    const to = `${fyYear + 1}-03-31`;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const costCenterId = req.query.costCenterId !== undefined && req.query.costCenterId !== null && req.query.costCenterId !== "" ? parseInt(req.query.costCenterId, 10) : null;
+
+    const groupMap = await loadGroups(pool);
+    const rootIds = await resolveRootIds(pool);
+
+    const rowsRes = await pool
+      .request()
+      .input("from", sql.Date, from)
+      .input("to", sql.Date, to)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("costCenterId", sql.Int, costCenterId).query(`
+        SELECT
+          YEAR(gle.VoucherDate)  AS y,
+          MONTH(gle.VoucherDate) AS m,
+          ahm.LBelongsTo         AS groupId,
+          ISNULL(SUM(gle.CreditAmount), 0) AS credit,
+          ISNULL(SUM(gle.DebitAmount), 0)  AS debit
+        FROM dbo.GeneralLedgerEntry gle
+        JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId
+        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1 AND gle.IsReversed = 0
+          AND gle.VoucherDate BETWEEN @from AND @to
+          AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+          AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+          AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
+        GROUP BY YEAR(gle.VoucherDate), MONTH(gle.VoucherDate), ahm.LBelongsTo
+      `);
+
+    // Accumulate REVENUE-root net (credit − debit) into a "YYYY-MM" bucket.
+    const byMonth = new Map();
+    for (const r of rowsRes.recordset) {
+      if (rootOf(groupMap, r.groupId, rootIds) !== rootIds.REVENUE) continue;
+      const key = `${r.y}-${String(r.m).padStart(2, "0")}`;
+      const net = (Number(r.credit) || 0) - (Number(r.debit) || 0);
+      byMonth.set(key, Math.round(((byMonth.get(key) || 0) + net) * 100) / 100);
+    }
+
+    const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const months = [];
+    for (let i = 0; i < 12; i++) {
+      const monthIdx = (3 + i) % 12; // 0-based, Apr = 3
+      const year = monthIdx >= 3 ? fyYear : fyYear + 1;
+      const key = `${year}-${String(monthIdx + 1).padStart(2, "0")}`;
+      const income = byMonth.get(key) || 0;
+      const prev = i > 0 ? months[i - 1].income : null;
+      let trend = "neutral";
+      if (prev != null) {
+        if (income > prev + 0.005) trend = "growth";
+        else if (income < prev - 0.005) trend = "degrowth";
+      }
+      months.push({
+        key,
+        month: MONTH_NAMES[monthIdx],
+        year,
+        income,
+        trend,
+      });
+    }
+
+    res.json({ fyStart: fyYear, from, to, months });
+  } catch (err) {
+    console.error("[GET /financial-statements/monthly-income]", err);
     res.status(500).json({ error: err.message });
   }
 });

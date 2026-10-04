@@ -18,6 +18,20 @@ export function useActivityLadder(initial: LadderActivity[] = []) {
     );
   };
 
+  // Appends several activities in the order picked, in one state update —
+  // same as calling add() N times, but as a single render instead of N.
+  const addMany = (
+    picks: { activityId: number; activityName: string }[],
+    workType: WorkType,
+  ) => {
+    setRungs((prev) =>
+      renumber([
+        ...prev,
+        ...picks.map((p) => ({ ...p, sequenceNo: 0, workType })),
+      ]),
+    );
+  };
+
   const remove = (index: number) => {
     setRungs((prev) => renumber(prev.filter((_, i) => i !== index)));
   };
@@ -34,5 +48,5 @@ export function useActivityLadder(initial: LadderActivity[] = []) {
 
   const reset = (list: LadderActivity[] = []) => setRungs(list);
 
-  return { rungs, add, remove, move, reset };
+  return { rungs, add, addMany, remove, move, reset };
 }

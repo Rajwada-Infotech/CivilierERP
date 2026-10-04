@@ -56,7 +56,7 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
   const { data: dbData, isLoading } = useQuery({
     queryKey: QUERY_KEY,
     queryFn: getAllFinYears, // Admin context — needs all years to manage them
-    enabled: !!localStorage.getItem("token"),
+    enabled: !!sessionStorage.getItem("token"),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });

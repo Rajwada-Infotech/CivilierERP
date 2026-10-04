@@ -39,9 +39,9 @@ function DisputeDialog({ applicationId, onClose, onSubmitted }: { applicationId:
         </DialogHeader>
         <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={4}
           placeholder="e.g. Unit isn't ready, snags unresolved, dates don't work..."
-          className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 resize-none" />
+          className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none" style={{ border: `1px solid ${HAIRLINE}`, background: "transparent", color: TEXT }} />
         <div className="flex justify-end gap-2 pt-2">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg" style={{ color: TEXT_MUTED }}>Cancel</button>
+          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
           <button onClick={submit} disabled={saving}
             className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
             {saving ? "Submitting..." : "Submit Dispute"}
@@ -105,10 +105,10 @@ const PortalConstruction: React.FC = () => {
             <span className="text-xs" style={{ color: TEXT_FAINT }}>Overall — {latest.Stage}</span>
             <span className="text-xs font-semibold" style={{ color: TEXT }}>{latest.PercentComplete}%</span>
           </div>
-          <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+          <div className="h-2.5 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
             <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, latest.PercentComplete)}%`, background: GOLD }} />
           </div>
-          <p className="text-[11px] mt-2" style={{ color: TEXT_FAINT }}>Last updated {fmtDateTime(latest.UpdateDate)}</p>
+          <p className="text-[0.6875rem] mt-2" style={{ color: TEXT_FAINT }}>Last updated {fmtDateTime(latest.UpdateDate)}</p>
         </Card>
       )}
 
@@ -205,14 +205,14 @@ const PortalConstruction: React.FC = () => {
                 <Card className="p-4">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-sm font-semibold flex items-center gap-1.5" style={{ ...serif, color: TEXT }}><HardHat size={14} style={{ color: GOLD }} /> {u.Stage}</span>
-                    <span className="text-[11px]" style={{ color: TEXT_FAINT }}>{fmtDate(u.UpdateDate)}</span>
+                    <span className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{fmtDate(u.UpdateDate)}</span>
                   </div>
                   {u.PercentComplete != null && (
                     <div className="mb-2">
-                      <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div className="h-2 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
                         <div className="h-full rounded-full" style={{ width: `${Math.min(100, u.PercentComplete)}%`, background: GOLD }} />
                       </div>
-                      <p className="text-[11px] mt-1" style={{ color: TEXT_FAINT }}>{u.PercentComplete}% complete</p>
+                      <p className="text-[0.6875rem] mt-1" style={{ color: TEXT_FAINT }}>{u.PercentComplete}% complete</p>
                     </div>
                   )}
                   {u.Summary && <p className="text-sm" style={{ color: TEXT_MUTED }}>{u.Summary}</p>}

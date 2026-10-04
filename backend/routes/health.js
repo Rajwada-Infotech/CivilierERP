@@ -6,6 +6,19 @@ const logger = require("../logger");
 const { isDbReady } = require("../db");
 const { isRedisReady } = require("../redis");
 const worker = require("../worker");
+const path = require("path");
+
+// Stamped into the release artifact at CI build time (see ci.yml's "Stamp
+// build info" step) — absent in local dev, where nothing deploys from an
+// artifact. A deploy compares this against public/version.json (the same
+// stamp, baked into the frontend bundle) to confirm what's actually running
+// is the commit that was just built, instead of trusting "no error" alone.
+let buildInfo = null;
+try {
+  buildInfo = require(path.join(__dirname, "..", "build-info.json"));
+} catch (_) {
+  // Not present outside a CI-built release artifact — expected in local dev.
+}
 
 // ─── Internal-only middleware ─────────────────────────────────────────────────
 // /health/ready and /health/startup expose service-level detail that is useful
@@ -33,9 +46,11 @@ function requireHealthToken(req, res, next) {
   next();
 }
 
-// GET /health — minimal public ping (name only, no env or infra data)
+// GET /health — minimal public ping (name only, no env or infra data).
+// build info (commit/ref/builtAt) is not sensitive — it's the same thing
+// `git log` shows anyone with repo access — so it's safe on the public route.
 router.get("/", (_req, res) => {
-  res.json({ status: "ok", name: "CivilierERP API" });
+  res.json({ status: "ok", name: "CivilierERP API", build: buildInfo });
 });
 
 // GET /health/live — liveness probe (no NODE_ENV, no internal details)

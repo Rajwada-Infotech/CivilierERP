@@ -5,6 +5,7 @@ const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -19,67 +20,135 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
   try {
     const pool = getPool();
     const { search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
-    let where = "WHERE c.IsActive = 1";
+    const conds = ["c.IsActive = 1"];
     if (search) {
       req0.input("srch", sql.NVarChar(200), `%${search}%`);
-      where += " AND (c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch)";
+      conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch)");
     }
-    const result = await req0.query(`
+    // Matched by the real CustomerId foreign key, not Mobile string equality
+    // — the old (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) pattern
+    // silently dropped every application/booking/payment for any customer
+    // with a blank Mobile (NULL = NULL is never true in SQL, so the whole
+    // rollup would just show zero) — which used to be a rare corruption
+    // case and is now a normal, expected state (Mobile is optional by
+    // business decision — see migration 445). CustomerId is also strictly
+    // more correct even for customers who DO have a mobile: string matching
+    // could under- or over-match on typos/shared numbers in a way a real FK
+    // never can.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
+    const where = `WHERE ${conds.join(" AND ")}`;
+    const BASE_SELECT = `
       SELECT
         c.Id, c.CustomerNo, c.CustomerName, c.Mobile, c.City, c.State,
-        (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AS ApplicationCount,
+        (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) AS ApplicationCount,
         (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS ActiveBookingCount,
-        (SELECT ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0)
+          WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS ActiveBookingCount,
+        -- Includes each booking's unswept On Account balance alongside
+        -- milestone AmountPaid — under the current "everything holds in On
+        -- Account until an explicit sweep" rule (crmPayments.js
+        -- applyCrmMilestonePaymentApproval / applyCrmOnAccountPaymentApproval)
+        -- every payment sits un-swept by default, so AmountPaid alone would
+        -- under-report real cash received from this customer.
+        ((SELECT ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS TotalPaid,
+          WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}'))
+        + (SELECT ISNULL(SUM(oa.Amount - ISNULL(oa.AppliedAmount,0)), 0)
+          FROM dbo.CrmOnAccountPayment oa JOIN dbo.CrmBooking b ON b.Id = oa.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}'))) AS TotalPaid,
         (SELECT ISNULL(SUM(CASE WHEN m.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS TotalOutstanding
+          WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS TotalOutstanding
       FROM dbo.CrmCustomer c
-      ${where}
-      ORDER BY c.CreatedAt DESC
-    `);
-    res.json(result.recordset);
+    `;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${BASE_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${BASE_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmCustomer c
+          WHERE c.IsActive = 1
+            AND (@srch2 IS NULL OR (c.CustomerName LIKE @srch2 OR c.Mobile LIKE @srch2 OR c.CustomerNo LIKE @srch2))
+            AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId2))
+            AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId2))
+            AND (@blockId2 IS NULL OR (EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId2) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId2)))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-customer-360] GET / error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /:mobile — full customer journey across Lead → Application → Booking →
+// GET /:id — full customer journey across Lead → Application → Booking →
 // Agreement → Payments → Handover → Service Tickets, merged into one
 // centralized ledger: invoices, payment receipts, on-account deposits, and
 // broker settlements per booking, plus a customer-level financial summary.
 // Restricted to admin-tier roles per the "leads visible only to marketing
 // head and super admin" access rule.
-router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req, res) => {
+//
+// Keyed by CrmCustomer.Id (the real primary key), not Mobile. It used to be
+// mobile-keyed end to end — meaning a customer with no mobile had no valid
+// URL for this page at all, and every join here (Application/Booking/
+// Tickets/Cancellations) matched by Mobile STRING EQUALITY instead of the
+// actual CustomerId foreign key, which silently dropped all of a mobile-
+// less customer's records (NULL = NULL is never true in SQL) and could
+// under/over-match even for customers who do have one (typos, shared
+// numbers). CustomerId is strictly correct in every case Mobile matching
+// was standing in for.
+router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const mobile = req.params.mobile.trim();
+    const customerId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(customerId)) return res.status(400).json({ error: "Invalid customer id" });
 
-    const [customer, leads, apps, bookings, calls, tickets, cancellations] = await Promise.all([
-      pool.request().input("mob", sql.NVarChar(20), mobile).query(`
-        SELECT TOP 1 Id, CustomerNo, CustomerName, Mobile, AltMobile, Email, PanNo, Address, City, State, Pincode
-        FROM dbo.CrmCustomer WHERE Mobile = @mob OR AltMobile = @mob
-      `),
-      pool.request().input("mob", sql.NVarChar(20), mobile).query(`
+    const customerRes = await pool.request().input("id", sql.Int, customerId).query(`
+      SELECT Id, CustomerNo, CustomerName, Mobile, AltMobile, Email, PanNo, Address, City, State, Pincode, LeadId
+      FROM dbo.CrmCustomer WHERE Id = @id AND IsActive = 1
+    `);
+    if (!customerRes.recordset.length) return res.status(404).json({ error: "Customer not found" });
+    const customerRow = customerRes.recordset[0];
+
+    const [leads, apps, bookings, calls, tickets, cancellations] = await Promise.all([
+      // A customer links to at most the ONE lead it converted from
+      // (CrmCustomer.LeadId) — set at customer-creation time, whether via
+      // the New Customer dialog's "Link to Existing Lead" or the
+      // Lead-conversion flow itself.
+      pool.request().input("lid", sql.Int, customerRow.LeadId).query(`
         SELECT Id, LeadUid, Status, Classification, SourceType, PlatformId,
                CreatedAt, AssignedSalespersonId
-        FROM dbo.SaLead WHERE Mobile = @mob OR AltMobile = @mob
+        FROM dbo.SaLead WHERE Id = @lid
         ORDER BY CreatedAt DESC
       `),
-      pool.request().input("mob", sql.NVarChar(20), mobile).query(`
+      pool.request().input("cid", sql.Int, customerId).query(`
         SELECT a.Id, a.ApplicationNo, a.ApplicantName, a.Status, a.CreatedAt,
                a.InterestedProject, a.PropertyType, a.BhkPreference,
                u.name AS AssigneeName
         FROM dbo.CrmApplication a
         LEFT JOIN dbo.Users u ON u.id = a.AssignedTo
-        WHERE a.Mobile = @mob OR a.AltMobile = @mob
+        WHERE a.CustomerId = @cid
         ORDER BY a.CreatedAt DESC
       `),
-      pool.request().input("mob", sql.NVarChar(20), mobile).query(`
+      pool.request().input("cid", sql.Int, customerId).query(`
         SELECT b.Id, b.BookingNo,
                COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
                COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
@@ -92,7 +161,10 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
                pp.Status AS PrePossessionStatus,
                (SELECT COUNT(*) FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.Status <> 'Issued') AS NocPendingCount,
                (SELECT COUNT(*) FROM dbo.CrmNoc n WHERE n.BookingId = b.Id) AS NocTotalCount,
-               (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalPaid,
+               -- Plus unswept On Account balance — same reasoning as the
+               -- customer-level TotalPaid above.
+               (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+                 + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS TotalPaid,
                (SELECT ISNULL(SUM(AmountDue),0)  FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalDue,
                CASE WHEN b.Status IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 0 ELSE
                  (SELECT ISNULL(SUM(CASE WHEN m2.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m2.AmountDue - ISNULL(m2.AmountPaid, 0) ELSE 0 END), 0)
@@ -106,37 +178,32 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
         LEFT JOIN dbo.CrmHandover h ON h.BookingId = b.Id
         LEFT JOIN dbo.CrmLegalMilestone lm ON lm.BookingId = b.Id
         LEFT JOIN dbo.CrmPrePossession pp ON pp.BookingId = b.Id
-        WHERE a.Mobile = @mob OR a.AltMobile = @mob
+        WHERE a.CustomerId = @cid
         ORDER BY b.CreatedAt DESC
       `),
-      pool.request().input("mob", sql.NVarChar(20), mobile).query(`
+      pool.request().input("lid", sql.Int, customerRow.LeadId).query(`
         SELECT c.Id, c.CallTime, c.Outcome, c.Classification, c.Remarks
         FROM dbo.SaInquiryCall c
-        JOIN dbo.SaLead l ON l.Id = c.LeadId
-        WHERE l.Mobile = @mob OR l.AltMobile = @mob
+        WHERE c.LeadId = @lid
         ORDER BY c.CallTime DESC
       `),
-      pool.request().input("mob", sql.NVarChar(20), mobile).query(`
+      pool.request().input("cid", sql.Int, customerId).query(`
         SELECT t.Id, t.TicketNo, t.Category, t.Priority, t.Subject, t.Status, t.CreatedAt
         FROM dbo.CrmServiceTicket t
         JOIN dbo.CrmBooking b ON b.Id = t.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE a.Mobile = @mob OR a.AltMobile = @mob
+        WHERE a.CustomerId = @cid
         ORDER BY t.CreatedAt DESC
       `),
-      pool.request().input("mob", sql.NVarChar(20), mobile).query(`
+      pool.request().input("cid", sql.Int, customerId).query(`
         SELECT c.Id, c.Status, c.RefundAmount, c.CreatedAt
         FROM dbo.CrmCancellation c
         JOIN dbo.CrmBooking b ON b.Id = c.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE a.Mobile = @mob OR a.AltMobile = @mob
+        WHERE a.CustomerId = @cid
         ORDER BY c.CreatedAt DESC
       `),
     ]);
-
-    if (!leads.recordset.length && !apps.recordset.length) {
-      return res.status(404).json({ error: "No customer found with this mobile number" });
-    }
 
     const bookingRows = bookings.recordset;
     const bookingIds = bookingRows.map((b) => b.Id);
@@ -223,8 +290,7 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
     };
 
     res.json({
-      mobile,
-      customer: customer.recordset[0] || null,
+      customer: customerRow,
       summary,
       leads: leads.recordset,
       applications: apps.recordset,

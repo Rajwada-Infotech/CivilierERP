@@ -177,6 +177,9 @@ export interface PaymentChainInvoice {
   TDSAmount: number | null;
   ProjectName: string | null;
   PartyName: string | null;
+  /** Resolved label — inherited from the invoice's linked PO/GRN (itself
+   *  auto-filled from Item Master), or the project's default. */
+  ECostCenter: string | null;
 }
 
 export interface PaymentChainResponse {

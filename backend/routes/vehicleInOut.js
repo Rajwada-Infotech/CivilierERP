@@ -28,15 +28,17 @@
 "use strict";
 
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageAction, hasAnyPageAction } = require("../middleware/requirePageRight");
 const {
   resolveDocTypeId,
   lockNextDocNumber,
@@ -49,13 +51,53 @@ const {
   getVehicleInOutItemsEnriched,
 } = require("../services/poVehicleGrnChain");
 
+// The entry/exit time pickers send a naive "YYYY-MM-DDTHH:MM" string — the
+// user's local (IST) wall-clock reading, with no timezone info attached.
+// `new Date(...)` on a string like that parses it against the SERVER
+// process's own timezone, which on this EC2 host is UTC — so "07:02" was
+// being read as 07:02 UTC (12:32 PM IST), well after the real IST "now",
+// and the future-time guard below rejected an exit time that was actually
+// hours in the past. Pin the offset explicitly instead of trusting
+// whatever TZ the Node process happens to be running under.
+const IST_OFFSET = "+05:30";
+function parseIstDateTime(value) {
+  if (!value) return null;
+  const hasOffset = /(Z|[+-]\d{2}:?\d{2})$/.test(value);
+  return new Date(hasOffset ? value : `${value}${IST_OFFSET}`);
+}
+
 const router = express.Router();
 
 // ── Rate-limit ────────────────────────────────────────────────────────────────
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // ── Permission guard ─────────────────────────────────────────────────────────
-router.use(checkPermissionForMethod("Material", "VehicleInOut"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Material", "VehicleInOut")(req, res, next);
+});
+
+// Any route with :id — refuse a Vehicle In/Out whose project is outside the
+// user's scope. /attachment/:attachId and /po-*/:poId use other param names.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  if (req.path.startsWith("/po-chat/")) return next(); // :id is a PO id there
+  const vid = parseInt(id, 10);
+  if (!Number.isFinite(vid)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, vid)
+      .query("SELECT ProjectID FROM dbo.VehicleInOut WHERE VehicleInOutID = @id");
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectID)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── Multer — memory storage (files go to DB, not disk) ───────────────────────
 const upload = multer({
@@ -203,6 +245,8 @@ class ValidationError extends Error {
  * when I ordered 100" rule, enforced per PO line item. Pure — no writes —
  * so callers can validate before touching the header row.
  */
+const VALID_QUALITIES = new Set(["Excellent", "Good", "Bad"]);
+
 async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutId) {
   const submitted = (Array.isArray(items) ? items : [])
     .map((it) => ({
@@ -211,6 +255,13 @@ async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutI
       // Optional real-time capture, base64 data URL — passed straight
       // through to the row without any validation of its own.
       photoBase64: typeof it.photoBase64 === "string" && it.photoBase64 ? it.photoBase64 : null,
+      // Quick inspection grade for this line — independent of the formal
+      // quality-rejection debit note flow.
+      quality: VALID_QUALITIES.has(it.quality) ? it.quality : null,
+      // Optional free-text brand for this line, captured at entry time —
+      // not sourced from the PO item, since the same ordered item can
+      // arrive under different brands lot to lot.
+      brand: typeof it.brand === "string" && it.brand.trim() ? it.brand.trim().slice(0, 100) : null,
     }))
     .filter((it) => it.poItemId && it.receivedQty > 0);
 
@@ -256,11 +307,13 @@ async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
       .input("ItemName", sql.NVarChar(255), line.po.itemName || null)
       .input("UomName", sql.NVarChar(50), line.po.uomName || null)
       .input("ReceivedQty", sql.Decimal(18, 3), line.receivedQty)
-      .input("PhotoBase64", sql.NVarChar(sql.MAX), line.photoBase64 || null).query(`
+      .input("PhotoBase64", sql.NVarChar(sql.MAX), line.photoBase64 || null)
+      .input("Quality", sql.NVarChar(20), line.quality || null)
+      .input("Brand", sql.NVarChar(100), line.brand || null).query(`
         INSERT INTO dbo.VehicleInOutItems
-          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64)
+          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand)
         VALUES
-          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64)
+          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64, @Quality, @Brand)
       `);
   }
 }
@@ -346,7 +399,7 @@ router.get("/", async (req, res) => {
           v.VehicleNo  LIKE @Search OR
           v.ChallanNo  LIKE @Search OR
           v.SupplierName LIKE @Search
-        )
+        )${projectPredicate(req.projectScope, "v.ProjectID")}
       ORDER BY v.VehicleInOutID DESC
       OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 
@@ -360,7 +413,7 @@ router.get("/", async (req, res) => {
           v.VehicleNo  LIKE @Search OR
           v.ChallanNo  LIKE @Search OR
           v.SupplierName LIKE @Search
-        );
+        )${projectPredicate(req.projectScope, "v.ProjectID")};
     `);
 
     const rows = result.recordsets[0];
@@ -379,6 +432,38 @@ router.get("/", async (req, res) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
+// ── GET /po-options — POs that can be picked on a Vehicle In/Out entry ───────
+// The form's PO picker used to read /api/purchase-orders, which is gated by the
+// separate Purchase Orders page right — so a store user with Vehicle In/Out
+// rights but none on Purchase Orders got an empty "No POs available" list.
+// This serves just what the picker needs, under the Vehicle In/Out right this
+// router already enforces. Must stay above "/:id".
+router.get("/po-options", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.Status,
+             po.SupplierID, ahm.LHeadName AS SupplierName,
+             po.CompanyId, po.ProjectId
+      FROM dbo.PurchaseOrders po
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
+      WHERE po.Status IN ('Approved', 'Pending', 'Received')${projectPredicate(req.projectScope, "po.ProjectId")}
+      ORDER BY po.PurchaseOrderID DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET vehicle-in-out po-options error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PO <-> supplier chat, under the Vehicle In/Out right ─────────────────────
+// The "Supplier" tab of a Vehicle In/Out entry embeds the PO chat. It used the
+// Purchase Orders routes (separate right); same handlers, gated by this router.
+const poHandlers = () => require("./purchaseOrders").poHandlers;
+router.get("/po-chat/:id/comments", (req, res) => poHandlers().listComments(req, res));
+router.post("/po-chat/:id/comment", (req, res) => poHandlers().addComment(req, res));
+
 // ── GET /pending-summary — POs with goods still outstanding after partial
 // Vehicle In/Out deliveries. Backs the "Pending Vehicle In/Out" widget:
 // PendingQty = ordered - received-so-far (excluding Rejected/Deleted lots),
@@ -474,15 +559,18 @@ router.get("/pending-summary", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("ID", sql.Int, id).query(`
         SELECT
           v.*,
           ec.Name AS CompanyName,
-          ep.Name AS ProjectName
+          ep.Name AS ProjectName,
+          COALESCE(cu.name, v.CreatedBy) AS CreatedByName
         FROM dbo.VehicleInOut v
         LEFT JOIN dbo.enterprise ec ON ec.id = v.CompanyID
         LEFT JOIN dbo.enterprise ep ON ep.id = v.ProjectID
+        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(v.CreatedBy)
         WHERE v.VehicleInOutID = @ID
       `);
 
@@ -492,7 +580,7 @@ router.get("/:id", async (req, res) => {
     const record = result.recordset[0];
     record.Attachments = await getAttachmentsFor(pool, id);
     const itemsResult = await pool.request().input("ItemsID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ItemsID
     `);
@@ -615,7 +703,7 @@ router.get("/:id/items", async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("ID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, Brand
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ID
     `);
@@ -629,6 +717,7 @@ router.get("/:id/items", async (req, res) => {
 router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
+  if (!assertProjectAllowed(req, res, req.body?.projectId)) return;
 
   const {
     docDate,
@@ -648,14 +737,19 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
+  if (!poId)
+    return res.status(400).json({ error: "A Purchase Order must be selected before a Vehicle In/Out entry can be created" });
   if (!vehicleNo)
     return res.status(400).json({ error: "vehicleNo is required" });
   if (!challanNo)
     return res.status(400).json({ error: "challanNo is required" });
   // Exit time is a backfill of when the vehicle actually left — never a
   // future appointment. The UI already caps the picker at "now", this is
-  // just the server-side backstop.
-  if (exitTime && new Date(exitTime).getTime() > Date.now())
+  // just the server-side backstop. Parsed via parseIstDateTime — the picker
+  // sends a naive "wall clock" string with no timezone, and comparing it
+  // raw against Date.now() reads it in the server process's own TZ (UTC on
+  // this host), not the IST it actually represents.
+  if (exitTime && parseIstDateTime(exitTime).getTime() > Date.now())
     return res.status(400).json({ error: "exitTime cannot be in the future" });
 
   const pool = getPool();
@@ -777,8 +871,10 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
 router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
+  if (!assertProjectAllowed(req, res, req.body?.projectId)) return;
 
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const {
     docDate,
     companyId,
@@ -797,17 +893,20 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
+  if (!poId)
+    return res.status(400).json({ error: "A Purchase Order must be selected before a Vehicle In/Out entry can be saved" });
   if (!vehicleNo)
     return res.status(400).json({ error: "vehicleNo is required" });
   if (!challanNo)
     return res.status(400).json({ error: "challanNo is required" });
-  if (exitTime && new Date(exitTime).getTime() > Date.now())
+  if (exitTime && parseIstDateTime(exitTime).getTime() > Date.now())
     return res.status(400).json({ error: "exitTime cannot be in the future" });
 
   try {
     const pool = getPool();
     const beforeSnapshot = await snapshotRow(pool, "dbo.VehicleInOut", "VehicleInOutID", id);
     const wasApproved = beforeSnapshot?.Status === "Approved";
+    const wasRejected = beforeSnapshot?.Status === "Rejected";
 
     // Validate before writing anything — excludeVehicleInOutId=id so this
     // record's own previously-saved quantities don't count against its
@@ -832,6 +931,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("UpdatedBy", sql.NVarChar(150), email).query(`
         UPDATE dbo.VehicleInOut SET
+          ${wasApproved ? "Status         = 'Pending'," : ""}
           DocDate        = @DocDate,
           CompanyID      = @CompanyID,
           ProjectID      = @ProjectID,
@@ -877,7 +977,32 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       }
     }
 
-    res.json({ success: true });
+    // A corrected, previously-Rejected record goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("vehicle-in-out", id, "Pending", email, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[vehicle-in-out] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          success: true,
+          message: "Updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: wasApproved ? "Updated — sent back for approval" : undefined,
+      reopenedForApproval: wasApproved,
+      resubmitted,
+    });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -911,7 +1036,11 @@ router.put("/:id/submit", requirePageRight("vehicle-in-out", "edit"), async (req
 });
 
 // ── PUT /:id/approve ──────────────────────────────────────────────────────────
-router.put("/:id/approve", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -925,6 +1054,8 @@ router.put("/:id/approve", requirePageRight("vehicle-in-out", "edit"), async (re
       "Approved",
       req.user?.email || email,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(CACHE_KEY);
     res.json({ message: "Vehicle In/Out approved", ...result });
@@ -936,7 +1067,7 @@ router.put("/:id/approve", requirePageRight("vehicle-in-out", "edit"), async (re
 });
 
 // ── PUT /:id/reject ───────────────────────────────────────────────────────────
-router.put("/:id/reject", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -952,6 +1083,7 @@ router.put("/:id/reject", requirePageRight("vehicle-in-out", "edit"), async (req
       req.user?.email || email,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(CACHE_KEY);
     res.json({ message: "Vehicle In/Out rejected", ...result });
@@ -969,7 +1101,8 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
   const email = userEmail(req, res);
   if (!email) return;
 
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const check = await pool
@@ -1013,7 +1146,16 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
 // VehicleInOutID exists — same flow as ticket attachments. Each row starts
 // with VehicleInOutID = NULL and gets linked once the parent record is
 // actually saved (see linkAttachments() in POST / and PUT /:id above).
-router.post("/upload", requirePageRight("vehicle-in-out", "edit"), upload.array("file", 20), async (req, res) => {
+// Attaching files is part of creating a record as much as editing one, so it needs
+// create OR edit — it used to need edit alone, which refused create-only users.
+const uploadFiles = (req, res, next) =>
+  upload.array("file", 20)(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.code === "LIMIT_FILE_SIZE";
+    res.status(400).json({ error: tooBig ? "A file is larger than the 50 MB limit." : err.message || "Upload failed" });
+  });
+
+router.post("/upload", requireAnyPageAction("vehicle-in-out", ["create", "edit"]), uploadFiles, async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -1094,7 +1236,10 @@ router.get("/attachment/:attachId", async (req, res) => {
 // ── DELETE /attachment/:attachId — remove a single attachment ─────────────────
 // Used when the user removes a captured photo / file before saving the form,
 // or removes one from an existing record while editing.
-router.delete("/attachment/:attachId", requirePageRight("vehicle-in-out", "delete"), async (req, res) => {
+// A file that's still un-linked (uploaded on a form that hasn't been saved yet)
+// can be dropped by anyone who could upload it; removing one that's already
+// attached to a saved record still needs the Delete right.
+router.delete("/attachment/:attachId", requireAnyPageAction("vehicle-in-out", ["delete", "create", "edit"]), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -1104,6 +1249,12 @@ router.delete("/attachment/:attachId", requirePageRight("vehicle-in-out", "delet
       return res.status(400).json({ error: "Invalid attachment id" });
 
     const pool = getPool();
+    const meta = await pool.request().input("AttachmentId", sql.Int, attachId)
+      .query(`SELECT VehicleInOutID FROM dbo.VehicleInOutAttachments WHERE AttachmentId = @AttachmentId`);
+    if (!meta.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+    if (meta.recordset[0].VehicleInOutID !== null && !(await hasAnyPageAction(req, "vehicle-in-out", ["delete"]))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const result = await pool
       .request()
       .input("AttachmentId", sql.Int, attachId)
