@@ -1746,8 +1746,11 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
     // type at all) — reported back so the user knows to set the layout up in
     // Unit Composition and then run Flat Master's bulk "Generate Rooms".
     const noRoomTypes = new Map(); // type label -> unit count
-    const tallyRooms = (rs, unitType) => {
+    const commercialKindsForTally = await require("../services/projectType").loadCommercialKinds(pool);
+    const tallyRooms = (rs, unitType, unitKind = null) => {
       roomsCreated += rs.created + rs.reactivated;
+      // Commercial units (shop, office…) have no rooms by design — not a gap to report.
+      if (unitKind && commercialKindsForTally.has(String(unitKind).toUpperCase())) return;
       if (rs.skipped === "no-layout" || rs.skipped === "no-composition") {
         const key = unitType || "No Unit Type";
         noRoomTypes.set(key, (noRoomTypes.get(key) || 0) + 1);
@@ -1828,8 +1831,13 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                 WHERE Id = @id`);
               // Its rooms, from its layout, in the same transaction (add-only;
               // a reactivated unit's existing rooms are kept).
+              const reKind = floor.UnitKind || typeSlot?.UnitKind || null;
+              if (reKind) {
+                await tx.request().input("id", sql.Int, reactivatedId).input("kind", sql.NVarChar(20), reKind)
+                  .query("UPDATE dbo.UnitMaster SET UnitKind = @kind WHERE Id = @id");
+              }
               const rs = await syncUnitRooms(tx, reactivatedId, { removeUnused: false, createdBy });
-              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType);
+              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType, floor.UnitKind || typeSlot?.UnitKind);
               await tx.commit();
               if (blockPlanIds.length) await syncUnitPaymentPlanTags(pool, reactivatedId, blockPlanIds);
               totalCreated++;
@@ -1874,7 +1882,7 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
             // in the same transaction as the unit itself.
             if (newId) {
               const rs = await syncUnitRooms(tx, newId, { removeUnused: false, createdBy });
-              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType);
+              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType, floor.UnitKind || typeSlot?.UnitKind);
             }
             await tx.commit();
             if (newId && blockPlanIds.length) await syncUnitPaymentPlanTags(pool, newId, blockPlanIds);
