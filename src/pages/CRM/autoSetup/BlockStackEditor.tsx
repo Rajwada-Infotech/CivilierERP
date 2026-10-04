@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, ChevronDown, ChevronRight, Lock, Plus, X } from "lucide-react";
+import { CheckCircle2, Lock, Plus, X } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { unitTypeOptions, type LayoutType } from "@/api/unitBhkConfigApi";
 
@@ -33,61 +33,77 @@ interface Props {
   onChanged: () => void;
 }
 
-// One editable mix (typical or a floor's own).
-function MixEditor({ rows, onChange, kinds, layoutTypes, canEdit, showDetails }: {
-  rows: MixRow[]; onChange: (r: MixRow[]) => void; kinds: KindRow[]; layoutTypes: LayoutType[]; canEdit: boolean; showDetails?: boolean;
+// One editable mix (typical or a floor's own) — a compact table with every
+// field visible: type, units, areas and rate. Nothing folded away.
+const AREA_COLS = [
+  ["CarpetAreaSqFt", "Carpet"],
+  ["BuiltUpAreaSqFt", "Built-up"],
+  ["SuperBuiltUpAreaSqFt", "Super built-up"],
+  ["RatePerSqFt", "Rate / sq ft"],
+] as const;
+
+function MixEditor({ rows, onChange, kinds, layoutTypes, canEdit }: {
+  rows: MixRow[]; onChange: (r: MixRow[]) => void; kinds: KindRow[]; layoutTypes: LayoutType[]; canEdit: boolean;
 }) {
-  const [openDetails, setOpenDetails] = useState<number | null>(null);
   const commercial = kinds.filter((k) => k.IsCommercial);
   const set = (i: number, patch: Partial<MixRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const firstType = unitTypeOptions(layoutTypes)[0]?.value ?? "";
+  const cell = "h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-right tabular-nums disabled:opacity-60";
   return (
-    <div className="space-y-1.5">
-      {rows.map((r, i) => (
-        <div key={i} className="space-y-1.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <input type="number" min={1} max={100} value={r.Count} disabled={!canEdit} aria-label="How many"
-              onChange={(e) => set(i, { Count: e.target.value })} className={`${inputCls} w-14 text-right tabular-nums`} />
-            <span className="text-xs text-muted-foreground">×</span>
-            <select value={r.UnitKind ? `kind:${r.UnitKind}` : r.UnitType} disabled={!canEdit}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v.startsWith("kind:")) { const k = commercial.find((x) => x.Code === v.slice(5)); set(i, { UnitKind: v.slice(5), UnitType: k?.Name || v.slice(5) }); }
-                else set(i, { UnitKind: null, UnitType: v });
-              }} className={`${inputCls} min-w-[9rem]`}>
-              {commercial.length ? (
-                <>
-                  <optgroup label="Residential">
-                    {unitTypeOptions(layoutTypes, r.UnitKind ? "" : r.UnitType).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </optgroup>
-                  <optgroup label="Commercial">
-                    {commercial.map((k) => <option key={k.Code} value={`kind:${k.Code}`}>{k.Name}</option>)}
-                  </optgroup>
-                </>
-              ) : unitTypeOptions(layoutTypes, r.UnitType).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            {showDetails && (
-              <button type="button" onClick={() => setOpenDetails(openDetails === i ? null : i)} className="text-[0.6875rem] text-muted-foreground hover:text-foreground inline-flex items-center gap-0.5">
-                {openDetails === i ? <ChevronDown size={11} /> : <ChevronRight size={11} />} Area & rate
-              </button>
-            )}
-            {canEdit && rows.length > 1 && (
-              <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label="Remove" className="text-muted-foreground hover:text-red-600"><X size={13} /></button>
-            )}
-          </div>
-          {showDetails && openDetails === i && (
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pl-16">
-              {([["CarpetAreaSqFt", "Carpet"], ["BuiltUpAreaSqFt", "Built-up"], ["SuperBuiltUpAreaSqFt", "Super built-up"], ["OpenTerraceAreaSqFt", "Open terrace"], ["RatePerSqFt", "Rate / sq ft"]] as const).map(([key, label]) => (
-                <label key={key} className="text-[0.625rem] text-muted-foreground">{label}
-                  <input type="number" min={0} value={r[key] ?? ""} disabled={!canEdit} onChange={(e) => set(i, { [key]: e.target.value })} className={`${inputCls} w-full`} />
-                </label>
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+            <th className="text-left font-medium pb-1.5 pr-2">Type</th>
+            <th className="text-right font-medium pb-1.5 px-1 w-16">Units</th>
+            {AREA_COLS.map(([, label]) => <th key={label} className="text-right font-medium pb-1.5 px-1 w-24">{label}</th>)}
+            <th className="w-6" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td className="py-1 pr-2">
+                <select value={r.UnitKind ? `kind:${r.UnitKind}` : r.UnitType} disabled={!canEdit}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v.startsWith("kind:")) { const k = commercial.find((x) => x.Code === v.slice(5)); set(i, { UnitKind: v.slice(5), UnitType: k?.Name || v.slice(5) }); }
+                    else set(i, { UnitKind: null, UnitType: v });
+                  }} className="h-8 w-full min-w-[8rem] rounded-md border border-border bg-background px-2 text-xs">
+                  {commercial.length ? (
+                    <>
+                      <optgroup label="Residential">
+                        {unitTypeOptions(layoutTypes, r.UnitKind ? "" : r.UnitType).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </optgroup>
+                      <optgroup label="Commercial">
+                        {commercial.map((k) => <option key={k.Code} value={`kind:${k.Code}`}>{k.Name}</option>)}
+                      </optgroup>
+                    </>
+                  ) : unitTypeOptions(layoutTypes, r.UnitType).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </td>
+              <td className="py-1 px-1">
+                <input type="number" min={1} max={100} value={r.Count} disabled={!canEdit} aria-label="Units"
+                  onChange={(e) => set(i, { Count: e.target.value })} className={cell} />
+              </td>
+              {AREA_COLS.map(([key, label]) => (
+                <td key={key} className="py-1 px-1">
+                  <input type="number" min={0} value={r[key] ?? ""} disabled={!canEdit} placeholder="—" aria-label={label}
+                    onChange={(e) => set(i, { [key]: e.target.value })}
+                    className={cell} />
+                </td>
               ))}
-            </div>
-          )}
-        </div>
-      ))}
+              <td className="py-1 pl-1 text-center">
+                {canEdit && rows.length > 1 && (
+                  <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label="Remove" className="text-muted-foreground hover:text-red-600"><X size={13} /></button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       {canEdit && (
-        <button type="button" onClick={() => onChange([...rows, { UnitType: firstType, Count: 1 }])} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+        <button type="button" onClick={() => onChange([...rows, { UnitType: firstType, Count: 1 }])} className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline">
           <Plus size={11} /> Add a type
         </button>
       )}
@@ -138,7 +154,8 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
   const toggleUnits = (f: FloorRow, on: boolean) => call(`${API}/floors/${f.Id}`, "PUT", { HasUnits: on }, on ? `Floor ${f.FloorLabel} has units` : `Floor ${f.FloorLabel}: no units`);
 
   if (!data) return <div className="text-xs text-muted-foreground p-2">Loading floors…</div>;
-  const typTotal = total(data.typical);
+  // Shown live from what's being typed, saved or not.
+  const typTotal = total(typical);
   const pending = data.floors.filter((f) => !f.IsGenerated && f.HasUnits).reduce((s, f) => s + (f.ownMix ? total(f.ownMix) : typTotal), 0);
 
   return (
@@ -147,10 +164,10 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
       <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold">Typical floor</span>
-          <span className="text-[0.6875rem] text-muted-foreground">every floor below uses this unless set to its own mix</span>
+          <span className="text-[0.6875rem] text-muted-foreground">applies to every floor unless a floor has its own mix</span>
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">{total(typical)} per floor</span>
         </div>
-        <MixEditor rows={typical} onChange={setTypical} kinds={kinds} layoutTypes={layoutTypes} canEdit={canEdit} showDetails />
+        <MixEditor rows={typical} onChange={setTypical} kinds={kinds} layoutTypes={layoutTypes} canEdit={canEdit} />
         {canEdit && typicalDirty && (
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setTypical(data.typical.length ? data.typical.map((r) => ({ ...r })) : [{ UnitType: firstType, Count: 1 }])} className="px-3 py-1.5 text-xs rounded-lg border border-border">Undo</button>
@@ -174,7 +191,7 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
                     <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400"><Lock size={11} /> {f.GeneratedUnitCount} unit(s) created — edit them in Unit Master</span>
                   ) : editingFloor === f.Id ? (
                     <div className="space-y-2">
-                      <MixEditor rows={floorDraft} onChange={setFloorDraft} kinds={kinds} layoutTypes={layoutTypes} canEdit={canEdit} showDetails />
+                      <MixEditor rows={floorDraft} onChange={setFloorDraft} kinds={kinds} layoutTypes={layoutTypes} canEdit={canEdit} />
                       <div className="flex gap-2">
                         <button type="button" onClick={() => saveFloorMix(f)} disabled={busy} className="px-3 py-1 text-xs font-semibold text-white rounded-lg bg-primary disabled:opacity-40">Save floor</button>
                         <button type="button" onClick={() => setEditingFloor(null)} className="px-3 py-1 text-xs rounded-lg border border-border">Cancel</button>
@@ -182,18 +199,25 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
                     </div>
                   ) : (
                     <div className="flex flex-wrap items-center gap-2">
-                      <label className="inline-flex items-center gap-1 text-muted-foreground">
-                        <input type="checkbox" checked={!!f.HasUnits} disabled={!canEdit || busy} onChange={(e) => toggleUnits(f, e.target.checked)} /> has units
-                      </label>
+                      {f.FloorNo === 0 && (
+                        <span className="inline-flex items-center gap-2 text-muted-foreground">
+                          <button type="button" role="switch" aria-checked={!!f.HasUnits} aria-label="Sellable units on the ground floor"
+                            disabled={!canEdit || busy} onClick={() => toggleUnits(f, !f.HasUnits)}
+                            className={`relative h-4 w-7 rounded-full transition-colors ${f.HasUnits ? "bg-primary" : "bg-muted-foreground/30"}`}>
+                            <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${f.HasUnits ? "left-3.5" : "left-0.5"}`} />
+                          </button>
+                          {!f.HasUnits && "No sellable units"}
+                        </span>
+                      )}
                       {f.HasUnits && (f.ownMix ? (
                         <>
                           <span className="rounded bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300">Own mix</span>
                           <span>{describe(f.ownMix)}</span>
                         </>
                       ) : (
-                        <span className="text-muted-foreground">Same as typical · {describe(data.typical)}</span>
+                        <span className="text-muted-foreground">Same as typical · {describe(typical)}</span>
                       ))}
-                      {canEdit && f.HasUnits && data.mixReady && (
+                      {canEdit && f.HasUnits && data.mixReady && editingFloor !== f.Id && (
                         <span className="ml-auto flex gap-2">
                           <button type="button" onClick={() => { setFloorDraft((f.ownMix || data.typical).map((r) => ({ ...r }))); setEditingFloor(f.Id); }} className="text-primary hover:underline">
                             {f.ownMix ? "Edit own mix" : "Set own mix"}
