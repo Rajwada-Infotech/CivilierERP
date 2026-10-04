@@ -14,8 +14,10 @@
 // area fields at once (e.g. carpet + super built-up); each column must exist.
 // A flat's optional "roomsAdjust" = { "Balcony": 1 } — only the plan's difference
 // from the layout's current composition; the rest is read from Unit Composition.
-// A flat's optional "kind" = unit kind code (e.g. a commercial "SHOP") — must
-// exist, active and non-land, in the unit kind master; the run refuses otherwise.
+// A flat's optional "kind" = the unit kind as the source list names it (e.g. the
+// sheet's own "SHOP NO" heading). It is matched to the unit kind master by code
+// or name — the master (Plot Master › Unit kinds) is the only place kinds are
+// defined; nothing is created here, and the run refuses if there's no match.
 // A flat's optional "rooms" = its full room list; when it differs from its
 // layout's composition it is saved as a UNIT override (Unit Composition), so
 // only that flat differs and the shared layout type is left alone.
@@ -103,11 +105,14 @@ async function main() {
     if (!/^\w+$/.test(c) || !(await one(pool, "SELECT 1 AS x FROM sys.columns WHERE object_id = OBJECT_ID('dbo.UnitMaster') AND name = @c", { c: [sql.NVarChar(128), c] })).length) throw new Error(`UnitMaster has no column ${c}`);
   }
   // Unit kinds named in the spec must already exist in the kind master.
-  const kindCodes = [...new Set(spec.blocks.flatMap((b) => Object.values(b.flats).map((f) => f.kind).filter(Boolean)))].map((k) => String(k).toUpperCase());
-  for (const k of kindCodes) {
-    const row = await one(pool, "SELECT IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @k AND IsActive = 1", { k: [sql.NVarChar(20), k] });
-    if (!row.length) throw new Error(`unit kind "${k}" isn't in the kind master — create it first (Plot Master › Asset kinds)`);
-    if (row[0].IsLand) throw new Error(`"${k}" is a land kind — land belongs in Plot Master, not Unit Master`);
+  const kindWords = [...new Set(spec.blocks.flatMap((b) => Object.values(b.flats).map((f) => f.kind).filter(Boolean)))];
+  const kindCode = new Map(); // spec word -> master code
+  for (const w of kindWords) {
+    const row = await one(pool, `SELECT Code, IsLand FROM dbo.CrmConstructedAssetKind
+      WHERE IsActive = 1 AND (UPPER(Code) = UPPER(@w) OR UPPER(LTRIM(RTRIM(Name))) = UPPER(LTRIM(RTRIM(@w))))`, { w: [sql.NVarChar(100), w] });
+    if (row.length !== 1) throw new Error(`the list calls these units "${w}", but ${row.length ? "more than one" : "no"} active unit kind has that name/code — add it in Plot Master › Unit kinds`);
+    if (row[0].IsLand) throw new Error(`"${w}" is a land kind — land belongs in Plot Master, not Unit Master`);
+    kindCode.set(w, row[0].Code);
   }
   // 2. Types + areas, then rooms, one transaction per unit.
   for (const b of spec.blocks) {
@@ -131,8 +136,9 @@ async function main() {
       const areaDiff = areaCol && want.area != null && Number(u.Area) !== Number(want.area);
       const extraAreas = Object.entries(want.areas || {}).filter(([c, v]) => Number(u[`x_${c}`]) !== Number(v));
       const extraNote = extraAreas.length ? ` areas{${extraAreas.map(([c, v]) => `${c}:${u[`x_${c}`] ?? "-"}->${v}`).join(", ")}}` : "";
-      const kindDiff = !!want.kind && String(u.UnitKind || "FLAT").toUpperCase() !== String(want.kind).toUpperCase();
-      const kindNote = kindDiff ? ` kind ${u.UnitKind || "FLAT"}->${String(want.kind).toUpperCase()}` : "";
+      const wantKind = want.kind ? kindCode.get(want.kind) : null;
+      const kindDiff = !!wantKind && String(u.UnitKind || "").toUpperCase() !== String(wantKind).toUpperCase();
+      const kindNote = kindDiff ? ` kind ${u.UnitKind || "-"}->${wantKind}` : "";
       if (!typeDiff && !areaDiff && !extraAreas.length && !kindDiff) { totals.unchanged++; }
       // Flat-specific rooms -> UNIT override, only when its effective rooms
       // (layout + any override already in force) differ from the plan.
@@ -178,7 +184,7 @@ async function main() {
       await tx.begin();
       try {
         if (kindDiff) {
-          await tx.request().input("id", sql.Int, u.Id).input("k", sql.NVarChar(20), String(want.kind).toUpperCase())
+          await tx.request().input("id", sql.Int, u.Id).input("k", sql.NVarChar(20), wantKind)
             .query("UPDATE dbo.UnitMaster SET UnitKind = @k WHERE Id = @id");
           totals.kindChanged = (totals.kindChanged || 0) + 1;
         }
