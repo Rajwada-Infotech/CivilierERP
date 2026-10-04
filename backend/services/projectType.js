@@ -34,6 +34,8 @@ const LEGACY_DEFAULT = Object.freeze({
   SellsLand: false,
   SellsConstruction: true,
   AllowsMultiUnitSale: false,
+  SellsResidential: true,
+  SellsCommercial: false,
 });
 
 // Unit kinds. 'FLAT' is the implicit kind of every row that predates 483.
@@ -58,6 +60,9 @@ function normaliseRow(row) {
     SellsLand: !!row.SellsLand,
     SellsConstruction: !!row.SellsConstruction,
     AllowsMultiUnitSale: !!row.AllowsMultiUnitSale,
+    // Migration 526. Absent on a pre-526 database -> today's behaviour.
+    SellsResidential: row.SellsResidential == null ? true : !!row.SellsResidential,
+    SellsCommercial: !!row.SellsCommercial,
   };
 }
 
@@ -83,7 +88,8 @@ async function getEffectiveType(pool, { projectId = null, blockId = null } = {})
   // passed in. COALESCE over the join does the inheritance.
   const result = await request.query(`
     SELECT TOP 1 pt.Id, pt.Code, pt.Name,
-           pt.HasFloors, pt.SellsLand, pt.SellsConstruction, pt.AllowsMultiUnitSale
+           pt.HasFloors, pt.SellsLand, pt.SellsConstruction, pt.AllowsMultiUnitSale,
+           pt.SellsResidential, pt.SellsCommercial
     FROM (
       SELECT COALESCE(
         ${blockId != null ? "(SELECT b.ProjectTypeId FROM dbo.BlockMaster b WHERE b.Id = @blockId)," : ""}
@@ -120,6 +126,52 @@ async function getEffectiveType(pool, { projectId = null, blockId = null } = {})
  * Returned as a Set of codes so the pure functions below stay synchronous and
  * testable: callers that touch the database load it once and pass it down.
  */
+/**
+ * The commercial register: which unit kinds are commercial (shop, office…),
+ * read from dbo.CrmConstructedAssetKind.IsCommercial (migration 526). Same
+ * contract as loadLandKinds — a Set of codes, loaded once, passed down.
+ */
+async function loadCommercialKinds(pool) {
+  const r = await pool.request().query(
+    "SELECT Code FROM dbo.CrmConstructedAssetKind WHERE IsCommercial = 1",
+  );
+  return new Set(r.recordset.map((x) => String(x.Code || "").toUpperCase()));
+}
+
+/**
+ * Whether a booking's constructed units are commercial: true (all commercial),
+ * false (none), null (no constructed units, e.g. a pure plot sale). Read from
+ * the units' kinds, never the project — a Gloria-style building holds both.
+ */
+async function getBookingCommercial(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT ISNULL(k.IsCommercial, 0) AS IsCommercial
+    FROM (
+      SELECT u.UnitKind FROM dbo.CrmBookingUnit l JOIN dbo.UnitMaster u ON u.Id = l.UnitId
+      WHERE l.BookingId = @bid AND l.Status = N'Active'
+      UNION ALL
+      SELECT u2.UnitKind FROM dbo.CrmBooking b JOIN dbo.UnitMaster u2 ON u2.Id = b.UnitId
+      WHERE b.Id = @bid
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingUnit l2 WHERE l2.BookingId = @bid AND l2.Status = N'Active')
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = @bid AND bp.Status = N'Active')
+    ) x
+    LEFT JOIN dbo.CrmConstructedAssetKind k ON k.Code = x.UnitKind
+  `);
+  if (!r.recordset.length) return null;
+  return r.recordset.every((x) => x.IsCommercial === true || x.IsCommercial === 1);
+}
+
+/** Same answer for a single unit (quotes / forms before a booking exists). */
+async function getUnitCommercial(pool, unitId) {
+  if (unitId == null) return null;
+  const r = await pool.request().input("uid", sql.Int, unitId).query(`
+    SELECT ISNULL(k.IsCommercial, 0) AS IsCommercial
+    FROM dbo.UnitMaster u LEFT JOIN dbo.CrmConstructedAssetKind k ON k.Code = u.UnitKind
+    WHERE u.Id = @uid`);
+  if (!r.recordset.length) return null;
+  return r.recordset[0].IsCommercial === true || r.recordset[0].IsCommercial === 1;
+}
+
 async function loadLandKinds(pool) {
   const r = await pool.request().query(
     "SELECT Code FROM dbo.CrmConstructedAssetKind WHERE IsLand = 1",
@@ -292,7 +344,8 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
  * @param {{isPlotBooking?:boolean, landKinds?:Set<string>}} opts
  * @returns {Promise<string|null>} a user-facing reason, or null when allowed
  */
-async function bookingTypeViolation(pool, units, { isPlotBooking = false, landKinds = null } = {}) {
+async function bookingTypeViolation(pool, units, { isPlotBooking = false, landKinds = null, commercialKinds = null } = {}) {
+  const isCommercial = (u) => !!commercialKinds && commercialKinds.has(String(u.UnitKind || UNIT_KIND.FLAT).toUpperCase());
   const cache = new Map();
   const typeOf = async (u) => {
     const key = `${u.ProjectId}|${u.BlockId}`;
@@ -312,6 +365,18 @@ async function bookingTypeViolation(pool, units, { isPlotBooking = false, landKi
     if (!isLand && !t.SellsConstruction) {
       return `${u.UnitName} is a constructed unit, but ${t.Name} does not sell construction. Check the unit's kind, or turn on "Sells construction" for this type.`;
     }
+    if (!isLand && isCommercial(u) && !t.SellsCommercial) {
+      return `${u.UnitName} is a commercial unit, but ${t.Name} does not sell commercial units. Check the unit's kind, or turn on "Sells commercial" for this type.`;
+    }
+    if (!isLand && !isCommercial(u) && !t.SellsResidential) {
+      return `${u.UnitName} is a residential unit, but ${t.Name} does not sell residential units. Check the unit's kind, or turn on "Sells residential" for this type.`;
+    }
+  }
+  // One booking takes one GST treatment, so commercial and residential units
+  // can't share a booking (the HSN is resolved per booking, not per line).
+  const constructed = isPlotBooking ? [] : units.filter((u) => !unitSaleTreatment(u.UnitKind, landKinds).isLand);
+  if (constructed.some(isCommercial) && constructed.some((u) => !isCommercial(u))) {
+    return "Commercial and residential units are taxed differently and can't be on one booking — book them separately.";
   }
   return null;
 }
@@ -319,6 +384,9 @@ async function bookingTypeViolation(pool, units, { isPlotBooking = false, landKi
 module.exports = {
   LEGACY_DEFAULT,
   bookingTypeViolation,
+  loadCommercialKinds,
+  getBookingCommercial,
+  getUnitCommercial,
   UNIT_KIND,
   INCOME_ACCOUNT,
   getEffectiveType,

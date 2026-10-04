@@ -29,7 +29,7 @@ type Plot = {
   LockBookingNo?: string | null; LockApplicationNo?: string | null; LockHoldId?: number | null; AdjacentPlotCount?: number;
 };
 type PlotBlock = { BlockId: number; BlockName: string; ProjectId: number; ProjectName: string };
-type ConstructedAssetKind = { Id: number; Code: string; Name: string; SortOrder?: number; IsActive?: boolean };
+type ConstructedAssetKind = { Id: number; Code: string; Name: string; SortOrder?: number; IsActive?: boolean; IsLand?: boolean; IsCommercial?: boolean };
 // Plot facing is master data (dbo.PlotFacingMaster), not a typed string, so
 // "North"/"north"/"N" cannot all coexist and a facing premium has somewhere
 // to live. Managed from inside this page rather than a separate screen.
@@ -106,7 +106,7 @@ const CrmPlotMaster: React.FC = () => {
   const [converting, setConverting] = useState(false);
   const [layoutState, setLayoutState] = useState<{ blockId: number; mode: "arrange" | "neighbours"; focusId: number | null } | null>(null);
   const [assetKindsOpen, setAssetKindsOpen] = useState(false);
-  const [assetKindDraft, setAssetKindDraft] = useState({ Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true });
+  const [assetKindDraft, setAssetKindDraft] = useState({ Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true, IsLand: false, IsCommercial: false });
   const [savingAssetKind, setSavingAssetKind] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -242,12 +242,12 @@ const CrmPlotMaster: React.FC = () => {
   const layoutBlockInfo = layoutState ? blockCatalog.find((block) => block.BlockId === layoutState.blockId) : undefined;
 
   const editAssetKind = (kind?: ConstructedAssetKind) => setAssetKindDraft(kind
-    ? { Id: kind.Id, Code: kind.Code, Name: kind.Name, SortOrder: String(kind.SortOrder ?? 100), IsActive: kind.IsActive !== false }
-    : { Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true });
+    ? { Id: kind.Id, Code: kind.Code, Name: kind.Name, SortOrder: String(kind.SortOrder ?? 100), IsActive: kind.IsActive !== false, IsLand: !!kind.IsLand, IsCommercial: !!kind.IsCommercial }
+    : { Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true, IsLand: false, IsCommercial: false });
   const saveAssetKind = async () => {
     setSavingAssetKind(true);
     try {
-      const payload = { Code: assetKindDraft.Code, Name: assetKindDraft.Name, SortOrder: Number(assetKindDraft.SortOrder), IsActive: assetKindDraft.IsActive };
+      const payload = { Code: assetKindDraft.Code, Name: assetKindDraft.Name, SortOrder: Number(assetKindDraft.SortOrder), IsActive: assetKindDraft.IsActive, IsLand: assetKindDraft.IsLand, IsCommercial: assetKindDraft.IsCommercial };
       const response = await fetchWithAuth(assetKindDraft.Id ? `${PLOT_API}/constructed-kinds/${assetKindDraft.Id}` : `${PLOT_API}/constructed-kinds`, {
         method: assetKindDraft.Id ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
@@ -838,6 +838,8 @@ const CrmPlotMaster: React.FC = () => {
               {managedAssetKinds.map((kind) => (
                 <button key={kind.Id} onClick={() => editAssetKind(kind)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted/40">
                   <span className="font-medium">{kind.Name}</span><span className="text-xs text-muted-foreground">{kind.Code}</span>
+                  {kind.IsLand && <span className="rounded bg-emerald-500/10 px-1.5 text-[10px] text-emerald-700 dark:text-emerald-300">Land</span>}
+                  {kind.IsCommercial && <span className="rounded bg-sky-500/10 px-1.5 text-[10px] text-sky-700 dark:text-sky-300">Commercial</span>}
                   <span className="ml-auto text-xs text-muted-foreground">{kind.IsActive === false ? "Inactive" : "Active"}</span>
                 </button>
               ))}
@@ -846,6 +848,9 @@ const CrmPlotMaster: React.FC = () => {
               <div><label className="mb-1 block text-xs text-muted-foreground">Name</label><input value={assetKindDraft.Name} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, Name: event.target.value }))} className={fieldCls} /></div>
               <div><label className="mb-1 block text-xs text-muted-foreground">Code</label><input value={assetKindDraft.Code} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, Code: event.target.value.toUpperCase() }))} className={fieldCls} /></div>
               <div><label className="mb-1 block text-xs text-muted-foreground">Sort order</label><input type="number" min="0" max="9999" value={assetKindDraft.SortOrder} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, SortOrder: event.target.value }))} className={fieldCls} /></div>
+              {/* Usage drives GST: land is outside GST, commercial picks the commercial GST rule. One or the other. */}
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assetKindDraft.IsLand} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, IsLand: event.target.checked, IsCommercial: event.target.checked ? false : draft.IsCommercial }))} /> Land (outside GST)</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assetKindDraft.IsCommercial} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, IsCommercial: event.target.checked, IsLand: event.target.checked ? false : draft.IsLand }))} /> Commercial (shop / office)</label>
               {assetKindDraft.Id > 0 && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assetKindDraft.IsActive} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, IsActive: event.target.checked }))} /> Active</label>}
               <div className="flex justify-end gap-2">
                 <button onClick={() => editAssetKind()} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">New</button>

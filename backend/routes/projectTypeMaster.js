@@ -13,6 +13,8 @@
 //   SellsLand            land is sold -> outside GST (Schedule III, CGST Act)
 //   SellsConstruction    built area is sold -> taxable supply
 //   AllowsMultiUnitSale  several units may share one booking (plot buyers)
+//   SellsResidential     residential units (flats / villas) may be sold
+//   SellsCommercial      commercial units (kinds flagged IsCommercial) may be sold
 //
 // Deletes are SOFT (IsActive = 0) and refused while projects or blocks still
 // point at the row. Hard-deleting would strand those references and silently
@@ -35,6 +37,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const SELECT = `
   SELECT t.Id, t.Code, t.Name, t.Description,
          t.HasFloors, t.SellsLand, t.SellsConstruction, t.AllowsMultiUnitSale,
+         t.SellsResidential, t.SellsCommercial,
          t.SortOrder, t.IsActive,
          (SELECT COUNT(*) FROM dbo.enterprise e WHERE e.project_type_id = t.Id) AS ProjectCount,
          (SELECT COUNT(*) FROM dbo.BlockMaster b WHERE b.ProjectTypeId = t.Id)  AS BlockCount,
@@ -73,15 +76,19 @@ router.get("/impact", async (req, res) => {
   try {
     const pool = getPool();
     const r = await pool.request().input("p", sql.Int, projectId).input("t", sql.Int, typeId).query(`
-      DECLARE @land BIT, @constr BIT;
-      SELECT @land = SellsLand, @constr = SellsConstruction FROM dbo.ProjectTypeMaster WHERE Id = @t;
+      DECLARE @land BIT, @constr BIT, @resi BIT, @comm BIT;
+      SELECT @land = SellsLand, @constr = SellsConstruction, @resi = SellsResidential, @comm = SellsCommercial
+      FROM dbo.ProjectTypeMaster WHERE Id = @t;
       SELECT Reason, COUNT(*) AS Units FROM (
         SELECT CASE
           WHEN ISNULL(u.UnitKind, 'FLAT') IN (SELECT Code FROM dbo.CrmConstructedAssetKind WHERE IsLand = 1)
             THEN CASE WHEN @land = 0 THEN 'land units (type does not sell land)' END
-          ELSE CASE WHEN @constr = 0 THEN CONCAT(LOWER(ISNULL(u.UnitKind, 'FLAT')), ' units (type does not sell construction)') END
+          WHEN @constr = 0 THEN CONCAT(LOWER(ISNULL(u.UnitKind, 'FLAT')), ' units (type does not sell construction)')
+          WHEN ISNULL(k.IsCommercial, 0) = 1 AND @comm = 0 THEN CONCAT(LOWER(ISNULL(u.UnitKind, 'FLAT')), ' units (type does not sell commercial)')
+          WHEN ISNULL(k.IsCommercial, 0) = 0 AND @resi = 0 THEN CONCAT(LOWER(ISNULL(u.UnitKind, 'FLAT')), ' units (type does not sell residential)')
         END AS Reason
         FROM dbo.UnitMaster u LEFT JOIN dbo.BlockMaster b ON b.Id = u.BlockId
+        LEFT JOIN dbo.CrmConstructedAssetKind k ON k.Code = ISNULL(u.UnitKind, 'FLAT')
         WHERE u.ProjectId = @p AND u.IsActive = 1 AND b.ProjectTypeId IS NULL
           AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1)
           AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingUnit l WHERE l.UnitId = u.Id AND l.Status = N'Active')
@@ -123,14 +130,16 @@ router.post("/", adminOnly, async (req, res) => {
       .input("land", sql.Bit, toBit(b.sellsLand ?? b.SellsLand, 0))
       .input("constr", sql.Bit, toBit(b.sellsConstruction ?? b.SellsConstruction, 1))
       .input("multi", sql.Bit, toBit(b.allowsMultiUnitSale ?? b.AllowsMultiUnitSale, 0))
+      .input("resi", sql.Bit, toBit(b.sellsResidential ?? b.SellsResidential, 1))
+      .input("comm", sql.Bit, toBit(b.sellsCommercial ?? b.SellsCommercial, 0))
       .input("sort", sql.Int, b.sortOrder != null && b.sortOrder !== "" ? parseInt(b.sortOrder, 10) : 100)
       .input("active", sql.Bit, toBit(b.isActive ?? b.IsActive, 1))
       .input("by", sql.Int, req.user?.id ?? req.user?.userId ?? null)
       .query(`
         INSERT INTO dbo.ProjectTypeMaster
-          (Code, Name, Description, HasFloors, SellsLand, SellsConstruction, AllowsMultiUnitSale, SortOrder, IsActive, CreatedBy)
+          (Code, Name, Description, HasFloors, SellsLand, SellsConstruction, AllowsMultiUnitSale, SellsResidential, SellsCommercial, SortOrder, IsActive, CreatedBy)
         OUTPUT INSERTED.Id
-        VALUES (@code, @name, @desc, @floors, @land, @constr, @multi, @sort, @active, @by)
+        VALUES (@code, @name, @desc, @floors, @land, @constr, @multi, @resi, @comm, @sort, @active, @by)
       `);
     res.status(201).json({ success: true, id: r.recordset[0].Id });
   } catch (e) {
@@ -163,6 +172,8 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("land", sql.Bit, toBit(b.sellsLand ?? b.SellsLand, 0))
       .input("constr", sql.Bit, toBit(b.sellsConstruction ?? b.SellsConstruction, 1))
       .input("multi", sql.Bit, toBit(b.allowsMultiUnitSale ?? b.AllowsMultiUnitSale, 0))
+      .input("resi", sql.Bit, toBit(b.sellsResidential ?? b.SellsResidential, 1))
+      .input("comm", sql.Bit, toBit(b.sellsCommercial ?? b.SellsCommercial, 0))
       .input("sort", sql.Int, b.sortOrder != null && b.sortOrder !== "" ? parseInt(b.sortOrder, 10) : 100)
       .input("active", sql.Bit, toBit(b.isActive ?? b.IsActive, 1))
       .input("by", sql.Int, req.user?.id ?? req.user?.userId ?? null)
@@ -171,6 +182,7 @@ router.put("/:id", adminOnly, async (req, res) => {
           Code = @code, Name = @name, Description = @desc,
           HasFloors = @floors, SellsLand = @land,
           SellsConstruction = @constr, AllowsMultiUnitSale = @multi,
+          SellsResidential = @resi, SellsCommercial = @comm,
           SortOrder = @sort, IsActive = @active,
           UpdatedBy = @by, UpdatedAt = SYSDATETIME()
         WHERE Id = @id

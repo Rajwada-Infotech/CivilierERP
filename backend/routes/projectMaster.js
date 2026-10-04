@@ -323,7 +323,8 @@ router.get("/types", async (_req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT Id, Code, Name, Description,
-             HasFloors, SellsLand, SellsConstruction, AllowsMultiUnitSale
+             HasFloors, SellsLand, SellsConstruction, AllowsMultiUnitSale,
+             SellsResidential, SellsCommercial
       FROM dbo.ProjectTypeMaster
       WHERE IsActive = 1
       ORDER BY SortOrder, Name

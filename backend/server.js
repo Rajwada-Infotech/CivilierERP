@@ -273,6 +273,7 @@ const ALL_ROUTES = [
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
   { path: "/api/project-type-master", file: "./routes/projectTypeMaster" },
+  { path: "/api/crm-gst-rule", file: "./routes/crmGstRule" },
   { path: "/api/plot-facing-master", file: "./routes/plotFacingMaster" },
   { path: "/api/villa-type-master", file: "./routes/villaTypeMaster" },
   { path: "/api/block-master", file: "./routes/blockMaster" },

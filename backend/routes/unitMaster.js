@@ -187,6 +187,33 @@ router.get("/applicable-payment-plans", async (req, res) => {
 });
 
 // POST — add unit
+// Unit kind (FLAT, SHOP, OFFICE…) — validated against the kind master, never
+// a fixed list. Land kinds belong to Plot Master, so they're refused here.
+// Undefined / "" means "leave the unit's kind as it is".
+async function applyUnitKind(db, unitId, rawKind) {
+  if (rawKind === undefined || rawKind === null || String(rawKind).trim() === "") return;
+  const code = String(rawKind).trim().toUpperCase();
+  const k = (await db.request().input("c", sql.NVarChar(20), code)
+    .query("SELECT TOP 1 Code, IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @c AND IsActive = 1")).recordset[0];
+  if (!k) throw new LayoutValidationError(`Unit kind "${code}" is not defined (or inactive) in the unit kind master.`);
+  if (k.IsLand) throw new LayoutValidationError(`"${code}" is a land kind — land is managed in Plot Master, not as a unit.`);
+  await db.request().input("id", sql.Int, unitId).input("k", sql.NVarChar(20), k.Code)
+    .query("UPDATE dbo.UnitMaster SET UnitKind = @k WHERE Id = @id");
+}
+
+// GET /kinds — the active non-land unit kinds, for the Unit Master form.
+router.get("/kinds", requirePageRight("followup-unit-master", "view"), async (_req, res) => {
+  try {
+    const r = await getPool().request().query(`
+      SELECT Code, Name, IsCommercial FROM dbo.CrmConstructedAssetKind
+      WHERE IsActive = 1 AND IsLand = 0 ORDER BY SortOrder, Name`);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[unit-master] GET kinds error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post("/", requirePageRight("followup-unit-master", "create"), async (req, res) => {
   const { ProjectId, BlockId, UnitName, FloorNo, LayoutTypeId, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
@@ -347,6 +374,7 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
         OUTPUT INSERTED.Id
         VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @LayoutTypeId, @Area, @CarpetArea, @BuiltUpArea, @SuperBuiltUpArea, @OpenTerraceArea, @Rate, @IsActive, @CreatedBy, @CreatedAt)
       `);
+      await applyUnitKind(tx, result.recordset[0].Id, req.body.UnitKind);
       roomSync = await syncUnitRooms(tx, result.recordset[0].Id, { removeUnused: false, createdBy });
       await tx.commit();
     } catch (e) {
@@ -496,6 +524,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UpdatedAt = @UpdatedAt
         WHERE Id = @Id
       `);
+      await applyUnitKind(tx, parseInt(id), req.body.UnitKind);
       // A room carries its unit's Project/Block/Floor — keep them in step if
       // the unit was moved.
       await tx.request()

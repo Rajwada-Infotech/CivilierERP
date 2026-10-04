@@ -516,6 +516,13 @@ export const crmSetupItems: SetupItem[] = [
     pageKey: "crm-brokerage-rate-tiers",
   },
   {
+    icon: Percent,
+    label: "GST Rules",
+    path: "/crm/setup/gst-rules",
+    color: "text-amber-500",
+    pageKey: "crm-gst-rule-master",
+  },
+  {
     icon: Car,
     label: "Parking Rate Master",
     path: "/crm/setup/parking-master",
