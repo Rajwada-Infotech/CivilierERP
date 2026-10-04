@@ -9,7 +9,7 @@ import {
   type WorkType,
 } from "@/api/dependencyMasterApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { EngineeringShell } from "@/components/engineering/EngineeringShell";
+import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
@@ -96,9 +96,9 @@ export default function DependencyMasterPage() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Engineering", "Dependency Master"]} />
+      <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Dependency Master"]} />
 
-      <EngineeringShell
+      <CivilWorkDprShell
         title="Dependency Master"
         subtitle="Room-level activity chains — task scope, alias, and a strictly linear dependency sequence"
         icon={GitBranch}
@@ -191,7 +191,7 @@ export default function DependencyMasterPage() {
             forceExpand={!!search.trim()}
           />
         )}
-      </EngineeringShell>
+      </CivilWorkDprShell>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>

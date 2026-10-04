@@ -476,13 +476,6 @@ const engineeringSetupItems: SetupItem[] = [
     color: "text-orange-400",
     pageKey: "engineering-activity-master",
   },
-  {
-    icon: GitBranch,
-    label: "Dependency Master",
-    path: "/masters/dependency",
-    color: "text-cyan-400",
-    pageKey: "dependency-master",
-  },
 ];
 
 const salesAutomationSetupItems: SetupItem[] = [
@@ -646,6 +639,13 @@ const civilWorkDprSetupItems: SetupItem[] = [
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
     pageKey: "civilworkdpr-room-master",
+  },
+  {
+    icon: GitBranch,
+    label: "Dependency Master",
+    path: "/masters/dependency",
+    color: "text-cyan-500",
+    pageKey: "dependency-master",
   },
 ];
 

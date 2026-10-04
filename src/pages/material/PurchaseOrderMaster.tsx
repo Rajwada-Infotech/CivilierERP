@@ -3356,13 +3356,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           value: viewingPO.ProjectName ?? viewingPO.projectName,
                         },
                         {
-                          label: "Cost Center",
-                          value:
-                            viewingPO.CostCenterName ??
-                            viewingPO.costCenterName ??
-                            "—",
-                        },
-                        {
                           label: "Payment Terms",
                           value: viewingPO.PaymentTermDescription
                             ? `${viewingPO.PaymentTermDescription} (${viewingPO.PaymentTermDays} days)`
