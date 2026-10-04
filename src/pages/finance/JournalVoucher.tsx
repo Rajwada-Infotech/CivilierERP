@@ -174,7 +174,7 @@ export default function JournalVoucher() {
     const id = Number(viewId);
     if (id > 0) openJVDetail(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams.get("view")]);
 
   const load = async () => {
     setLoading(true);

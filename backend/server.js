@@ -186,6 +186,7 @@ const ALL_ROUTES = [
   { path: "/api/profit-center", file: "./routes/profitCenter" },
   { path: "/api/document-type", file: "./routes/document-type" },
   { path: "/api/doc-selector", file: "./routes/docSelector" },
+  { path: "/api/doc-search", file: "./routes/docSearch" },
   { path: "/api/fin-year", file: "./routes/finYear" },
   { path: "/api/general-ledger", file: "./routes/generalLedger" },
   { path: "/api/hsn", file: "./routes/hsn" },

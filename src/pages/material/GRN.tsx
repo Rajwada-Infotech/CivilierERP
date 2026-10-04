@@ -1701,7 +1701,7 @@ export default function GRN() {
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams.get("view")]);
 
   onEdit = async (grn: any) => {
     let fullGrn = grn;

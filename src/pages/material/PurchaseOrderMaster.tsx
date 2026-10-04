@@ -2778,7 +2778,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams.get("view")]);
 
   // ── Import/Export handlers ────────────────────────────────────────────────────
   const handleDownloadTemplate = () => {

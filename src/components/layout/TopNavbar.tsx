@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./layoutContexts";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
+import { DocFinderButton } from "@/components/navbar/DocFinderButton";
 import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import {
@@ -953,6 +954,7 @@ export const TopNavbar = () => {
           </div>
 
           <SaNotificationBell />
+          <DocFinderButton />
           <ReminderBell />
           <ThemeSwitcher
             open={themeOpen}
@@ -1006,6 +1008,7 @@ export const TopNavbar = () => {
         {/* ── Mobile right ── */}
         <div className="flex md:hidden items-center gap-1.5 ml-auto">
           <SaNotificationBell />
+          <DocFinderButton />
           <ReminderBell />
           <Dropdown
             open={userOpen}
