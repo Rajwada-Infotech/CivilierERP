@@ -807,16 +807,18 @@ const CrmProjectAutoSetup: React.FC = () => {
   };
 
   // Unit kinds this project's type may use — drives the per-floor "use" picker.
-  const { data: allowedKinds = [] } = useQuery<{ Code: string; Name: string; IsCommercial: boolean }[]>({
-    queryKey: ["auto-setup-kinds", projectId],
+  type KindRow = { Code: string; Name: string; IsCommercial: boolean };
+  const { data: kindsData } = useQuery<{ project: KindRow[]; blocks: Record<string, KindRow[]> }>({
+    queryKey: ["auto-setup-kinds", projectId, status?.blocks?.map((b: any) => `${b.Id}:${b.OwnTypeId ?? ""}`).join(",")],
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/kinds?ProjectId=${projectId}`);
-      return r.ok ? r.json() : [];
+      return r.ok ? r.json() : { project: [], blocks: {} };
     },
     enabled: !!projectId,
     staleTime: 60 * 1000,
   });
-  const showFloorUse = allowedKinds.some((k) => k.IsCommercial);
+  // Each block allows what its OWN effective type sells (block override, else project).
+  const kindsFor = (blockId: number): KindRow[] => kindsData?.blocks?.[blockId] ?? kindsData?.project ?? [];
 
   const handleFloorFieldSave = async (floor: any, patch: { UnitCount?: number; HasUnits?: boolean; UnitKind?: string }) => {
     try {
@@ -1926,20 +1928,20 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   onChange={(e) => {
                                     const v = e.target.value;
                                     if (v.startsWith("kind:")) {
-                                      const k = allowedKinds.find((x) => x.Code === v.slice(5));
+                                      const k = kindsFor(b.Id).find((x) => x.Code === v.slice(5));
                                       updateTemplateRow(b.Id, idx, { UnitKind: v.slice(5), UnitType: k?.Name || v.slice(5) });
                                     } else updateTemplateRow(b.Id, idx, { UnitKind: "", UnitType: v });
                                   }}
                                   title={unitTypesMaster.find((t) => t.label === row.UnitType)?.summary || undefined}
                                   className={`${inputCls} !py-1 flex-1`}>
                                   {!row.UnitType && <option value="" disabled>Select Unit Type</option>}
-                                  {allowedKinds.some((k) => k.IsCommercial) ? (
+                                  {kindsFor(b.Id).some((k) => k.IsCommercial) ? (
                                     <>
                                       <optgroup label="Residential">
                                         {unitTypeOptions(unitTypesMaster, row.UnitKind ? "" : row.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
                                       </optgroup>
                                       <optgroup label="Commercial">
-                                        {allowedKinds.filter((k) => k.IsCommercial).map((k) => <option key={k.Code} value={`kind:${k.Code}`}>{k.Name}</option>)}
+                                        {kindsFor(b.Id).filter((k) => k.IsCommercial).map((k) => <option key={k.Code} value={`kind:${k.Code}`}>{k.Name}</option>)}
                                       </optgroup>
                                     </>
                                   ) : unitTypeOptions(unitTypesMaster, row.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
@@ -2047,7 +2049,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                         {/* Floor use — only for project types that sell commercial
                             units: which floors are shops / offices instead of flats.
                             Commercial floors take no BHK from the unit mix. */}
-                        {showFloorUse && (
+                        {kindsFor(b.Id).some((k) => k.IsCommercial) && (
                           <div className="pt-3 border-t border-border/60 space-y-2">
                             <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Whole floor as one kind <span className="normal-case tracking-normal">(optional — e.g. a shops-only ground floor)</span></div>
                             <div className="flex flex-wrap gap-1.5">
@@ -2058,7 +2060,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                     onChange={(e) => handleFloorFieldSave(f, { UnitKind: e.target.value })}
                                     className="bg-transparent outline-none">
                                     <option value="">As the unit mix</option>
-                                    {allowedKinds.map((k) => <option key={k.Code} value={k.Code}>{k.Name}{k.IsCommercial ? " · commercial" : ""}</option>)}
+                                    {kindsFor(b.Id).map((k) => <option key={k.Code} value={k.Code}>{k.Name}{k.IsCommercial ? " · commercial" : ""}</option>)}
                                   </select>
                                 </label>
                               ))}

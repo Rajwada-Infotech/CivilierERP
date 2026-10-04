@@ -1450,9 +1450,19 @@ router.put("/blocks/:id/type", requirePageRight("crm-auto-project-setup", "edit"
 // per-floor "use" picker). Same rule as Unit Master and the booking guard.
 router.get("/kinds", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
   try {
+    // Per block: a block with its own type (e.g. a commercial block inside a
+    // township) allows what ITS type sells, not the project's.
+    const pool = getPool();
     const projectId = parseInt(req.query.ProjectId, 10);
-    const kinds = await require("../services/unitKind").allowedKinds(getPool(), { projectId: Number.isFinite(projectId) ? projectId : null });
-    res.json(kinds.map((k) => ({ Code: k.Code, Name: k.Name, IsCommercial: !!k.IsCommercial })));
+    if (!Number.isFinite(projectId)) return res.json({ project: [], blocks: {} });
+    const uk = require("../services/unitKind");
+    const shape = (list) => list.map((k) => ({ Code: k.Code, Name: k.Name, IsCommercial: !!k.IsCommercial }));
+    const blocks = {};
+    for (const b of (await pool.request().input("p", sql.Int, projectId)
+      .query("SELECT Id FROM dbo.BlockMaster WHERE ProjectId = @p AND IsActive = 1")).recordset) {
+      blocks[b.Id] = shape(await uk.allowedKinds(pool, { projectId, blockId: b.Id }));
+    }
+    res.json({ project: shape(await uk.allowedKinds(pool, { projectId })), blocks });
   } catch (err) {
     console.error("[auto-setup] GET kinds:", err.message);
     res.status(500).json({ error: err.message });
