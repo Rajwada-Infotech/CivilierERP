@@ -781,6 +781,10 @@ router.put("/floors/:id/mix", requirePageRight("crm-auto-project-setup", "edit")
       }
       // A floor given its own mix obviously has units.
       if (items) await tx.request().input("id", sql.Int, floorId).query("UPDATE dbo.CrmProjectAutoSetupFloor SET HasUnits = 1 WHERE Id = @id");
+      // The mix now decides each unit's kind — drop any older whole-floor kind.
+      if ((await tx.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupFloor', 'UnitKind') AS c")).recordset[0].c != null) {
+        await tx.request().input("id", sql.Int, floorId).query("UPDATE dbo.CrmProjectAutoSetupFloor SET UnitKind = NULL WHERE Id = @id");
+      }
       await tx.commit();
     } catch (e) { try { await tx.rollback(); } catch (_) { /* ignore */ } throw e; }
     await syncFloorCounts(pool, fl.BlockId, req.user?.userId || null);
@@ -1785,7 +1789,10 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
         });
         // A commercial floor (shops, offices…) takes no BHK from the block's
         // unit mix — those units have no layout or rooms by design.
-        const typeSlot = commercialKinds.has(String(floor.UnitKind || "").toUpperCase()) ? null
+        // The floor's own mix (or typical floor) decides each unit; a legacy
+        // whole-floor commercial kind only applies when the floor has no own mix.
+        const typeSlot = ownSeq.length ? ownSeq[(seq - 1) % ownSeq.length]
+          : commercialKinds.has(String(floor.UnitKind || "").toUpperCase()) ? null
           : (sequence.length ? sequence[(seq - 1) % sequence.length] : null);
         const blockPlanIds = plansByBlock.get(floor.BlockId) || [];
 
@@ -1831,13 +1838,13 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                 WHERE Id = @id`);
               // Its rooms, from its layout, in the same transaction (add-only;
               // a reactivated unit's existing rooms are kept).
-              const reKind = floor.UnitKind || typeSlot?.UnitKind || null;
+              const reKind = typeSlot?.UnitKind || floor.UnitKind || null;
               if (reKind) {
                 await tx.request().input("id", sql.Int, reactivatedId).input("kind", sql.NVarChar(20), reKind)
                   .query("UPDATE dbo.UnitMaster SET UnitKind = @kind WHERE Id = @id");
               }
               const rs = await syncUnitRooms(tx, reactivatedId, { removeUnused: false, createdBy });
-              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType, floor.UnitKind || typeSlot?.UnitKind);
+              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType, typeSlot?.UnitKind || floor.UnitKind);
               await tx.commit();
               if (blockPlanIds.length) await syncUnitPaymentPlanTags(pool, reactivatedId, blockPlanIds);
               totalCreated++;
@@ -1872,7 +1879,7 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                    1, @cb, SYSDATETIME())
               `);
             // Floor use wins, then the unit-mix row's kind; otherwise the column default stands.
-            const unitKind = floor.UnitKind || typeSlot?.UnitKind || null;
+            const unitKind = typeSlot?.UnitKind || floor.UnitKind || null;
             if (unitKind && ins.recordset[0]?.Id) {
               await tx.request().input("id", sql.Int, ins.recordset[0].Id).input("kind", sql.NVarChar(20), unitKind)
                 .query("UPDATE dbo.UnitMaster SET UnitKind = @kind WHERE Id = @id");
@@ -1882,7 +1889,7 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
             // in the same transaction as the unit itself.
             if (newId) {
               const rs = await syncUnitRooms(tx, newId, { removeUnused: false, createdBy });
-              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType, floor.UnitKind || typeSlot?.UnitKind);
+              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType, typeSlot?.UnitKind || floor.UnitKind);
             }
             await tx.commit();
             if (newId && blockPlanIds.length) await syncUnitPaymentPlanTags(pool, newId, blockPlanIds);
