@@ -210,6 +210,9 @@ export async function fetchHomeDashboard(
     followup?: boolean;
     ticket?: boolean;
     sales?: boolean;
+    /** Opt-in extras — off unless a caller asks (the Finance/Material home doesn't). */
+    tasks?: boolean;
+    projects?: boolean;
   },
 ): Promise<HomeDashboardData> {
   const hasFinanceAccess = moduleAccess?.finance ?? false;
@@ -224,7 +227,7 @@ export async function fetchHomeDashboard(
     hasFinanceAccess ? safeFetch<FinanceDashboardApiData>("/api/finance-dashboard") : skip,
     hasMaterialAccess ? safeFetch<MaterialDashboardData>("/api/material-dashboard") : skip,
     safeFetch<ApprovalInboxItem[]>("/api/approval-inbox"),
-    safeFetch<{ data: TaskSummary[] }>("/api/tasks?limit=5&sort=dueDate&order=asc"),
+    moduleAccess?.tasks ? safeFetch<{ data: TaskSummary[] }>("/api/tasks?limit=5&sort=dueDate&order=asc") : skip,
     hasTicketAccess ? safeFetch<{ counts: Record<string, number | null> }>("/api/tickets/stats") : skip,
     hasEngineeringAccess ? safeFetch<EngineeringSummaryData>("/api/engineering/dashboard") : skip,
     hasFollowupAccess ? safeFetch<unknown>("/api/followup-applications?pageSize=500") : skip,
@@ -235,7 +238,7 @@ export async function fetchHomeDashboard(
     hasSalesAccess ? safeFetch<{ data: any[]; total: number }>("/api/sale-orders?limit=500") : skip,
     // Fetch active project count independently — engineering/dashboard is
     // permission-gated so non-engineering users would always see 0 otherwise.
-    safeFetch<unknown>("/api/project-master"),
+    moduleAccess?.projects ? safeFetch<unknown>("/api/project-master") : skip,
     // Newest 30 expense bookings (any source) — filtered client-side below
     // for the ones with no ESourceType (the "Other Expenses"/TOD direct
     // invoices), since the endpoint has no source-type filter param.

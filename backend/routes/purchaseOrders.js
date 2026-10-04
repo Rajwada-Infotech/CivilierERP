@@ -1609,6 +1609,20 @@ router.put("/:id/reject", async (req, res) => {
       req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("purchase-orders");
+
+    // A rejected PO no longer holds its Material Request's quantity, so refresh
+    // that MR's status (a Completed MR goes back to Approved / Partially
+    // Fulfilled and can be ordered or transferred again).
+    try {
+      const pool = getPool();
+      const src = await pool.request().input("id", sql.Int, id)
+        .query("SELECT SourceMRId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id");
+      if (src.recordset[0]?.SourceMRId) {
+        await recomputeMRFulfillment(pool, src.recordset[0].SourceMRId, null);
+      }
+    } catch (e) {
+      console.error("MR status update after PO reject failed:", e.message);
+    }
     res.json({ message: "Purchase order rejected", ...result });
   } catch (err) {
     res

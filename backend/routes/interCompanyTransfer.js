@@ -831,6 +831,21 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
 
     const result = await transition("inter-company-transfer", id, "Rejected", userEmail(req), req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("stock-transfers");
+
+    // A rejected transfer no longer holds the Material Request's quantity
+    // (getMRItemFulfillment ignores Rejected), so refresh the MR's status too —
+    // otherwise an MR that was marked Completed by this transfer stays
+    // Completed with quantity free again, and can never be used for a PO/ICT.
+    try {
+      const pool = getPool();
+      const src = await pool.request().input("id", sql.Int, id)
+        .query("SELECT SourceMRId FROM dbo.InterCompanyTransfer WHERE ICTId = @id");
+      if (src.recordset[0]?.SourceMRId) {
+        await recomputeMRFulfillment(pool, src.recordset[0].SourceMRId, null);
+      }
+    } catch (e) {
+      console.error("MR status update after ICT reject failed:", e.message);
+    }
     res.json({ message: "Rejected", ...result });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });

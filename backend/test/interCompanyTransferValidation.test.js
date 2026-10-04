@@ -66,6 +66,12 @@ jest.mock("../services/lastPurchaseRate", () => ({
   getLastPurchaseRateByCompany: (...args) => mockGetLastPurchaseRateByCompany(...args),
 }));
 
+const mockRecomputeMR = jest.fn(async () => ({}));
+jest.mock("../services/materialRequestFulfillment", () => ({
+  getMRItemFulfillment: jest.fn(async () => []),
+  recomputeMRFulfillment: (...args) => mockRecomputeMR(...args),
+}));
+
 const mockPostToGL = jest.fn(async () => ({ posted: true }));
 jest.mock("../services/interCompanyStockTransferGL", () => ({
   postInterCompanyStockTransferToGL: (...args) => mockPostToGL(...args),
@@ -114,6 +120,9 @@ function makeFakePool() {
         }
         if (/UPDATE dbo\.InterCompanyTransfer/i.test(text)) {
           return { recordset: [], rowsAffected: [1] };
+        }
+        if (/SELECT SourceMRId FROM dbo\.InterCompanyTransfer WHERE ICTId/i.test(text)) {
+          return { recordset: [{ SourceMRId: storedIctRow?.SourceMRId ?? null }] };
         }
         if (/FROM dbo\.MaterialRequests WHERE MRId/i.test(text)) {
           return { recordset: mockMrRow ? [mockMrRow] : [] };
@@ -454,5 +463,30 @@ describe("Inter-Company Transfer: stock and Material Request checks at creation"
     mockMrRow = { DocNo: "REQ-2026-00001", Status: "Approved", ProjectId: 7 };
     const res = await post({ ...validPayload(), SourceMRId: 5 });
     expect(res.status).toBe(201);
+  });
+});
+
+describe("Inter-Company Transfer: a rejected transfer releases its Material Request", () => {
+  const reject = async () => {
+    const { createApp } = require("../server");
+    const app = await createApp();
+    return request(app)
+      .put("/api/inter-company-transfer/999/reject")
+      .set("Authorization", `Bearer ${superAdminToken()}`)
+      .send({ note: "wrong godown" });
+  };
+
+  test("recomputes the source MR so a 'Completed' MR becomes usable again", async () => {
+    storedIctRow = { ...storedIctRow, SourceMRId: 5 };
+    const res = await reject();
+    expect(res.status).toBe(200);
+    expect(mockRecomputeMR).toHaveBeenCalledWith(expect.anything(), 5, null);
+  });
+
+  test("a transfer not raised from an MR touches no MR", async () => {
+    storedIctRow = { ...storedIctRow, SourceMRId: null };
+    const res = await reject();
+    expect(res.status).toBe(200);
+    expect(mockRecomputeMR).not.toHaveBeenCalled();
   });
 });

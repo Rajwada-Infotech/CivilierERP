@@ -6,6 +6,7 @@
 // type — PDFs, docs, etc — via expo-document-picker + expo-file-system's
 // base64 read, matching web's arbitrary file input), and Terms &
 // Conditions (multi-select from TC master).
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, Alert, Modal, Image } from "react-native";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
@@ -228,6 +229,14 @@ export default function NewContractScreen() {
   const { data: companies = EMPTY_LIST } = useQuery({ queryKey: ["contract-companies"], queryFn: fetchCompanyOptions });
   const { data: allProjects = EMPTY_LIST } = useQuery({ queryKey: ["contract-projects"], queryFn: fetchProjectOptions });
   const { data: finYears = [] } = useQuery({ queryKey: ["contract-finyears"], queryFn: fetchFinYearOptions });
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(!isEditing);
+  const finYearLocked = (!isEditing) && !!lockedFY;
+  useEffect(() => {
+    if (!(!isEditing) || !lockedFY) return;
+    setFinYear(lockedFY.label);
+  }, [isEditing, lockedFY?.id]);
   const { data: contactPersons = [] } = useQuery({ queryKey: ["contract-contact-persons"], queryFn: fetchContactPersons });
   const { data: tcRecords = [] } = useQuery({ queryKey: ["tc-master"], queryFn: fetchTCRecords });
 
@@ -447,7 +456,7 @@ export default function NewContractScreen() {
         <View className="flex-row flex-wrap justify-between">
           <DateField label="Doc Date" value={docDate} onChangeText={setDocDate} />
           <DateField label="Contract Date" value={contractDate} onChangeText={setContractDate} />
-          <PickerField label="Financial Year" value={finYear} placeholder="Select FY…" onPress={() => setFinYearPickerOpen(true)} />
+          <PickerField label={finYearLocked ? "Financial Year · locked" : "Financial Year"} value={finYear} placeholder="Select FY…" onPress={() => setFinYearPickerOpen(true)} disabled={finYearLocked} />
           <PickerField label="Company" value={companyLabel} placeholder="Select company…" onPress={() => setCompanyPickerOpen(true)} />
           <PickerField label="Project" value={projectLabel} placeholder="Select project…" onPress={() => setProjectPickerOpen(true)} disabled={!companyId} />
         </View>

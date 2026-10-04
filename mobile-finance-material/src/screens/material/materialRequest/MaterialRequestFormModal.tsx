@@ -3,6 +3,7 @@
 // for a plain UOM picker (any active UOM, no category filtering) — the
 // most complex part of the web form and not needed for correctness, since
 // quantity/UOM are stored as entered either way.
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -91,6 +92,14 @@ export function MaterialRequestFormModal({
   const { data: companies = [] } = useQuery({ queryKey: ["mr-form-companies"], queryFn: getMRCompanies, enabled: visible });
   const { data: projects = [] } = useQuery({ queryKey: ["mr-form-projects"], queryFn: getMRProjects, enabled: visible });
   const { data: finYears = [] } = useQuery({ queryKey: ["mr-form-finyears"], queryFn: getMRFinYears, enabled: visible });
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(visible && editingId == null);
+  const finYearLocked = (visible && editingId == null) && !!lockedFY;
+  useEffect(() => {
+    if (!(visible && editingId == null) || !lockedFY) return;
+    setForm((f) => ({ ...f, finYearId: String(lockedFY.id), finYearName: lockedFY.label }));
+  }, [visible, editingId == null, lockedFY?.id]);
   const { data: itemOptions = [] } = useQuery({ queryKey: ["mr-form-items", form.projectId], queryFn: () => getMRItemOptions(form.projectId || null), enabled: visible });
   const { data: uoms = [] } = useQuery({ queryKey: ["mr-form-uoms"], queryFn: getMRUomOptions, enabled: visible });
 
@@ -219,7 +228,7 @@ export function MaterialRequestFormModal({
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
             <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
             <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label="Financial Year" value={form.finYearName} placeholder="Auto" onPress={() => setPicker("finYear")} />
+            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYearName} placeholder="Auto" onPress={() => setPicker("finYear")} disabled={finYearLocked} />
 
             <FieldLabel required>Priority</FieldLabel>
             <View className="flex-row flex-wrap gap-2 mb-4">
