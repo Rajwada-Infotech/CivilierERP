@@ -3,6 +3,7 @@
 // for a plain UOM picker (any active UOM, no category filtering) — the
 // most complex part of the web form and not needed for correctness, since
 // quantity/UOM are stored as entered either way.
+import { filterProjectsByCompany } from "@/utils/projectBelongsTo";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
@@ -199,7 +200,8 @@ export function MaterialRequestFormModal({
   };
 
   const companyOptions: PickerOption[] = companies.map((c) => ({ key: String(c.id), label: c.name }));
-  const projectOptions: PickerOption[] = projects.map((p) => ({ key: String(p.id), label: p.name }));
+  // Only the projects that belong to the chosen company (own or tagged).
+  const projectOptions: PickerOption[] = filterProjectsByCompany(projects, form.companyId).map((p) => ({ key: String(p.id), label: p.name }));
   const finYearOptions: PickerOption[] = finYears.map((f) => ({ key: String(f.id), label: f.name }));
   const itemPickerOptions: PickerOption[] = itemOptions.map((i) => ({
     key: i.M_Id, label: i.M_Name, sublabel: [i.M_Group, i.AvailableStock != null ? `Stock: ${Number(i.AvailableStock).toFixed(2)}` : null].filter(Boolean).join(" · "),
