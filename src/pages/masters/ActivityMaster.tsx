@@ -463,6 +463,7 @@ const ActivityMaster: React.FC = () => {
       hsnCode: item.hsn_code ?? "",
       glHeadId: item.gl_head_id ?? "",
       glHeadName: item.gl_head_name ?? "",
+      daysOfCompletion: item.days_of_completion ?? "",
     };
   });
 
@@ -645,6 +646,43 @@ const ActivityMaster: React.FC = () => {
               },
             },
             {
+              name: "daysOfCompletion",
+              label: "Days of Completion",
+              type: "custom",
+              render: ({ value, onChange, formData }) => {
+                const isActivity = formData?.activityType === "Activity";
+                return (
+                  <div className="flex flex-col gap-1">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={isActivity ? String(value ?? "") : ""}
+                      disabled={!isActivity}
+                      // Whole days only, up to 4 digits (the server accepts 1-3650).
+                      onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      placeholder={
+                        !isActivity
+                          ? "N/A — only for Activity type"
+                          : "Days needed to complete, e.g. 7"
+                      }
+                      className={`w-full text-sm rounded-lg border px-3 py-2.5 transition focus:outline-none focus:ring-2 focus:ring-primary/30
+                        ${
+                          !isActivity
+                            ? "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60"
+                            : "border-border bg-background text-foreground"
+                        }`}
+                    />
+                    {!isActivity && (
+                      <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
+                        <Hash size={10} />
+                        Days of completion can only be set on an Activity, not a Group
+                      </p>
+                    )}
+                  </div>
+                );
+              },
+            },
+            {
               name: "status",
               label: "Status",
               type: "toggle",
@@ -658,6 +696,7 @@ const ActivityMaster: React.FC = () => {
             { key: "groupName", label: "Group", hideOnMobile: true },
             { key: "hsnCode", label: "SAC", hideOnMobile: true },
             { key: "glHeadName", label: "GL Head", hideOnMobile: true },
+            { key: "daysOfCompletion", label: "Days", hideOnMobile: true },
             { key: "status", label: "Status" },
           ]}
           initialData={mappedData}
@@ -899,6 +938,23 @@ const ActivityMaster: React.FC = () => {
                   ) : (
                     <span className="text-muted-foreground italic text-sm">
                       Not assigned
+                    </span>
+                  )}
+                </div>
+              )}
+              {viewRecord.activity_type === 1 && (
+                <div>
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Days of Completion
+                  </p>
+                  {viewRecord.days_of_completion ? (
+                    <span className="text-sm text-foreground">
+                      {viewRecord.days_of_completion}{" "}
+                      {viewRecord.days_of_completion === 1 ? "day" : "days"}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic text-sm">
+                      Not set
                     </span>
                   )}
                 </div>

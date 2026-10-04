@@ -179,10 +179,14 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
       where += " AND u.BlockId = @bid";
     }
 
+    const commercialCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c")).recordset[0].c != null;
     const result = await request.query(`
       SELECT
         u.Id, u.UnitName, u.FloorNo, u.BlockId, blk.BlockName, u.IsActive AS UnitIsActive,
         u.AreaSqFt,
+        -- The unit's kind as named in the kind master, and whether it's
+        -- commercial — so the matrix can tell shops/offices from flats.
+        knd.Name AS KindName, ISNULL(knd.IsCommercial, 0) AS IsCommercial,
         bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.BookingDate, bk.ConfirmDeadline,
         bk.TotalValue, bk.GrandTotal, bk.BookingAmount,
         CASE WHEN EXISTS (
@@ -195,6 +199,7 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         hassn.name AS HoldAssignedToName, hassn.email AS HoldAssignedToEmail
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
+      OUTER APPLY (SELECT TOP 1 k.Name, ${commercialCol ? "k.IsCommercial" : "CAST(0 AS BIT) AS IsCommercial"} FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind) knd
       LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo

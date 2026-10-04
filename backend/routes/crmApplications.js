@@ -94,7 +94,7 @@ const APP_SELECT = `
     -- AreaSqFt sqft" at pick time — see CrmApplication.tsx step 1) — surface
     -- it here too so the detail dialog's "Type" line isn't permanently "—"
     -- for every application that has a real unit on it.
-    um.UnitType AS UnitTypeFromMaster, um.AreaSqFt AS UnitAreaSqFt,
+    COALESCE(um.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = um.UnitKind)) AS UnitTypeFromMaster, um.AreaSqFt AS UnitAreaSqFt,
     -- Customer-master fields, auto-fetched here so the Application page
     -- never asks staff to retype what's already on the Customer record.
     cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,

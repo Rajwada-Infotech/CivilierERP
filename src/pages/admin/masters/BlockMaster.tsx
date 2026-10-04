@@ -325,6 +325,7 @@ const fields: FieldDef[] = [
 const columns = [
   { key: "projectName", label: "Project" },
   { key: "blockName", label: "Block Name" },
+  { key: "typeName", label: "Type" },
   { key: "status", label: "Status" },
 ];
 
@@ -394,6 +395,8 @@ const BlockMaster: React.FC = () => {
         projectId: String(item.ProjectId),
         projectName: item.ProjectName ?? "",
         blockName: item.BlockName ?? "",
+        // Effective type; set in Auto Project Setup's Project type bar.
+        typeName: item.TypeName ? `${item.TypeName}${item.HasOwnType ? " (block's own)" : ""}` : "Not set",
         // PaymentPlanIds comes back as a comma-joined string from blockMaster.js's
         // GET / STRING_AGG — split into the string[] the chip picker expects.
         paymentPlanIds: item.PaymentPlanIds ? String(item.PaymentPlanIds).split(",") : [],

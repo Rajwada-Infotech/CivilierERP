@@ -1,8 +1,8 @@
--- Migration 528: Civil Work DPR > Work Transfer — move activities from one
+-- Migration 532: Civil Work DPR > Work Transfer — move activities from one
 -- engineer to another, one at a time or in bulk. Registers the page for RBAC
 -- and adds an audit log of every transfer (who, from whom, to whom, when).
 INSERT INTO dbo.PageDefinitions (PageKey, Label, Module, GroupName, Actions, SortOrder, IsActive, CreatedBy, CreatedAt)
-SELECT 'civilworkdpr-work-transfer', 'Work Transfer', 'Civil Work DPR', 'Civil Work DPR', 'view,edit', 14, 1, 'migration-528', SYSUTCDATETIME()
+SELECT 'civilworkdpr-work-transfer', 'Work Transfer', 'Civil Work DPR', 'Civil Work DPR', 'view,edit', 14, 1, 'migration-532', SYSUTCDATETIME()
 WHERE NOT EXISTS (
   SELECT 1 FROM dbo.PageDefinitions pd WHERE pd.PageKey = 'civilworkdpr-work-transfer' AND pd.IsActive = 1
 );
@@ -25,5 +25,5 @@ BEGIN
 END
 GO
 
-PRINT '528-civilworkdpr-work-transfer applied successfully.';
+PRINT '532-civilworkdpr-work-transfer applied successfully.';
 GO

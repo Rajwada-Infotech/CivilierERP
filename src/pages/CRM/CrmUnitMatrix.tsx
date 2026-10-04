@@ -30,6 +30,8 @@ interface Option {
 }
 
 interface MatrixUnit {
+  KindName?: string | null;
+  IsCommercial?: boolean | number;
   Id: number;
   UnitName: string;
   FloorNo: number | null;
@@ -675,6 +677,10 @@ export function UnitMatrixPage() {
                               >
                                 <div className="flex items-center justify-between gap-2 mb-1.5">
                                   <span className="font-bold text-sm text-foreground truncate">{u.UnitName}</span>
+                                  {/* Commercial units (shop, office…) — name from the unit kind master. */}
+                                  {!!u.IsCommercial && u.KindName && (
+                                    <span className="shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-300">{u.KindName}</span>
+                                  )}
                                   <span className={`shrink-0 text-[0.625rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[u.Status]}`}>
                                     {u.Status === "OnHold" ? "Hold" : u.Status}
                                   </span>
