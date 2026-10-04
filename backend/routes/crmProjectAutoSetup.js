@@ -737,8 +737,11 @@ router.get("/blocks/:id/stack", requirePageRight("crm-auto-project-setup", "view
       SELECT x.FloorId, x.UnitType, x.LayoutTypeId, x.UnitKind, x.Count, x.CarpetAreaSqFt, x.BuiltUpAreaSqFt, x.SuperBuiltUpAreaSqFt, x.OpenTerraceAreaSqFt, x.RatePerSqFt
       FROM dbo.CrmProjectAutoSetupFloorMix x JOIN dbo.CrmProjectAutoSetupFloor f ON f.Id = x.FloorId
       WHERE f.BlockId = @bid AND x.IsActive = 1 ORDER BY x.SortOrder`)).recordset : [];
+    const planIds = (await pool.request().input("bid", sql.Int, blockId)
+      .query("SELECT PlanId FROM dbo.CrmBlockPaymentPlan WHERE BlockId = @bid AND IsActive = 1")).recordset.map((r) => r.PlanId);
     res.json({
       mixReady: ready,
+      paymentPlanIds: planIds,
       typical,
       floors: floors.map((f) => ({ ...f, ownMix: own.some((o) => o.FloorId === f.Id) ? own.filter((o) => o.FloorId === f.Id) : null })),
     });

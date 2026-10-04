@@ -25,6 +25,10 @@ const describe = (rows: MixRow[] | null | undefined) =>
   (rows || []).filter((r) => (parseInt(String(r.Count), 10) || 0) > 0).map((r) => `${r.Count} × ${r.UnitType}`).join(" + ") || "—";
 
 interface Props {
+  /** Generated floors: load + render their real units (edit / delete in place). */
+  onOpenGeneratedFloor?: (floor: { Id: number }) => void;
+  renderGeneratedFloor?: (floorId: number) => React.ReactNode;
+  paymentPlans?: { Id: number; PlanName: string; IsActive: boolean }[];
   blockId: number;
   blockName: string;
   kinds: KindRow[];
@@ -111,10 +115,10 @@ function MixEditor({ rows, onChange, kinds, layoutTypes, canEdit }: {
   );
 }
 
-export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEdit, onChanged }: Props) {
+export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEdit, onChanged, paymentPlans = [], onOpenGeneratedFloor, renderGeneratedFloor }: Props) {
   const qc = useQueryClient();
   const key = ["auto-setup-stack", blockId];
-  const { data } = useQuery<{ mixReady: boolean; typical: MixRow[]; floors: FloorRow[] }>({
+  const { data } = useQuery<{ mixReady: boolean; paymentPlanIds: number[]; typical: MixRow[]; floors: FloorRow[] }>({
     queryKey: key,
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/blocks/${blockId}/stack`);
@@ -150,7 +154,15 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
     } catch (e: any) { toast.error(e.message); return false; } finally { setBusy(false); }
   };
 
-  const saveTypical = () => call(`${API}/blocks/${blockId}/unit-template`, "PUT", { Items: typical }, "Typical floor saved — floors updated");
+  const saveTypical = () => call(`${API}/blocks/${blockId}/unit-template`, "PUT", { Items: typical, PaymentPlanIds: data?.paymentPlanIds ?? [] }, "Typical floor saved — floors updated");
+  // Payment plans every unit generated in this block gets (saved with the typical floor).
+  const togglePlan = (id: number) => {
+    if (!data) return;
+    if (!data.typical.length) { toast.error("Save the typical floor first, then pick payment plans."); return; }
+    const cur = data.paymentPlanIds ?? [];
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    call(`${API}/blocks/${blockId}/unit-template`, "PUT", { Items: data.typical, PaymentPlanIds: next }, "Payment plans updated");
+  };
   const saveFloorMix = async (f: FloorRow) => { if (await call(`${API}/floors/${f.Id}/mix`, "PUT", { Items: floorDraft }, `Floor ${f.FloorLabel} saved`)) setEditingFloor(null); };
   const useTypical = (f: FloorRow) => call(`${API}/floors/${f.Id}/mix`, "PUT", { Items: null }, `Floor ${f.FloorLabel} follows the typical floor`);
   const toggleUnits = (f: FloorRow, on: boolean) => call(`${API}/floors/${f.Id}`, "PUT", { HasUnits: on }, on ? `Floor ${f.FloorLabel} has units` : `Floor ${f.FloorLabel}: no units`);
@@ -190,6 +202,22 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
         )}
       </div>
 
+      {/* Payment plans for units generated in this block. */}
+      {paymentPlans.filter((p) => p.IsActive).length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground mr-1">Payment plans</span>
+          {paymentPlans.filter((p) => p.IsActive).map((p) => {
+            const on = (data.paymentPlanIds ?? []).includes(p.Id);
+            return (
+              <button key={p.Id} type="button" disabled={!canEdit || busy} onClick={() => togglePlan(p.Id)} aria-pressed={on}
+                className={`px-2.5 py-1 text-xs rounded-full border transition-colors disabled:opacity-60 ${on ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/50"}`}>
+                {on && <CheckCircle2 size={11} className="inline mr-1 -mt-0.5" />}{p.PlanName}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* The building, top floor first. */}
       <div className="rounded-lg border border-border/60 overflow-hidden">
         <table className="w-full text-xs">
@@ -205,7 +233,11 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
               return (
                 <React.Fragment key={f.Id}>
                   {/* Summary row — click to see this floor's configuration (read-only until Edit). */}
-                  <tr onClick={() => { if (!isEditing) setOpenFloor(isOpen ? null : f.Id); }}
+                  <tr onClick={() => {
+                      if (isEditing) return;
+                      if (!isOpen && f.IsGenerated) onOpenGeneratedFloor?.(f);
+                      setOpenFloor(isOpen ? null : f.Id);
+                    }}
                     className={`cursor-pointer transition-colors ${f.IsGenerated ? "bg-emerald-500/5" : isOpen ? "bg-primary/5" : "hover:bg-muted/40"}`}>
                     <td className="px-3 py-2 font-medium">
                       <span className="inline-flex items-center gap-1.5">
@@ -248,7 +280,8 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
                       <td />
                       <td colSpan={2} className="px-3 pb-3 pt-1">
                         {f.IsGenerated ? (
-                          <p className="text-xs text-muted-foreground">Units on this floor are created — change them in Unit Master.</p>
+                          renderGeneratedFloor ? renderGeneratedFloor(f.Id)
+                            : <p className="text-xs text-muted-foreground">Units on this floor are created — change them in Unit Master.</p>
                         ) : !f.HasUnits ? (
                           <p className="text-xs text-muted-foreground">No sellable units on this floor. Turn the switch on to add some.</p>
                         ) : isEditing ? (

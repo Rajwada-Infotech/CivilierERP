@@ -1933,7 +1933,16 @@ const CrmProjectAutoSetup: React.FC = () => {
                               )}
                             </div>
                             {/* The block as a building: typical floor once, any floor its own mix. */}
-                            <BlockStackEditor blockId={b.Id} blockName={b.BlockName} kinds={kindsFor(b.Id)} layoutTypes={unitTypesMaster}
+                            <BlockStackEditor blockId={b.Id} blockName={b.BlockName} kinds={kindsFor(b.Id)} layoutTypes={unitTypesMaster} paymentPlans={applicablePlans}
+                              onOpenGeneratedFloor={(f) => { if (!floorUnits[f.Id]) handleToggleExpandFloor(f); }}
+                              renderGeneratedFloor={(fid) => (
+                                <FloorUnitList floorId={fid} units={floorUnits[fid]} loading={loadingUnitsFloorId === fid}
+                                  editingUnitId={editingUnitId} editingUnit={editingUnit} savingUnitId={savingUnitId}
+                                  unitTypesMaster={unitTypesMaster} commercialKinds={projectCommercialKinds}
+                                  onStartEdit={startEditUnit} onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
+                                  onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
+                                  onSave={handleSaveUnit} onDelete={handleDeleteUnit} />
+                              )}
                               canEdit={rights.canEdit} onChanged={() => { refetchStatus(); invalidateSyncedMasters(); }} />
                           </>
                         )}
