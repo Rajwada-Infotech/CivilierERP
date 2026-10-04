@@ -106,7 +106,7 @@ export default function DependencyMasterPage() {
           rights.canCreate && (
             <button
               onClick={() => navigate("/masters/dependency/new")}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-engineering transition-all"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-civilworkdpr transition-all"
             >
               <Plus className="h-3.5 w-3.5" />
               New Dependency
@@ -116,9 +116,9 @@ export default function DependencyMasterPage() {
       >
         {/* Stat strip */}
         <div className="grid grid-cols-3 gap-3">
-          <StatTile label="Total Entries" value={rows.length} icon={Boxes} accent="#f97316" />
-          <StatTile label="Internal" value={internalCount} icon={Home} accent="#f97316" />
-          <StatTile label="External" value={externalCount} icon={Waypoints} accent="#0ea5e9" />
+          <StatTile label="Total Entries" value={rows.length} icon={Boxes} accent="#0891b2" />
+          <StatTile label="Internal" value={internalCount} icon={Home} accent="#0891b2" />
+          <StatTile label="External" value={externalCount} icon={Waypoints} accent="#8b5cf6" />
         </div>
 
         {/* Toolbar */}
@@ -133,7 +133,7 @@ export default function DependencyMasterPage() {
                 key={val}
                 onClick={() => setTypeFilter(val)}
                 className={`px-3 py-1.5 text-xs font-heading font-semibold tracking-wide transition-colors ${
-                  typeFilter === val ? "gradient-engineering text-white" : "bg-background text-muted-foreground hover:bg-muted"
+                  typeFilter === val ? "gradient-civilworkdpr text-white" : "bg-background text-muted-foreground hover:bg-muted"
                 }`}
               >
                 {label}
@@ -174,7 +174,7 @@ export default function DependencyMasterPage() {
             {rights.canCreate && !search && typeFilter === "ALL" && (
               <button
                 onClick={() => navigate("/masters/dependency/new")}
-                className="inline-flex items-center gap-1.5 mt-1 font-heading font-semibold text-white shadow-sm text-xs px-4 py-1.5 rounded-lg gradient-engineering transition-all"
+                className="inline-flex items-center gap-1.5 mt-1 font-heading font-semibold text-white shadow-sm text-xs px-4 py-1.5 rounded-lg gradient-civilworkdpr transition-all"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Create your first Dependency

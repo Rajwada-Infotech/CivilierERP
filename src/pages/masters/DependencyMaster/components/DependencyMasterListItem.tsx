@@ -33,7 +33,7 @@ export function DependencyMasterListItem({
   onDelete,
 }: Props) {
   const isInternal = row.workType === "INTERNAL";
-  const accent = isInternal ? "#f97316" : "#0ea5e9";
+  const accent = isInternal ? "#0891b2" : "#8b5cf6";
   const dotCount = Math.min(row.activityCount, 6);
 
   // Clicking an activity chip opens the same assign-engineer-&-material
