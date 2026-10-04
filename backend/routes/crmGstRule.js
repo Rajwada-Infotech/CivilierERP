@@ -56,7 +56,17 @@ router.get("/options", requirePageRight(PAGE, "view"), async (_req, res) => {
     const pool = getPool();
     const [used, hsn] = await Promise.all([
       pool.request().query("SELECT DISTINCT AppliesTo FROM dbo.CrmGstRule"),
-      pool.request().query("SELECT HCode, HDescription, HIGST FROM dbo.HSN WHERE HStatus = 1 ORDER BY HCode"),
+      // Only what a sale can be: service (SAC) codes, as flagged in HSN Master
+      // (HIsSAC), plus any code a rule already uses. Goods HSNs (cement, sand…)
+      // are purchases, never a CRM sale. If no code is flagged SAC yet, all
+      // active codes are offered rather than an empty list.
+      pool.request().query(`
+        SELECT HCode, HDescription, HIGST FROM dbo.HSN h
+        WHERE h.HStatus = 1
+          AND (h.HIsSAC = 1
+               OR h.HCode IN (SELECT HsnCode FROM dbo.CrmGstRule WHERE HsnCode IS NOT NULL)
+               OR NOT EXISTS (SELECT 1 FROM dbo.HSN s WHERE s.HStatus = 1 AND s.HIsSAC = 1))
+        ORDER BY HCode`),
     ]);
     const appliesTo = [...new Set([...Object.values(APPLIES_TO), ...used.recordset.map((x) => x.AppliesTo)])].sort();
     res.json({
