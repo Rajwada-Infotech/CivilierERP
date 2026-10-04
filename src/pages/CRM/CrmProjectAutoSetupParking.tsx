@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { ParkingNamingPanel } from "./autoSetup/NamingPanel";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -311,6 +312,8 @@ const CrmProjectAutoSetupParking: React.FC = () => {
             <Car size={14} className="text-primary" /> Parking — Block-wise
             {blocks.some((b) => b.ParkingSlotCount > 0) && <CheckCircle2 size={13} className="text-green-600" />}
           </h3>
+
+          <ParkingNamingPanel projectId={Number(projectId)} shortName={status?.project?.ShortCode} blocks={blocks} canEdit={rights.canEdit} />
 
           <div className="space-y-4">
             {blocks.map((b) => {

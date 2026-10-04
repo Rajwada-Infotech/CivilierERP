@@ -1761,7 +1761,7 @@ router.put("/blocks/:id/plot-template", requirePageRight("crm-auto-project-setup
       .input("bid", sql.Int, blockId)
       .input("pid", sql.Int, block.ProjectId)
       .input("count", sql.Int, plotCount)
-      .input("prefix", sql.NVarChar(20), b.NumberPrefix || null)
+      .input("prefix", sql.NVarChar(20), b.NumberPrefix ?? null)
       .input("start", sql.Int, startNumber)
       .input("area", sql.Decimal(18, 2), num(b.DefaultAreaSqFt))
       .input("rate", sql.Decimal(18, 2), num(b.DefaultRatePerSqFt))
@@ -1821,7 +1821,8 @@ router.post("/generate-plots", requirePageRight("crm-auto-project-setup", "creat
     if (effType.HasFloors)
       return res.status(400).json({ error: `This block is part of a ${effType.Name} project, which uses floors.` });
 
-    const prefix = tpl.NumberPrefix || "P";
+    // "" is a real choice (plain 1, 2, 3); only an unset prefix falls back to "P".
+    const prefix = tpl.NumberPrefix ?? "P";
     let created = 0;
     const skipped = [];
 

@@ -333,3 +333,141 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
     </div>
   );
 }
+
+// ── Parking slot naming — same card, same lock/Edit behaviour ───────────────
+const PARKING_PRESETS: { title: string; hint: string; template: string }[] = [
+  { title: "P + number", hint: "Most common", template: "{P}/{B}/P{N:2}" },
+  { title: "P + plain number", hint: "P1, P2…", template: "{P}/{B}/P{N}" },
+  { title: "Tower-wise", hint: "T1, T2…", template: "{P}/T{T}/P{N:2}" },
+  { title: "With dashes", hint: "Dash separated", template: "{P}-{B}-P{N:2}" },
+  { title: "3-digit number", hint: "Large lots", template: "{P}/{B}/P{N:3}" },
+];
+const LEGACY_PARKING = PARKING_PRESETS[0].template; // what's generated when nothing is chosen
+
+function parkingExample(template: string, short: string, blockName: string) {
+  const one = (n: number) => template.replace("{P}", short).replace("T{T}", "T1").replace("{B}", blockName)
+    .replace("{N:3}", String(n).padStart(3, "0")).replace("{N:2}", String(n).padStart(2, "0")).replace("{N}", String(n));
+  return [one(1), one(2), one(3)].join(",  ");
+}
+
+export function ParkingNamingPanel({ projectId, shortName, blocks, canEdit }: {
+  projectId: number; shortName?: string; blocks: { Id: number; BlockName: string; ParkingSlotCount?: number }[]; canEdit: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState<boolean | null>(null);
+  const [pick, setPick] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const { data: naming } = useQuery<any>({
+    queryKey: ["auto-setup-naming", projectId],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API}/naming?ProjectId=${projectId}`);
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to load naming");
+      return res.json();
+    },
+    enabled: !!projectId,
+  });
+  const short = shortName || "PRJ";
+  const blockName = blocks[0]?.BlockName ?? "A";
+  const savedTemplate: string = naming?.patterns?.find((p: any) => p.Id === naming?.project?.ParkingNamingPatternId)?.Template ?? LEGACY_PARKING;
+  const chosen = pick ?? savedTemplate;
+  const dirty = chosen !== savedTemplate;
+  const anyGenerated = blocks.some((b) => (b.ParkingSlotCount || 0) > 0);
+  const firstTime = !!naming && !naming.project?.ParkingNamingPatternId && !anyGenerated;
+  const isOpen = open ?? firstTime;
+  const titleOf = (tpl: string) => PARKING_PRESETS.find((p) => p.template === tpl)?.title ?? "Custom";
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      let pattern = naming?.patterns?.find((p: any) => p.Scope === "PARKING" && p.Template === chosen);
+      if (!pattern) {
+        const res = await fetchWithAuth(PATTERN_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ Name: chosen.replace("{P}", "Project"), Scope: "PARKING", Template: chosen, GroundLabel: "G", NumberStart: 1 }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || "Couldn't save naming");
+        pattern = { Id: body.id };
+      }
+      const res = await fetchWithAuth(`${API}/naming`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Level: "project", Id: projectId, Scope: "PARKING", PatternId: pattern.Id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Couldn't save naming");
+      toast.success("Parking naming saved — new slots will use it");
+      await queryClient.invalidateQueries({ queryKey: ["auto-setup-naming", projectId] });
+      setPick(null);
+      setOpen(false);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-background/50 p-3 sm:p-4 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {isOpen ? <Tag size={13} className="text-sky-600" /> : <Lock size={12} className="text-muted-foreground" />}
+        <span className="text-sm font-semibold">{isOpen ? "How should parking slots be named?" : "Slot names"}</span>
+        {!isOpen && (
+          <>
+            <span className="font-mono text-xs text-muted-foreground">{parkingExample(savedTemplate, short, blockName)} …</span>
+            <span className="text-xs text-muted-foreground">· {titleOf(savedTemplate)}</span>
+          </>
+        )}
+        {canEdit && !isOpen && (
+          <button type="button" onClick={() => setOpen(true)}
+            className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border text-primary hover:bg-primary/5">
+            <Pencil size={11} /> Edit
+          </button>
+        )}
+        {isOpen && !firstTime && (
+          <button type="button" onClick={() => { setOpen(false); setPick(null); }}
+            className="ml-auto px-2.5 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted/50">Cancel</button>
+        )}
+      </div>
+      {isOpen && (
+        <>
+          <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+            {PARKING_PRESETS.map((p) => {
+              const active = p.template === chosen;
+              const [first, ...rest] = parkingExample(p.template, short, blockName).split(",  ");
+              return (
+                <button key={p.title} type="button" disabled={!canEdit} onClick={() => setPick(p.template)} aria-pressed={active}
+                  className={`relative h-full rounded-xl border p-3 text-left transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${active ? "border-primary ring-2 ring-primary/30 bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/40"}`}>
+                  {active && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-primary" />}
+                  <div className="text-[11px] text-muted-foreground pr-5">{p.title} <span className="opacity-60">· {p.hint}</span></div>
+                  <div className="mt-1 font-mono text-sm font-semibold">{first}</div>
+                  <div className="font-mono text-[11px] text-muted-foreground">{rest.join(", ")}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 ${dirty ? "bg-amber-500/5 border-amber-500/30" : "bg-emerald-500/5 border-emerald-500/20"}`}>
+            <span className="text-xs text-muted-foreground">{dirty ? "New slots would be named" : "New slots will be named"}</span>
+            <span className={`font-mono text-sm ${dirty ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>{parkingExample(chosen, short, blockName)} …</span>
+            <div className="ml-auto flex items-center gap-2">
+              {dirty || firstTime ? (canEdit && (
+                <>
+                  {dirty && (
+                    <button type="button" onClick={() => setPick(null)} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-border hover:bg-muted/50">
+                      <Undo2 size={11} /> Undo
+                    </button>
+                  )}
+                  <button type="button" onClick={save} disabled={saving} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">
+                    {saving ? "Saving…" : "Save naming"}
+                  </button>
+                </>
+              )) : (
+                <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400"><CheckCircle2 size={12} /> Saved</span>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground">Only slots generated from now on use this. Slots already created keep their names.</p>
+        </>
+      )}
+    </div>
+  );
+}
