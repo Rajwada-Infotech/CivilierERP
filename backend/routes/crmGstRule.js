@@ -30,10 +30,23 @@ const triState = (v) => {
   if (["0", "false", "no", "residential", "company"].includes(s)) return 0;
   return null;
 };
+// Migration 526 adds ForCommercial. Until it has run, say so plainly rather
+// than failing every request with an opaque 500.
+async function schemaProblem(pool) {
+  const r = await pool.request().query(`
+    SELECT OBJECT_ID('dbo.CrmGstRule') AS T,
+           COL_LENGTH('dbo.CrmGstRule', 'ForCommercial') AS C`);
+  if (!r.recordset[0].T) return "GST rule table is missing — run database migration 507.";
+  if (r.recordset[0].C == null) return "Database is not up to date — run migration 526 (commercial usage) and reload.";
+  return null;
+}
+
 const money = (v) => (v === undefined || v === null || v === "" ? null : Number(v));
 
 router.get("/", requirePageRight(PAGE, "view"), async (_req, res) => {
   try {
+    const problem = await schemaProblem(getPool());
+    if (problem) return res.status(409).json({ error: problem });
     const r = await getPool().request().query(`
       SELECT r.Id, r.Name, r.AppliesTo, r.HsnCode, r.MinValue, r.MaxValue,
              r.LandOwnedByCustomer, r.ForCommercial, r.Priority, r.IsActive, r.Notes,
@@ -44,7 +57,7 @@ router.get("/", requirePageRight(PAGE, "view"), async (_req, res) => {
     res.json(r.recordset);
   } catch (e) {
     console.error("[crm-gst-rule] GET:", e.message);
-    res.status(500).json({ error: "Failed to load GST rules" });
+    res.status(500).json({ error: `Failed to load GST rules: ${e.message}` });
   }
 });
 
@@ -119,6 +132,8 @@ const bind = (r, v, req) => r
 router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   try {
     const pool = getPool();
+    const problem = await schemaProblem(pool);
+    if (problem) return res.status(409).json({ error: problem });
     const v = await validate(pool, req.body || {});
     if (v.error) return res.status(400).json({ error: v.error });
     const r = await bind(pool.request(), v, req).query(`

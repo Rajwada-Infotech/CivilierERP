@@ -81,7 +81,12 @@ const tri = (v: unknown) => (v === true || v === 1 ? "1" : v === false || v === 
 
 async function fetchRules(): Promise<RecordWithId[]> {
   const res = await fetchWithAuth(API);
-  if (!res.ok) throw new Error("Failed to load GST rules");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const msg = body.error || "Failed to load GST rules";
+    toast.error(msg);
+    throw new Error(msg);
+  }
   const data = await res.json().catch(() => []);
   return (Array.isArray(data) ? data : []).map((r: any) => ({
     ...r,
