@@ -165,6 +165,9 @@ const CivilWorkDprQualityCheck = lazy(
 const CivilWorkDprAmendment = lazy(
   () => import("./pages/civilworkdpr/Amendment"),
 );
+const CivilWorkDprWorkTransfer = lazy(
+  () => import("./pages/civilworkdpr/WorkTransfer"),
+);
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
 );
@@ -1210,6 +1213,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-quality-check">
             <CivilWorkDprQualityCheck />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/work-transfer"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-work-transfer">
+            <CivilWorkDprWorkTransfer />
           </ProtectedRoute>
         }
       />
