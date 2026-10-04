@@ -7,6 +7,7 @@ import { queryClient } from "@/services/queryClient";
 import { AuthProvider } from "@/auth/AuthContext";
 import RootNavigator from "@/navigation/RootNavigator";
 import { UpdateGate } from "@/updater/UpdateGate";
+import { OtaUpdateGate } from "@/updater/OtaUpdateGate";
 import { useAppFonts } from "@/theme/fonts";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
@@ -30,6 +31,7 @@ export default function App() {
           </AuthProvider>
         </QueryClientProvider>
         <UpdateGate appKey="finance-material" />
+        <OtaUpdateGate />
       </ErrorBoundary>
       <StatusBar style="light" />
     </SafeAreaProvider>

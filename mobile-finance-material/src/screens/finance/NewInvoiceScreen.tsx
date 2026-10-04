@@ -4,6 +4,7 @@
 // document sources, EMI, and billing terms. Not ported: file attachments
 // (the web Invoice form has none either — no backend column for it, unlike
 // Contract).
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, Alert, Modal, Switch } from "react-native";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
@@ -200,6 +201,14 @@ export default function NewInvoiceScreen() {
   const { data: companies = EMPTY_LIST } = useQuery({ queryKey: ["inv-companies"], queryFn: fetchCompanyOptions });
   const { data: allProjects = EMPTY_LIST } = useQuery({ queryKey: ["inv-projects"], queryFn: fetchProjectOptions });
   const { data: finYears = [] } = useQuery({ queryKey: ["inv-finyears"], queryFn: fetchFinYearOptions });
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(!isEditing);
+  const finYearLocked = (!isEditing) && !!lockedFY;
+  useEffect(() => {
+    if (!(!isEditing) || !lockedFY) return;
+    setFinYear(lockedFY.label);
+  }, [isEditing, lockedFY?.id]);
   const { data: supplierHeads = [] } = useQuery({ queryKey: ["inv-supplier-heads"], queryFn: fetchSupplierHeads });
   const { data: contractorHeads = [] } = useQuery({ queryKey: ["inv-contractor-heads"], queryFn: fetchContractorHeads });
   const { data: brokerHeads = [] } = useQuery({ queryKey: ["inv-broker-heads"], queryFn: fetchBrokerHeads });
@@ -465,7 +474,7 @@ export default function NewInvoiceScreen() {
         <View className="flex-row flex-wrap justify-between">
           <PickerField label="Company *" value={companyLabel} placeholder="Select company…" onPress={() => setCompanyPickerOpen(true)} />
           <PickerField label="Project" value={projectLabel} placeholder="Select project…" onPress={() => setProjectPickerOpen(true)} disabled={!companyId} />
-          <PickerField label="Financial Year" value={finYear} placeholder="Select FY…" onPress={() => setFinYearPickerOpen(true)} />
+          <PickerField label={finYearLocked ? "Financial Year · locked" : "Financial Year"} value={finYear} placeholder="Select FY…" onPress={() => setFinYearPickerOpen(true)} disabled={finYearLocked} />
           <PickerField
             label="Supplier / Vendor"
             value={supplier}

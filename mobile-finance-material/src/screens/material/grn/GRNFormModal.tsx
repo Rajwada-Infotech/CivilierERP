@@ -7,6 +7,7 @@
 //     receivedQty/rate/billing-qty, capped at what's still on the PO.
 // A PO only shows up in the picker once ≥1 Vehicle In/Out has been logged
 // against it (goods can't be receipted before a vehicle brought them in).
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -110,6 +111,14 @@ export function GRNFormModal({
   const { data: purchaseOrders = [] } = useQuery({ queryKey: ["grn-form-pos"], queryFn: getPurchaseOrders, enabled: visible });
   const { data: poIdsWithVio } = useQuery({ queryKey: ["grn-form-po-ids-with-vio"], queryFn: getPoIdsWithVio, enabled: visible });
   const { data: finYears = [] } = useQuery({ queryKey: ["grn-form-finyears"], queryFn: fetchFinYearOptions, enabled: visible });
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(visible && editingId == null);
+  const finYearLocked = (visible && editingId == null) && !!lockedFY;
+  useEffect(() => {
+    if (!(visible && editingId == null) || !lockedFY) return;
+    set("finYear", lockedFY.label);
+  }, [visible, editingId == null, lockedFY?.id]);
 
   const { data: existing, isLoading: loadingExisting } = useQuery({
     queryKey: ["grn-editing-record", editingId],
@@ -371,7 +380,7 @@ export function GRNFormModal({
             <TextField value={form.grnDate} onChangeText={(v) => set("grnDate", v)} placeholder="YYYY-MM-DD" />
             <FieldLabel>Doc Date</FieldLabel>
             <TextField value={form.docDate} onChangeText={(v) => set("docDate", v)} placeholder="YYYY-MM-DD" />
-            <PickerRow label="Financial Year" value={form.finYear} placeholder="Auto" onPress={() => setPicker("finYear")} />
+            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} placeholder="Auto" onPress={() => setPicker("finYear")} disabled={finYearLocked} />
             <View className="rounded-xl px-3.5 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
               <Text style={{ color: colors.mutedForeground, fontSize: 10, textTransform: "uppercase" }}>GRN Number</Text>
               <Text style={{ color: colors.primary, fontSize: 13, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
