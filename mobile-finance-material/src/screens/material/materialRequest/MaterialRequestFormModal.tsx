@@ -3,6 +3,7 @@
 // for a plain UOM picker (any active UOM, no category filtering) — the
 // most complex part of the web form and not needed for correctness, since
 // quantity/UOM are stored as entered either way.
+import { DateTimeField } from "@/components/DateTimeField";
 import { filterProjectsByCompany } from "@/utils/projectBelongsTo";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
@@ -246,9 +247,9 @@ export function MaterialRequestFormModal({
             </View>
 
             <FieldLabel required>Request Date</FieldLabel>
-            <TextField value={form.requestDate} onChangeText={(v) => set("requestDate", v)} placeholder="YYYY-MM-DD" />
+            <DateTimeField mode="date" value={form.requestDate} onChange={(v) => set("requestDate", v)} title="Request date" />
             <FieldLabel>Required By Date</FieldLabel>
-            <TextField value={form.requiredByDate} onChangeText={(v) => set("requiredByDate", v)} placeholder="YYYY-MM-DD" />
+            <DateTimeField mode="date" value={form.requiredByDate} onChange={(v) => set("requiredByDate", v)} title="Required by" placeholder="Select a date (optional)" clearable />
 
             <View className="rounded-xl px-3.5 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
               <Text style={{ color: colors.mutedForeground, fontSize: 10, textTransform: "uppercase" }}>Doc Number</Text>
