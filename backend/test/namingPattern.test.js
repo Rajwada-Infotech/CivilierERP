@@ -17,6 +17,12 @@ describe("renderName", () => {
   test("ground floor uses the pattern's ground label", () => {
     expect(renderName({ Template: "{P}/{B}/{F}-{N}", GroundLabel: "GF", NumberStart: 1 }, { ...ctx, floorNo: 0, seq: 4 })).toBe("GS/A/GF-4");
   });
+  test("India-standard floor + 2-digit flat no., incl. 2-digit floors", () => {
+    const p = { Template: "{P}/{B}/{F}{N:2}", GroundLabel: "G", NumberStart: 1 };
+    expect(renderName(p, { ...ctx, floorNo: 12, seq: 4 })).toBe("GS/A/1204");
+    expect(renderName(p, { ...ctx, floorNo: 0, seq: 1 })).toBe("GS/A/G01");
+    expect(renderName({ ...p, Template: "{P}-{B}-{F:2}{N:2}" }, { ...ctx, floorNo: 1, seq: 1 })).toBe("GS-A-0101");
+  });
   test("padded numbers and a custom start", () => {
     expect(renderName({ Template: "{P}/{B}/{F}{N:2}", GroundLabel: "G", NumberStart: 1 }, { ...ctx, floorNo: 1, seq: 1 })).toBe("GS/A/101");
     expect(renderName({ Template: "{P}/{B}/B{N}", GroundLabel: "G", NumberStart: 10 }, { ...ctx, seq: 3 })).toBe("GS/A/B12");

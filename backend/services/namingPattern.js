@@ -4,7 +4,7 @@
 //   {P}    project short name            (required — keeps names unique across projects)
 //   {T}    tower number = block's position in its project (1, 2, 3 … by creation order)
 //   {B}    block name as typed           (A, 1, IRIS …)
-//   {F}    floor label                   (pattern's GroundLabel for floor 0, else the number)
+//   {F}    floor label                   (pattern's GroundLabel for floor 0, else the number); {F:2} pads to 2 digits
 //   {L}    letter of the unit on its floor (A, B … skipping the pattern's SkipLetters; Z → AA)
 //   {N}    number of the unit on its floor, from NumberStart; {N:2} pads to 2 digits
 //
@@ -65,7 +65,8 @@ function renderName(pattern, ctx) {
       case "P": return ctx.shortCode;
       case "T": return String(ctx.towerNo);
       case "B": return ctx.blockName;
-      case "F": return floorLabel;
+      // {F:2} pads numeric floors (0101 style); a lettered ground label isn't padded.
+      case "F": return pad && /^\d+$/.test(floorLabel) ? floorLabel.padStart(parseInt(pad, 10), "0") : floorLabel;
       case "L": return letterAt(ctx.seq, pattern.SkipLetters);
       case "N": return pad ? String(num).padStart(parseInt(pad, 10), "0") : String(num);
       default: return "";
