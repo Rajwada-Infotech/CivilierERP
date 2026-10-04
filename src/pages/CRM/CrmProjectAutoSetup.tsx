@@ -27,7 +27,7 @@ function firstPickableType(types: LayoutType[]): string {
   return types.find((t) => t.roomCount > 0)?.label ?? "";
 }
 
-type TemplateRow = { UnitType: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
+type TemplateRow = { UnitType: string; UnitKind?: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 type PaymentPlan = { Id: number; PlanName: string; IsActive: boolean };
 type UnitEdit = { UnitName: string; FloorNo: string; UnitType: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 
@@ -726,6 +726,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         const rows: TemplateRow[] = (data.items || []).length
           ? data.items.map((it: any) => ({
               UnitType: it.UnitType,
+              UnitKind: it.UnitKind || "",
               Count: String(it.Count),
               AreaSqFt: it.AreaSqFt != null ? String(it.AreaSqFt) : "",
               CarpetAreaSqFt: it.CarpetAreaSqFt != null ? String(it.CarpetAreaSqFt) : "",
@@ -1025,6 +1026,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         body: JSON.stringify({
           Items: rows.map((r) => ({
             UnitType: r.UnitType,
+            UnitKind: r.UnitKind || null,
             Count: r.Count,
             AreaSqFt: r.AreaSqFt || null,
             CarpetAreaSqFt: r.CarpetAreaSqFt || null,
@@ -1918,11 +1920,29 @@ const CrmProjectAutoSetup: React.FC = () => {
                           {rows.map((row, idx) => (
                             <div key={idx} className="rounded-lg border border-border/60 bg-muted/20 p-2.5 space-y-2">
                               <div className="flex items-center gap-2">
-                                <select value={row.UnitType} onChange={(e) => updateTemplateRow(b.Id, idx, { UnitType: e.target.value })}
+                                {/* A row is a BHK layout, or — where the project's type sells
+                                    commercial — a commercial unit kind (Shop, Office…). */}
+                                <select value={row.UnitKind ? `kind:${row.UnitKind}` : row.UnitType}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    if (v.startsWith("kind:")) {
+                                      const k = allowedKinds.find((x) => x.Code === v.slice(5));
+                                      updateTemplateRow(b.Id, idx, { UnitKind: v.slice(5), UnitType: k?.Name || v.slice(5) });
+                                    } else updateTemplateRow(b.Id, idx, { UnitKind: "", UnitType: v });
+                                  }}
                                   title={unitTypesMaster.find((t) => t.label === row.UnitType)?.summary || undefined}
                                   className={`${inputCls} !py-1 flex-1`}>
                                   {!row.UnitType && <option value="" disabled>Select Unit Type</option>}
-                                  {unitTypeOptions(unitTypesMaster, row.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
+                                  {allowedKinds.some((k) => k.IsCommercial) ? (
+                                    <>
+                                      <optgroup label="Residential">
+                                        {unitTypeOptions(unitTypesMaster, row.UnitKind ? "" : row.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
+                                      </optgroup>
+                                      <optgroup label="Commercial">
+                                        {allowedKinds.filter((k) => k.IsCommercial).map((k) => <option key={k.Code} value={`kind:${k.Code}`}>{k.Name}</option>)}
+                                      </optgroup>
+                                    </>
+                                  ) : unitTypeOptions(unitTypesMaster, row.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
                                 </select>
                                 <input type="number" min={1} max={100} placeholder="Count" value={row.Count}
                                   onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
@@ -2029,7 +2049,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                             Commercial floors take no BHK from the unit mix. */}
                         {showFloorUse && (
                           <div className="pt-3 border-t border-border/60 space-y-2">
-                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Floor use</div>
+                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Whole floor as one kind <span className="normal-case tracking-normal">(optional — e.g. a shops-only ground floor)</span></div>
                             <div className="flex flex-wrap gap-1.5">
                               {[groundFloor, ...nonGroundFloors].filter((f: any) => f && f.HasUnits && !f.IsGenerated).map((f: any) => (
                                 <label key={f.Id} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border/50 bg-muted/40 text-xs">
@@ -2037,13 +2057,13 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   <select value={f.UnitKind || ""} disabled={!rights.canEdit}
                                     onChange={(e) => handleFloorFieldSave(f, { UnitKind: e.target.value })}
                                     className="bg-transparent outline-none">
-                                    <option value="">Default (residential)</option>
+                                    <option value="">As the unit mix</option>
                                     {allowedKinds.map((k) => <option key={k.Code} value={k.Code}>{k.Name}{k.IsCommercial ? " · commercial" : ""}</option>)}
                                   </select>
                                 </label>
                               ))}
                             </div>
-                            <p className="text-[0.625rem] text-muted-foreground">Floors set to a commercial kind are created as that kind, without a BHK or rooms.</p>
+                            <p className="text-[0.625rem] text-muted-foreground">A floor set here is created entirely as that kind (no BHK, no rooms); other floors follow the unit mix above, which can itself mix flats and shops.</p>
                           </div>
                         )}
 

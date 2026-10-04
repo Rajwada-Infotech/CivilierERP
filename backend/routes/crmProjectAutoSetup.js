@@ -681,8 +681,10 @@ router.get("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
   try {
     const blockId = parseId(req.params.id);
     if (blockId === null) return res.status(400).json({ error: "Invalid id" });
+    const tplKindCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupUnitTemplate', 'UnitKind') AS c")).recordset[0].c != null;
     const items = await pool.request().input("bid", sql.Int, blockId).query(`
       SELECT Id, SortOrder, UnitType, LayoutTypeId, Count, AreaSqFt,
+             ${tplKindCol ? "UnitKind" : "CAST(NULL AS NVARCHAR(20)) AS UnitKind"},
              CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
       FROM dbo.CrmProjectAutoSetupUnitTemplate
       WHERE BlockId = @bid AND IsActive = 1
@@ -735,7 +737,18 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
       .query("SELECT UnitType, LayoutTypeId FROM dbo.CrmProjectAutoSetupUnitTemplate WHERE BlockId = @bid AND IsActive = 1");
     const keepLayoutIds = currentRows.recordset.map((r) => r.LayoutTypeId).filter(Boolean);
     const keepTexts = new Set(currentRows.recordset.filter((r) => !r.LayoutTypeId).map((r) => String(r.UnitType || "").trim()));
+    // A row may be a unit kind (Shop, Office…) the project type sells,
+    // instead of a BHK layout — such units get no layout or rooms.
+    const tplKindCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupUnitTemplate', 'UnitKind') AS c")).recordset[0].c != null;
+    const allowed = await require("../services/unitKind").allowedKinds(pool, { projectId, blockId });
     for (const it of items) {
+      if (it.UnitKind) {
+        if (!tplKindCol) return res.status(409).json({ error: "Shops / offices in the unit mix need database migration 529 — run the migrations and reload." });
+        const k = allowed.find((x) => x.Code === String(it.UnitKind).toUpperCase());
+        if (!k) return res.status(400).json({ error: `"${it.UnitKind}" isn't a unit kind this project's type sells.` });
+        it.UnitKind = k.Code; it.UnitType = k.Name; it.LayoutTypeId = null;
+        continue;
+      }
       const text = String(it.UnitType || "").trim();
       const resolved = await resolveUnitTypeInput(
         pool,
@@ -765,10 +778,11 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
           .input("openTerraceArea", sql.Decimal(18, 2), items[i].OpenTerraceAreaSqFt != null && items[i].OpenTerraceAreaSqFt !== "" ? parseFloat(items[i].OpenTerraceAreaSqFt) : null)
           .input("rate", sql.Decimal(18, 2), items[i].RatePerSqFt != null && items[i].RatePerSqFt !== "" ? parseFloat(items[i].RatePerSqFt) : null)
           .input("cb", sql.Int, updatedBy)
+          .input("kind", sql.NVarChar(20), items[i].UnitKind || null)
           .query(`
             INSERT INTO dbo.CrmProjectAutoSetupUnitTemplate
-              (BlockId, SortOrder, UnitType, LayoutTypeId, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
-            VALUES (@bid, @so, @type, @lt, @count, @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea, @rate, 1, @cb, SYSDATETIME())
+              (BlockId, SortOrder, UnitType, LayoutTypeId, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt${tplKindCol ? ", UnitKind" : ""})
+            VALUES (@bid, @so, @type, @lt, @count, @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea, @rate, 1, @cb, SYSDATETIME()${tplKindCol ? ", @kind" : ""})
           `);
       }
       await tx.commit();
@@ -782,6 +796,7 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
     // MERGE ensures we upsert (update if exists, insert if not) without wiping
     // unrelated rows for other unit types in the same block.
     for (const item of items) {
+      if (item.UnitKind) continue; // BHK area spec only
       const carpetArea  = item.CarpetAreaSqFt  != null && item.CarpetAreaSqFt  !== "" ? parseFloat(item.CarpetAreaSqFt)  : null;
       const builtUpArea = item.BuiltUpAreaSqFt != null && item.BuiltUpAreaSqFt !== "" ? parseFloat(item.BuiltUpAreaSqFt) : null;
       const sbuArea     = item.SuperBuiltUpAreaSqFt != null && item.SuperBuiltUpAreaSqFt !== "" ? parseFloat(item.SuperBuiltUpAreaSqFt) : null;
@@ -1281,8 +1296,9 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
 // for this block) means every generated unit keeps UnitType/AreaSqFt NULL,
 // exactly like before this feature existed.
 async function getBlockUnitSequence(pool, blockId) {
+  const kindCol = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmProjectAutoSetupUnitTemplate', 'UnitKind') AS c")).recordset[0].c != null;
   const rows = await pool.request().input("bid", sql.Int, blockId).query(`
-    SELECT UnitType, LayoutTypeId, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
+    SELECT UnitType, LayoutTypeId, Count, ${kindCol ? "UnitKind" : "CAST(NULL AS NVARCHAR(20)) AS UnitKind"}, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
     FROM dbo.CrmProjectAutoSetupUnitTemplate
     WHERE BlockId = @bid AND IsActive = 1 ORDER BY SortOrder
   `);
@@ -1290,8 +1306,10 @@ async function getBlockUnitSequence(pool, blockId) {
   for (const r of rows.recordset) {
     for (let i = 0; i < r.Count; i++) {
       sequence.push({
-        UnitType: r.UnitType,
-        LayoutTypeId: r.LayoutTypeId,
+        // A kind row (Shop…) carries no BHK: the unit gets the kind, no layout.
+        UnitKind: r.UnitKind || null,
+        UnitType: r.UnitKind ? null : r.UnitType,
+        LayoutTypeId: r.UnitKind ? null : r.LayoutTypeId,
         AreaSqFt: r.AreaSqFt,
         CarpetAreaSqFt: r.CarpetAreaSqFt,
         BuiltUpAreaSqFt: r.BuiltUpAreaSqFt,
@@ -1700,9 +1718,10 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                    @area, @carpetArea, @builtUp, @superBuiltUp, @openTerrace, @rate,
                    1, @cb, SYSDATETIME())
               `);
-            // The floor's use, when set — otherwise the column default (flat) stands.
-            if (floor.UnitKind && ins.recordset[0]?.Id) {
-              await tx.request().input("id", sql.Int, ins.recordset[0].Id).input("kind", sql.NVarChar(20), floor.UnitKind)
+            // Floor use wins, then the unit-mix row's kind; otherwise the column default stands.
+            const unitKind = floor.UnitKind || typeSlot?.UnitKind || null;
+            if (unitKind && ins.recordset[0]?.Id) {
+              await tx.request().input("id", sql.Int, ins.recordset[0].Id).input("kind", sql.NVarChar(20), unitKind)
                 .query("UPDATE dbo.UnitMaster SET UnitKind = @kind WHERE Id = @id");
             }
             const newId = ins.recordset[0]?.Id;
