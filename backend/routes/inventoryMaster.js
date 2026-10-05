@@ -120,10 +120,15 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     // sl.UOM; only an item with NO ledger rows in that window (genuinely
     // zero stock) falls back to its own declared default UOM so it still
     // appears in the list.
+    //
+    // A movement recorded with NO UOM at all (e.g. a GRN line saved without one) is not a
+    // different unit — if the item has exactly one UOM anywhere in its ledger, the blank
+    // movements belong to it. Otherwise a 650 PSC opening and a blank-UOM +7000 receipt
+    // for the same item showed up as two separate lines, with the issue going negative on one.
     const uomKeyExpr = hasUomCol
       ? hasUomOnItem
-        ? "COALESCE(sl.UOM, img.M_UOM)"
-        : "sl.UOM"
+        ? "COALESCE(NULLIF(sl.UOM, ''), img.M_UOM, solo.OnlyUom)"
+        : "COALESCE(NULLIF(sl.UOM, ''), solo.OnlyUom)"
       : hasUomOnItem
         ? "img.M_UOM"
         : null;
@@ -134,7 +139,14 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     let uomGroupBy = "";
 
     if (uomKeyExpr) {
-      uomJoinClause = `LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = ${uomKeyExpr}`;
+      uomJoinClause = `LEFT JOIN (
+          SELECT CONVERT(NVARCHAR(50), ItemID) AS ItemKey, MAX(UOM) AS OnlyUom
+          FROM dbo.StockLedger
+          WHERE UOM IS NOT NULL AND LTRIM(RTRIM(UOM)) <> ''
+          GROUP BY CONVERT(NVARCHAR(50), ItemID)
+          HAVING COUNT(DISTINCT UOM) = 1
+        ) solo ON solo.ItemKey = CONVERT(NVARCHAR(50), img.M_Id)
+        LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = ${uomKeyExpr}`;
       uomSelect =
         "uom.Id AS UOMID, uom.UOMName AS UOMName, uom.UOMCode AS UOMCode, uom.Symbol AS UOMSymbol";
       uomGroupBy = `, ${uomKeyExpr}, uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol`;
