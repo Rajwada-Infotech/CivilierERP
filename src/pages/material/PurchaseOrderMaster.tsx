@@ -666,6 +666,7 @@ const PurchaseOrderMaster: React.FC = () => {
         poType: poTypeFilter || undefined,
         includeShortClosed: true,
         projectId: projectFilter ? Number(projectFilter) : undefined,
+        groupBy: "project",
       }),
   });
 
@@ -2777,7 +2778,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams.get("view")]);
 
   // ── Import/Export handlers ────────────────────────────────────────────────────
   const handleDownloadTemplate = () => {
@@ -2882,7 +2883,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       Purchase Order Register
                     </CardTitle>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {totalRecords} record{totalRecords !== 1 ? "s" : ""}
+                      {totalRecords} project{totalRecords !== 1 ? "s" : ""} · {filteredList.length} PO{filteredList.length !== 1 ? "s" : ""} on this page
                     </p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
@@ -2991,7 +2992,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
               {/* Pagination */}
               <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
                 <span>
-                  Page {page} of {totalPages} ({totalRecords} records)
+                  Page {page} of {totalPages} ({totalRecords} projects)
                 </span>
                 <div className="flex gap-2">
                   <button
@@ -3353,13 +3354,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         {
                           label: "Project / Site",
                           value: viewingPO.ProjectName ?? viewingPO.projectName,
-                        },
-                        {
-                          label: "Cost Center",
-                          value:
-                            viewingPO.CostCenterName ??
-                            viewingPO.costCenterName ??
-                            "—",
                         },
                         {
                           label: "Payment Terms",

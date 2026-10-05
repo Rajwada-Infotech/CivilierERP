@@ -401,7 +401,7 @@ const CrmMutation: React.FC = () => {
       </div>
       <div className="flex items-center gap-2 mt-2 pl-7">
         {doc.HasFile && (doc.MimeType?.startsWith('image/') || doc.MimeType === 'application/pdf') && (
-          <button onClick={() => handlePreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-xs text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
+          <button data-row-view onClick={() => handlePreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-xs text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
             {previewLoading === doc.Id ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />} Preview
           </button>
         )}

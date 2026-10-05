@@ -12,6 +12,7 @@ const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
 const authMiddleware = require("./middleware/auth");
+const { attachProjectScope } = require("./services/projectScope");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
 
@@ -151,6 +152,8 @@ const ALL_ROUTES = [
   { path: "/api/roles", file: "./routes/roles" },
   { path: "/api/user-rights", file: "./routes/userRights" },
   { path: "/api/user-widget-rights", file: "./routes/userWidgetRights" },
+  { path: "/api/user-project-access", file: "./routes/userProjectAccess" },
+  { path: "/api/activity-comments", file: "./routes/activityComments" },
   { path: "/api/account-group", file: "./routes/accountGroup" },
   { path: "/api/account-head", file: "./routes/accountHeadMaster" },
   { path: "/api/activity-master", file: "./routes/activityMaster" },
@@ -183,6 +186,9 @@ const ALL_ROUTES = [
   { path: "/api/profit-center", file: "./routes/profitCenter" },
   { path: "/api/document-type", file: "./routes/document-type" },
   { path: "/api/doc-selector", file: "./routes/docSelector" },
+  { path: "/api/doc-search", file: "./routes/docSearch" },
+  { path: "/api/push-devices", file: "./routes/pushDevices" },
+  { path: "/api/dependency-bulk-assign", file: "./routes/dependencyBulkAssign" },
   { path: "/api/fin-year", file: "./routes/finYear" },
   { path: "/api/general-ledger", file: "./routes/generalLedger" },
   { path: "/api/hsn", file: "./routes/hsn" },
@@ -548,6 +554,9 @@ async function createApp() {
     }
     next();
   });
+
+  // Per-user project scoping (req.projectScope: null = unrestricted).
+  app.use("/api", attachProjectScope);
 
   if (!isTest) logger.info("[ROUTES] Loading routes...");
 

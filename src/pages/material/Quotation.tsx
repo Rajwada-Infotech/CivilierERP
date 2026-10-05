@@ -1190,9 +1190,14 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
       }
     >
       <Breadcrumbs items={[{ label: "Material", path: "/material" }, { label: "Quotation" }]} />
-      {viewMode === "list" && <ListView />}
-      {viewMode === "form" && <FormView />}
-      {viewMode === "view" && <ViewMode />}
+      {/* Called as functions, not rendered as <ListView/> etc.: they are
+          defined inside this component, so JSX would give React a brand-new
+          component type on every render and remount the whole form on each
+          keystroke (Remarks accepted one letter, then lost focus). None of
+          them use hooks. */}
+      {viewMode === "list" && ListView()}
+      {viewMode === "form" && FormView()}
+      {viewMode === "view" && ViewMode()}
     </MaterialShell>
   );
 }

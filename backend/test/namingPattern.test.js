@@ -1,3 +1,5 @@
+jest.mock("../db", () => ({ getPool: jest.fn(), sql: require("mssql") }));
+
 // Naming patterns (services/namingPattern.js) — templates are master data, so
 // these pin the token behaviour every project's unit names depend on.
 const { SCOPE, validateTemplate, letterAt, renderName, legacyName } = require("../services/namingPattern");

@@ -8,20 +8,18 @@
 // heavy animation on every card entrance doesn't read as "polish" on a
 // touch device the way it does with a mouse.
 import { useMemo, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
+import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import {
-  HardHat, RefreshCw, AlertCircle, ShieldCheck, Users, BarChart3, IndianRupee,
-  TrendingUp, CreditCard, Package, Warehouse, Wrench, Building2, FileText,
-  Pickaxe, CheckCircle2, FileCheck, ShoppingCart, Megaphone, Ticket,
-  TriangleAlert, Database, Hammer, Layers, LineChart, ClipboardList,
+  RefreshCw, AlertCircle, ShieldCheck, Users, BarChart3, IndianRupee,
+  TrendingUp, CreditCard, Package, Warehouse, Building2, FileText,
+  FileCheck, Layers,
 } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import { fetchWithAuth } from "@/services/fetchWithAuth";
-import { fetchHomeDashboard, type HomeDashboardData, type RecentGRN, type RecentPayment, type ApprovalInboxItem, type TaskSummary, type RecentOtherExpense } from "@/api/homeDashboardApi";
+import { fetchHomeDashboard, type HomeDashboardData, type RecentGRN, type RecentPayment, type ApprovalInboxItem, type RecentOtherExpense } from "@/api/homeDashboardApi";
 import { colors, moduleAccents } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { GradientText } from "@/components/GradientText";
@@ -37,49 +35,36 @@ function fmtDay(d?: string) {
   return isNaN(dt.getTime()) ? undefined : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
-const notBuiltYet = (title: string) =>
-  Alert.alert(title, `The ${title} module isn't built on mobile yet — use the web app for now.`);
+// This app is the Finance + Material workspace. Approval-inbox items for any
+// other module (Civil DPR, CRM, ...) are not shown on its home.
+const FINANCE_MATERIAL_APPROVAL = /purchase|goods|grn|payment|expense|material|journal|voucher|debit|stock|vehicle|contract|invoice|quotation|issue|transfer|boq/i;
 
 export default function DashboardScreen() {
   const { currentUser } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const [refreshing, setRefreshing] = useState(false);
-  const { role, privileged, isAdmin, isDba, access } = useModuleAccess();
+  const { role, privileged, access } = useModuleAccess();
 
   const firstName = currentUser?.name?.split(" ")[0] ?? "there";
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
+  // Only the two modules this app is for are fetched — nothing is loaded for
+  // engineering, tickets, follow-up, sales or admin.
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useQuery<HomeDashboardData>({
-    queryKey: ["home-dashboard", role, access.finance, access.material, access.engineering],
-    queryFn: () => fetchHomeDashboard(isAdmin, access),
+    queryKey: ["home-dashboard", role, access.finance, access.material],
+    queryFn: () => fetchHomeDashboard(false, { finance: access.finance, material: access.material }),
     staleTime: 2 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
     retry: 2,
   });
 
-  const { data: civilDpr } = useQuery({
-    queryKey: ["home-civilworkdpr"],
-    queryFn: async () => {
-      const res = await fetchWithAuth("/api/civilworkdpr-dashboard");
-      if (!res.ok) throw new Error("Failed to fetch Civil Work DPR stats");
-      return res.json().catch(() => ({}));
-    },
-    enabled: access.civilworkdpr,
-    staleTime: 2 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
-    retry: 1,
-  });
-
   const fin = data?.finance;
   const mat = data?.material;
-  const adm = data?.admin;
-  const tick = data?.tickets;
-  const eng = data?.engineering;
-  const fol = data?.followup;
-  const sal = data?.sales;
-  const pendingApprovals = data?.pendingApprovals ?? [];
+  const pendingApprovals = (data?.pendingApprovals ?? []).filter((a: ApprovalInboxItem) =>
+    FINANCE_MATERIAL_APPROVAL.test(`${a.Module} ${a.ModuleLabel}`),
+  );
 
   const lastUpdated = dataUpdatedAt
     ? new Date(dataUpdatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
@@ -114,14 +99,11 @@ export default function DashboardScreen() {
         });
       });
     }
-    if (access.approvals) {
+    if (access.finance || access.material) {
       pendingApprovals.slice(0, 2).forEach((a: ApprovalInboxItem) => {
         feed.push({ label: `${a.ModuleLabel} ${a.Reference}`, sub: "Pending approval", icon: FileCheck, color: "#ef4444", time: fmtDay(a.RecordDate) });
       });
     }
-    (data?.recentTasks ?? []).slice(0, 2).forEach((t: TaskSummary) => {
-      feed.push({ label: t.title, sub: `${t.priority} · ${t.status}`, icon: ClipboardList, color: "#8b5cf6", time: fmtDay(t.dueDate) });
-    });
     return feed.slice(0, 7);
   }, [data, access, pendingApprovals]);
 
@@ -137,31 +119,16 @@ export default function DashboardScreen() {
         value: isLoading ? null : Math.round((mat?.purchaseOrders?.openValue ?? fin?.purchaseOrders?.openValue ?? 0) / 100000),
         suffix: "L", prefix: "₹", color: "#f59e0b", icon: Layers,
       },
-      access.engineering && {
-        label: "BOQ certified (₹)",
-        value: isLoading ? null : Math.round((eng?.workDone?.certifiedAmount ?? 0) / 100000),
-        suffix: "L", prefix: "₹", color: "#8b5cf6", icon: LineChart,
-      },
       access.finance && {
         label: "Supplier count",
         value: isLoading ? null : (fin?.parties?.supplierCount ?? 0),
         color: "#06b6d4", icon: Building2,
       },
-      access.ticket && !access.finance && !access.material && {
-        label: "Open tickets",
-        value: isLoading ? null : (tick?.pending ?? 0) + (tick?.inProgress ?? 0),
-        color: "#f97316", icon: Ticket,
-      },
-      access.engineering && !access.finance && {
-        label: "Active projects",
-        value: isLoading ? null : (eng?.projects?.active ?? 0),
-        color: "#10b981", icon: Building2,
-      },
     ].filter(Boolean) as Array<{ label: string; value: number | null; suffix?: string; prefix?: string; color: string; icon: any }>;
     return items;
-  }, [access, isLoading, fin, mat, eng, tick]);
+  }, [access, isLoading, fin, mat]);
 
-  const hasAnyAccess = Object.values(access).some(Boolean);
+  const hasAnyAccess = access.finance || access.material;
 
   // Staggered module-card entrance delay, same idea as Home.tsx's
   // cardIdx-based nextDelay() — a fresh counter per render so cards fade
@@ -207,11 +174,13 @@ export default function DashboardScreen() {
       </FadeSlideIn>
       <FadeSlideIn delay={90}>
         <Text style={{ color: colors.mutedForeground, fontSize: 14, lineHeight: 20, marginTop: 4, fontFamily: fonts.body.regular }}>
-          {privileged
-            ? "Everything live across procurement, finance, engineering and sales — in one place."
-            : role === "engineer"
-              ? "Your engineering, follow-up and ticket workspace — live and in one place."
-              : "Your workspace overview — all your accessible modules in one place."}
+          {access.finance && access.material
+            ? "Payments, purchase orders, GRNs and stock — live across finance and material."
+            : access.finance
+              ? "Your finance workspace — payments, vouchers and contracts, live in one place."
+              : access.material
+                ? "Your material workspace — requests, orders, GRNs and stock, live in one place."
+                : "Your workspace overview."}
         </Text>
       </FadeSlideIn>
 
@@ -256,7 +225,7 @@ export default function DashboardScreen() {
 
       {/* Module cards */}
       <View className="mt-8 mb-2">
-        <SectionLabel>{hasAnyAccess ? "Operations at a glance" : "Your workspace"}</SectionLabel>
+        <SectionLabel>{hasAnyAccess ? "Finance & Material" : "Your workspace"}</SectionLabel>
 
         <View className="flex-row flex-wrap justify-between">
           {access.finance && (
@@ -285,129 +254,14 @@ export default function DashboardScreen() {
             />
           )}
 
-          {access.engineering && (
-            <ModuleCard
-              title="Engineering" icon={Wrench} accent={moduleAccents.engineering} loading={isLoading} delay={nextCardDelay()}
-              onPress={() => notBuiltYet("Engineering")}
-              stats={[
-                { label: "Open work orders", value: eng?.workOrders?.open ?? 0, accent: moduleAccents.engineering },
-                { label: "Active projects", value: eng?.projects?.active ?? 0, accent: "#10b981", icon: Building2 },
-                { label: "Work done pending", value: eng?.workDone?.pending ?? 0, accent: eng?.workDone?.pending ? "#f59e0b" : undefined },
-                { label: "BOQ approved", value: eng?.boq?.approved ?? 0, accent: "#06b6d4", icon: FileText },
-              ] as StatRow[]}
-            />
-          )}
-
-          {access.civilworkdpr && (
-            <ModuleCard
-              title="Civil DPR" icon={Pickaxe} accent={moduleAccents.civilworkdpr} loading={isLoading} delay={nextCardDelay()}
-              badge={civilDpr?.progress?.pendingReviewCount}
-              onPress={() => notBuiltYet("Civil Work DPR")}
-              stats={[
-                { label: "Active activities", value: civilDpr?.activities?.activeCount ?? 0, accent: moduleAccents.civilworkdpr },
-                { label: "Workers assigned", value: civilDpr?.allocations?.workerCount ?? 0, accent: "#3b82f6", icon: HardHat },
-                { label: "Pending review", value: civilDpr?.progress?.pendingReviewCount ?? 0, accent: civilDpr?.progress?.pendingReviewCount ? "#f59e0b" : undefined },
-                { label: "Labour on site today", value: civilDpr?.labour?.totalToday ?? 0, accent: "#10b981", icon: Users },
-              ] as StatRow[]}
-            />
-          )}
-
-          {access.followup && (
-            <ModuleCard
-              title="Follow-Up" icon={Users} accent={moduleAccents.followup} loading={isLoading} delay={nextCardDelay()}
-              badge={fol?.pendingNOCs}
-              onPress={() => notBuiltYet("Follow-Up")}
-              stats={[
-                { label: "Applications", value: fol?.applications ?? 0, accent: moduleAccents.followup },
-                { label: "Confirmed bookings", value: fol?.confirmedBookings ?? 0, accent: "#10b981", icon: CheckCircle2 },
-                { label: "Active agreements", value: fol?.activeAgreements ?? 0, accent: "#f59e0b" },
-                { label: "Handovers due", value: fol?.scheduledHandovers ?? 0, accent: fol?.scheduledHandovers ? "#ef4444" : undefined },
-              ] as StatRow[]}
-            />
-          )}
-
-          {access.approvals && (
-            <ModuleCard
-              title="Approvals" icon={FileCheck} accent={moduleAccents.approvals} loading={isLoading} delay={nextCardDelay()}
-              badge={pendingApprovals.length}
-              onPress={() => notBuiltYet("Approvals")}
-              stats={[
-                { label: "Awaiting action", value: pendingApprovals.length, accent: pendingApprovals.length ? "#f59e0b" : undefined },
-                { label: "Modules affected", value: new Set(pendingApprovals.map((a) => a.Module)).size, accent: "#8b5cf6" },
-                { label: "PO approvals", value: pendingApprovals.filter((a) => a.Module === "PurchaseOrders").length },
-                { label: "GRN approvals", value: pendingApprovals.filter((a) => a.Module === "GoodsReceiptNotes").length },
-              ] as StatRow[]}
-            />
-          )}
-
-          {access.sales && (
-            <ModuleCard
-              title="Sales" icon={ShoppingCart} accent={moduleAccents.sales} loading={isLoading} delay={nextCardDelay()}
-              onPress={() => notBuiltYet("Sales")}
-              stats={[
-                { label: "Total orders", value: sal?.total ?? 0, accent: moduleAccents.sales },
-                { label: "Approved", value: sal?.approved ?? 0, accent: "#10b981", icon: CheckCircle2 },
-                { label: "Pending approval", value: sal?.pendingApproval ?? 0, accent: sal?.pendingApproval ? "#f59e0b" : undefined },
-                {
-                  label: "This month", accent: "#06b6d4", icon: TrendingUp,
-                  value: (() => { const a = sal?.thisMonthAmount ?? 0; return a === 0 ? "₹0" : a < 100000 ? `₹${(a / 1000).toFixed(1)}K` : `₹${(a / 100000).toFixed(1)}L`; })(),
-                },
-              ] as StatRow[]}
-            />
-          )}
-
-          {access.salesAutomation && (
-            <ModuleCard title="Sales Auto" icon={Megaphone} accent={moduleAccents.salesAutomation} loading={isLoading} delay={nextCardDelay()} onPress={() => notBuiltYet("Sales Automation")} stats={[]} />
-          )}
-
-          {access.ticket && (
-            <ModuleCard
-              title="Tickets" icon={Ticket} accent={moduleAccents.ticket} loading={isLoading} delay={nextCardDelay()}
-              badge={tick?.urgent}
-              onPress={() => notBuiltYet("Tickets")}
-              stats={[
-                { label: "Open", value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0), accent: moduleAccents.ticket },
-                { label: "Urgent", value: tick?.urgent ?? 0, accent: tick?.urgent ? "#f97316" : undefined, icon: TriangleAlert },
-                { label: "Resolved", value: tick?.resolved ?? 0, accent: "#10b981", icon: CheckCircle2 },
-                { label: "Resolution %", value: `${tick?.resolvedPct ?? 0}%`, accent: "#06b6d4" },
-              ] as StatRow[]}
-            />
-          )}
-
-          {access.admin && !isDba && (
-            <ModuleCard
-              title="Admin" icon={ShieldCheck} accent={moduleAccents.admin} loading={isLoading} delay={nextCardDelay()}
-              onPress={() => notBuiltYet("Admin")}
-              stats={[
-                { label: "Total users", value: adm?.stats?.totalUsers ?? 0, accent: moduleAccents.admin },
-                { label: "Active users", value: adm?.stats?.activeUsers ?? 0, accent: "#10b981", icon: Users },
-                { label: "Roles", value: adm?.stats?.totalRoles ?? 0, accent: "#06b6d4" },
-                { label: "Work orders open", value: eng?.workOrders?.open ?? 0, accent: "#f59e0b", icon: Hammer },
-              ] as StatRow[]}
-            />
-          )}
-
-          {access.dba && (
-            <ModuleCard
-              title="DBA Console" icon={Database} accent={moduleAccents.dba} loading={isLoading} delay={nextCardDelay()}
-              onPress={() => notBuiltYet("DBA Console")}
-              stats={[
-                { label: "Total users", value: adm?.stats?.totalUsers ?? 0, accent: moduleAccents.dba },
-                { label: "Active users", value: adm?.stats?.activeUsers ?? 0, accent: "#3b82f6" },
-                { label: "Roles", value: adm?.stats?.totalRoles ?? 0 },
-                { label: "Open tickets", value: (tick?.pending ?? 0) + (tick?.inProgress ?? 0), accent: "#f97316", icon: Ticket },
-              ] as StatRow[]}
-            />
-          )}
-
           {!hasAnyAccess && (
             <View className="w-full rounded-xl p-8 items-center" style={{ backgroundColor: `${colors.card}66`, borderWidth: 1, borderColor: `${colors.border}66` }}>
               <ShieldCheck size={28} color={`${colors.mutedForeground}4d`} />
               <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 13, fontFamily: fonts.body.medium, marginTop: 12 }}>
-                No module access assigned.
+                No Finance or Material access assigned.
               </Text>
               <Text style={{ color: `${colors.mutedForeground}66`, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 4 }}>
-                Contact your administrator to get module permissions.
+                Contact your administrator to get these permissions.
               </Text>
             </View>
           )}

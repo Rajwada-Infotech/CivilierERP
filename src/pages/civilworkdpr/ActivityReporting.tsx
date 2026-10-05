@@ -239,10 +239,10 @@ function ChainGroupList({
 
                         {delay && (
                           <span
-                            className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                            className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                               delay.tone === "on-time"
                                 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                             }`}
                           >
                             {delay.label}
@@ -286,7 +286,7 @@ function ChainGroupList({
                 <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                      <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
                         <th className="px-5 py-2">Activity</th>
                         <th className="px-3 py-2">Engineer</th>
                         <th className="px-3 py-2">Start Date</th>
@@ -325,10 +325,10 @@ function ChainGroupList({
                               if (!delay) return null;
                               return (
                                 <span
-                                  className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                                  className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                                     delay.tone === "on-time"
                                       ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                      : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                                   }`}
                                 >
                                   {delay.label}
@@ -432,9 +432,14 @@ export default function ActivityReporting() {
 
   // Debounced so the search box doesn't fire a fresh GROUP BY over the
   // whole (342,000+ row, in production) table on every keystroke.
+  // A single letter matches nearly everything (and forces the same full scan
+  // as no filter at all), so the server is only asked from 2 characters on.
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    const t = setTimeout(() => {
+      const q = search.trim();
+      setDebouncedSearch(q.length >= 2 ? q : "");
+    }, 400);
     return () => clearTimeout(t);
   }, [search]);
 
@@ -450,9 +455,18 @@ export default function ActivityReporting() {
         search: debouncedSearch || undefined,
       }),
     enabled: rights.canView,
+    // Keep showing the previous tree while the next search is fetched instead
+    // of blanking to a spinner on every refinement of the query.
+    placeholderData: (prev) => prev,
   });
 
   const rooms = summary?.rooms ?? [];
+  // Auto-expanding a room fetches all of its activities. Doing that for every
+  // match of a broad search ("floor" -> hundreds of rooms) fired hundreds of
+  // heavy requests at once and froze both the page and the server, so only a
+  // narrow result opens itself; a broad one stays collapsed for the user to open.
+  const MAX_AUTO_EXPAND_ROOMS = 6;
+  const autoExpand = !!debouncedSearch && rooms.length <= MAX_AUTO_EXPAND_ROOMS;
   const statusCounts = summary?.statusCounts ?? {};
   const total = summary?.total ?? 0;
 
@@ -534,12 +548,17 @@ export default function ActivityReporting() {
               </div>
             ) : (
               <div className="p-2 sm:p-4">
+                {debouncedSearch && !autoExpand && (
+                  <p className="px-1 pb-2 text-xs text-muted-foreground">
+                    {rooms.length} rooms match “{debouncedSearch}” — open the ones you need, or type more to narrow it down.
+                  </p>
+                )}
                 <ScopeLocationTree
                   rows={rooms}
                   countLabel="activity"
                   countLabelPlural="activities"
                   getCount={(r) => r.activityCount}
-                  forceExpand={!!debouncedSearch}
+                  forceExpand={autoExpand}
                   renderLeaf={(items) => (
                     <RoomActivities room={items[0]} statusFilter={statusFilter} openDetail={openDetail} />
                   )}

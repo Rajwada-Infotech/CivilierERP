@@ -12,6 +12,14 @@ router.use(
 );
 
 const { getPool, sql } = require("../db");
+const { projectAllowed } = require("../services/projectScope");
+
+// An inter-company transfer belongs to BOTH of its projects: a restricted user
+// can see it if either end is theirs (the receiving project needs to see what
+// is coming in) but can only raise one out of their own sender project.
+const ictScopeIds = (scope) => scope.map(Number).filter(Number.isFinite).join(",") || "NULL";
+const ictVisibleSql = (scope, alias = "ict") =>
+  scope ? `(${alias}.SenderProjectId IN (${ictScopeIds(scope)}) OR ${alias}.ReceiverProjectId IN (${ictScopeIds(scope)}))` : "";
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
@@ -105,12 +113,30 @@ async function getProjectGodown(pool, projectId) {
   return result.recordset[0] || null;
 }
 
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const tid = parseInt(id, 10);
+  if (!Number.isFinite(tid)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, tid).query(
+      `SELECT CASE WHEN ${ictVisibleSql(req.projectScope, "ict")} THEN 1 ELSE 0 END AS visible FROM dbo.InterCompanyTransfer ict WHERE ict.ICTId = @id`,
+    );
+    if (r.recordset.length && !r.recordset[0].visible) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const { companyId, projectId, dateFrom, dateTo, status, limit = 100, page = 1 } = req.query;
     const request = pool.request();
     const where = [];
+    if (req.projectScope) where.push(ictVisibleSql(req.projectScope, "ict"));
 
     if (companyId) {
       where.push("(ict.SenderCompanyId = @companyId OR ict.ReceiverCompanyId = @companyId)");
@@ -170,12 +196,15 @@ router.get("/summary", authenticateToken, async (req, res) => {
       SELECT YEAR(TransferDate) AS Year,
              COUNT(*) AS TransferCount,
              SUM(TotalAmount) AS TotalAmount
-      FROM dbo.InterCompanyTransfer
+      FROM dbo.InterCompanyTransfer ict
     `;
+    const sumWhere = [];
     if (status !== "all") {
       request.input("status", sql.NVarChar(20), status);
-      query += " WHERE Status = @status";
+      sumWhere.push("ict.Status = @status");
     }
+    if (req.projectScope) sumWhere.push(ictVisibleSql(req.projectScope, "ict"));
+    if (sumWhere.length) query += " WHERE " + sumWhere.join(" AND ");
     query += " GROUP BY YEAR(TransferDate) ORDER BY Year DESC";
     const result = await request.query(query);
     res.json(result.recordset);
@@ -293,6 +322,41 @@ async function priceItems(pool, senderCompanyId, senderCompanyName, items, apply
   return pricedItems;
 }
 
+// Throws a 400 naming every short item when the sender's godown can't cover
+// the transfer. An item that appears on several lines is checked on its
+// combined quantity. Used both when the request is created (so a shortfall is
+// refused up front instead of sitting in the approval queue) and again at
+// approval (stock can change while a request is Pending).
+async function assertStockAvailable(pool, senderGodown, sender, pricedItems) {
+  const demand = new Map();
+  for (const item of pricedItems) {
+    const key = String(item.itemId);
+    const cur = demand.get(key) || { qty: 0, name: item.itemName || item.itemId };
+    cur.qty += Number(item.qty) || 0;
+    demand.set(key, cur);
+  }
+  const short = [];
+  for (const [itemId, d] of demand) {
+    const avail = await pool.request()
+      .input("itemId", sql.NVarChar(100), itemId)
+      .input("godownId", sql.Int, senderGodown.GodownID).query(`
+        SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+        FROM dbo.StockLedger
+        WHERE ItemID = @itemId AND GodownID = @godownId
+      `);
+    const available = Number(avail.recordset[0]?.Available || 0);
+    if (available < d.qty - 0.0001) short.push({ name: d.name, available, requested: d.qty });
+  }
+  if (short.length) {
+    const err = new Error(
+      `Insufficient stock in sender project ${sender.ProjectName}: ` +
+        short.map((s) => `${s.name} (available ${s.available}, requested ${s.requested})`).join("; ") + ".",
+    );
+    err.status = 400;
+    throw err;
+  }
+}
+
 // Runs for an already-Approved ICT header: moves stock directly (no GRN/SO
 // needed) and posts the two-sided GL voucher. Only called from
 // PUT /:id/approve — no further manual steps after approval.
@@ -301,23 +365,7 @@ async function executeTransfer(pool, ctx, createdBy, opts = {}) {
   const { docNo = null, ictId = null } = opts;
 
   // Validate stock is actually available before moving anything.
-  for (const item of pricedItems) {
-    const avail = await pool.request()
-      .input("itemId", sql.NVarChar(100), String(item.itemId))
-      .input("godownId", sql.Int, senderGodown.GodownID).query(`
-        SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
-        FROM dbo.StockLedger
-        WHERE ItemID = @itemId AND GodownID = @godownId
-      `);
-    const available = Number(avail.recordset[0].Available || 0);
-    if (available < item.qty) {
-      const err = new Error(
-        `Insufficient stock for item ${item.itemName || item.itemId} in sender project ${sender.ProjectName}: available=${available}, requested=${item.qty}.`,
-      );
-      err.status = 400;
-      throw err;
-    }
-  }
+  await assertStockAvailable(pool, senderGodown, sender, pricedItems);
 
   // Credit the sender's godown OUT, debit the receiver's godown IN —
   // straight StockLedger movement, same shape stockTransfers.js already
@@ -433,6 +481,9 @@ router.post("/preview", authenticateToken, async (req, res) => {
     const pool = getPool();
     const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
     const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
+    if (req.projectScope && !projectAllowed(req.projectScope, senderProjectId)) {
+      return res.status(403).json({ error: "You can only raise a transfer out of one of your own projects." });
+    }
     // Optional company overrides — used when a project is cross-tagged to a
     // company that isn't its primary company_id (e.g. Pristine Enclave tagged
     // to Delta Gardens). The override governs GL posting; purchase rate
@@ -507,6 +558,9 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     const transferDate = req.body.TransferDate || new Date().toISOString().slice(0, 10);
     const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
     const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
+    if (req.projectScope && !projectAllowed(req.projectScope, senderProjectId)) {
+      return res.status(403).json({ error: "You can only raise a transfer out of one of your own projects." });
+    }
     const senderCompanyOverrideId = parsePositiveInt(req.body.SenderCompanyId);
     const receiverCompanyOverrideId = parsePositiveInt(req.body.ReceiverCompanyId);
     const items = asItems(req.body.Items || req.body.TransferItems);
@@ -561,7 +615,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     let sourceMRDocNo = null;
     if (sourceMRId) {
       const mrCheck = await pool.request().input("MRId", sql.Int, sourceMRId)
-        .query("SELECT DocNo, Status FROM dbo.MaterialRequests WHERE MRId = @MRId");
+        .query("SELECT DocNo, Status, ProjectId FROM dbo.MaterialRequests WHERE MRId = @MRId");
       if (!mrCheck.recordset.length) {
         return res.status(404).json({ error: "Source Material Request not found." });
       }
@@ -569,6 +623,13 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       if (!["Approved", "Partially Fulfilled"].includes(mrRow.Status)) {
         return res.status(400).json({
           error: `Cannot create an Inter-Company Transfer: Material Request is "${mrRow.Status}". Only Approved or Partially Fulfilled Material Requests can be used.`,
+        });
+      }
+      // An MR is raised by the project that needs the material, i.e. the
+      // RECEIVING project of this transfer.
+      if (mrRow.ProjectId != null && Number(mrRow.ProjectId) !== Number(receiverProjectId)) {
+        return res.status(400).json({
+          error: `Material Request ${mrRow.DocNo} belongs to a different project than the receiving project — pick that project as the receiver, or choose another request.`,
         });
       }
       sourceMRDocNo = mrRow.DocNo;
@@ -587,6 +648,10 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
         }
       }
     }
+
+    // Refuse a transfer the source godown can't cover — at creation, not only
+    // at approval.
+    await assertStockAvailable(pool, ctx.senderGodown, ctx.sender, pricedItems);
 
     const totalAmount        = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
     const totalGstAmount     = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
@@ -766,6 +831,21 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
 
     const result = await transition("inter-company-transfer", id, "Rejected", userEmail(req), req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("stock-transfers");
+
+    // A rejected transfer no longer holds the Material Request's quantity
+    // (getMRItemFulfillment ignores Rejected), so refresh the MR's status too —
+    // otherwise an MR that was marked Completed by this transfer stays
+    // Completed with quantity free again, and can never be used for a PO/ICT.
+    try {
+      const pool = getPool();
+      const src = await pool.request().input("id", sql.Int, id)
+        .query("SELECT SourceMRId FROM dbo.InterCompanyTransfer WHERE ICTId = @id");
+      if (src.recordset[0]?.SourceMRId) {
+        await recomputeMRFulfillment(pool, src.recordset[0].SourceMRId, null);
+      }
+    } catch (e) {
+      console.error("MR status update after ICT reject failed:", e.message);
+    }
     res.json({ message: "Rejected", ...result });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });

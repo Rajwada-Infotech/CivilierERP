@@ -3,6 +3,12 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, ebProjectPredicate, ebProjectIdSql, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a debit note whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT project_id AS ProjectId FROM dbo.DebitNote WHERE id = @id"));
+// /for-invoice/:billId — the invoice's own project.
+router.param("billId", projectParamGuard(`SELECT ${ebProjectIdSql("eb")} AS ProjectId FROM dbo.ExpenseBooking eb WHERE eb.Eid = @id`));
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -130,7 +136,7 @@ router.get("/invoices-for-party/:partyId", requirePageRight("debit-note", "view"
         ON eb.ESourceType = 'WO' AND wo.Id = TRY_CAST(eb.ESourceId AS INT)
       WHERE (${INVOICE_PARTY_MATCH})
         AND eb.EDocNo IS NOT NULL
-        AND eb.EStatus = 'Approved'
+        AND eb.EStatus = 'Approved'${ebProjectPredicate(req.projectScope, "eb")}
       ORDER BY ECreatedAt DESC
     `);
 
@@ -219,7 +225,7 @@ router.get("/", requirePageRight("debit-note", "view"), cache("debit-note", 120)
       LEFT JOIN dbo.enterprise pr ON pr.id = dn.project_id
       LEFT JOIN dbo.AccountHeadMaster party ON party.LHeadId = dn.supplier_id
       LEFT JOIN dbo.ExpenseBooking eb ON eb.Eid = dn.bill_id
-      ${companyId ? "WHERE dn.company_id = @companyId" : ""}
+      ${companyId ? "WHERE dn.company_id = @companyId" : "WHERE 1=1"}${projectPredicate(req.projectScope, "dn.project_id")}
       ORDER BY dn.id DESC
     `);
 
@@ -330,6 +336,7 @@ async function replaceItems(pool, debitNoteId, items) {
 // value-only for a direct/TOD invoice) ───────────────────────────────────────
 router.post("/", requirePageRight("debit-note", "create"), async (req, res) => {
   const { company_id, project_id, party_id, party_type, bill_id, DebitDate, Reason, DebitAmount, items } = req.body;
+  if (!assertProjectAllowed(req, res, project_id)) return;
 
   const company_id_val = toInt(company_id);
   const project_id_val = toInt(project_id);
@@ -426,6 +433,7 @@ router.put("/:id", requirePageRight("debit-note", "edit"), async (req, res) => {
   if (!id) return res.status(400).json({ error: "Invalid id" });
 
   const { company_id, project_id, party_id, party_type, bill_id, DebitDate, Reason, DebitAmount, items } = req.body;
+  if (!assertProjectAllowed(req, res, project_id)) return;
 
   const company_id_val = toInt(company_id);
   const project_id_val = toInt(project_id);

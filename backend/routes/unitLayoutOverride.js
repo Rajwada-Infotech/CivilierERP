@@ -10,6 +10,7 @@
 const express = require("express");
 const router = express.Router();
 const { getPool } = require("../db");
+const { assertProjectAllowed } = require("../services/projectScope");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   validateScope, validateItems, previewOverrideChange, saveOverride, resetOverride,
@@ -24,6 +25,10 @@ function fail(res, err, where) {
   console.error(`[unit-layout-override] ${where} error:`, err.message);
   return res.status(500).json({ error: err.message });
 }
+
+// Project scoping: the project comes from the path (GET) or the body (preview/save/reset).
+router.param("projectId", (req, res, next, projectId) => (assertProjectAllowed(req, res, parseInt(projectId, 10)) ? next() : undefined));
+router.use((req, res, next) => (req.body && req.body.ProjectId != null && !assertProjectAllowed(req, res, req.body.ProjectId) ? undefined : next()));
 
 router.get("/project/:projectId", requirePageRight(PAGE, "view"), async (req, res) => {
   const projectId = parseInt(req.params.projectId, 10);

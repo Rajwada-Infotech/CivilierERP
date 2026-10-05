@@ -593,7 +593,7 @@ const PortalAgreement: React.FC = () => {
                   </p>
                   <p className="text-[0.6875rem] truncate" style={{ color: TEXT_FAINT }}>{d.FileName}{d.FileSize ? ` · ${fmtBytes(d.FileSize)}` : ""}</p>
                 </div>
-                <Eye size={14} className="shrink-0" style={{ color: TEXT_FAINT }} />
+                
               </button>
             ))}
           </div>
@@ -647,7 +647,7 @@ const PortalAgreement: React.FC = () => {
                       style={{ border: `1px solid ${HAIRLINE}`, background: SURFACE_ALT }}>
                       {mimeIcon(a.MimeType, 15)}
                       <span className="text-sm truncate flex-1" style={{ color: TEXT }}>{a.FileName}</span>
-                      <Eye size={13} style={{ color: TEXT_FAINT }} />
+                      
                     </button>
                   ))}
                 </div>
@@ -664,7 +664,7 @@ const PortalAgreement: React.FC = () => {
                       style={{ border: `1px solid ${HAIRLINE}`, background: SURFACE_ALT }}>
                       {mimeIcon(a.MimeType, 15)}
                       <span className="text-sm truncate flex-1" style={{ color: TEXT }}>{a.FileName}</span>
-                      <Eye size={13} style={{ color: TEXT_FAINT }} />
+                      
                     </button>
                   ))}
                 </div>

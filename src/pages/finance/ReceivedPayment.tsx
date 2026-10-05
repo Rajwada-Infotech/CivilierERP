@@ -478,7 +478,7 @@ export default function ReceivedPaymentPage() {
         .catch(() => toast.error(`Received payment #${id} not found`));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams.get("view")]);
 
   // ── Form state ───────────────────────────────────────────────────────────────
   // This form only shows when view === "form" (a full-page swap), so a

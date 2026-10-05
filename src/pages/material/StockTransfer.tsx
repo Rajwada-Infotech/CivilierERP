@@ -86,6 +86,10 @@ interface TItem {
   mrItemId?: number | null;
   /** Cap for this line's quantity — what's still pending on that MR item. */
   mrPendingQty?: number | null;
+  /** Computed each render from the source godown's live stock — not stored. */
+  stockKnown?: boolean;
+  /** True when this item's total requested qty (all lines) exceeds the stock. */
+  stockShort?: boolean;
 }
 
 interface AvailableItem {
@@ -313,7 +317,9 @@ function ItemSearchRow({
   };
 
   const qtyNum = parseFloat(item.qty) || 0;
-  const overLimit = qtyNum > item.availableQty && item.availableQty > 0;
+  // With live stock known, running out (0 available) is a shortage too — the
+  // old "> 0" guard treated "no stock at all" as "unknown" and let it through.
+  const overLimit = !!item.stockShort || (qtyNum > item.availableQty && (item.availableQty > 0 || !!item.stockKnown));
   const overMrPending = item.mrPendingQty != null && qtyNum - item.mrPendingQty > 0.0001;
 
   return (
@@ -410,7 +416,13 @@ function ItemSearchRow({
       {/* Available badge */}
       <div className="col-span-1 flex items-center h-9">
         {item.itemId && (
-          <span className="text-[0.625rem] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
+          <span
+            className={`text-[0.625rem] px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap ${
+              item.stockKnown && (item.availableQty <= 0 || item.stockShort)
+                ? "text-red-600 bg-red-500/10"
+                : "text-emerald-600 bg-emerald-500/10"
+            }`}
+          >
             {fmtNum(item.availableQty)}
           </span>
         )}
@@ -432,7 +444,9 @@ function ItemSearchRow({
         />
         {overLimit && (
           <p className="text-[0.625rem] text-red-500 mt-0.5">
-            Max: {fmtNum(item.availableQty)}
+            {item.stockKnown && item.availableQty <= 0
+              ? "Out of stock in source godown"
+              : `Only ${fmtNum(item.availableQty)} in stock — short by ${fmtNum(Math.max(0, qtyNum - item.availableQty))}`}
           </p>
         )}
         {overMrPending && (
@@ -655,7 +669,7 @@ function TransferPreviewModal({
         <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
           <div className="flex items-center gap-2.5">
             <div className="p-1.5 rounded-lg bg-muted">
-              <Eye size={16} className="text-muted-foreground" />
+              
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground">
@@ -1309,7 +1323,7 @@ function TransferHistory() {
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center justify-end gap-1.5">
-                            <button
+                            <button data-row-view
                               onClick={() => setPreviewIctId(t.ICTId)}
                               title="Preview"
                               className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
@@ -1380,7 +1394,7 @@ function TransferHistory() {
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
+                          <button data-row-view
                             onClick={() => setPreviewTransfer(t)}
                             title="Preview"
                             className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
@@ -1440,6 +1454,9 @@ export default function StockTransfer() {
   // land on the Receiver side, not Sender.
   const [sourceMR, setSourceMR] = useState<{ id: number; docNo: string } | null>(null);
   const [mrDropdownValue, setMrDropdownValue] = useState("");
+  // The project the picked MR belongs to (= the receiving project). If the
+  // user later changes the Receiver Project, the MR no longer applies.
+  const [sourceMrProjectId, setSourceMrProjectId] = useState<string | null>(null);
   const [mrDropdownLoading, setMrDropdownLoading] = useState(false);
   const [mrDropdownError, setMrDropdownError] = useState<string | null>(null);
   const [fromGodownId, setFromGodownId] = useState<number | null>(null);
@@ -1477,10 +1494,13 @@ export default function StockTransfer() {
 
   // MRs available to raise an Inter-Company Transfer from — same
   // approved-list endpoint PurchaseOrderMaster's own MR picker uses.
-  const { data: approvedMRs = [] } = useQuery<ApprovedMRSummary[]>({
-    queryKey: ["ict-approved-mrs"],
-    queryFn: () => getApprovedMRList(),
-    enabled: transferMode === "inter",
+  // Only Approved / Partially Fulfilled MRs (the server list), and only those
+  // of the RECEIVING project — an MR is raised by the project that needs the
+  // material, which is the receiver side of this transfer.
+  const { data: approvedMRs = [], isLoading: loadingApprovedMRs } = useQuery<ApprovedMRSummary[]>({
+    queryKey: ["ict-approved-mrs", toProjectId],
+    queryFn: () => getApprovedMRList({ projectId: toProjectId }),
+    enabled: transferMode === "inter" && !!toProjectId,
     staleTime: 30_000,
   });
   const allProjects: {
@@ -1647,6 +1667,7 @@ export default function StockTransfer() {
         })),
       );
       setSourceMR({ id: prefill.MRId, docNo: prefill.DocNo });
+      setSourceMrProjectId(prefill.ProjectId ? String(prefill.ProjectId) : null);
       if (prefill.CompanyId) setToCompanyId(String(prefill.CompanyId));
       if (prefill.ProjectId) setToProjectId(String(prefill.ProjectId));
     } catch (err: any) {
@@ -1658,14 +1679,60 @@ export default function StockTransfer() {
 
   const clearSourceMR = () => {
     setSourceMR(null);
+    setSourceMrProjectId(null);
     setMrDropdownValue("");
     setItems([emptyItem()]);
   };
 
-  const hasOverLimit = items.some(
-    (it) =>
-      it.itemId && it.availableQty > 0 && parseFloat(it.qty) > it.availableQty,
-  );
+  // Changing the Receiver Project after picking an MR drops that MR (and its
+  // prefilled lines) — it belongs to a different project now.
+  useEffect(() => {
+    if (sourceMR && sourceMrProjectId && toProjectId !== sourceMrProjectId) {
+      setSourceMR(null);
+      setSourceMrProjectId(null);
+      setMrDropdownValue("");
+      setItems([emptyItem()]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toProjectId]);
+
+  // ── Live stock check ────────────────────────────────────────────────────
+  // Closing stock per item in the SOURCE godown. Every line is checked against
+  // it (not just lines picked from the stock list), and an item that appears on
+  // more than one line is checked on its combined quantity.
+  const stockByItem = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of fromStockData?.data ?? []) {
+      const k = String(r.ItemID).toLowerCase();
+      m.set(k, (m.get(k) ?? 0) + (Number(r.ClosingStock) || 0));
+    }
+    return m;
+  }, [fromStockData]);
+  const stockKnown = !!fromGodownId && !!fromStockData && !isLoadingStock;
+  const liveItems: TItem[] = useMemo(() => {
+    if (!stockKnown) return items;
+    const demand = new Map<string, number>();
+    for (const it of items) {
+      if (!it.itemId) continue;
+      const k = it.itemId.toLowerCase();
+      demand.set(k, (demand.get(k) ?? 0) + (parseFloat(it.qty) || 0));
+    }
+    return items.map((it) => {
+      if (!it.itemId) return it;
+      const k = it.itemId.toLowerCase();
+      const avail = stockByItem.get(k) ?? 0;
+      return { ...it, availableQty: avail, stockKnown: true, stockShort: (demand.get(k) ?? 0) > avail + 0.0001 && (parseFloat(it.qty) || 0) > 0 };
+    });
+  }, [items, stockKnown, stockByItem]);
+  const shortLines = liveItems.filter((it) => it.stockShort);
+  const hasInsufficientStock = shortLines.length > 0;
+
+  const hasOverLimit =
+    hasInsufficientStock ||
+    items.some(
+      (it) =>
+        it.itemId && it.availableQty > 0 && parseFloat(it.qty) > it.availableQty,
+    );
   const hasOverMrPending = items.some(
     (it) => it.mrItemId != null && it.mrPendingQty != null && (parseFloat(it.qty) || 0) - it.mrPendingQty > 0.0001,
   );
@@ -1677,6 +1744,7 @@ export default function StockTransfer() {
     items.some((it) => it.itemId && parseFloat(it.qty) > 0) &&
     !hasOverLimit &&
     !hasOverMrPending &&
+    !(fromGodownId && isLoadingStock) &&
     !transferMut.isPending &&
     !interTransferMut.isPending;
 
@@ -1745,6 +1813,7 @@ export default function StockTransfer() {
     setErrorMsg("");
     setManualRates({});
     setSourceMR(null);
+    setSourceMrProjectId(null);
     setMrDropdownValue("");
   };
 
@@ -2077,13 +2146,21 @@ export default function StockTransfer() {
                       ) : (
                         <>
                           <select
-                            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-60"
                             value={mrDropdownValue}
                             onChange={(e) => handleMRDropdownSelect(e.target.value)}
-                            disabled={mrDropdownLoading}
+                            disabled={mrDropdownLoading || !toProjectId || loadingApprovedMRs}
                           >
                             <option value="">
-                              {mrDropdownLoading ? "Loading..." : "Select a Material Request"}
+                              {mrDropdownLoading
+                                ? "Loading..."
+                                : !toProjectId
+                                  ? "Select the receiver project first"
+                                  : loadingApprovedMRs
+                                    ? "Loading approved requests…"
+                                    : approvedMRs.length === 0
+                                      ? "No approved Material Requests for this project"
+                                      : "Select a Material Request"}
                             </option>
                             {approvedMRs.map((mr) => (
                               <option key={mr.MRId} value={String(mr.MRId)}>
@@ -2091,6 +2168,9 @@ export default function StockTransfer() {
                               </option>
                             ))}
                           </select>
+                          <p className="text-[0.6875rem] text-muted-foreground">
+                            Only Approved requests of the receiver project are listed. Picking one fills the items and receiver.
+                          </p>
                           {mrDropdownError && (
                             <p className="text-xs text-destructive">{mrDropdownError}</p>
                           )}
@@ -2266,6 +2346,35 @@ export default function StockTransfer() {
                 </div>
 
                 <div className="p-4 space-y-2">
+                  {liveItems.some((it) => it.itemId) && (
+                    !fromGodownId ? (
+                      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                        Pick the source godown to check stock for these items.
+                      </div>
+                    ) : isLoadingStock ? (
+                      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground flex items-center gap-1.5">
+                        <RefreshCw size={11} className="animate-spin" /> Checking stock in the source godown…
+                      </div>
+                    ) : hasInsufficientStock ? (
+                      <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+                        <p className="font-semibold">
+                          Stock is not enough for {shortLines.length} item{shortLines.length !== 1 ? "s" : ""} — the transfer is blocked until it is fixed.
+                        </p>
+                        <ul className="mt-1 space-y-0.5">
+                          {shortLines.map((it, i) => (
+                            <li key={`${it.itemId}-${i}`}>
+                              {it.itemName || it.itemId}: needs {fmtNum(parseFloat(it.qty) || 0)}, only {fmtNum(it.availableQty)} in stock
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="mt-1 opacity-80">Reduce the quantity, remove the item, or choose another source godown.</p>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+                        Stock check passed — every item is available in the source godown.
+                      </div>
+                    )
+                  )}
                   <div className="overflow-x-auto">
                   <div className="min-w-[480px]">
                   <div className="grid grid-cols-12 gap-2 px-1 mb-1">
@@ -2291,7 +2400,7 @@ export default function StockTransfer() {
                     ))}
                   </div>
 
-                  {items.map((it, idx) => (
+                  {liveItems.map((it, idx) => (
                     <ItemSearchRow
                       key={idx}
                       item={it}

@@ -13,6 +13,7 @@ const {
   postDebitNoteApproval,
 } = require("./generalLedger");
 const { userHasEffectivePageRight } = require("../middleware/permissions");
+const { notifyTransition } = require("./approvalNotifications");
 
 // Module slug → general ledger poster, called once a record reaches full
 // approval (last workflow level). Modules not listed here don't post to the
@@ -913,6 +914,28 @@ async function transition(
         );
       }
     }
+  }
+
+  // Phone pushes ("Approval needed" / "Approved" / "Rejected"). After the commit
+  // and strictly best-effort: it never delays or fails the approval itself.
+  if (process.env.NODE_ENV !== "test") {
+    void (async () => {
+      try {
+        const wf = await getWorkflow(module);
+        await notifyTransition({
+          module,
+          tableName,
+          id,
+          targetStatus,
+          result,
+          actorUserId: userId,
+          levelDefs: wf?.LevelDefs ?? [],
+          defaultRoles: MODULE_APPROVER_ROLE_OVERRIDES[module] ?? APPROVER_ROLES,
+        });
+      } catch {
+        /* notifyTransition already logs; nothing may escape here */
+      }
+    })();
   }
 
   return result;

@@ -2576,7 +2576,7 @@ export default function VehicleInOut() {
                       </p>
                       <p className="text-xs font-semibold font-mono text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
                         {viewingRec.PONumber}
-                        <Eye size={10} className="shrink-0 opacity-60" />
+                        
                       </p>
                     </button>
                   ) : (

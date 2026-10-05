@@ -3,12 +3,14 @@
  * a socket event to the target user's personal room. Used across Sales
  * Automation and CRM modules so every workflow (lead assignment, overdue
  * payment, handover ready, service ticket assigned, etc.) surfaces the
- * same way in the notification bell.
+ * same way in the notification bell. Pass `{ push: true, apps: [...] }` as the last
+ * argument to also send it to the user's phones (apps = which Civilier apps) (see services/pushNotifications.js).
  */
 const { sql } = require("../db");
 const { getIo } = require("../socket");
+const { sendToUsers } = require("./pushNotifications");
 
-async function emitNotification(pool, userId, type, title, body, refId, refType) {
+async function emitNotification(pool, userId, type, title, body, refId, refType, opts = {}) {
   if (!userId) return;
   try {
     const result = await pool.request()
@@ -38,6 +40,15 @@ async function emitNotification(pool, userId, type, title, body, refId, refType)
         createdAt: notif.CreatedAt,
       });
     } catch { /* socket may not be initialised in tests */ }
+    // Opt-in (`{ push: true }`): the same alert also goes to the user's phones.
+    // Reminder / due-date engines turn it on; assignment-style events do not.
+    if (opts && opts.push) {
+      await sendToUsers([userId], {
+        title,
+        body: body || undefined,
+        data: { type: "reminder", notificationType: type, refId: refId || null, refType: refType || null },
+      }, { apps: opts.apps });
+    }
   } catch (e) {
     console.error("[notify] emitNotification error:", e.message);
   }

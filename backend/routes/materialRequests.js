@@ -22,6 +22,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const {
   lockNextDocNumber,
@@ -133,6 +134,23 @@ router.get("/companies", authenticateToken, async (req, res) => {
   }
 });
 
+// Any route with :id — refuse an MR whose project is outside the user's scope.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const mrId = parseInt(id, 10);
+  if (!Number.isFinite(mrId)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, mrId)
+      .query("SELECT ProjectId FROM dbo.MaterialRequests WHERE MRId = @id");
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /projects ──────────────────────────────────────────────────────────────
 router.get("/projects", authenticateToken, async (req, res) => {
   try {
@@ -142,7 +160,7 @@ router.get("/projects", authenticateToken, async (req, res) => {
              (SELECT STRING_AGG(CAST(pc.CompanyId AS NVARCHAR(20)), ',')
                 FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = enterprise.id) AS tagged_company_ids
       FROM   dbo.enterprise
-      WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)
+      WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)${projectPredicate(req.projectScope, "id")}
       ORDER  BY name
     `);
     res.json(result.recordset);
@@ -179,6 +197,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     const requestedProjectId = req.query.projectId
       ? parseInt(req.query.projectId, 10)
       : null;
+    if (requestedProjectId && !assertProjectAllowed(req, res, requestedProjectId)) return;
 
     // Detect optional columns (same pattern as inventoryMaster.js)
     const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply, hasCC] =
@@ -348,6 +367,7 @@ router.get("/", authenticateToken, async (req, res) => {
     const statusFilter = req.query.status || ""; // exact status filter from dashboard
     const companyId = parseInt(req.query.companyId, 10) || null;
     const projectId = parseInt(req.query.projectId, 10) || null;
+    const groupByProject = req.query.groupBy === "project";
 
     const request = pool.request();
     request.input("offset", sql.Int, offset);
@@ -357,9 +377,9 @@ router.get("/", authenticateToken, async (req, res) => {
     request.input("companyId", sql.Int, companyId);
     request.input("projectId", sql.Int, projectId);
 
-    const result = await request.query(`
+    const baseSelect = `
       SELECT
-        mr.MRId, mr.DocNo, mr.Status, mr.Priority,
+        mr.MRId, mr.ProjectId, mr.DocNo, mr.Status, mr.Priority,
         mr.RequestDate, mr.RequiredByDate,
         mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
         ec.name  AS CompanyName,
@@ -389,8 +409,7 @@ router.get("/", authenticateToken, async (req, res) => {
             GROUP BY ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
             FOR XML PATH('')
           ), 1, 2, '')
-        )                        AS QtyByUom,
-        COUNT(*)  OVER ()        AS _total
+        )                        AS QtyByUom
       FROM       dbo.MaterialRequests mr WITH (NOLOCK)
       LEFT JOIN  dbo.enterprise  ec  WITH (NOLOCK) ON ec.id  = mr.CompanyId
       LEFT JOIN  dbo.enterprise  ep  WITH (NOLOCK) ON ep.id  = mr.ProjectId
@@ -399,14 +418,37 @@ router.get("/", authenticateToken, async (req, res) => {
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
         AND (@statusFilter = '' OR mr.Status = @statusFilter)
         AND (@companyId IS NULL OR mr.CompanyId = @companyId)
-        AND (@projectId IS NULL OR mr.ProjectId = @projectId)
+        AND (@projectId IS NULL OR mr.ProjectId = @projectId)${projectPredicate(req.projectScope, "mr.ProjectId")}
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,
                mr.RequestDate, mr.RequiredByDate,
-               mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
+               mr.ProjectId, mr.Reason, mr.Remarks, mr.CreatedBy, mr.CreatedAt,
                ec.name, ep.name, fy.FName
-      ORDER BY mr.CreatedAt DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-    `);
+    `;
+
+
+    // groupBy=project pages by PROJECT, not by row: each page holds `limit`
+    // whole projects (newest-activity first) with every one of their MRs, so
+    // a project's folder is never split across pages.
+    const result = await request.query(
+      groupByProject
+        ? `
+      WITH base AS (${baseSelect}),
+      proj AS (
+        SELECT ISNULL(ProjectId, 0) AS PKey, MAX(CreatedAt) AS LastAt FROM base GROUP BY ISNULL(ProjectId, 0)
+      ),
+      ranked AS (
+        SELECT PKey, ROW_NUMBER() OVER (ORDER BY LastAt DESC) AS rn, COUNT(*) OVER () AS _total FROM proj
+      )
+      SELECT b.*, r._total
+      FROM base b JOIN ranked r ON r.PKey = ISNULL(b.ProjectId, 0)
+      WHERE r.rn > @offset AND r.rn <= @offset + @limit
+      ORDER BY r.rn, b.CreatedAt DESC`
+        : `
+      WITH base AS (${baseSelect})
+      SELECT *, COUNT(*) OVER () AS _total FROM base
+      ORDER BY CreatedAt DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`,
+    );
 
     const total = result.recordset[0]?._total ?? 0;
     const data = result.recordset.map(({ _total, ...row }) => row);
@@ -433,6 +475,7 @@ router.get("/approved-list", authenticateToken, async (req, res) => {
       "mr.Status IN ('Approved', 'Partially Fulfilled')",
       "mr.DocNo IS NOT NULL",
     ];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "mr.ProjectId", "").trim());
 
     if (req.query.companyId) {
       conditions.push("mr.CompanyId = @companyId");
@@ -507,6 +550,7 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Material Request not found" });
 
     const mr = header.recordset[0];
+    if (!assertProjectAllowed(req, res, mr.ProjectId)) return;
     if (!["Approved", "Partially Fulfilled"].includes(mr.Status))
       return res.status(400).json({
         error: `MR is ${mr.Status}. Only Approved or Partially Fulfilled MRs can generate a Normal PO.`,
@@ -591,7 +635,7 @@ router.get("/pending-summary", authenticateToken, async (req, res) => {
         WHERE poi.MRItemId = mri.MRItemId
           AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
       ) ord
-      WHERE mr.Status IN ('Approved', 'Partially Fulfilled', 'Completed')
+      WHERE mr.Status IN ('Approved', 'Partially Fulfilled', 'Completed')${projectPredicate(req.projectScope, "mr.ProjectId")}
       GROUP BY mri.MRId
     `);
     res.json(
@@ -625,6 +669,7 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
     const conditions = [
       "mr.Status IN ('Approved', 'Partially Fulfilled')",
     ];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "mr.ProjectId", "").trim());
 
     if (req.query.companyId) {
       conditions.push("mr.CompanyId = @companyId");
@@ -762,6 +807,19 @@ router.get("/:id", authenticateToken, async (req, res) => {
 });
 
 // ── POST / ─────────────────────────────────────────────────────────────────────
+// The financial year is optional on the form, but every "approved MR" picker
+// (Quotation, PO) filters on it — a request saved without one silently vanished
+// from them. When the client sends none, take the year whose date range covers
+// the request date.
+async function resolveFinYearId(db, finYearId, requestDate) {
+  const given = parseInt(finYearId, 10);
+  if (Number.isFinite(given) && given > 0) return given;
+  const r = await db.request().input("d", sql.Date, requestDate || new Date()).query(
+    "SELECT TOP 1 FId FROM dbo.FinYear WHERE @d >= FStartDate AND @d <= FEndDate ORDER BY FStartDate DESC",
+  );
+  return r.recordset[0]?.FId ?? null;
+}
+
 router.post("/", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
@@ -783,6 +841,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       items = [],
     } = req.body;
 
+    if (!assertProjectAllowed(req, res, ProjectId)) return;
     if (!Reason?.trim())
       return res.status(400).json({ error: "Reason is required" });
     if (!items.length)
@@ -838,7 +897,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
         .request()
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
-        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("FinYearId", sql.Int, await resolveFinYearId(pool, FinYearId, RequestDate))
         .input("RequestDate", sql.Date, RequestDate || new Date())
         .input("RequiredByDate", sql.Date, RequiredByDate || null)
         .input("Priority", sql.NVarChar(20), Priority)
@@ -951,6 +1010,8 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       items = [],
     } = req.body;
 
+    if (!assertProjectAllowed(req, res, ProjectId)) return;
+
     // Guard against editing a Pending MR (mid-approval — reject it first) —
     // Draft is normal editing, Approved is allowed too (logged as an
     // amendment below) so an approved request doesn't become permanently
@@ -1022,7 +1083,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
         .input("id", sql.Int, id)
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
-        .input("FinYearId", sql.Int, FinYearId || null)
+        .input("FinYearId", sql.Int, await resolveFinYearId(pool, FinYearId, RequestDate))
         .input("RequestDate", sql.Date, RequestDate || new Date())
         .input("RequiredByDate", sql.Date, RequiredByDate || null)
         .input("Priority", sql.NVarChar(20), Priority)

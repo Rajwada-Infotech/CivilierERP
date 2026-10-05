@@ -1096,7 +1096,7 @@ const InboxRow: React.FC<{
         />
         {/* Wide screens: one table row. Narrower: a card — module on top,
             labelled details in a grid, actions on their own line. */}
-        <div className="flex-1 min-w-0 ai-row">
+        <div data-row className="flex-1 min-w-0 ai-row">
         {/* Col 1 — Module */}
         <div className="ai-c-mod flex items-center gap-3 min-w-0">
           <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>

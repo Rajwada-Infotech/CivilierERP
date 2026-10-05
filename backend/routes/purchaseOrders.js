@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
@@ -34,6 +35,23 @@ const {
 router.use((req, res, next) => {
   if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
   return checkPermissionForMethod("Material", "PurchaseOrders")(req, res, next);
+});
+
+// Any route with :id — refuse a PO whose project is outside the user's scope.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const poId = parseInt(id, 10);
+  if (!Number.isFinite(poId)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, poId)
+      .query("SELECT ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id");
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -798,6 +816,8 @@ const listPurchaseOrders = async (req, res) => {
         ? parseInt(req.query.projectId, 10) || null
         : null;
 
+      const groupByProject = req.query.groupBy === "project";
+
       const whereConditions = [];
       if (sourceWOId) whereConditions.push("po.SourceWOId = @sourceWOId");
       if (fyId) whereConditions.push("po.fy_id = @fyId");
@@ -807,6 +827,7 @@ const listPurchaseOrders = async (req, res) => {
       if (!includeShortClosed) whereConditions.push("ISNULL(po.Status, '') != 'Short Closed'");
       if (companyId) whereConditions.push("po.CompanyId = @companyId");
       if (projectId) whereConditions.push("po.ProjectId = @projectId");
+      if (req.projectScope) whereConditions.push(projectPredicate(req.projectScope, "po.ProjectId", "").trim());
       const whereClause = whereConditions.length
         ? `WHERE ${whereConditions.join(" AND ")}`
         : "";
@@ -822,13 +843,33 @@ const listPurchaseOrders = async (req, res) => {
         .input("poTypeFilter", sql.NVarChar(20), poTypeFilter)
         .input("companyId", sql.Int, companyId)
         .input("projectId", sql.Int, projectId).query(`
+        ${
+          groupByProject
+            ? `
+        -- groupBy=project pages by PROJECT: each page holds @limit whole
+        -- projects (most recent PO first) with every one of their POs.
+        WITH base AS (
+          ${PO_SELECT}
+          ${whereClause}
+        ),
+        proj AS (
+          SELECT ISNULL(ProjectId, 0) AS PKey, MAX(PurchaseOrderID) AS LastId FROM base GROUP BY ISNULL(ProjectId, 0)
+        ),
+        ranked AS (
+          SELECT PKey, ROW_NUMBER() OVER (ORDER BY LastId DESC) AS rn, COUNT(*) OVER () AS _total FROM proj
+        )
+        SELECT b.*, r._total FROM base b JOIN ranked r ON r.PKey = ISNULL(b.ProjectId, 0)
+        WHERE r.rn > @offset AND r.rn <= @offset + @limit
+        ORDER BY r.rn, b.PurchaseOrderID DESC`
+            : `
         SELECT *, COUNT(*) OVER() AS _total FROM (
           ${PO_SELECT}
           ${whereClause}
         ) _po
         ORDER BY _po.PurchaseOrderID DESC
         OFFSET @offset ROWS
-        FETCH NEXT @limit ROWS ONLY
+        FETCH NEXT @limit ROWS ONLY`
+        }
       `);
 
       const total = result.recordset[0]?._total ?? 0;
@@ -865,7 +906,7 @@ router.get("/service-eligible", async (req, res) => {
   try {
     const pool = getPool();
     const pos = await getServicePurchaseOrders(pool);
-    res.json(pos);
+    res.json(req.projectScope ? pos.filter((po) => projectAllowed(req.projectScope, po.ProjectId)) : pos);
   } catch (err) {
     console.error("GET service-eligible POs error:", err);
     res.status(500).json({ error: err.message });
@@ -944,6 +985,7 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
+    if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
 
     const pool = getPool();
     const { PurchaseOrderID: newId, PurchaseOrderNo: finalDocNo } =
@@ -1019,6 +1061,7 @@ router.put(
   async (req, res) => {
     const id = requireValidId(req, res);
     if (!id) return;
+    if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
     const {
       PurchaseOrderNo,
       PODate,
@@ -1566,6 +1609,20 @@ router.put("/:id/reject", async (req, res) => {
       req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("purchase-orders");
+
+    // A rejected PO no longer holds its Material Request's quantity, so refresh
+    // that MR's status (a Completed MR goes back to Approved / Partially
+    // Fulfilled and can be ordered or transferred again).
+    try {
+      const pool = getPool();
+      const src = await pool.request().input("id", sql.Int, id)
+        .query("SELECT SourceMRId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id");
+      if (src.recordset[0]?.SourceMRId) {
+        await recomputeMRFulfillment(pool, src.recordset[0].SourceMRId, null);
+      }
+    } catch (e) {
+      console.error("MR status update after PO reject failed:", e.message);
+    }
     res.json({ message: "Purchase order rejected", ...result });
   } catch (err) {
     res

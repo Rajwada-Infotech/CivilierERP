@@ -24,7 +24,7 @@ export function ActivityChainPreview({ rungs, onRungClick }: Props) {
     <div className="flex flex-wrap items-center gap-1.5 py-1">
       {rungs.map((rung, i) => {
         const isInternal = rung.workType === "INTERNAL";
-        const accent = isInternal ? "#f97316" : "#0ea5e9";
+        const accent = isInternal ? "#0891b2" : "#8b5cf6";
         const clickable = !!onRungClick && rung.rungId != null;
         const Chip = clickable ? "button" : "div";
         return (

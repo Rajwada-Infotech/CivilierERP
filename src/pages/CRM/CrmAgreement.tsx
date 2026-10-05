@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -538,7 +539,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
                     </div>
                     <div className="text-right text-muted-foreground shrink-0">
                       <div>{h.ChangedByName || "System"}</div>
-                      <div>{String(h.ChangedAt).replace("T", " ").slice(0, 16)}</div>
+                      <div>{fmtIstIso(h.ChangedAt)}</div>
                     </div>
                   </li>
                 ))}
@@ -1644,7 +1645,7 @@ const CrmAgreement: React.FC = () => {
                           <div className="flex items-center gap-2 text-muted-foreground">
                             <span className="px-1.5 py-0.5 rounded-full border border-violet-200 bg-violet-50 text-violet-600 text-[0.625rem] font-medium">v{r.VersionNo}</span>
                             <span>{r.Reason}</span>
-                            <span className="text-[0.625rem]">({String(r.CreatedAt).slice(0,16).replace("T"," ")}{r.CreatedByName ? ` · ${r.CreatedByName}` : ""})</span>
+                            <span className="text-[0.625rem]">({fmtIstIso(r.CreatedAt)}{r.CreatedByName ? ` · ${r.CreatedByName}` : ""})</span>
                           </div>
                           <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
                             {r.LegalName && <div><span className="text-muted-foreground">Legal Name: </span>{r.LegalName}</div>}
@@ -1815,7 +1816,7 @@ const CrmAgreement: React.FC = () => {
                           </p>
                           {sent && a?.SentToCustomerAt && (
                             <p className="text-xs text-blue-600 flex items-center gap-1">
-                              <Send size={11} /> Sent {String(a.SentToCustomerAt).slice(0,16).replace("T"," ")}
+                              <Send size={11} /> Sent {fmtIstIso(a.SentToCustomerAt)}
                             </p>
                           )}
                           {seniorApproved && !sent && !cancelled && (
@@ -2094,7 +2095,7 @@ const CrmAgreement: React.FC = () => {
                                 {d.FileName && <span className="text-[0.6875rem] text-muted-foreground truncate max-w-[200px]">{d.FileName}</span>}
                                 {d.FileSize && <span className="text-[0.6875rem] text-muted-foreground">{fmtBytes(d.FileSize)}</span>}
                                 {d.IssuedBy && <span className="text-[0.6875rem] text-muted-foreground">by {d.IssuedBy}</span>}
-                                {(d.FilePath || d.DocumentUrl) && <Eye size={11} className="text-muted-foreground/60" />}
+                                
                               </>
                             )}
                           </div>

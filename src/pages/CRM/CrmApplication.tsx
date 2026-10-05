@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -3113,7 +3114,7 @@ const CrmApplication: React.FC = () => {
                             {s.ActorName && <span className="text-[0.6875rem] text-muted-foreground"> · {s.ActorName}</span>}
                           </div>
                           <span className="shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
-                            {s.CreatedAt ? String(s.CreatedAt).slice(0, 16).replace("T", " ") : ""}
+                            {s.CreatedAt ? fmtIstIso(s.CreatedAt) : ""}
                           </span>
                         </div>
                       ))}
@@ -3960,7 +3961,7 @@ const AttachmentsStep: React.FC<{
                 <span className="truncate flex-1">{d.DocumentType} — {d.FileName}</span>
                 <div className="flex items-center gap-1 shrink-0">
                   {previewable && (
-                    <button type="button" title="Preview" onClick={() => setPreviewDoc(d)}
+                    <button data-row-view type="button" title="Preview" onClick={() => setPreviewDoc(d)}
                       className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
                       <Eye size={12} />
                     </button>

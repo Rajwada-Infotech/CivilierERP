@@ -4,6 +4,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const logger = require("../logger");
 const { getPool, sql } = require("../db");
+const { projectPredicate } = require("../services/projectScope");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   MODULE_MAP,
@@ -294,7 +295,7 @@ const NULL_EXTRA_CIVILWORKDPR_APPROVAL = NULL_EXTRA.replace(
 // source of truth for "what counts as pending" so the two can never drift,
 // and so the badge count can be run through the exact same per-viewer
 // visibility filter as the list itself instead of a separate raw aggregate.
-function buildInboxQueries(module) {
+function buildInboxQueries(module, projectScope = null) {
   const queries = [];
 
   if (!module || module === "purchase-orders") {
@@ -1355,7 +1356,7 @@ function buildInboxQueries(module) {
         JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
         JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
         JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
-        WHERE daa.IsCurrent = 1
+        WHERE daa.IsCurrent = 1${projectPredicate(projectScope, "dm.ProjectId")}
           AND daa.Status = 'COMPLETED'
           -- No longer requires ApprovalLevelsJson to be configured — a
           -- Completed, QC-passed activity with no approval setup still
@@ -1377,7 +1378,7 @@ function buildInboxQueries(module) {
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
-    const queries = buildInboxQueries(req.query.module);
+    const queries = buildInboxQueries(req.query.module, req.projectScope);
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -1405,7 +1406,7 @@ router.get("/", async (req, res) => {
 router.get("/count", async (req, res) => {
   try {
     const pool = getPool();
-    const queries = buildInboxQueries(undefined);
+    const queries = buildInboxQueries(undefined, req.projectScope);
     if (queries.length === 0) return res.json({ count: 0 });
 
     const fullQuery = queries.join(" UNION ALL ");

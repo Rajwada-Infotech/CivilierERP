@@ -408,7 +408,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuItem onClick={() => setDetailRow(r)} className="gap-2">
-                  <Eye size={14} className="text-muted-foreground" /> View Details
+                   View Details
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => copyToClipboard(r.AfsRegNo, "AREG No.")} className="gap-2">
                   <Copy size={14} className="text-muted-foreground" /> Copy AREG No.

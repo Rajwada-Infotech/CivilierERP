@@ -68,6 +68,7 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
       { label: "Menu", path: "/admin/rights/menu" },
       { label: "Widgets", path: "/admin/rights/widgets" },
       { label: "Financial Year", path: "/admin/rights/fin-year" },
+      { label: "Project Access", path: "/admin/rights/project-access" },
     ],
   },
   {

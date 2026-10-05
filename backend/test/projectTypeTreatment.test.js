@@ -6,6 +6,10 @@
 // land or under-declaring output tax on construction, so it is pinned here
 // rather than left to be re-derived at each call site.
 
+// These are pure rules; services/projectType.js only pulls in db.js for the
+// mssql type helpers, which would otherwise demand real DB env vars in CI.
+jest.mock("../db", () => ({ sql: require("mssql") }));
+
 const {
   UNIT_KIND,
   INCOME_ACCOUNT,

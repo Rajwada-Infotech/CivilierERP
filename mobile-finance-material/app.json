@@ -1,9 +1,9 @@
-gat is{
+{
   "expo": {
     "name": "CivilierERP",
     "slug": "mobile",
     "scheme": "civiliererp",
-    "version": "1.0.0",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -43,6 +43,14 @@ gat is{
         }
       ]
     ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0af41143-6419-4a76-99cd-96c0dfbd4fe1",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "extra": {
       "eas": {
         "projectId": "0af41143-6419-4a76-99cd-96c0dfbd4fe1"

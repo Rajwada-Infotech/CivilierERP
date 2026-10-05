@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -242,7 +243,7 @@ const CrmServiceTickets: React.FC = () => {
         const overdue = isOverdue(t);
         return (
           <span className={`text-xs ${overdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
-            {t.SlaDueDate ? String(t.SlaDueDate).slice(0, 16).replace("T", " ") : "—"}
+            {t.SlaDueDate ? fmtIstIso(t.SlaDueDate) : "—"}
             {overdue && " (OVERDUE)"}
           </span>
         );

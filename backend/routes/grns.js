@@ -26,6 +26,7 @@ router.use(
   }),
 );
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -46,6 +47,50 @@ const {
 router.use((req, res, next) => {
   if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
   return checkPermissionForMethod("Material", "GRN")(req, res, next);
+});
+
+// A GRN belongs to the project of its parent PO (GRNs have no project column).
+const poProjectOf = async (poId) => {
+  const r = await getPool().request().input("poid", sql.Int, poId)
+    .query("SELECT ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @poid");
+  return r.recordset.length ? r.recordset[0].ProjectId : null;
+};
+
+// Any GRN route with :id — refuse a GRN whose parent PO's project is outside
+// the user's scope. /po/:id and /by-*/:id reuse the same param name for other
+// record types (a PO id, a vehicle-in-out id, a transfer id), so skip those.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  if (req.path.startsWith("/po/") || req.path.startsWith("/by-")) return next();
+  const grnId = parseInt(id, 10);
+  if (!Number.isFinite(grnId)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, grnId).query(`
+      SELECT p.ProjectId FROM dbo.GoodsReceiptNotes grn
+      LEFT JOIN dbo.PurchaseOrders p ON p.PurchaseOrderID = grn.POID
+      WHERE grn.GRNID = @id`);
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Routes keyed by a PO id — same check against that PO's project.
+router.param("poId", async (req, res, next, poId) => {
+  if (!req.projectScope) return next();
+  const id = parseInt(poId, 10);
+  if (!Number.isFinite(id)) return next();
+  try {
+    if (!projectAllowed(req.projectScope, await poProjectOf(id))) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const requireUserEmail = (req, res) => {
@@ -512,6 +557,7 @@ router.get("/filtered", async (req, res) => {
       request.input("ProjectId", sql.Int, projectId);
       whereClause += " AND (p.ProjectId = @ProjectId OR grn.POID IS NULL)";
     }
+    if (req.projectScope) whereClause += projectPredicate(req.projectScope, "p.ProjectId");
     if (companyId) {
       request.input("CompanyId", sql.Int, companyId);
       whereClause += " AND (p.CompanyId = @CompanyId OR grn.POID IS NULL)";
@@ -635,7 +681,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
           END
         ) = @finYear
       ))
-        AND (@companyId IS NULL OR p.CompanyId = @companyId)
+        AND (@companyId IS NULL OR p.CompanyId = @companyId)${projectPredicate(req.projectScope, "p.ProjectId")}
       ORDER BY grn.GRNID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
@@ -838,7 +884,7 @@ router.get("/register", cache("grns", 300), async (req, res) => {
         ) appr
         LEFT JOIN dbo.Users pu ON LOWER(pu.email) = LOWER(appr.ApproverEmail)
         WHERE (@companyId  IS NULL OR p.CompanyId = @companyId)
-          AND (@projectId  IS NULL OR p.ProjectId = @projectId)
+          AND (@projectId  IS NULL OR p.ProjectId = @projectId)${projectPredicate(req.projectScope, "p.ProjectId")}
           AND (@supplierId IS NULL OR grn.SupplierID = @supplierId)
           AND (@status     IS NULL OR grn.Status = @status)
           AND (@grnNo      IS NULL OR grn.GRNNo LIKE '%' + @grnNo + '%')
@@ -1301,6 +1347,9 @@ router.post("/", requirePageRight("grn-master", "create"), validateBody(grnBodyS
   try {
     const userEmail = req.user?.email || req.user?.name || null;
     const pool = getPool();
+    if (req.projectScope && req.body?.POID && !projectAllowed(req.projectScope, await poProjectOf(parseInt(req.body.POID, 10)))) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
     const { GRNID: grnId, DocNo: docNo } = await createGRNInternal(pool, req.body, userEmail);
     const grnNo = docNo;
 

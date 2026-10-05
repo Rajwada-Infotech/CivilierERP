@@ -33,6 +33,7 @@ const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition } = require("../services/approvalService");
@@ -77,6 +78,25 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 router.use((req, res, next) => {
   if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
   return checkPermissionForMethod("Material", "VehicleInOut")(req, res, next);
+});
+
+// Any route with :id — refuse a Vehicle In/Out whose project is outside the
+// user's scope. /attachment/:attachId and /po-*/:poId use other param names.
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  if (req.path.startsWith("/po-chat/")) return next(); // :id is a PO id there
+  const vid = parseInt(id, 10);
+  if (!Number.isFinite(vid)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, vid)
+      .query("SELECT ProjectID FROM dbo.VehicleInOut WHERE VehicleInOutID = @id");
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectID)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Multer — memory storage (files go to DB, not disk) ───────────────────────
@@ -379,7 +399,7 @@ router.get("/", async (req, res) => {
           v.VehicleNo  LIKE @Search OR
           v.ChallanNo  LIKE @Search OR
           v.SupplierName LIKE @Search
-        )
+        )${projectPredicate(req.projectScope, "v.ProjectID")}
       ORDER BY v.VehicleInOutID DESC
       OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 
@@ -393,7 +413,7 @@ router.get("/", async (req, res) => {
           v.VehicleNo  LIKE @Search OR
           v.ChallanNo  LIKE @Search OR
           v.SupplierName LIKE @Search
-        );
+        )${projectPredicate(req.projectScope, "v.ProjectID")};
     `);
 
     const rows = result.recordsets[0];
@@ -427,7 +447,7 @@ router.get("/po-options", async (req, res) => {
              po.CompanyId, po.ProjectId
       FROM dbo.PurchaseOrders po
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
-      WHERE po.Status IN ('Approved', 'Pending', 'Received')
+      WHERE po.Status IN ('Approved', 'Pending', 'Received')${projectPredicate(req.projectScope, "po.ProjectId")}
       ORDER BY po.PurchaseOrderID DESC
     `);
     res.json(result.recordset);
@@ -697,6 +717,7 @@ router.get("/:id/items", async (req, res) => {
 router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
+  if (!assertProjectAllowed(req, res, req.body?.projectId)) return;
 
   const {
     docDate,
@@ -850,6 +871,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
 router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
+  if (!assertProjectAllowed(req, res, req.body?.projectId)) return;
 
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });

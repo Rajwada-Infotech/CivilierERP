@@ -464,6 +464,11 @@ export const getDailyLog = async (rungId: number): Promise<DailyLogEntry[]> => {
   return handleResponse<DailyLogEntry[]>(res);
 };
 
+export const deleteDailyLogEntry = async (rungId: number, logId: number) => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/daily-log/${logId}`, { method: "DELETE" });
+  return handleResponse<{ success: boolean }>(res);
+};
+
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────
 // Scoped per (rung, room, context) — see migration 345/346's own comments
 // for why: two activities in the same chain sharing a room's blueprint
@@ -778,4 +783,39 @@ export const restoreCancelledActivity = async (
 ): Promise<{ success: boolean; status: AssignmentStatus }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/restore`, { method: "POST" });
   return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
+};
+
+export interface TransferCandidate {
+  assignmentId: number;
+  rungId: number;
+  status: AssignmentStatus;
+  progressPercent: number;
+  startDate: string | null;
+  endDate: string | null;
+  activityName: string;
+  projectId: number;
+  projectName: string | null;
+  scopePath: string;
+  engineerNames: string | null;
+}
+
+export const getTransferCandidates = async (engineerId: number, projectId?: number): Promise<TransferCandidate[]> => {
+  const qs = new URLSearchParams({ engineerId: String(engineerId) });
+  if (projectId) qs.set("projectId", String(projectId));
+  const res = await fetchWithAuth(`${BASE}/transfer/candidates?${qs.toString()}`);
+  return handleResponse<TransferCandidate[]>(res);
+};
+
+export const transferWork = async (payload: {
+  fromEngineerId: number;
+  toEngineerId: number;
+  assignmentIds: number[];
+  remarks?: string;
+}): Promise<{ success: boolean; transferred: number }> => {
+  const res = await fetchWithAuth(`${BASE}/transfer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ success: boolean; transferred: number }>(res);
 };

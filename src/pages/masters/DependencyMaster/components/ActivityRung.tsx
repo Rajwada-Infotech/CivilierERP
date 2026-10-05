@@ -80,8 +80,8 @@ export function ActivityRung({
         <span
           className={`text-[0.5625rem] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 ${
             rung.workType === "INTERNAL"
-              ? "bg-orange-500/10 text-orange-500"
-              : "bg-sky-500/10 text-sky-500"
+              ? "bg-cyan-600/10 text-cyan-600"
+              : "bg-violet-500/10 text-violet-500"
           }`}
         >
           {rung.workType === "INTERNAL" ? "Internal" : "External"}

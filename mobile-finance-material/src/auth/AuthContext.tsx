@@ -1,6 +1,7 @@
 // RN port of src/contexts/AuthContext.tsx (web), trimmed to what a mobile
 // client actually needs: login, logout, currentUser, permission checks.
 // Profile-editing / avatar / admin-user-management pieces stay on web only.
+import { unregisterPushAsync } from "@/notifications/pushNotifications";
 import {
   createContext,
   useCallback,
@@ -80,6 +81,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const logout = useCallback(async () => {
+    await unregisterPushAsync(); // while the session token still exists
     await clearAuthStorage();
     queryClient.clear();
     setCurrentUser(null);

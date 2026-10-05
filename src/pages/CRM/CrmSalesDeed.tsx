@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -1994,7 +1995,7 @@ const CrmSalesDeed: React.FC = () => {
                                 </p>
                                 {sent && (
                                   <p className="text-xs text-blue-600 flex items-center gap-1">
-                                    <Send size={11} /> Sent {String(detail.SentToCustomerAt).slice(0,16).replace("T"," ")}
+                                    <Send size={11} /> Sent {fmtIstIso(detail.SentToCustomerAt)}
                                   </p>
                                 )}
                                 {seniorApproved && detail.BookingStatus !== 'Cancelled' && (
@@ -2540,7 +2541,7 @@ const CrmSalesDeed: React.FC = () => {
                                           </div>
                                           <div className="flex items-center gap-2 mt-1.5 pl-6">
                                             {doc.HasFile && (doc.MimeType?.startsWith('image/') || doc.MimeType === 'application/pdf') && (
-                                              <button onClick={() => handleRegPreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-[0.6875rem] text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
+                                              <button data-row-view onClick={() => handleRegPreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-[0.6875rem] text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
                                                 {previewLoading === doc.Id ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />} Preview
                                               </button>
                                             )}
@@ -2645,7 +2646,7 @@ const CrmSalesDeed: React.FC = () => {
                         </div>
                         <div className="flex items-center gap-2 mt-2 pl-7">
                           {doc.HasFile && (doc.MimeType?.startsWith('image/') || doc.MimeType === 'application/pdf') && (
-                            <button onClick={() => handlePreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-xs text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
+                            <button data-row-view onClick={() => handlePreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-xs text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
                               {previewLoading === doc.Id ? <Loader2 size={12} className="animate-spin"/> : <Eye size={12}/>} Preview
                             </button>
                           )}

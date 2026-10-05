@@ -4,6 +4,40 @@ const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
+const { invalidateThread } = require("../services/activityThread");
+
+// ── Project scoping ──────────────────────────────────────────────────────────
+// A rung / checkpoint / checkpoint-update belongs to the project of its
+// Dependency chain (dbo.DependencyMaster.ProjectId). A restricted user is
+// refused anything outside their assigned projects.
+const RUNG_TO_PROJECT = `
+  FROM dbo.DependencyMasterActivity dma
+  JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId`;
+const projectGuard = (sqlText) => async (req, res, next, value) => {
+  if (!req.projectScope) return next();
+  const id = parseInt(value, 10);
+  if (!Number.isFinite(id)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, id).query(sqlText);
+    if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+router.param("rungId", projectGuard(`SELECT dm.ProjectId ${RUNG_TO_PROJECT} WHERE dma.Id = @id`));
+const CHECKPOINT_TO_PROJECT = `
+  FROM dbo.DependencyActivityCheckpoint cp
+  JOIN dbo.DependencyActivityAssignment daa ON daa.Id = cp.AssignmentId
+  JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+  JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId`;
+router.param("cpId", projectGuard(`SELECT dm.ProjectId ${CHECKPOINT_TO_PROJECT} WHERE cp.Id = @id`));
+// Only /checkpoint-update/:id uses :id in this router.
+router.param("id", projectGuard(`SELECT dm.ProjectId ${CHECKPOINT_TO_PROJECT}
+  JOIN dbo.DependencyActivityCheckpointUpdate cu ON cu.AssignmentCheckpointId = cp.Id WHERE cu.Id = @id`));
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 
@@ -171,6 +205,7 @@ router.get(
       request.input("projectId", sql.Int, projectId);
       conds.push("dm.ProjectId = @projectId");
     }
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "dm.ProjectId", "").trim());
     if (fromDate && !Number.isNaN(Date.parse(fromDate))) {
       request.input("fromDate", sql.Date, fromDate);
       conds.push("daa.UpdatedAt >= @fromDate");
@@ -306,7 +341,10 @@ router.get(
 
       const countsReq = pool.request();
       if (search) countsReq.input("search", sql.NVarChar(200), `%${search}%`);
-      const countsRes = await countsReq.query(`
+      // Started now, awaited below: the status counts and the room list are
+      // independent aggregates over the same tables, so they run in parallel
+      // instead of one after the other (the search made this the slow call).
+      const countsPromise = countsReq.query(`
         SELECT daa.Status AS status, COUNT(*) AS count
         FROM dbo.DependencyActivityAssignment daa
         JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
@@ -316,20 +354,13 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}
+        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
         GROUP BY daa.Status
       `);
-      const statusCounts = {};
-      let total = 0;
-      for (const row of countsRes.recordset) {
-        statusCounts[row.status] = row.count;
-        total += row.count;
-      }
-
       const roomsReq = pool.request();
       if (search) roomsReq.input("search", sql.NVarChar(200), `%${search}%`);
       if (statusFilter && STATUS_VALUES.has(statusFilter)) roomsReq.input("statusFilter", sql.NVarChar(20), statusFilter);
-      const roomsRes = await roomsReq.query(`
+      const roomsPromise = roomsReq.query(`
         SELECT
           dm.ProjectId AS projectId, ep.name AS projectName,
           dm.TowerId AS towerId, bm.BlockName AS towerName,
@@ -345,10 +376,18 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}
+        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
           ${statusFilter && STATUS_VALUES.has(statusFilter) ? "AND daa.Status = @statusFilter" : ""}
         GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName
       `);
+
+      const [countsRes, roomsRes] = await Promise.all([countsPromise, roomsPromise]);
+      const statusCounts = {};
+      let total = 0;
+      for (const row of countsRes.recordset) {
+        statusCounts[row.status] = row.count;
+        total += row.count;
+      }
 
       res.json({ statusCounts, total, rooms: roomsRes.recordset });
     } catch (err) {
@@ -415,12 +454,162 @@ router.get(
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
         LEFT JOIN dbo.DependencyActivityAssignment cur
           ON cur.DependencyMasterActivityId = daa.DependencyMasterActivityId AND cur.IsCurrent = 1
-        WHERE daa.IsCurrent = 0
+        WHERE daa.IsCurrent = 0${projectPredicate(req.projectScope, "dm.ProjectId")}
         ORDER BY daa.UpdatedAt DESC
       `);
       res.json(r.recordset);
     } catch (err) {
       console.error("[dependency-activity-assignment] GET /amendments error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ── Work Transfer ────────────────────────────────────────────────────────────
+// Move activities from one engineer to another. Only work still sitting with
+// the engineer is transferable — once it's Completed/Approved/Cancelled
+// there's nothing left for a new engineer to do.
+const TRANSFERABLE_STATUSES = ["ALLOCATED", "IN_PROGRESS", "HOLD", "REWORK"];
+
+// GET /transfer/candidates?engineerId=&projectId= — current activities the
+// given engineer holds that can still be transferred.
+router.get(
+  "/transfer/candidates",
+  authMiddleware,
+  requirePageRight("civilworkdpr-work-transfer", "view"),
+  async (req, res) => {
+    const engineerId = parseInt(req.query.engineerId, 10);
+    if (!Number.isFinite(engineerId)) return res.status(400).json({ error: "engineerId is required" });
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    try {
+      const pool = await getPool();
+      const request = pool.request().input("engineerId", sql.Int, engineerId);
+      let projectCond = "";
+      if (Number.isFinite(projectId)) {
+        request.input("projectId", sql.Int, projectId);
+        projectCond = " AND dm.ProjectId = @projectId";
+      }
+      const r = await request.query(`
+        SELECT
+          daa.Id AS assignmentId,
+          daa.DependencyMasterActivityId AS rungId,
+          daa.Status AS status,
+          daa.ProgressPercent AS progressPercent,
+          daa.StartDate AS startDate,
+          daa.EndDate AS endDate,
+          am.activity_name AS activityName,
+          dm.ProjectId AS projectId, ep.name AS projectName,
+          CONCAT(
+            ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
+            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+          ) AS scopePath,
+          (
+            SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+            FROM dbo.DependencyActivityEngineer d2
+            JOIN dbo.users u ON u.id = d2.EngineerId
+            WHERE d2.AssignmentId = daa.Id
+          ) AS engineerNames
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyActivityEngineer dae ON dae.AssignmentId = daa.Id AND dae.EngineerId = @engineerId
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+        WHERE daa.IsCurrent = 1
+          AND daa.Status IN (${TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ")})${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        ORDER BY ep.name, scopePath, am.activity_name
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /transfer/candidates error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// POST /transfer — body { fromEngineerId, toEngineerId, assignmentIds: number[], remarks? }.
+// All-or-nothing: if any selected activity is no longer transferable (status
+// moved on, engineer already changed, outside the caller's project scope) the
+// whole batch is refused so a bulk transfer never half-applies. The new
+// engineer starts unconfirmed (Approved = 0), same as a fresh allocation; if
+// they were already on the activity the old engineer is just removed.
+router.post(
+  "/transfer",
+  authMiddleware,
+  requirePageRight("civilworkdpr-work-transfer", "edit"),
+  async (req, res) => {
+    const fromEngineerId = parseInt(req.body?.fromEngineerId, 10);
+    const toEngineerId = parseInt(req.body?.toEngineerId, 10);
+    const assignmentIds = [...new Set((Array.isArray(req.body?.assignmentIds) ? req.body.assignmentIds : [])
+      .map((v) => parseInt(v, 10)).filter(Number.isFinite))];
+    const remarks = req.body?.remarks ? String(req.body.remarks).trim().slice(0, 500) : null;
+    if (!Number.isFinite(fromEngineerId) || !Number.isFinite(toEngineerId)) {
+      return res.status(400).json({ error: "Pick both the engineer to transfer from and to." });
+    }
+    if (fromEngineerId === toEngineerId) {
+      return res.status(400).json({ error: "From and To engineer must be different." });
+    }
+    if (!assignmentIds.length) return res.status(400).json({ error: "Select at least one activity to transfer." });
+    if (assignmentIds.length > 2000) return res.status(400).json({ error: "Too many activities in one transfer (max 2000)." });
+    const actor = req.user?.email || req.user?.name || "system";
+
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    try {
+      const toUser = await pool.request().input("id", sql.Int, toEngineerId)
+        .query("SELECT id FROM dbo.users WHERE id = @id AND ISNULL(discontinue, 0) = 0");
+      if (!toUser.recordset.length) return res.status(400).json({ error: "The engineer to transfer to is not an active user." });
+
+      const idList = assignmentIds.join(",");
+      const rows = (await pool.request().input("fromId", sql.Int, fromEngineerId).query(`
+        SELECT daa.Id AS assignmentId, daa.Status AS status, daa.IsCurrent AS isCurrent, dm.ProjectId AS projectId
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.DependencyActivityEngineer dae ON dae.AssignmentId = daa.Id AND dae.EngineerId = @fromId
+        WHERE daa.Id IN (${idList})
+      `)).recordset;
+      const byId = new Map(rows.map((r) => [Number(r.assignmentId), r]));
+      for (const id of assignmentIds) {
+        const r = byId.get(id);
+        if (!r) return res.status(409).json({ error: "An activity in your selection is no longer assigned to the From engineer. Reload and try again." });
+        if (!r.isCurrent || !TRANSFERABLE_STATUSES.includes(r.status)) {
+          return res.status(409).json({ error: "An activity in your selection has moved on and can't be transferred any more. Reload and try again." });
+        }
+        if (!projectAllowed(req.projectScope, r.projectId)) {
+          return res.status(403).json({ error: "You don't have access to one of the selected activities' projects." });
+        }
+      }
+
+      await tx.begin();
+      for (const id of assignmentIds) {
+        const rq = () => new sql.Request(tx).input("aid", sql.Int, id)
+          .input("fromId", sql.Int, fromEngineerId).input("toId", sql.Int, toEngineerId);
+        const already = await rq().query(
+          "SELECT 1 AS found FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @aid AND EngineerId = @toId",
+        );
+        if (already.recordset.length) {
+          await rq().query("DELETE FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @aid AND EngineerId = @fromId");
+        } else {
+          await rq().query(`
+            UPDATE dbo.DependencyActivityEngineer
+            SET EngineerId = @toId, Approved = 0, ApprovedAt = NULL
+            WHERE AssignmentId = @aid AND EngineerId = @fromId
+          `);
+        }
+        await rq().input("remarks", sql.NVarChar(500), remarks).input("by", sql.NVarChar(200), actor).query(`
+          INSERT INTO dbo.DependencyActivityTransferLog (AssignmentId, FromEngineerId, ToEngineerId, Remarks, TransferredBy)
+          VALUES (@aid, @fromId, @toId, @remarks, @by)
+        `);
+      }
+      await tx.commit();
+      res.json({ success: true, transferred: assignmentIds.length });
+    } catch (err) {
+      try { await tx.rollback(); } catch (_) { /* not begun or already rolled back */ }
+      console.error("[dependency-activity-assignment] POST /transfer error:", err.message);
       res.status(500).json({ error: err.message });
     }
   },
@@ -504,6 +693,19 @@ router.post(
       const assignmentId = a.recordset[0].Id;
       if (a.recordset[0].Status !== "COMPLETED") {
         return res.status(400).json({ error: "Only a Completed activity (work dragged to 100%) can be quality-checked." });
+      }
+
+      // When Work Allocation named QC people for this activity, only they
+      // (or a super_admin) may decide it. No one named = anyone with the QC
+      // page's edit right, as before.
+      const qcNamed = await pool.request().input("aid", sql.Int, assignmentId).query(
+        "SELECT QcUserId FROM dbo.DependencyActivityQcAssignee WHERE AssignmentId = @aid",
+      );
+      if (qcNamed.recordset.length && req.user?.role !== "super_admin") {
+        const viewerId = Number(req.user?.userId ?? req.user?.id);
+        if (!qcNamed.recordset.some((r) => Number(r.QcUserId) === viewerId)) {
+          return res.status(403).json({ error: "You're not named as a QC reviewer for this activity." });
+        }
       }
 
       const cp = await pool.request().input("aid", sql.Int, assignmentId).query(
@@ -610,6 +812,14 @@ router.post(
 // any level regardless of who's named. Shared level-satisfaction logic
 // between the two routes below (kept inline rather than factored out — the
 // two call sites are the entire surface that needs it).
+// Approving or rejecting is only meaningful once QC has passed — Completed
+// alone just means work hit 100%, which happens before QC.
+async function qcHasPassed(pool, assignmentId) {
+  const r = await pool.request().input("aid", sql.Int, assignmentId).query(
+    "SELECT TOP 1 Decision FROM dbo.DependencyActivityQc WHERE AssignmentId = @aid ORDER BY QcAt DESC, Id DESC",
+  );
+  return r.recordset[0]?.Decision === "APPROVED";
+}
 function satisfiedLevel(level, approvals) {
   const approvedIds = new Set(
     approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)),
@@ -711,6 +921,9 @@ async function handleApproveLevel(req, res) {
     if (a.recordset[0].Status !== "COMPLETED") {
       return res.status(400).json({ error: "Only a Completed, QC-passed activity is awaiting approval." });
     }
+    if (!(await qcHasPassed(pool, assignmentId))) {
+      return res.status(400).json({ error: "Quality Check hasn't passed yet — this activity can't be approved before it." });
+    }
     let levels = [];
     try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
 
@@ -750,15 +963,24 @@ async function handleApproveLevel(req, res) {
     const already = approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId));
     if (already) return res.status(400).json({ error: "You've already approved this step." });
 
-    await pool.request()
-      .input("aid", sql.Int, assignmentId)
-      .input("levelId", sql.NVarChar(50), currentLevel.id)
-      .input("levelIndex", sql.Int, currentLevelIndex)
-      .input("userId", sql.Int, viewerUserId)
-      .query(`
-        INSERT INTO dbo.DependencyActivityApproval (AssignmentId, LevelId, LevelIndex, ApproverUserId)
-        VALUES (@aid, @levelId, @levelIndex, @userId)
-      `);
+    try {
+      await pool.request()
+        .input("aid", sql.Int, assignmentId)
+        .input("levelId", sql.NVarChar(50), currentLevel.id)
+        .input("levelIndex", sql.Int, currentLevelIndex)
+        .input("userId", sql.Int, viewerUserId)
+        .query(`
+          INSERT INTO dbo.DependencyActivityApproval (AssignmentId, LevelId, LevelIndex, ApproverUserId)
+          VALUES (@aid, @levelId, @levelIndex, @userId)
+        `);
+    } catch (insErr) {
+      // UX_DependencyActivityApproval_Assignment_Level_User — a double-click
+      // or concurrent retry by the same approver.
+      if (insErr.number === 2627 || insErr.number === 2601) {
+        return res.status(400).json({ error: "You've already approved this step." });
+      }
+      throw insErr;
+    }
 
     // NOT just "was this the last level by position" — a mode "all" level
     // with several named users isn't actually cleared until every one of
@@ -768,7 +990,14 @@ async function handleApproveLevel(req, res) {
     // level flipped the whole activity to APPROVED after just the FIRST
     // of three signoffs, the moment that level happened to be the last one
     // configured.
-    const approvalsAfter = [...approvals, { levelId: currentLevel.id, approverUserId: viewerUserId }];
+    // Re-read AFTER our insert instead of appending to the list read before
+    // it: two approvers clearing the last "all" level at the same moment each
+    // used a stale list that lacked the other's row, so neither saw the level
+    // satisfied and the activity stuck at Completed. Each insert precedes its
+    // own re-read, so at least one of them sees both rows.
+    const approvalsAfter = (await pool.request().input("aid", sql.Int, assignmentId).query(
+      "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+    )).recordset;
     const fullyApproved = firstUnsatisfiedLevelIndex(levels, approvalsAfter) == null;
     if (fullyApproved) {
       await pool.request()
@@ -826,6 +1055,9 @@ async function handleRejectLevel(req, res) {
     const assignmentId = a.recordset[0].Id;
     if (a.recordset[0].Status !== "COMPLETED") {
       return res.status(400).json({ error: "Only a Completed, QC-passed activity is awaiting approval." });
+    }
+    if (!(await qcHasPassed(pool, assignmentId))) {
+      return res.status(400).json({ error: "Quality Check hasn't passed yet — send it back from Quality Check instead." });
     }
     let levels = [];
     try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
@@ -913,8 +1145,10 @@ router.get(
       const candidates = await pool.request().query(`
         SELECT daa.Id AS assignmentId, daa.ApprovalLevelsJson AS approvalLevelsJson
         FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
         WHERE daa.Status = 'COMPLETED'
-          AND daa.IsCurrent = 1
+          AND daa.IsCurrent = 1${projectPredicate(req.projectScope, "dm.ProjectId")}
           AND (
             SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc
             WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC
@@ -1220,6 +1454,32 @@ router.get(
       res.json(r.recordset);
     } catch (err) {
       console.error("[dependency-activity-assignment] GET /:rungId/daily-log error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// DELETE /:rungId/daily-log/:logId — removes one logbook day. Only the
+// log row goes; the live assignment's progress/remarks and that day's
+// photos are untouched.
+router.delete(
+  "/:rungId/daily-log/:logId",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    const logId = parseInt(req.params.logId, 10);
+    if (!Number.isFinite(rungId) || !Number.isFinite(logId)) return res.status(400).json({ error: "Invalid id" });
+    try {
+      const pool = await getPool();
+      const r = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("logId", sql.Int, logId)
+        .query("DELETE FROM dbo.DependencyActivityDailyLog WHERE Id = @logId AND DependencyMasterActivityId = @rungId");
+      if (!r.rowsAffected[0]) return res.status(404).json({ error: "Daily log entry not found" });
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] DELETE /:rungId/daily-log/:logId error:", err.message);
       res.status(500).json({ error: err.message });
     }
   },
@@ -1789,6 +2049,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .query(`DELETE FROM dbo.DependencyActivityCheckpoint WHERE Id = @id`);
     }
 
+    invalidateThread(rungId); // engineers / approvers may have changed
     res.json({ success: true, assignmentId });
   } catch (err) {
     console.error("[dependency-activity-assignment] POST /:rungId error:", err.message);

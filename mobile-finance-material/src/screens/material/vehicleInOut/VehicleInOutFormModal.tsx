@@ -3,8 +3,9 @@
 // page; mobile uses a full-screen modal, matching this app's established
 // convention (PaymentFormModal.tsx, ReceivedPaymentFormModal.tsx).
 // Deferred vs. web: CSV import/export, Print — both stay web-only.
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
-import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Image } from "react-native";
+import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
@@ -18,6 +19,12 @@ import {
   type VehicleInOutPayload, type VehicleAttachment, type POItemRemaining, type PickedFile,
 } from "@/api/vehicleInOutApi";
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/screens/finance/payment/OptionPicker";
+import { DateTimeField } from "@/components/DateTimeField";
+import { AuthImage } from "@/components/AuthImage";
+import { ImagePreviewModal } from "@/components/ImagePreviewModal";
+
+/** `localUri` is the copy on this phone, so a photo just taken previews instantly. */
+type FormAttachment = VehicleAttachment & { localUri?: string };
 
 type FormState = {
   companyId: string;
@@ -34,7 +41,7 @@ type FormState = {
   exitTime: string;
   challanNo: string;
   remarks: string;
-  attachments: VehicleAttachment[];
+  attachments: FormAttachment[];
 };
 
 function nowLocal() {
@@ -99,6 +106,7 @@ export function VehicleInOutFormModal({
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [picker, setPicker] = useState<"company" | "project" | "finYear" | "supplier" | "po" | null>(null);
+  const [previewAtt, setPreviewAtt] = useState<FormAttachment | null>(null);
 
   const { data: companies = [] } = useQuery({ queryKey: ["veh-form-companies"], queryFn: fetchCompanyOptions, enabled: visible });
   const { data: projects = [] } = useQuery({ queryKey: ["veh-form-projects"], queryFn: fetchProjectOptions, enabled: visible });
@@ -152,6 +160,15 @@ export function VehicleInOutFormModal({
   }, [visible, editingId, existing]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
+  // Declared after the reset effect above so the locked year isn't wiped by it.
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(visible && !editingId);
+  const finYearLocked = (visible && !editingId) && !!lockedFY;
+  useEffect(() => {
+    if (!(visible && !editingId) || !lockedFY) return;
+    set("finYear", lockedFY.label);
+  }, [visible, editingId, lockedFY?.id]);
 
   const filteredProjects = useMemo(
     () => (form.companyId ? projects.filter((p) => String(p.company_id ?? "") === form.companyId) : projects),
@@ -249,7 +266,9 @@ export function VehicleInOutFormModal({
     setUploading(true);
     try {
       const res = await uploadVehicleAttachments(files);
-      setForm((f) => ({ ...f, attachments: [...f.attachments, ...res.attachments] }));
+      // The server returns attachments in upload order, so each pairs with the file just picked.
+      const added: FormAttachment[] = res.attachments.map((a, i) => ({ ...a, localUri: files[i]?.uri }));
+      setForm((f) => ({ ...f, attachments: [...f.attachments, ...added] }));
     } catch (err: any) {
       Alert.alert("Upload failed", err.message ?? "Something went wrong.");
     } finally {
@@ -351,7 +370,7 @@ export function VehicleInOutFormModal({
             </Text>
             <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
             <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label="Financial Year" value={form.finYear} onPress={() => setPicker("finYear")} />
+            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} onPress={() => setPicker("finYear")} disabled={finYearLocked} />
             <View className="rounded-xl px-3.5 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
               <Text style={{ color: colors.mutedForeground, fontSize: 10, textTransform: "uppercase" }}>Doc Number</Text>
               <Text style={{ color: colors.primary, fontSize: 13, fontFamily: fonts.heading.semibold, marginTop: 2 }}>
@@ -424,10 +443,10 @@ export function VehicleInOutFormModal({
             <TextField value={form.vehicleNo} onChangeText={(v) => set("vehicleNo", v.toUpperCase())} placeholder="e.g. WB-01-AB-1234" />
 
             <FieldLabel required>Entry Time</FieldLabel>
-            <TextField value={form.entryTime} onChangeText={(v) => set("entryTime", v)} placeholder="YYYY-MM-DDTHH:mm" />
+            <DateTimeField value={form.entryTime} onChange={(v) => set("entryTime", v)} title="Entry time" />
 
             <FieldLabel>Exit Time</FieldLabel>
-            <TextField value={form.exitTime} onChangeText={(v) => set("exitTime", v)} placeholder="Leave blank if not yet exited" />
+            <DateTimeField value={form.exitTime} onChange={(v) => set("exitTime", v)} title="Exit time" placeholder="Leave blank if not yet exited" clearable />
 
             <FieldLabel>Supplier Ref / Challan No</FieldLabel>
             <TextField value={form.challanNo} onChangeText={(v) => set("challanNo", v)} placeholder="e.g. CH-20240601-001" />
@@ -457,9 +476,11 @@ export function VehicleInOutFormModal({
             {form.attachments.length > 0 && (
               <View className="flex-row flex-wrap gap-2 mb-2">
                 {form.attachments.map((a) => (
-                  <View key={a.id} className="rounded-lg overflow-hidden" style={{ width: 64, height: 64, borderWidth: 1, borderColor: colors.border }}>
+                  <View key={a.id} className="rounded-lg overflow-hidden" style={{ width: 84, height: 84, borderWidth: 1, borderColor: colors.border }}>
                     {a.mimeType?.startsWith("image/") ? (
-                      <Image source={{ uri: a.url }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                      <Pressable onPress={() => setPreviewAtt(a)} style={{ width: "100%", height: "100%" }}>
+                        <AuthImage url={a.url} localUri={a.localUri} style={{ width: "100%", height: "100%" }} />
+                      </Pressable>
                     ) : (
                       <View className="flex-1 items-center justify-center" style={{ backgroundColor: `${colors.muted}40` }}>
                         <FileText size={18} color={colors.mutedForeground} />
@@ -467,9 +488,10 @@ export function VehicleInOutFormModal({
                     )}
                     <Pressable
                       onPress={() => removeAttachment(a.id)}
-                      style={{ position: "absolute", top: 2, right: 2, width: 16, height: 16, borderRadius: 8, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" }}
+                      hitSlop={6}
+                      style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" }}
                     >
-                      <X size={10} color="#fff" />
+                      <X size={12} color="#fff" />
                     </Pressable>
                   </View>
                 ))}
@@ -500,6 +522,7 @@ export function VehicleInOutFormModal({
       <OptionPickerModal visible={picker === "finYear"} title="Select Financial Year" options={finYearOptions} selectedKey={form.finYear} onSelect={(k) => { set("finYear", k); setPicker(null); }} onClose={() => setPicker(null)} />
       <OptionPickerModal visible={picker === "supplier"} title="Select Supplier" options={supplierOptions} selectedKey={form.supplierId} onSelect={onSupplierChange} onClose={() => setPicker(null)} searchable />
       <OptionPickerModal visible={picker === "po"} title="Select Purchase Order" options={poOptions} selectedKey={form.poId} onSelect={onPOChange} onClose={() => setPicker(null)} searchable clearable />
+      <ImagePreviewModal visible={!!previewAtt} url={previewAtt?.url} localUri={previewAtt?.localUri} title={previewAtt?.filename} onClose={() => setPreviewAtt(null)} />
     </Modal>
   );
 }

@@ -165,6 +165,9 @@ const CivilWorkDprQualityCheck = lazy(
 const CivilWorkDprAmendment = lazy(
   () => import("./pages/civilworkdpr/Amendment"),
 );
+const CivilWorkDprWorkTransfer = lazy(
+  () => import("./pages/civilworkdpr/WorkTransfer"),
+);
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
 );
@@ -344,6 +347,7 @@ const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
 const PostApprovalRights = lazy(
   () => import("./pages/admin/PostApprovalRights"),
 );
+const ProjectAccess = lazy(() => import("./pages/admin/ProjectAccess"));
 const ApprovalInbox = lazy(() => import("./pages/admin/ApprovalInbox"));
 
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
@@ -1209,6 +1213,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-quality-check">
             <CivilWorkDprQualityCheck />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/work-transfer"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-work-transfer">
+            <CivilWorkDprWorkTransfer />
           </ProtectedRoute>
         }
       />
@@ -2148,6 +2160,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <PostApprovalRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/project-access"
+        element={
+          <AdminRoute>
+            <ProjectAccess />
           </AdminRoute>
         }
       />

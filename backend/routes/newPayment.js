@@ -4,6 +4,23 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, paymentProjectSql, ebResolvedProjectSql, assertProjectRawAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a payment whose project is outside the user's scope.
+router.param("id", projectParamGuard(`SELECT ${paymentProjectSql("np")} AS ProjectId FROM dbo.NewPayment np WHERE np.PPaymentID = @id`));
+
+// A restricted user may only record a payment against a project they can see:
+// the one on the form, else the one on the invoice it settles.
+async function assertPaymentProjectAllowed(req, res, body) {
+  if (!req.projectScope) return true;
+  let raw = body?.PProject;
+  if ((raw == null || String(raw).trim() === "") && body?.PExpenseRef) {
+    const r = await getPool().request().input("d", sql.NVarChar(100), String(body.PExpenseRef))
+      .query(`SELECT TOP 1 ${ebResolvedProjectSql("eb")} AS pid FROM dbo.ExpenseBooking eb WHERE eb.EDocNo = @d`);
+    raw = r.recordset[0]?.pid;
+  }
+  return assertProjectRawAllowed(req, res, raw);
+}
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
@@ -143,9 +160,13 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
     if (Number(r.RemainingAmount) <= 0) bad(`${r.EDocNo}: already fully paid — nothing left to merge.`);
   }
 
-  const distinctCompanies = new Set(rows.map((r) => r.ECompanyId));
-  const distinctProjects = new Set(rows.map((r) => r.ProjectKey));
-  const distinctSuppliers = new Set(rows.map((r) => r.SupplierId));
+  // Trim+lowercase ProjectKey specifically — it can fall back to the raw,
+  // manually-entered EProjectName text (see its own comment above) when the
+  // invoice isn't on a real enterprise id, and stray whitespace there
+  // shouldn't split two otherwise-identical projects into "different".
+  const distinctCompanies = new Set(rows.map((r) => Number(r.ECompanyId)));
+  const distinctProjects = new Set(rows.map((r) => String(r.ProjectKey ?? "").trim().toLowerCase()));
+  const distinctSuppliers = new Set(rows.map((r) => Number(r.SupplierId)));
   if (distinctCompanies.size > 1) bad("All merged invoices must belong to the same company.");
   if (distinctProjects.size > 1) bad("All merged invoices must belong to the same project.");
   if (distinctSuppliers.size > 1) bad("All merged invoices must share the same supplier.");
@@ -274,6 +295,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     `;
 
     const conditions = [];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, paymentProjectSql("np"), "").trim());
     if (idFilter) conditions.push(`np.PPaymentID = @idFilter`);
     if (search) {
       conditions.push(`(np.PPaymentName LIKE @search
@@ -830,6 +852,7 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
 
 // ── POST — Create payment ─────────────────────────────────────────────────────
 router.post("/", requirePageRight("new-payment", "create"), validateBody(paymentBodySchema), async (req, res) => {
+  if (!(await assertPaymentProjectAllowed(req, res, req.body))) return;
   let {
     PPaymentName,
     PRemarks,
@@ -1211,6 +1234,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
 
 // ── PUT /:id — Update payment ─────────────────────────────────────────────────
 router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(paymentBodySchema), async (req, res) => {
+  if (!(await assertPaymentProjectAllowed(req, res, req.body))) return;
   const { id } = req.params;
   const {
     PPaymentName,

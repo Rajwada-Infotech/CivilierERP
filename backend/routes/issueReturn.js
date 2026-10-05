@@ -1,6 +1,12 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a return whose project is outside the user's scope.
+// (/issues/:id/items uses :id for a Material Issue, handled by its own check below.)
+const returnGuard = projectParamGuard("SELECT ProjectId FROM dbo.MaterialIssueReturn WHERE ReturnId = @id");
+router.param("id", (req, res, next, id) => (req.path.startsWith("/issues/") ? projectParamGuard("SELECT ProjectId FROM dbo.MaterialIssues WHERE IssueId = @id")(req, res, next, id) : returnGuard(req, res, next, id)));
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -17,6 +23,7 @@ router.get("/", requirePageRight("material-issue-return", "view"), async (req, r
     const pool = getPool();
     const { companyId, projectId, status } = req.query;
     const conditions = ["1=1"];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "ir.ProjectId", "").trim());
     const request = pool.request();
     if (companyId) { conditions.push("ir.CompanyId = @CompanyId"); request.input("CompanyId", sql.Int, parseInt(companyId)); }
     if (projectId) { conditions.push("ir.ProjectId = @ProjectId"); request.input("ProjectId", sql.Int, parseInt(projectId)); }
@@ -49,6 +56,7 @@ router.get("/issues", requirePageRight("material-issue-return", "view"), async (
     const pool = getPool();
     const { companyId, projectId } = req.query;
     const conditions = ["mi.Status = 'Approved'"];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "mi.ProjectId", "").trim());
     const request = pool.request();
     if (companyId) { conditions.push("mi.CompanyId = @CompanyId"); request.input("CompanyId", sql.Int, parseInt(companyId)); }
     if (projectId) { conditions.push("mi.ProjectId = @ProjectId"); request.input("ProjectId", sql.Int, parseInt(projectId)); }
@@ -128,6 +136,7 @@ router.get("/:id", requirePageRight("material-issue-return", "view"), async (req
 // ── POST / — create a return ──────────────────────────────────────────────────
 router.post("/", requirePageRight("material-issue-return", "create"), async (req, res) => {
   const { IssueId, ReturnDate, CompanyId, ProjectId, GodownId, Reason, Remarks, items } = req.body;
+  if (!assertProjectAllowed(req, res, ProjectId)) return;
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "At least one item is required" });
 
@@ -221,6 +230,7 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   const { ReturnDate, IssueId, CompanyId, ProjectId, GodownId, Reason, Remarks, items } = req.body;
+  if (!assertProjectAllowed(req, res, ProjectId)) return;
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "At least one item is required" });
 
