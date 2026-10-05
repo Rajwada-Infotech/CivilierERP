@@ -209,6 +209,27 @@ describe("apply", () => {
   });
 });
 
+describe("size limit", () => {
+  const many = (n) => Array.from({ length: n }, (_, i) => rung({ rungId: i + 1, assignmentId: 1000 + i }));
+
+  it("allows up to 20000 activities in one go", async () => {
+    mockDb.rungs = many(20000);
+    const res = await request(app).post("/api/dependency-bulk-assign/preview").send(body);
+    expect(res.status).toBe(200);
+    expect(res.body.summary.eligible).toBe(20000);
+  });
+
+  it("refuses more than 20000 and tells the user to pick a block, writing nothing", async () => {
+    mockDb.rungs = many(20001);
+    const res = await request(app).post("/api/dependency-bulk-assign/apply").send(body);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/20001 activities/);
+    expect(res.body.error).toMatch(/under 20000/);
+    expect(mockDb.writes).toHaveLength(0);
+    expect(mockDb.tx.begun).toBe(0);
+  });
+});
+
 describe("helpers", () => {
   const { toIntList, normalizeLevels } = router._test;
   it("normalises id lists", () => {
