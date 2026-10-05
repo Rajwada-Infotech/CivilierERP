@@ -28,7 +28,7 @@ const { requireAnyPageRight } = require("../middleware/requirePageRight");
 const { invalidateThread } = require("../services/activityThread");
 
 const SKIP_STATUSES = new Set(["CANCELLED", "APPROVED"]);
-const MAX_ACTIVITIES = 10000;
+const MAX_ACTIVITIES = 20000;
 
 const toIntList = (v) =>
   [...new Set((Array.isArray(v) ? v : []).map((x) => parseInt(x, 10)).filter(Number.isInteger))];
