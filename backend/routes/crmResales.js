@@ -140,6 +140,26 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
       fromCustomerId = row.CustomerId;
       // Snapshotted so a later rate change cannot restate an already-agreed gain.
       originalValue = row.AllocatedValue;
+    } else {
+      // A unit resale is the villa built on a plot (see /complete) — never a
+      // flat or shop, which this flow can't transfer. The seller is whoever
+      // holds the villa now, read from the live booking like a plot's.
+      const held = await pool.request().input("u", sql.Int, unitId).query(`
+        SELECT TOP 1 bk.Id AS BookingId, bk.TotalValue, a.CustomerId
+        FROM dbo.CrmBooking bk
+        JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
+        WHERE bk.UnitId = @u AND bk.IsActive = 1 AND bk.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+        ORDER BY bk.Id DESC`);
+      const onPlot = (await pool.request().input("u", sql.Int, unitId)
+        .query("SELECT COUNT(*) AS n FROM dbo.PlotMaster WHERE ConvertedUnitId = @u")).recordset[0].n > 0;
+      if (!onPlot)
+        return res.status(400).json({ error: "Only a villa built on a plot can be resold here — this unit isn't one." });
+      const row = held.recordset[0];
+      if (!row)
+        return res.status(400).json({ error: "That villa is not currently held by anyone — there is nothing to resell." });
+      fromBookingId = row.BookingId;
+      fromCustomerId = row.CustomerId;
+      originalValue = row.TotalValue;
     }
 
     // The fee's GST comes from the masters, never from the request.

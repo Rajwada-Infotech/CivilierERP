@@ -12,7 +12,7 @@ const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../serv
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
-const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus, requireNotMidApproval } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
 
@@ -901,6 +901,8 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    const midApproval = await requireNotMidApproval(pool, bookingId);
+    if (midApproval) return res.status(400).json({ error: midApproval });
 
     if (await isSaleDeedRegistered(pool, bookingId))
       return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
@@ -940,6 +942,8 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "
     if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
+      const midApproval = await requireNotMidApproval(pool, bookingId);
+      if (midApproval) return res.status(400).json({ error: midApproval });
     }
 
     if (bookingId != null && await isSaleDeedRegistered(pool, bookingId))
@@ -1042,6 +1046,8 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
     if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
+      const midApproval = await requireNotMidApproval(pool, bookingId);
+      if (midApproval) return res.status(400).json({ error: midApproval });
     }
 
     if (bookingId != null && await isSaleDeedRegistered(pool, bookingId))

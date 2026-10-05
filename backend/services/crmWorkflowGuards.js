@@ -12,6 +12,20 @@ const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 // Possession Notice, Brokerage, Handover, Welcome Call, Bank Details,
 // Service Tickets, Payments) calls this first and 400s with the message
 // below if it fails. Returns null when the booking is fine to act on.
+// While a booking sits with its approvers, its price must not move under them —
+// the same lock PUT /crm/bookings/:id applies to rate / value. Parking and extra
+// charges change the total too, so they wait until it's back in Review (or
+// approved: adding parking to a confirmed sale is normal and allowed).
+async function requireNotMidApproval(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT WorkflowStage FROM dbo.CrmBooking WHERE Id = @bid");
+  const stage = r.recordset[0]?.WorkflowStage;
+  if (stage === "MarketingHeadApproval" || stage === "DirectorApproval") {
+    return `This booking is in ${stage} — reject it back to Review before changing its parking or extra charges, so the new total is approved.`;
+  }
+  return null;
+}
+
 async function requireActiveBooking(pool, bookingId) {
   const row = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Status, IsActive, IsFrozen, FreezeReason, FreezeExpiresAt FROM dbo.CrmBooking WHERE Id = @bid");
@@ -1341,7 +1355,7 @@ async function resolveOcCcGate(pool, bookingId, certType = null) {
   return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
 }
 
-module.exports = {
+module.exports = { requireNotMidApproval,
   resolveNocType,
   resolveOcCcGate,
   validateAgreementPreparationPrerequisites,

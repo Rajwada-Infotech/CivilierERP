@@ -620,8 +620,13 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const booking = await pool.request().input("id", sql.Int, id)
-      .query("SELECT UnitId, Status, RatePerSqFt, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
+      .query("SELECT UnitId, Status, WorkflowStage, RatePerSqFt, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
     if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    // A new unit re-prices the booking — not while approvers are looking at
+    // the old price (same lock PUT /:id applies to the financial fields).
+    if (["MarketingHeadApproval", "DirectorApproval"].includes(booking.recordset[0].WorkflowStage)) {
+      return res.status(400).json({ error: `This booking is in ${booking.recordset[0].WorkflowStage} — reject it back to Review before changing its unit, so the new price is approved.` });
+    }
     const oldUnitId = booking.recordset[0].UnitId;
     const oldRow = booking.recordset[0];
     const newUnitId = parseInt(b.NewUnitId);
