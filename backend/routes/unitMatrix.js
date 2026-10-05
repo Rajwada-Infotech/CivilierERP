@@ -239,6 +239,8 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         BlockName: r.BlockName,
         Status: !r.UnitIsActive ? "Blocked" : isBooked ? "Booked" : isOnHold ? "OnHold" : "Available",
         AreaSqFt: r.AreaSqFt || null,
+        KindName: r.KindName || null,
+        IsCommercial: !!r.IsCommercial,
         BookingId: hasBookingId ? r.BookingId : null,
         BookingNo: r.BookingNo || null,
         BookingStatus: r.BookingStatus || null,

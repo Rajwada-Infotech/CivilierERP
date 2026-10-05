@@ -14,7 +14,7 @@ const { applyPagination } = require("../services/crmListPagination");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
 const { getIo } = require("../socket");
-const { guardAndConvertHold, placeHoldIfNeeded } = require("../services/crmHoldService");
+const { guardAndConvertHold, placeHoldIfNeeded, releaseAllHoldsForApplication } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, resolveNocType } = require("../services/crmWorkflowGuards");
 const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
@@ -1372,7 +1372,18 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       await syncApplicationOnBookingTerminal(pool, id, CrmStatus.CANCELLED,
         "BookingAdminDelete", "Booking deleted by admin", actor);
 
-      if (booking.UnitId) {
+      // A cancelled application can't hold inventory — release whatever it
+      // still holds instead of re-holding the unit for nobody. Only a live
+      // application gets the unit held while it's corrected and re-booked.
+      const appNow = (await pool.request().input("aid", sql.Int, booking.ApplicationId)
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid")).recordset[0];
+      if (appNow && appNow.Status === CrmStatus.CANCELLED) {
+        try {
+          await releaseAllHoldsForApplication(pool, booking.ApplicationId, actor);
+        } catch (holdErr) {
+          console.error("[crm-bookings] hold release after delete failed:", holdErr.message);
+        }
+      } else if (booking.UnitId) {
         try {
           await placeHoldIfNeeded(pool, {
             entityType: "Unit",
