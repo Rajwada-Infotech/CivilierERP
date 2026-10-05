@@ -407,7 +407,7 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
       `);
 
     const row = result.recordset[0];
-    res.json({ success: true, status: row?.Status, duesClearedCheck: row?.DuesClearedCheck === 1 });
+    res.json({ success: true, status: row?.Status, duesClearedCheck: !!row?.DuesClearedCheck });
   } catch (e) {
     console.error("[crm-pre-possession] PUT error:", e.message);
     res.status(500).json({ error: e.message });

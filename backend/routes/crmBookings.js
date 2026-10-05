@@ -445,7 +445,9 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const inApproval = APPROVAL_STAGES.includes(oldRow.WorkflowStage) || oldRow.ReadyForApprovalAt != null;
     const financialFields = ["RatePerSqFt", "TotalValue", "BookingAmount", "PaymentPlanId"];
     if (inApproval && financialFields.some(f => b[f] !== undefined)) {
-      return res.status(400).json({ error: `Financial fields (rate, value, booking amount, payment plan) cannot be changed once the booking is in ${oldRow.WorkflowStage || "the approval pipeline"}. Reject it back to Review first.` });
+      return res.status(400).json({ error: oldRow.WorkflowStage === "Confirmed"
+        ? "This booking is approved — its rate, value, booking amount and payment plan are final. Cancel and re-book to change them."
+        : `Financial fields (rate, value, booking amount, payment plan) cannot be changed once the booking is in ${oldRow.WorkflowStage || "the approval pipeline"}. Reject it back to Review first.` });
     }
 
     const existingArea = oldRow.AreaSqFt;
@@ -622,6 +624,18 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     const booking = await pool.request().input("id", sql.Int, id)
       .query("SELECT UnitId, Status, WorkflowStage, RatePerSqFt, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
     if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    // Once the Agreement for Sale is signed (or the deed registered) the unit
+    // is named in a legal document — the ERP can't quietly swap it. Cancellation
+    // and parking already refuse at this point; so must a unit change.
+    {
+      const { isLegalWorkStarted, isSaleDeedRegistered } = require("../services/crmWorkflowGuards");
+      if (await isSaleDeedRegistered(pool, id)) {
+        return res.status(400).json({ error: "The Sale Deed is registered — the unit can't be changed in the ERP. A Deed of Rectification at the Sub-Registrar is required." });
+      }
+      if (await isLegalWorkStarted(pool, id)) {
+        return res.status(400).json({ error: "The Agreement for Sale is already signed and names this unit — cancel the agreement before changing the unit." });
+      }
+    }
     // A new unit re-prices the booking — not while approvers are looking at
     // the old price (same lock PUT /:id applies to the financial fields).
     if (["MarketingHeadApproval", "DirectorApproval"].includes(booking.recordset[0].WorkflowStage)) {
