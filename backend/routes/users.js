@@ -11,6 +11,7 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
+const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 
 // Privileged roles that can always list users (Password Reset, User Management)
@@ -302,6 +303,7 @@ router.post(
     try {
       const hashed = await bcrypt.hash(password, SALT_ROUNDS);
       const pool = getPool();
+      const withCreatedBy = await usersHaveCreatedBy(pool);
       await pool
         .request()
         .input("name", sql.NVarChar, name)
@@ -309,11 +311,12 @@ router.post(
         .input("RoleId", sql.Int, assignedRoleId)
         .input("can_accept_tickets", sql.Bit, can_accept_tickets ? 1 : 0)
         .input("DepartmentId", sql.Int, DepartmentId ? Number(DepartmentId) : null)
+        .input("createdBy", sql.Int, req.user?.userId ?? null)
         .input("password", sql.NVarChar, hashed).query(`
-          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets, DepartmentId)
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets, DepartmentId${withCreatedBy ? ", CreatedBy" : ""})
           VALUES (
             @name, @email, @password, @RoleId,
-            GETDATE(), 0, @can_accept_tickets, @DepartmentId
+            GETDATE(), 0, @can_accept_tickets, @DepartmentId${withCreatedBy ? ", @createdBy" : ""}
           )
         `);
       res.json({ message: "User created" });
