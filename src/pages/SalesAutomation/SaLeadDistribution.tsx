@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { fmtIstIso } from "@/lib/istTime";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -7,6 +8,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/lead-distribution";
 const RULES_API = "/api/sa/distribution-rules";
@@ -160,11 +162,11 @@ const SaLeadDistribution: React.FC = () => {
     ...(method === "Manual" ? [{
       id: "assignTo", header: "Assign To", size: 130, enableSorting: false,
       cell: (i: any) => (
-        <select value={assignments[i.row.original.Id] || ""} onChange={(e) => setAssignments((a) => ({ ...a, [i.row.original.Id]: parseInt(e.target.value) }))}
+        <SearchableNativeSelect value={assignments[i.row.original.Id] || ""} onChange={(e) => setAssignments((a) => ({ ...a, [i.row.original.Id]: parseInt(e.target.value) }))}
           className="text-xs border border-border rounded px-2 py-1 bg-background">
           <option value="">Select</option>
           {eligibleUsers.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
-        </select>
+        </SearchableNativeSelect>
       ),
     } as ColumnDef<any, unknown>] : []),
   ];
@@ -182,7 +184,7 @@ const SaLeadDistribution: React.FC = () => {
       cell: (i) => <span className="text-muted-foreground">L{i.row.original.Level}</span> },
     { accessorKey: "Method", header: "Method", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
     { accessorKey: "DistributedAt", header: "Date", size: 140,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.DistributedAt ? String(i.row.original.DistributedAt).slice(0, 16).replace("T", " ") : "—"}</span> },
+      cell: (i) => <span className="text-muted-foreground">{i.row.original.DistributedAt ? fmtIstIso(i.row.original.DistributedAt) : "—"}</span> },
   ];
 
   return (
@@ -357,11 +359,11 @@ const SaLeadDistribution: React.FC = () => {
                 </div>
                 {newRule.members.map((m, i) => (
                   <div key={i} className="flex items-center gap-2 mb-2">
-                    <select value={m.UserId} onChange={(e) => setNewRule((r) => { const ms = [...r.members]; ms[i] = { ...ms[i], UserId: parseInt(e.target.value) }; return { ...r, members: ms }; })}
+                    <SearchableNativeSelect value={m.UserId} onChange={(e) => setNewRule((r) => { const ms = [...r.members]; ms[i] = { ...ms[i], UserId: parseInt(e.target.value) }; return { ...r, members: ms }; })}
                       className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background">
                       <option value={0}>Select user</option>
                       {users.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
-                    </select>
+                    </SearchableNativeSelect>
                     <input type="number" min={0} max={100} value={m.Weight}
                       onChange={(e) => setNewRule((r) => { const ms = [...r.members]; ms[i] = { ...ms[i], Weight: parseFloat(e.target.value) || 0 }; return { ...r, members: ms }; })}
                       className="w-20 text-sm border border-border rounded px-2 py-1.5 bg-background" placeholder="Weight" />

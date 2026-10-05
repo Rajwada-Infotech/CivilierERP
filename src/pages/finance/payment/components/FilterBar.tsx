@@ -5,6 +5,7 @@ import { Building2, FolderKanban, CalendarDays, Users, Search, X, ChevronDown } 
 import type { BookingFilters } from "../types";
 import { PARTY_TYPE_LABELS } from "../api";
 import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // Typeable, scrollable combobox for the Vendor filter (suppliers,
 // contractors, brokers — grouped by category) — a plain native <select>
@@ -304,7 +305,7 @@ export function FilterBar({
               <Icon size={9} /> {label}
             </label>
             <div className="relative">
-              <select
+              <SearchableNativeSelect
                 value={filters[key] || ""}
                 onChange={(e) => onChange(key, e.target.value)}
                 className="w-full appearance-none pl-2 pr-7 py-1.5 rounded-lg text-xs bg-background border border-border/70 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -315,7 +316,7 @@ export function FilterBar({
                     {item}
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
               <ChevronDown
                 size={11}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"

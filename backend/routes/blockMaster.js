@@ -61,10 +61,14 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         b.UpdatedAt,
         COALESCE(unitLock.LockBookingNo, parkLock.LockBookingNo) AS LockBookingNo,
         COALESCE(unitLock.LockHoldId, parkLock.LockHoldId) AS LockHoldId,
-        planTags.PlanIds AS PaymentPlanIds, planTags.PlanNames AS PaymentPlanNames
+        planTags.PlanIds AS PaymentPlanIds, planTags.PlanNames AS PaymentPlanNames,
+        COALESCE(bt.Name, pt.Name) AS TypeName,
+        CASE WHEN b.ProjectTypeId IS NOT NULL THEN 1 ELSE 0 END AS HasOwnType
       FROM dbo.BlockMaster b
       LEFT JOIN dbo.enterprise e
         ON e.id = b.ProjectId AND e.business_type = 'P'
+      LEFT JOIN dbo.ProjectTypeMaster bt ON bt.Id = b.ProjectTypeId
+      LEFT JOIN dbo.ProjectTypeMaster pt ON pt.Id = e.project_type_id
       OUTER APPLY (
         SELECT STRING_AGG(CAST(bpp.PlanId AS VARCHAR(20)), ',') AS PlanIds,
                STRING_AGG(pp.PlanName, ', ') AS PlanNames
@@ -76,7 +80,7 @@ router.get("/", cache("block-master", 300), async (req, res) => {
         SELECT TOP 1 bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
         FROM dbo.UnitMaster u
         LEFT JOIN dbo.CrmBooking bk
-          ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected')
+          ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Transferred')
         LEFT JOIN dbo.CrmInventoryHold h
           ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
         WHERE u.BlockId = b.Id AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL)

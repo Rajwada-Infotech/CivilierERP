@@ -19,6 +19,9 @@
  */
 const { getPool, sql } = require("../db");
 const { emitNotification } = require("./notify");
+
+// Phone apps that show CRM follow-up work; SLA reminders are pushed to these only.
+const SLA_PUSH = { push: true, apps: ["follow-up", "admin"] };
 const { advanceApplicationStatus, syncApplicationOnBookingTerminal } = require("./crmApplicationWorkflow");
 const { logCrmAudit } = require("./crmAudit");
 const { findActiveHold, releaseHold } = require("./crmHoldService");
@@ -73,7 +76,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_ticket_overdue",
         "Ticket SLA Breached",
         `${row.TicketNo}: ${row.Subject} (${row.ApplicantName} · ${row.BookingNo}) is past its SLA due date.`,
-        row.Id, "service_ticket");
+        row.Id, "service_ticket", SLA_PUSH);
       return true;
     },
   },
@@ -96,7 +99,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_payment_overdue",
         "Payment Overdue",
         `${row.ApplicantName} · ${row.BookingNo} — ${row.MilestoneName} overdue (₹${balance.toLocaleString("en-IN")} pending)`,
-        row.Id, "payment_milestone");
+        row.Id, "payment_milestone", SLA_PUSH);
       return true;
     },
   },
@@ -121,7 +124,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_followup_call_due",
         "Follow-up Call Overdue",
         `${row.ApplicantName} · ${row.BookingNo} — scheduled follow-up call is overdue.`,
-        row.Id, "crm_booking");
+        row.Id, "crm_booking", SLA_PUSH);
       return true;
     },
   },
@@ -159,7 +162,7 @@ const REGISTRY = [
         await emitNotification(pool, row.AssignedTo, "crm_hold_expired",
           "Hold Expired",
           `${label} — hold for ${row.ApplicantName} has expired and is now back to Available.`,
-          row.Id, "crm_inventory_hold");
+          row.Id, "crm_inventory_hold", SLA_PUSH);
       }
 
       // If this was the LAST thing keeping the Application open — no other
@@ -205,7 +208,7 @@ const REGISTRY = [
         FROM dbo.CrmBooking bk
         JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
         LEFT JOIN dbo.UnitMaster u ON u.Id = bk.UnitId
-        WHERE bk.IsActive = 1 AND bk.Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired')
+        WHERE bk.IsActive = 1 AND bk.Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired', 'Transferred')
           AND bk.ConfirmDeadline IS NOT NULL AND bk.ConfirmDeadline < SYSDATETIME()
       `);
       return r.recordset;
@@ -220,13 +223,16 @@ const REGISTRY = [
       const claimed = await pool.request().input("id", sql.Int, row.Id).query(`
         UPDATE dbo.CrmBooking SET Status = 'Expired'
         OUTPUT INSERTED.Id
-        WHERE Id = @id AND IsActive = 1 AND Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired')
+        WHERE Id = @id AND IsActive = 1 AND Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired', 'Transferred')
       `);
       if (!claimed.recordset.length) return false;
 
       await logCrmAudit(pool, "Booking", row.Id, null, [
         { field: "Status", oldVal: "Pending", newVal: "Expired" },
       ]);
+
+      // Its unit / plot lines too — or the expired sale locks them for good.
+      await require("./crmWorkflowGuards").releaseBookingInventoryLines(pool, row.Id);
 
       // Free the Unit back up — release its hold if the sweep hasn't
       // already caught it separately (it may still be 'Converted', not
@@ -258,7 +264,7 @@ const REGISTRY = [
         await emitNotification(pool, row.AssignedTo, "crm_booking_confirm_expired",
           "Booking Expired — Not Confirmed In Time",
           `${row.BookingNo} (${row.ApplicantName}) — ${label} was never approved/paid within its window and has expired.`,
-          row.Id, "crm_booking");
+          row.Id, "crm_booking", SLA_PUSH);
       }
       return true;
     },
@@ -290,7 +296,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_registration_overdue",
         "Sale Deed Registration Overdue",
         `${row.DeedNo} (${row.BookingNo} · ${row.ApplicantName}) — registration deadline was ${deadline}. RegistrationNo not yet recorded.`,
-        row.Id, "crm_sales_deed");
+        row.Id, "crm_sales_deed", SLA_PUSH);
       return true;
     },
   },
@@ -320,7 +326,7 @@ const REGISTRY = [
       await emitNotification(pool, row.AssignedTo, "sla_possession_response_overdue",
         "Possession Notice Response Overdue",
         `${row.NoticeNo} (${row.BookingNo} · ${row.ApplicantName}) — response deadline was ${deadline} and the customer has neither acknowledged nor disputed.`,
-        row.Id, "crm_possession_notice");
+        row.Id, "crm_possession_notice", SLA_PUSH);
       return true;
     },
   },
@@ -352,7 +358,7 @@ const REGISTRY = [
         await emitNotification(pool, row.AssignedTo, "crm_hold_reminder",
           "Hold Reminder",
           `${label} — hold for ${row.ApplicantName} expires in ${daysLeft} day(s). Follow up before it auto-releases.`,
-          row.Id, "crm_inventory_hold");
+          row.Id, "crm_inventory_hold", SLA_PUSH);
       }
       return true;
     },

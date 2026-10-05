@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { fmtIstIso } from "@/lib/istTime";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
@@ -930,7 +931,7 @@ const ALL_REPORTS: ReportDef[] = [
         header: "Created Date",
         accessor: (r) =>
           r.CreatedDate
-            ? String(r.CreatedDate).slice(0, 19).replace("T", " ")
+            ? fmtIstIso(String(r.CreatedDate), true)
             : "—",
       },
       { header: "Modified By", accessor: (r) => (r.ModifiedBy ?? "—") as string },
@@ -938,7 +939,7 @@ const ALL_REPORTS: ReportDef[] = [
         header: "Modified Date",
         accessor: (r) =>
           r.ModifiedDate
-            ? String(r.ModifiedDate).slice(0, 19).replace("T", " ")
+            ? fmtIstIso(String(r.ModifiedDate), true)
             : "—",
       },
       { header: "Posted By", accessor: (r) => (r.PostedBy ?? "—") as string },
@@ -946,7 +947,7 @@ const ALL_REPORTS: ReportDef[] = [
         header: "Posted Date",
         accessor: (r) =>
           r.PostedDate
-            ? String(r.PostedDate).slice(0, 19).replace("T", " ")
+            ? fmtIstIso(String(r.PostedDate), true)
             : "—",
       },
     ],
@@ -1282,7 +1283,7 @@ const ALL_REPORTS: ReportDef[] = [
         header: "Timestamp",
         accessor: (r) =>
           r.timestamp
-            ? String(r.timestamp).slice(0, 19).replace("T", " ")
+            ? fmtIstIso(String(r.timestamp), true)
             : "—",
       },
     ],

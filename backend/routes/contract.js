@@ -3,6 +3,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
+
+// Any :id route — refuse a contract whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.Contract WHERE ContractId = @id"));
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
@@ -64,7 +68,7 @@ router.get("/", authenticateToken, async (req, res) => {
       FROM dbo.Contract c
       LEFT JOIN dbo.enterprise co ON co.id = c.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = c.ProjectId
-      WHERE 1=1
+      WHERE 1=1${projectPredicate(req.projectScope, "c.ProjectId")}
         ${companyId ? "AND c.CompanyId = @CompanyId" : ""}
         ${projectId ? "AND c.ProjectId = @ProjectId" : ""}
         ${finYear   ? "AND c.FinYear = @FinYear" : ""}
@@ -155,7 +159,7 @@ router.get("/options", authenticateToken, async (req, res) => {
                     ISNULL(' — ' + c.ContactPerson, '')) AS label,
              c.ContractAmount
       FROM dbo.Contract c
-      WHERE c.Status <> 'Deleted'
+      WHERE c.Status <> 'Deleted'${projectPredicate(req.projectScope, "c.ProjectId")}
     `;
     if (req.query.companyId) {
       query += " AND c.CompanyId = @CompanyId";
@@ -258,6 +262,7 @@ router.get("/:id/attachment/:index", authenticateToken, async (req, res) => {
 router.post("/", authenticateToken, requirePageRight("finance-contracts", "create"), async (req, res) => {
   const email = requireUser(req, res);
   if (!email) return;
+  if (!assertProjectAllowed(req, res, req.body?.projectId)) return;
   try {
     const pool = getPool();
     const {
@@ -338,6 +343,7 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   const email = requireUser(req, res);
   if (!email) return;
+  if (!assertProjectAllowed(req, res, req.body?.projectId)) return;
   let wasRejected = false;
   try {
     await guardEdit("contracts", id);

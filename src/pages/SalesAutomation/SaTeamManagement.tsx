@@ -10,6 +10,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { UserPlus, UserMinus, ArrowRightLeft, TrendingUp, TrendingDown, Users, ChevronDown, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/teams";
 
@@ -289,7 +290,7 @@ const SaTeamManagement: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="text-xs text-muted-foreground block mb-1.5">Select Sales Person</label>
-              <select
+              <SearchableNativeSelect
                 value={selectedAddUser}
                 onChange={(e) => setSelectedAddUser(e.target.value)}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background"
@@ -298,7 +299,7 @@ const SaTeamManagement: React.FC = () => {
                 {(unassigned as any[]).map((u: any) => (
                   <option key={u.Id} value={u.Id}>{u.Name} ({u.Role.replace(/_/g, " ")})</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button
@@ -324,7 +325,7 @@ const SaTeamManagement: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="text-xs text-muted-foreground block mb-1.5">Transfer to Team Lead</label>
-              <select
+              <SearchableNativeSelect
                 value={selectedTransferLead}
                 onChange={(e) => setSelectedTransferLead(e.target.value)}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background"
@@ -333,7 +334,7 @@ const SaTeamManagement: React.FC = () => {
                 {teamLeads.map((tl: any) => (
                   <option key={tl.Id} value={tl.Id}>{tl.Name}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button

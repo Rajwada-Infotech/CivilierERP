@@ -3,6 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool } = require("../db");
+const { projectPredicate, ebResolvedProjectSql } = require("../services/projectScope");
 const { redisGet, redisSet } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
@@ -18,7 +19,18 @@ router.use(checkPermissionForMethod("Material", "MaterialDashboard"));
 
 router.get("/", async (req, res) => {
   try {
-    const CACHE_KEY = "material_dashboard";
+    // Project scoping: a restricted user's figures cover only their projects, so
+    // the cached payload is kept per scope — never shared with other scopes.
+    const scope = req.projectScope;
+    const CACHE_KEY = scope
+      ? `material_dashboard:ps${[...scope].map(Number).sort((a, b) => a - b).join("-")}`
+      : "material_dashboard";
+    const poP = projectPredicate(scope, "ProjectId");
+    const woP = projectPredicate(scope, "ProjectId");
+    const poAliasP = (a) => projectPredicate(scope, `${a}.ProjectId`);
+    const grnP = (col) => (scope ? ` AND ${col} IN (SELECT PurchaseOrderID FROM dbo.PurchaseOrders WHERE 1=1${projectPredicate(scope, "ProjectId")})` : "");
+    const ebP = projectPredicate(scope, ebResolvedProjectSql("eb"));
+    const slP = (col) => (scope ? ` AND ${col} IN (SELECT GodownID FROM dbo.Godowns WHERE 1=1${projectPredicate(scope, "ProjectID")})` : "");
     const CACHE_TTL = 60;
     try {
       const cached = await redisGet(CACHE_KEY);
@@ -82,6 +94,7 @@ router.get("/", async (req, res) => {
           ISNULL(SUM(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected')
                           THEN TotalAmount ELSE 0 END), 0) AS OpenValue
         FROM dbo.GoodsReceiptNotes
+        WHERE 1=1${grnP("POID")}
       `),
 
       // ── Purchase Orders ──────────────────────────────────────────────
@@ -95,6 +108,7 @@ router.get("/", async (req, res) => {
           ISNULL(SUM(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected')
                           THEN TotalAmount ELSE 0 END), 0)                             AS OpenValue
         FROM dbo.PurchaseOrders
+        WHERE 1=1${poP}
       `),
 
       // ── Work Orders ──────────────────────────────────────────────────
@@ -106,6 +120,7 @@ router.get("/", async (req, res) => {
           COUNT(CASE WHEN YEAR(CreatedAt) = YEAR(GETDATE())
                       AND MONTH(CreatedAt) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount
         FROM dbo.WorkOrderHeader
+        WHERE 1=1${woP}
       `),
 
       // ── Material Expenses ────────────────────────────────────────────
@@ -116,7 +131,8 @@ router.get("/", async (req, res) => {
           COUNT(CASE WHEN ISNULL(EStatus,'') = 'Approved' THEN 1 END) AS ApprovedCount,
           ISNULL(SUM(EAmount), 0) AS TotalAmount,
           ISNULL(SUM(CASE WHEN ISNULL(EStatus,'') = 'Pending' THEN EAmount ELSE 0 END), 0) AS PendingAmount
-        FROM dbo.ExpenseBooking
+        FROM dbo.ExpenseBooking eb
+        WHERE 1=1${ebP}
       `),
 
       // ── Stock Ledger ─────────────────────────────────────────────────
@@ -127,6 +143,7 @@ router.get("/", async (req, res) => {
           ISNULL(SUM(CASE WHEN Type='OUT' THEN Qty ELSE 0 END), 0) AS TotalOut,
           COUNT(DISTINCT ItemID) AS UniqueItems
         FROM dbo.StockLedger
+        WHERE 1=1${slP("GodownID")}
       `),
 
       // ── UOM count ────────────────────────────────────────────────────
@@ -149,6 +166,7 @@ router.get("/", async (req, res) => {
         FROM dbo.GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId        = grn.SupplierID
         LEFT JOIN dbo.PurchaseOrders    p ON p.PurchaseOrderID = grn.POID
+        WHERE 1=1${grnP("grn.POID")}
         ORDER BY grn.GRNID DESC
       `),
 
@@ -162,6 +180,7 @@ router.get("/", async (req, res) => {
         FROM dbo.PurchaseOrders po
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
         LEFT JOIN dbo.enterprise        en ON en.id      = po.ProjectId
+        WHERE 1=1${poAliasP("po")}
         ORDER BY po.PurchaseOrderID DESC
       `),
 
@@ -176,6 +195,7 @@ router.get("/", async (req, res) => {
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
         LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
         LEFT JOIN dbo.AccountHeadMaster con ON con.LHeadId = h.ContractorId
+        WHERE 1=1${poAliasP("h")}
         ORDER BY h.Id DESC
       `),
 
@@ -192,7 +212,7 @@ router.get("/", async (req, res) => {
           ah.LHeadName AS SupplierName
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = eb.LHeadId
-        WHERE ISNULL(eb.EStatus, '') != 'Draft'
+        WHERE ISNULL(eb.EStatus, '') != 'Draft'${ebP}
         ORDER BY eb.Eid DESC
       `),
 
@@ -203,6 +223,7 @@ router.get("/", async (req, res) => {
           COUNT(*) AS Count,
           ISNULL(SUM(TotalAmount), 0) AS TotalValue
         FROM dbo.PurchaseOrders
+        WHERE 1=1${poP}
         GROUP BY Status
       `),
 
@@ -213,6 +234,7 @@ router.get("/", async (req, res) => {
           COUNT(*) AS Count,
           ISNULL(SUM(TotalAmount), 0) AS TotalValue
         FROM dbo.WorkOrderHeader
+        WHERE 1=1${woP}
         GROUP BY Status
       `),
 
@@ -227,6 +249,7 @@ router.get("/", async (req, res) => {
           SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END) AS NetStock
         FROM dbo.StockLedger sl
         LEFT JOIN dbo.Item_Master_Group img ON img.M_Code = sl.ItemID
+        WHERE 1=1${slP("sl.GodownID")}
         GROUP BY sl.ItemID, img.M_Name
         ORDER BY TotalIn DESC
       `),
@@ -238,8 +261,9 @@ router.get("/", async (req, res) => {
           COUNT(CASE WHEN YEAR(CreatedAt) = YEAR(GETDATE())
                       AND MONTH(CreatedAt) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount,
           COUNT(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END) AS TodayCount,
-          ISNULL((SELECT SUM(mii.Quantity) FROM dbo.MaterialIssueItems mii), 0) AS TotalQty
+          ISNULL((SELECT SUM(mii.Quantity) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId IN (SELECT mx.IssueId FROM dbo.MaterialIssues mx WHERE 1=1${projectPredicate(scope, "mx.ProjectId")})), 0) AS TotalQty
         FROM dbo.MaterialIssues mi
+        WHERE 1=1${poAliasP("mi")}
       `),
 
       // ── Material Requests ─────────────────────────────────────────────
@@ -254,6 +278,7 @@ router.get("/", async (req, res) => {
           COUNT(CASE WHEN YEAR(CreatedAt) = YEAR(GETDATE())
                       AND MONTH(CreatedAt) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount
         FROM dbo.MaterialRequests
+        WHERE 1=1${poP}
       `),
 
       // ── Recent Issues (last 6) ────────────────────────────────────────
@@ -267,6 +292,7 @@ router.get("/", async (req, res) => {
         FROM dbo.MaterialIssues mi
         LEFT JOIN dbo.enterprise ec ON ec.id = mi.CompanyId
         LEFT JOIN dbo.enterprise ep ON ep.id = mi.ProjectId
+        WHERE 1=1${poAliasP("mi")}
         ORDER BY mi.CreatedAt DESC
       `),
 
@@ -280,6 +306,7 @@ router.get("/", async (req, res) => {
         FROM dbo.MaterialRequests mr
         LEFT JOIN dbo.enterprise ec ON ec.id = mr.CompanyId
         LEFT JOIN dbo.enterprise ep ON ep.id = mr.ProjectId
+        WHERE 1=1${poAliasP("mr")}
         ORDER BY mr.CreatedAt DESC
       `),
 
@@ -289,7 +316,7 @@ router.get("/", async (req, res) => {
           CAST(GRNDate AS DATE)   AS Day,
           ISNULL(SUM(TotalAmount), 0) AS Amount
         FROM dbo.GoodsReceiptNotes
-        WHERE CAST(GRNDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        WHERE CAST(GRNDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))${grnP("POID")}
         GROUP BY CAST(GRNDate AS DATE)
       `),
 
@@ -299,7 +326,7 @@ router.get("/", async (req, res) => {
           CAST(PODate AS DATE)    AS Day,
           ISNULL(SUM(TotalAmount), 0) AS Amount
         FROM dbo.PurchaseOrders
-        WHERE CAST(PODate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        WHERE CAST(PODate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))${poP}
         GROUP BY CAST(PODate AS DATE)
       `),
     ]);

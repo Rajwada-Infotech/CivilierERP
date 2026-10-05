@@ -9,9 +9,18 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
+let unitOptionsPromise: Promise<{ kinds: { Code: string; Name: string }[]; layouts: string[] }> | null = null;
+const fetchUnitOptions = () => {
+  unitOptionsPromise ??= fetchWithAuth("/api/project-master/unit-options")
+    .then((r) => (r.ok ? r.json() : { kinds: [], layouts: [] }))
+    .catch(() => ({ kinds: [], layouts: [] }));
+  return unitOptionsPromise;
+};
 import { CheckCircle2, IndianRupee, LayoutList, Kanban, GitMerge, ArrowRightLeft, Clock, Printer } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/leads";
 
@@ -102,8 +111,9 @@ const fields: FieldDef[] = [
   { name: "Classification", label: "Classification", type: "select", options: ["Hot","Warm","Cold","NotInterested","CallBackLater"] },
   { name: "BudgetMin", label: "Budget Min", type: "number" },
   { name: "BudgetMax", label: "Budget Max", type: "number" },
-  { name: "PropertyType", label: "Property Type", type: "select", options: ["Apartment","Villa","Commercial","Plot","Warehouse","Studio"] },
-  { name: "BhkPreference", label: "BHK Preference", type: "select", options: ["Studio","1BHK","2BHK","3BHK","4BHK+"] },
+  // From the masters: unit kinds (Unit Master › Unit kinds) and layouts (Unit Composition).
+  { name: "PropertyType", label: "Property Type", type: "select", asyncOptions: async () => (await fetchUnitOptions()).kinds.map((k) => ({ value: k.Name, label: k.Name })) },
+  { name: "BhkPreference", label: "BHK Preference", type: "select", asyncOptions: async () => (await fetchUnitOptions()).layouts.map((l) => ({ value: l, label: l })) },
   { name: "PreferredLocation", label: "Preferred Location", type: "text" },
   { name: "PurchaseTimeline", label: "Purchase Timeline", type: "select", options: ["Immediate","3Months","6Months","1Year","JustExploring"] },
   { name: "CustomerRemarks", label: "Customer Remarks", type: "textarea", fullWidth: true },
@@ -743,7 +753,7 @@ const SaLeadManagement: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1.5">Transfer To Team Lead <span className="text-destructive">*</span></label>
-                <select
+                <SearchableNativeSelect
                   value={transferToTLId}
                   onChange={(e) => setTransferToTLId(e.target.value)}
                   className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background"
@@ -752,7 +762,7 @@ const SaLeadManagement: React.FC = () => {
                   {(tlOptions as any[]).map((tl: any) => (
                     <option key={tl.Id} value={tl.Id}>{tl.Name}</option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1.5">Notes (optional)</label>

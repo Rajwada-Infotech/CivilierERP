@@ -9,6 +9,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { MapPin, Phone } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/inquiry";
 const LEADS_API = "/api/sa/leads";
@@ -337,14 +338,14 @@ const SaInquiryDashboard: React.FC = () => {
             ))}
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Assigned Executive</label>
-              <select
+              <SearchableNativeSelect
                 value={visitForm.ExecutiveId}
                 onChange={(e) => setVisitForm((f) => ({ ...f, ExecutiveId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
               >
                 <option value="">Select executive</option>
                 {userOptions.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Pickup Required</label>

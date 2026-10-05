@@ -29,7 +29,7 @@ type Plot = {
   LockBookingNo?: string | null; LockApplicationNo?: string | null; LockHoldId?: number | null; AdjacentPlotCount?: number;
 };
 type PlotBlock = { BlockId: number; BlockName: string; ProjectId: number; ProjectName: string };
-type ConstructedAssetKind = { Id: number; Code: string; Name: string; SortOrder?: number; IsActive?: boolean };
+type ConstructedAssetKind = { Id: number; Code: string; Name: string; SortOrder?: number; IsActive?: boolean; IsLand?: boolean; IsCommercial?: boolean };
 // Plot facing is master data (dbo.PlotFacingMaster), not a typed string, so
 // "North"/"north"/"N" cannot all coexist and a facing premium has somewhere
 // to live. Managed from inside this page rather than a separate screen.
@@ -50,13 +50,9 @@ async function fetchPlotBlocks(): Promise<PlotBlock[]> {
   if (!response.ok) throw new Error("Failed to load blocks");
   return response.json();
 }
-async function fetchConstructedAssetKinds(): Promise<ConstructedAssetKind[]> {
-  const response = await fetchWithAuth(`${PLOT_API}/constructed-kinds`);
-  if (!response.ok) throw new Error("Failed to load constructed asset kinds");
-  return response.json();
-}
-async function fetchManagedConstructedAssetKinds(): Promise<ConstructedAssetKind[]> {
-  const response = await fetchWithAuth(`${PLOT_API}/constructed-kinds/manage`);
+async function fetchConstructedAssetKinds(projectId?: number | null): Promise<ConstructedAssetKind[]> {
+  // With a project: only the kinds that project's type sells.
+  const response = await fetchWithAuth(`${PLOT_API}/constructed-kinds${projectId ? `?projectId=${projectId}` : ""}`);
   if (!response.ok) throw new Error("Failed to load constructed asset kinds");
   return response.json();
 }
@@ -105,9 +101,6 @@ const CrmPlotMaster: React.FC = () => {
   React.useEffect(() => { setConversionConfirmed(false); }, [selectedIds, unitName, villaTypeId, builtUpArea, superBuiltUpArea]);
   const [converting, setConverting] = useState(false);
   const [layoutState, setLayoutState] = useState<{ blockId: number; mode: "arrange" | "neighbours"; focusId: number | null } | null>(null);
-  const [assetKindsOpen, setAssetKindsOpen] = useState(false);
-  const [assetKindDraft, setAssetKindDraft] = useState({ Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true });
-  const [savingAssetKind, setSavingAssetKind] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [facingsOpen, setFacingsOpen] = useState(false);
@@ -125,8 +118,6 @@ const CrmPlotMaster: React.FC = () => {
   const { data: facings = [], isError: facingsFailed } = useQuery({ queryKey: ["plot-facings"], queryFn: () => fetchFacings(false), staleTime: 5 * 60_000 });
   const { data: allFacings = [] } = useQuery({ queryKey: ["plot-facings", "all"], queryFn: () => fetchFacings(true), enabled: facingsOpen });
   const { data: layoutTypes = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60_000 });
-  const { data: constructedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds"], queryFn: fetchConstructedAssetKinds, staleTime: 60_000 });
-  const { data: managedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds", "manage"], queryFn: fetchManagedConstructedAssetKinds, staleTime: 30_000 });
   // Villa types of the project being converted, and of the plot being edited.
   const conversionProjectId = plots.find((plot: Plot) => selectedIds.includes(plot.Id))?.ProjectId ?? null;
   const { data: conversionVillaTypes = [] } = useQuery<VillaType[]>({ queryKey: villaTypesKey(conversionProjectId), queryFn: () => fetchVillaTypes(conversionProjectId!), enabled: convertOpen && conversionProjectId != null });
@@ -200,6 +191,9 @@ const CrmPlotMaster: React.FC = () => {
   // Only plots that are still visible count as selected. Before, a plot ticked and then
   // filtered out was still converted, with nothing on screen to show it.
   const selectedPlots = useMemo(() => filtered.filter((plot) => selectedIds.includes(plot.Id) && canConvert(plot)), [filtered, selectedIds]);
+  // Kinds offered when converting = what the selected plots' project type sells.
+  const kindsProjectId = selectedPlots[0]?.ProjectId ?? null;
+  const { data: constructedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds", kindsProjectId], queryFn: () => fetchConstructedAssetKinds(kindsProjectId), staleTime: 60_000 });
   const selectionIsCompatible = selectedPlots.length > 0 && selectedPlots.every((plot) => plot.ProjectId === selectedPlots[0].ProjectId && plot.BlockId === selectedPlots[0].BlockId);
   const totalArea = selectedPlots.reduce((total, plot) => total + Number(plot.AreaSqFt || 0), 0);
   // Counts follow the project/block filter and always add up: a converted plot with an old
@@ -232,7 +226,9 @@ const CrmPlotMaster: React.FC = () => {
     if (only != null) {
       fetchVillaTypes(selectedPlots[0].ProjectId).then((types) => applyVillaType(String(only), types)).catch(() => {});
     }
-    if (!unitKind) { const villa = constructedAssetKinds.find((kind) => kind.Code === "VILLA"); if (villa) setUnitKind(villa.Code); }
+    // No kind is assumed here (kinds are master data): a single active kind is
+    // pre-picked, otherwise the user chooses — the form already requires it.
+    if (!unitKind) { const usable = constructedAssetKinds.filter((kind) => !kind.IsLand && kind.IsActive !== false); if (usable.length === 1) setUnitKind(usable[0].Code); }
     setConvertOpen(true);
   };
 
@@ -241,26 +237,6 @@ const CrmPlotMaster: React.FC = () => {
   const openLayout = (targetBlockId: number, mode: "arrange" | "neighbours" = "arrange", focusId: number | null = null) => setLayoutState({ blockId: targetBlockId, mode, focusId });
   const layoutBlockInfo = layoutState ? blockCatalog.find((block) => block.BlockId === layoutState.blockId) : undefined;
 
-  const editAssetKind = (kind?: ConstructedAssetKind) => setAssetKindDraft(kind
-    ? { Id: kind.Id, Code: kind.Code, Name: kind.Name, SortOrder: String(kind.SortOrder ?? 100), IsActive: kind.IsActive !== false }
-    : { Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true });
-  const saveAssetKind = async () => {
-    setSavingAssetKind(true);
-    try {
-      const payload = { Code: assetKindDraft.Code, Name: assetKindDraft.Name, SortOrder: Number(assetKindDraft.SortOrder), IsActive: assetKindDraft.IsActive };
-      const response = await fetchWithAuth(assetKindDraft.Id ? `${PLOT_API}/constructed-kinds/${assetKindDraft.Id}` : `${PLOT_API}/constructed-kinds`, {
-        method: assetKindDraft.Id ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || "Could not save constructed asset kind");
-      toast.success("Constructed asset kind saved");
-      editAssetKind();
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["constructed-asset-kinds"] }),
-        queryClient.invalidateQueries({ queryKey: ["constructed-asset-kinds", "manage"] }),
-      ]);
-    } catch (e: any) { toast.error(e.message); } finally { setSavingAssetKind(false); }
-  };
 
   const loadPlotDetail = async (plot: Plot) => {
     const response = await fetchWithAuth(`${PLOT_API}/${plot.Id}`);
@@ -457,7 +433,7 @@ const CrmPlotMaster: React.FC = () => {
           <button onClick={() => navigate("/crm/setup/auto-project-setup")} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted"><MapIcon size={14} /> Configure plots</button>
           {rights.canEdit && <button onClick={() => { setFacingDraft({}); setFacingsOpen(true); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Manage plot facings"><Settings2 size={14} /> Facings</button>}
           {rights.canEdit && <button onClick={() => setVillaTypesOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted" title="Manage villa types"><Settings2 size={14} /> Villa types</button>}
-          {rights.canEdit && <button onClick={() => { editAssetKind(); setAssetKindsOpen(true); }} className="p-2 border border-border rounded-lg hover:bg-muted" title="Manage constructed asset kinds"><Settings2 size={14} /></button>}
+          
           <button onClick={() => refetch()} className="p-2 border border-border rounded-lg hover:bg-muted" title="Refresh"><RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /></button>
         </div>
       }>
@@ -830,32 +806,6 @@ const CrmPlotMaster: React.FC = () => {
         selectedProjectId={selectedPlots[0]?.ProjectId ?? null}
         onPlotsChanged={() => queryClient.invalidateQueries({ queryKey: ["plot-master"] })}
       />
-      <Dialog open={assetKindsOpen} onOpenChange={setAssetKindsOpen}>
-        <DialogContent accent="crm" className="max-w-2xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 size={17} className="text-primary" /> Constructed asset kinds</DialogTitle></DialogHeader>
-          <div className="grid gap-4 md:grid-cols-[1fr_280px]">
-            <div className="max-h-80 overflow-y-auto divide-y divide-border rounded-lg border border-border">
-              {managedAssetKinds.map((kind) => (
-                <button key={kind.Id} onClick={() => editAssetKind(kind)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted/40">
-                  <span className="font-medium">{kind.Name}</span><span className="text-xs text-muted-foreground">{kind.Code}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">{kind.IsActive === false ? "Inactive" : "Active"}</span>
-                </button>
-              ))}
-            </div>
-            <div className="space-y-3">
-              <div><label className="mb-1 block text-xs text-muted-foreground">Name</label><input value={assetKindDraft.Name} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, Name: event.target.value }))} className={fieldCls} /></div>
-              <div><label className="mb-1 block text-xs text-muted-foreground">Code</label><input value={assetKindDraft.Code} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, Code: event.target.value.toUpperCase() }))} className={fieldCls} /></div>
-              <div><label className="mb-1 block text-xs text-muted-foreground">Sort order</label><input type="number" min="0" max="9999" value={assetKindDraft.SortOrder} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, SortOrder: event.target.value }))} className={fieldCls} /></div>
-              {assetKindDraft.Id > 0 && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assetKindDraft.IsActive} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, IsActive: event.target.checked }))} /> Active</label>}
-              <div className="flex justify-end gap-2">
-                <button onClick={() => editAssetKind()} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">New</button>
-                <button onClick={saveAssetKind} disabled={savingAssetKind || !assetKindDraft.Name.trim() || !assetKindDraft.Code.trim()} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">{savingAssetKind ? "Saving..." : "Save"}</button>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent accent="crm" className="max-w-xl">
           <DialogHeader><DialogTitle className="flex items-center gap-2">{detailPlot?.PlotName || "Plot details"}</DialogTitle></DialogHeader>

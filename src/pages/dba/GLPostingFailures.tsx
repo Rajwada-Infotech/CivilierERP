@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { fmtIstDateTime } from "@/lib/istTime";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -26,16 +27,7 @@ const OUTCOME_STYLE: Record<string, string> = {
 };
 
 function fmtDateTime(value: string) {
-  const naive = value.replace(/Z$/, "");
-  const d = new Date(naive);
-  if (isNaN(d.getTime())) return value;
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return fmtIstDateTime(value);
 }
 
 export default function GLPostingFailures() {

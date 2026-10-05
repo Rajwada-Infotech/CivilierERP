@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -19,6 +20,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useGstRates, computeUnitParkingGst, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
@@ -2118,13 +2120,18 @@ const CrmApplication: React.FC = () => {
                     <ExternalLink size={11} /> New Customer
                   </a>
                 </div>
-                <select value={form.CustomerId} onChange={(e) => setForm((f) => ({ ...f, CustomerId: e.target.value }))}
-                  className={inputCls} disabled={applicationId != null}>
-                  <option value="">Select customer</option>
-                  {(customers as any[]).map((c: any) => (
-                    <option key={c.Id} value={String(c.Id)}>{c.CustomerName} · {c.Mobile} · {c.CustomerNo}</option>
-                  ))}
-                </select>
+                {/* Searchable: type a name, mobile or customer number. */}
+                <SearchableSelect
+                  value={form.CustomerId}
+                  onChange={(v) => setForm((f) => ({ ...f, CustomerId: v }))}
+                  disabled={applicationId != null}
+                  placeholder="Select customer"
+                  searchPlaceholder="Search name, mobile or customer no..."
+                  options={(customers as any[]).map((c: any) => ({
+                    value: String(c.Id),
+                    label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · "),
+                  }))}
+                />
                 {selectedCustomer && (
                   <div className="mt-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-0.5">
                     <div className="flex items-center gap-1.5 font-medium text-foreground"><IdCard size={12} className="text-sky-500" /> {selectedCustomer.CustomerName}</div>
@@ -2182,14 +2189,16 @@ const CrmApplication: React.FC = () => {
                     </div>
                     <div>
                       <label className={labelCls}>Project *</label>
-                      <select value={form.ProjectId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
-                        onChange={(e) => {
-                          setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitIds: [], PreferredPlotIds: [], PaymentPlanId: "" }));
+                      <SearchableSelect
+                        value={form.ProjectId}
+                        disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
+                        onChange={(v) => {
+                          setForm((f) => ({ ...f, ProjectId: v, BlockId: "", FloorNo: "", PreferredUnitIds: [], PreferredPlotIds: [], PaymentPlanId: "" }));
                         }}
-                        className={inputCls}>
-                        <option value="">Select project</option>
-                        {(projectsForCompany as any[]).map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-                      </select>
+                        placeholder="Select project"
+                        searchPlaceholder="Search projects..."
+                        options={(projectsForCompany as any[]).map((p: any) => ({ value: String(p.Id), label: p.Name }))}
+                      />
                     </div>
                     <div>
                       <label className={labelCls}>Block / Tower</label>
@@ -2418,10 +2427,13 @@ const CrmApplication: React.FC = () => {
                       <div className="space-y-3">
                         <div>
                           <label className={labelCls}>Broker (from Broker Master)</label>
-                          <select value={form.BrokerId} onChange={(e) => setForm((f) => ({ ...f, BrokerId: e.target.value }))} className={inputCls}>
-                            <option value="">Select broker</option>
-                            {(brokers as any[]).map((b: any) => <option key={b.LHeadId} value={String(b.LHeadId)}>{b.LHeadName}</option>)}
-                          </select>
+                          <SearchableSelect
+                            value={form.BrokerId}
+                            onChange={(v) => setForm((f) => ({ ...f, BrokerId: v }))}
+                            placeholder="Select broker"
+                            searchPlaceholder="Search brokers..."
+                            options={(brokers as any[]).map((b: any) => ({ value: String(b.LHeadId), label: b.LHeadName }))}
+                          />
                         </div>
 
                         {/* Read-only, auto-fetched from Broker Master the moment a
@@ -3102,7 +3114,7 @@ const CrmApplication: React.FC = () => {
                             {s.ActorName && <span className="text-[0.6875rem] text-muted-foreground"> · {s.ActorName}</span>}
                           </div>
                           <span className="shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
-                            {s.CreatedAt ? String(s.CreatedAt).slice(0, 16).replace("T", " ") : ""}
+                            {s.CreatedAt ? fmtIstIso(s.CreatedAt) : ""}
                           </span>
                         </div>
                       ))}

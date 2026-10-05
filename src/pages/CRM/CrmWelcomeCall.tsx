@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -18,6 +19,7 @@ import { translateError } from "@/lib/translateError";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput, DateTimeInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
@@ -820,7 +822,7 @@ const ChecklistSubmitFooter: React.FC<{
     <div className="rounded-xl border border-border p-3.5 space-y-2 bg-muted/10">
       {locked ? (
         <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-          <span className="flex items-center gap-1.5 font-medium"><Lock size={12} /> Submitted and locked{vc.submission?.SubmittedAt ? ` — ${String(vc.submission.SubmittedAt).slice(0, 16).replace("T", " ")}` : ""}</span>
+          <span className="flex items-center gap-1.5 font-medium"><Lock size={12} /> Submitted and locked{vc.submission?.SubmittedAt ? ` — ${fmtIstIso(vc.submission.SubmittedAt)}` : ""}</span>
           <div className="flex items-center gap-3">
             {onPreviewPdf && (
               <button type="button" onClick={onPreviewPdf}
@@ -1442,11 +1444,11 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                       <button type="button" onClick={() => setCalledByLocked(false)} className="text-xs text-primary hover:underline shrink-0">Change</button>
                     </div>
                   ) : (
-                    <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
+                    <SearchableNativeSelect value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
                       className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                       <option value="">— Self —</option>
                       {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                    </select>
+                    </SearchableNativeSelect>
                   )}
                 </div>
                 <div>
@@ -2096,7 +2098,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                         <p className="text-[0.6875rem] text-muted-foreground mt-0.5 ml-5">{bp.Remarks}</p>
                       )}
                       <p className="text-[0.625rem] text-muted-foreground mt-0.5 ml-5">
-                        Added by {bp.CreatedByName || "—"} · {bp.CreatedAt ? String(bp.CreatedAt).slice(0, 16).replace("T", " ") : ""}
+                        Added by {bp.CreatedByName || "—"} · {bp.CreatedAt ? fmtIstIso(bp.CreatedAt) : ""}
                       </p>
                     </div>
                     {rights.canDelete && (

@@ -4,10 +4,9 @@
  * "AVAILABILITY LIST OF RAJWADA.xlsx", sheet "Silverwood New":
  *   column E  base land area, column F  villa type, column G  built-up area.
  *
- * Only types with areas in the sheet are created (1-6). Type 7 (plot 18) has no
- * areas there, and plots marked N/A or blank have no type, so those plots are
- * left unplanned — add type 7 in Plot Master > Villa types once its areas are
- * known, then plan it on plot 18.
+ * Types 1-6 are created. There is no type 7: the sheet's "7" on plot 18 has no
+ * areas and is not a villa type; it and the N/A or blank plots have no type, so they are
+ * left unplanned.
  *
  * Needs migration 525. Safe to re-run: existing types are kept (their areas are
  * reported if they differ from the sheet), and a plot already planned with a
@@ -85,7 +84,7 @@ function range(a, b) { return Array.from({ length: b - a + 1 }, (_, i) => a + i)
   }
   console.log(`Summary: types to create ${toCreate}, plots to plan ${toPlan}, already planned ${already}, left as is ${conflicts}`);
   if (missingPlots.length) console.log(`WARNING: plot numbers from the sheet not found in block ${BLOCK_NAME}: ${missingPlots.join(", ")}`);
-  console.log("Not planned (no type/areas in the sheet): 18 (type 7), 30, 31 (blank), 65, 66, 67, 106, 116-121 (N/A)");
+  console.log("Not planned (no type/areas in the sheet): 18, 30, 31 (blank), 65, 66, 67, 106, 116-121 (N/A)");
 
   if (!APPLY) { console.log("Dry run only — re-run with --apply to write."); await closeDB(); return; }
 

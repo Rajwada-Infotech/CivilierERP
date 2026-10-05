@@ -18,6 +18,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/mutation";
 
@@ -673,12 +674,12 @@ const CrmMutation: React.FC = () => {
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-                <select value={bookingId} onChange={(e) => setBookingId(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                   <option value="">Select booking</option>
                   {startableBookings.map((b: any) => (
                     <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
                 <p className="text-[0.6875rem] text-muted-foreground mt-1">Requires Sale Deed Registry to be Completed.</p>
                 {!startableBookings.length && <p className="text-[0.6875rem] text-sky-600 mt-1">No bookings are eligible yet — Sale Deed Registry must be Completed first.</p>}
               </div>

@@ -42,7 +42,7 @@ async function landPositionOfUnits(poolOrTx, unitIds) {
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
       WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-        AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+        AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
       ORDER BY bp.Id DESC
     ) owner
     WHERE u.Id IN (${ids.join(",")})

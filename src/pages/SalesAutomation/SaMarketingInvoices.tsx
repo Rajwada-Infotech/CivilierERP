@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { fmtIstIso } from "@/lib/istTime";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -130,7 +131,7 @@ const SaMarketingInvoices: React.FC = () => {
       ApprovalStatus: i.ApprovalStatus ?? "Pending",
       ApprovalNotes: i.ApprovalNotes ?? "",
       ApproverName: i.ApproverName ?? "",
-      ApprovedAt: i.ApprovedAt ? String(i.ApprovedAt).slice(0, 16).replace("T", " ") : "",
+      ApprovedAt: i.ApprovedAt ? fmtIstIso(i.ApprovedAt) : "",
     }));
   }, [invoices]);
 

@@ -52,6 +52,7 @@ import {
   type AlternateUomRow,
 } from "./ItemUomAlternatesEditor";
 import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface HsnCode {
@@ -184,7 +185,9 @@ const HsnDropdown: React.FC<{
   value: string;
   onChange: (code: string) => void;
   hsnCodes: HsnCode[];
-}> = ({ value, onChange, hsnCodes }) => {
+  /** "HSN" for goods, "SAC" for services — only changes the wording. */
+  label?: string;
+}> = ({ value, onChange, hsnCodes, label = "HSN" }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -234,7 +237,7 @@ const HsnDropdown: React.FC<{
             </span>
           </span>
         ) : (
-          <span className="text-muted-foreground">Select HSN code...</span>
+          <span className="text-muted-foreground">Select {label} code...</span>
         )}
         <span className="flex items-center gap-1 shrink-0 ml-2">
           {value && (
@@ -274,11 +277,11 @@ const HsnDropdown: React.FC<{
           <div className="max-h-48 overflow-y-auto">
             {hsnCodes.length === 0 ? (
               <p className="px-3 py-4 text-center text-sm text-muted-foreground">
-                No HSN codes available
+                No {label} codes available
               </p>
             ) : filtered.length === 0 ? (
               <p className="px-3 py-4 text-center text-sm text-muted-foreground">
-                No HSN codes found
+                No {label} codes found
               </p>
             ) : (
               filtered.map((h) => (
@@ -387,20 +390,19 @@ const ItemMaster: React.FC = () => {
         }))
     : [];
 
-  // Item Master is the material-module (goods) master, so only plain HSN
-  // codes are offered here — SAC-flagged (services) codes are reserved for
-  // the engineering module's Activity Master / Work Order.
-  const hsnCodes: HsnCode[] = Array.isArray(dbHsn)
-    ? dbHsn
-        .filter((h: any) => h.HStatus !== false && h.HIsSAC !== true)
-        .map((h: any) => ({
-          code: h.HCode || "",
-          description: h.HShortDescription || h.HDescription || "",
-          cgstRate: h.HCGST ?? 0,
-          sgstRate: h.HSGST ?? 0,
-          igstRate: h.HIGST ?? 0,
-        }))
-    : [];
+  // Goods / Fixed Asset items take plain HSN codes; a Service item takes
+  // SAC codes (the SAC-flagged rows of the same master).
+  const toHsnCode = (h: any): HsnCode => ({
+    code: h.HCode || "",
+    description: h.HShortDescription || h.HDescription || "",
+    cgstRate: h.HCGST ?? 0,
+    sgstRate: h.HSGST ?? 0,
+    igstRate: h.HIGST ?? 0,
+  });
+  const activeHsnRows: any[] = Array.isArray(dbHsn) ? dbHsn.filter((h: any) => h.HStatus !== false) : [];
+  const hsnCodes: HsnCode[] = activeHsnRows.filter((h: any) => h.HIsSAC !== true).map(toHsnCode);
+  const sacCodes: HsnCode[] = activeHsnRows.filter((h: any) => h.HIsSAC === true).map(toHsnCode);
+  const codesFor = (itemType: string): HsnCode[] => (itemType === "Service" ? sacCodes : hsnCodes);
 
   // Fetch supplier list from AccountHeadMaster where LHeadType = 'S'
   const { data: dbSuppliers = [] } = useQuery({
@@ -499,7 +501,7 @@ const ItemMaster: React.FC = () => {
       setFormState((p) => {
         const next = { ...p, [key]: val };
         if (key === "hsnCode") {
-          const hsn = hsnCodes.find((h) => h.code === val);
+          const hsn = codesFor(next.itemType).find((h) => h.code === val);
           if (hsn) {
             next.cgst = hsn.cgstRate ?? 0;
             next.sgst = hsn.sgstRate ?? 0;
@@ -510,11 +512,19 @@ const ItemMaster: React.FC = () => {
             next.igst = 0;
           }
         }
+        // Switching between Service (SAC codes) and Goods (HSN codes): a code that
+        // belongs to the other list is dropped, along with the GST rates it set.
+        if (key === "itemType" && next.hsnCode && !codesFor(String(val)).some((h) => h.code === next.hsnCode)) {
+          next.hsnCode = "";
+          next.cgst = 0;
+          next.sgst = 0;
+          next.igst = 0;
+        }
         return next;
       });
       if (errors[key]) setErrors((p) => ({ ...p, [key]: false }));
     },
-    [errors, hsnCodes],
+    [errors, hsnCodes, sacCodes],
   );
 
   const validate = () => {
@@ -863,9 +873,11 @@ const ItemMaster: React.FC = () => {
           let sgst = 0;
           let igst = 0;
           if (hsnRaw) {
-            const matchedHsn = hsnCodes.find((h) => h.code === hsnRaw);
+            const matchedHsn = codesFor(itemType).find((h) => h.code === hsnRaw);
             if (!matchedHsn)
-              throw new Error(`HSN Code "${hsnRaw}" was not found`);
+              throw new Error(
+                `${itemType === "Service" ? "SAC" : "HSN"} Code "${hsnRaw}" was not found`,
+              );
             hsnCode = matchedHsn.code;
             cgst = matchedHsn.cgstRate ?? 0;
             sgst = matchedHsn.sgstRate ?? 0;
@@ -1397,12 +1409,13 @@ const ItemMaster: React.FC = () => {
                 <option value="Fixed Asset">Fixed Asset</option>
               </select>
             </Field>
-            {/* HSN Code */}
-            <Field label="HSN Code">
+            {/* HSN Code (Goods / Fixed Asset) or SAC Code (Service) */}
+            <Field label={form.itemType === "Service" ? "SAC Code" : "HSN Code"}>
               <HsnDropdown
                 value={form.hsnCode}
                 onChange={(val) => set("hsnCode", val)}
-                hsnCodes={hsnCodes}
+                hsnCodes={codesFor(form.itemType)}
+                label={form.itemType === "Service" ? "SAC" : "HSN"}
               />
             </Field>
             {/* Description */}
@@ -1417,7 +1430,7 @@ const ItemMaster: React.FC = () => {
             </Field>
             {/* Default Supplier */}
             <Field label="Default Supplier">
-              <select
+              <SearchableNativeSelect
                 value={form.defaultSupplierId}
                 onChange={(e) => set("defaultSupplierId", e.target.value)}
                 className={inputCls()}
@@ -1428,7 +1441,7 @@ const ItemMaster: React.FC = () => {
                     {s.label}
                   </option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </Field>
             {/* GL Account tag — the account this item's spend is booked under */}
             <Field label="GL Account">

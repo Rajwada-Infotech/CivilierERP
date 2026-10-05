@@ -47,7 +47,7 @@ const PLOT_SELECT = `
     SELECT TOP 1 cb.BookingNo
     FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking cb ON cb.Id = bp.BookingId
     WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND cb.IsActive = 1
-      AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+      AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
   ) bk
   OUTER APPLY (
     SELECT TOP 1 ca.ApplicationNo
@@ -74,10 +74,16 @@ async function resolveFacing(pool, facing, currentFacing = null) {
   return { value: found.recordset[0].Code };
 }
 
-router.get("/constructed-kinds", requirePageRight("crm-auto-project-setup", "view"), async (_req, res) => {
+router.get("/constructed-kinds", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
   try {
+    // ?projectId= / ?blockId= narrows to the kinds that project's type sells.
+    const n = (v) => (v === undefined || v === "" ? null : parseInt(v, 10));
+    const projectId = n(req.query.projectId), blockId = n(req.query.blockId);
+    if (projectId != null || blockId != null) {
+      return res.json(await require("../services/unitKind").allowedKinds(getPool(), { projectId, blockId }));
+    }
     const result = await getPool().request().query(`
-      SELECT Id, Code, Name, SortOrder
+      SELECT Id, Code, Name, SortOrder, IsLand, IsCommercial
       FROM dbo.CrmConstructedAssetKind
       WHERE IsActive = 1
       ORDER BY SortOrder, Name
@@ -92,7 +98,7 @@ router.get("/constructed-kinds", requirePageRight("crm-auto-project-setup", "vie
 router.get("/constructed-kinds/manage", requirePageRight("crm-auto-project-setup", "view"), async (_req, res) => {
   try {
     const result = await getPool().request().query(`
-      SELECT Id, Code, Name, SortOrder, IsActive
+      SELECT Id, Code, Name, SortOrder, IsActive, IsLand, IsCommercial
       FROM dbo.CrmConstructedAssetKind
       ORDER BY IsActive DESC, SortOrder, Name
     `);
@@ -103,57 +109,16 @@ router.get("/constructed-kinds/manage", requirePageRight("crm-auto-project-setup
   }
 });
 
-function parseConstructedKind(body) {
-  const code = String(body?.Code || "").trim().toUpperCase();
-  const name = String(body?.Name || "").trim();
-  const sortOrder = Number(body?.SortOrder ?? 100);
-  if (!/^[A-Z][A-Z0-9_]{1,19}$/.test(code) || code === "PLOT") {
-    return { error: "Code must use 2-20 uppercase letters, numbers, or underscores and cannot be PLOT" };
-  }
-  if (!name || name.length > 100) return { error: "Name is required and must be 100 characters or fewer" };
-  if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) return { error: "Sort order must be a whole number from 0 to 9999" };
-  return { code, name, sortOrder };
-}
-
+// Unit kinds are managed in Unit Master (services/unitKind.js); these two
+// write routes stay only so older screens keep working.
+const unitKind = require("../services/unitKind");
 router.post("/constructed-kinds", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
-  const value = parseConstructedKind(req.body);
-  if (value.error) return res.status(400).json({ error: value.error });
-  try {
-    const result = await getPool().request()
-      .input("code", sql.NVarChar(20), value.code).input("name", sql.NVarChar(100), value.name)
-      .input("sortOrder", sql.Int, value.sortOrder).input("by", sql.Int, req.user?.userId || null)
-      .query(`INSERT INTO dbo.CrmConstructedAssetKind (Code, Name, SortOrder, IsActive, CreatedBy, CreatedAt)
-              OUTPUT INSERTED.Id, INSERTED.Code, INSERTED.Name, INSERTED.SortOrder, INSERTED.IsActive
-              VALUES (@code, @name, @sortOrder, 1, @by, SYSDATETIME())`);
-    res.status(201).json(result.recordset[0]);
-  } catch (error) {
-    if (error.number === 2627 || error.number === 2601) return res.status(409).json({ error: "An asset kind with this code already exists" });
-    console.error("[plot-master] POST constructed kind error:", error.message);
-    res.status(500).json({ error: error.message });
-  }
+  try { const r = await unitKind.createKind(req.body, req.user?.userId); res.status(r.status).json(r.body); }
+  catch (error) { console.error("[plot-master] POST constructed kind error:", error.message); res.status(500).json({ error: error.message }); }
 });
-
 router.put("/constructed-kinds/:id", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid asset kind id" });
-  const value = parseConstructedKind(req.body);
-  if (value.error) return res.status(400).json({ error: value.error });
-  const isActive = req.body?.IsActive !== false;
-  try {
-    const result = await getPool().request()
-      .input("id", sql.Int, id).input("code", sql.NVarChar(20), value.code).input("name", sql.NVarChar(100), value.name)
-      .input("sortOrder", sql.Int, value.sortOrder).input("isActive", sql.Bit, isActive).input("by", sql.Int, req.user?.userId || null)
-      .query(`UPDATE dbo.CrmConstructedAssetKind
-              SET Code = @code, Name = @name, SortOrder = @sortOrder, IsActive = @isActive, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-              OUTPUT INSERTED.Id, INSERTED.Code, INSERTED.Name, INSERTED.SortOrder, INSERTED.IsActive
-              WHERE Id = @id`);
-    if (!result.recordset.length) return res.status(404).json({ error: "Constructed asset kind not found" });
-    res.json(result.recordset[0]);
-  } catch (error) {
-    if (error.number === 2627 || error.number === 2601) return res.status(409).json({ error: "An asset kind with this code already exists" });
-    console.error("[plot-master] PUT constructed kind error:", error.message);
-    res.status(500).json({ error: error.message });
-  }
+  try { const r = await unitKind.updateKind(Number(req.params.id), req.body, req.user?.userId); res.status(r.status).json(r.body); }
+  catch (error) { console.error("[plot-master] PUT constructed kind error:", error.message); res.status(500).json({ error: error.message }); }
 });
 
 router.get("/:id/adjacent", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {

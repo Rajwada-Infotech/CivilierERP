@@ -1,26 +1,14 @@
 import { useEffect, useState } from "react";
+import { fmtIstDateTime } from "@/lib/istTime";
 import { History, PlusCircle, Pencil, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { getAuditTrail, type AuditTrailEntry } from "@/api/auditTrailApi";
 import { toast } from "sonner";
 
+// SYSUTCDATETIME() serialised with a "Z" — read as UTC, shown in IST (+5:30).
 function fmtDateTime(value: string) {
-  // Backend timestamps come from SQL Server's SYSUTCDATETIME() but are
-  // JSON-serialized with a trailing "Z" — stripping it makes Date parse it
-  // as the plain wall-clock time it actually is, matching the rest of the
-  // app's amendment/audit displays.
-  const naive = value.replace(/Z$/, "");
-  const d = new Date(naive);
-  if (isNaN(d.getTime())) return value;
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  return fmtIstDateTime(value, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 const ACTION_META: Record<AuditTrailEntry["Action"], { label: string; icon: typeof PlusCircle; className: string }> = {

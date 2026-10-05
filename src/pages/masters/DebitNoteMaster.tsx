@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { getQualityDebitNotes, type QualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
 import { AlertTriangle, Eye, X } from "lucide-react";
 import { useState } from "react";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ─── Party Type → AccountHeadMaster.LHeadType (see accountHeadMaster.js) ─────
 const PARTY_TYPES: { code: string; label: string }[] = [
@@ -285,7 +286,7 @@ function PartyInvoiceRenderer({
           </label>
           <div className="relative">
             <Users size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <select
+            <SearchableNativeSelect
               value={g.partyId ?? ""}
               disabled={!g.partyType}
               onChange={(e) => {
@@ -300,7 +301,7 @@ function PartyInvoiceRenderer({
               {partyOptions.map((p) => (
                 <option key={p.id} value={p.id}>{p.label}</option>
               ))}
-            </select>
+            </SearchableNativeSelect>
             <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           </div>
         </div>

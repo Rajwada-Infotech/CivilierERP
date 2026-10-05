@@ -19,6 +19,7 @@ import {
   type InventoryImportListItem,
 } from "@/api/fixedAssetInventoryImportApi";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 function ensureArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -287,10 +288,10 @@ export default function FixedAssetInventoryImport() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 xl:gap-5">
               <div className="sm:col-span-2">
                 <label className={labelCls}><Hash size={11} /> Item * <span className="text-muted-foreground/60 font-normal normal-case">(Fixed Asset category only)</span></label>
-                <select value={form.itemId} onChange={(e) => setField("itemId", e.target.value)} className={inputCls}>
+                <SearchableNativeSelect value={form.itemId} onChange={(e) => setField("itemId", e.target.value)} className={inputCls}>
                   <option value="">Select item…</option>
                   {fixedAssetItems.map((i) => <option key={i.M_Id} value={i.M_Id}>{i.M_Name}{i.M_Group ? ` (${i.M_Group})` : ""}</option>)}
-                </select>
+                </SearchableNativeSelect>
                 {fixedAssetItems.length === 0 && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1.5">
                     <AlertCircle size={12} /> No items tagged "Fixed Asset" in Item Master yet.

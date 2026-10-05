@@ -14,7 +14,7 @@ const { applyPagination } = require("../services/crmListPagination");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
 const { getIo } = require("../socket");
-const { guardAndConvertHold, placeHoldIfNeeded } = require("../services/crmHoldService");
+const { guardAndConvertHold, placeHoldIfNeeded, releaseAllHoldsForApplication } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, resolveNocType } = require("../services/crmWorkflowGuards");
 const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
@@ -127,7 +127,7 @@ const BOOKING_SELECT = `
     -- the booking itself carries (migration 519).
     COALESCE(um.BlockId, b.BlockId) AS BlockId,
     b.FloorName,
-    COALESCE(um.UnitType,   b.UnitType)  AS UnitType,
+    COALESCE(um.UnitType,   b.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = um.UnitKind))  AS UnitType,
     b.AreaSqFt,
     b.CarpetAreaSqFt, b.BuiltUpAreaSqFt, b.SuperBuiltUpAreaSqFt, b.OpenTerraceAreaSqFt,
     b.RatePerSqFt, b.TotalValue, b.BookingAmount, b.TokenType, b.TokenValue,
@@ -299,7 +299,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
           WHERE ${showDeleted ? "b.IsActive = 0" : "b.IsActive = 1"}
-            AND (@st2 IS NULL AND (${includeCancelled ? "1=1" : "b.Status NOT IN ('Cancelled', 'Rejected')"}) OR b.Status = @st2)
+            AND (@st2 IS NULL AND (${includeCancelled ? "1=1" : "b.Status NOT IN ('Cancelled', 'Rejected', 'Transferred')"}) OR b.Status = @st2)
             AND (@appId2 IS NULL OR b.ApplicationId = @appId2)
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
@@ -445,7 +445,9 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const inApproval = APPROVAL_STAGES.includes(oldRow.WorkflowStage) || oldRow.ReadyForApprovalAt != null;
     const financialFields = ["RatePerSqFt", "TotalValue", "BookingAmount", "PaymentPlanId"];
     if (inApproval && financialFields.some(f => b[f] !== undefined)) {
-      return res.status(400).json({ error: `Financial fields (rate, value, booking amount, payment plan) cannot be changed once the booking is in ${oldRow.WorkflowStage || "the approval pipeline"}. Reject it back to Review first.` });
+      return res.status(400).json({ error: oldRow.WorkflowStage === "Confirmed"
+        ? "This booking is approved — its rate, value, booking amount and payment plan are final. Cancel and re-book to change them."
+        : `Financial fields (rate, value, booking amount, payment plan) cannot be changed once the booking is in ${oldRow.WorkflowStage || "the approval pipeline"}. Reject it back to Review first.` });
     }
 
     const existingArea = oldRow.AreaSqFt;
@@ -620,8 +622,25 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const booking = await pool.request().input("id", sql.Int, id)
-      .query("SELECT UnitId, Status, RatePerSqFt, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
+      .query("SELECT UnitId, Status, WorkflowStage, RatePerSqFt, TotalValue, BookingAmount FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1");
     if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    // Once the Agreement for Sale is signed (or the deed registered) the unit
+    // is named in a legal document — the ERP can't quietly swap it. Cancellation
+    // and parking already refuse at this point; so must a unit change.
+    {
+      const { isLegalWorkStarted, isSaleDeedRegistered } = require("../services/crmWorkflowGuards");
+      if (await isSaleDeedRegistered(pool, id)) {
+        return res.status(400).json({ error: "The Sale Deed is registered — the unit can't be changed in the ERP. A Deed of Rectification at the Sub-Registrar is required." });
+      }
+      if (await isLegalWorkStarted(pool, id)) {
+        return res.status(400).json({ error: "The Agreement for Sale is already signed and names this unit — cancel the agreement before changing the unit." });
+      }
+    }
+    // A new unit re-prices the booking — not while approvers are looking at
+    // the old price (same lock PUT /:id applies to the financial fields).
+    if (["MarketingHeadApproval", "DirectorApproval"].includes(booking.recordset[0].WorkflowStage)) {
+      return res.status(400).json({ error: `This booking is in ${booking.recordset[0].WorkflowStage} — reject it back to Review before changing its unit, so the new price is approved.` });
+    }
     const oldUnitId = booking.recordset[0].UnitId;
     const oldRow = booking.recordset[0];
     const newUnitId = parseInt(b.NewUnitId);
@@ -630,7 +649,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     // Same lookup + availability checks as booking creation — the new unit
     // must be real, active, and not already locked by another booking.
     const unit = await pool.request().input("uid", sql.Int, newUnitId).query(`
-      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind)) AS UnitType, u.AreaSqFt,
              u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
              proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
       FROM dbo.UnitMaster u
@@ -641,8 +660,41 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
     const unitRow = unit.recordset[0];
 
+    // The same rules a new booking must pass (crmEntityCreation.js) — a unit
+    // change must not slip a sale past them.
+    const ctx = (await pool.request().input("id", sql.Int, id).input("nu", sql.Int, newUnitId).query(`
+      SELECT b.ProjectId, a.CustomerId, u.UnitKind
+      FROM dbo.CrmBooking b
+      LEFT JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      CROSS JOIN (SELECT UnitKind FROM dbo.UnitMaster WHERE Id = @nu) u
+      WHERE b.Id = @id`)).recordset[0] || {};
+    if (ctx.ProjectId != null && unitRow.ProjectId !== ctx.ProjectId) {
+      return res.status(400).json({ error: "A booking stays in its own project — pick a unit from the same project, or cancel and book afresh." });
+    }
+    {
+      const { bookingTypeViolation, loadLandKinds, loadCommercialKinds } = require("../services/projectType");
+      const why = await bookingTypeViolation(pool, [{ ...unitRow, UnitKind: ctx.UnitKind }], {
+        isPlotBooking: false,
+        landKinds: await loadLandKinds(pool),
+        commercialKinds: await loadCommercialKinds(pool),
+      });
+      if (why) return res.status(400).json({ error: why });
+    }
+    try {
+      await require("../services/villaLand").assertVillaBuyerOwnsLand(pool, [newUnitId], ctx.CustomerId);
+    } catch (e) {
+      if (e.status) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+    // Priced from the new unit's saleable area — without one the booking
+    // would silently keep the old unit's price.
+    if (!(Number(unitRow.AreaSqFt) > 0)) {
+      return res.status(400).json({ error: `${unitRow.UnitName} has no saleable area — set it in Unit Master first, so the booking can be re-priced.` });
+    }
+
     const taken = await pool.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id)
-      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
+      .query(`SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())
+              UNION SELECT BookingId FROM dbo.CrmBookingUnit WHERE UnitId = @uid AND BookingId <> @id AND Status = N'Active'`);
     if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
 
     const bookingAppId = await pool.request().input("id", sql.Int, id)
@@ -713,6 +765,28 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
             UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
+
+      // The allocation line is what actually reserves a unit (active-only
+      // unique index; booking creation checks it). Move it with the booking —
+      // otherwise the old unit stays locked forever and the new one isn't
+      // protected against a second sale.
+      const moved = await tx.request()
+        .input("id", sql.Int, id).input("old", sql.Int, oldUnitId).input("uid", sql.Int, newUnitId)
+        .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), rate).input("tot", sql.Decimal(18, 2), total)
+        .input("ub", sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmBookingUnit SET UnitId = @uid, AreaSqFt = @area, RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+                 AllocatedValue = @tot, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE BookingId = @id AND Status = N'Active' AND UnitId = @old
+        `);
+      if (!moved.rowsAffected[0]) {
+        await tx.request().input("id", sql.Int, id).input("uid", sql.Int, newUnitId)
+          .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), rate).input("tot", sql.Decimal(18, 2), total).input("ub", sql.Int, actor)
+          .query(`
+            INSERT INTO dbo.CrmBookingUnit (BookingId, UnitId, AreaSqFt, RatePerSqFt, AllocatedValue, Status, IsPrimary, CreatedBy, CreatedAt)
+            VALUES (@id, @uid, @area, @rate, @tot, N'Active', 1, @ub, SYSDATETIME())
+          `);
+      }
 
       // New unit means a new TotalValue — Unit+Parking could have crossed the
       // Rs. 45L GST bracket.
@@ -818,7 +892,7 @@ router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, 
 // truth (the checklist), one action per fact.
 async function checkBookingApprovalReadiness(pool, id) {
   const row = await pool.request().input("id", sql.Int, id).query(`
-    SELECT b.ApplicationId
+    SELECT b.ApplicationId, b.TotalValue
     FROM dbo.CrmBooking b
     WHERE b.Id = @id
   `);
@@ -830,6 +904,10 @@ async function checkBookingApprovalReadiness(pool, id) {
 
   const missing = [];
   if (uncheckedCount > 0) missing.push(`Data Review Checklist (${uncheckedCount} item(s) unchecked)`);
+  // A booking can start at ₹0 (e.g. a plot with no rate yet, or a unit with
+  // no saleable area), but it can never be approved at ₹0 — a ticked
+  // checklist alone mustn't let a zero-value sale through.
+  if (!(Number(chk.TotalValue) > 0)) missing.push("Total value is ₹0 — set the rate (and the unit's saleable area)");
   return { notFound: false, missing };
 }
 
@@ -1372,7 +1450,18 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       await syncApplicationOnBookingTerminal(pool, id, CrmStatus.CANCELLED,
         "BookingAdminDelete", "Booking deleted by admin", actor);
 
-      if (booking.UnitId) {
+      // A cancelled application can't hold inventory — release whatever it
+      // still holds instead of re-holding the unit for nobody. Only a live
+      // application gets the unit held while it's corrected and re-booked.
+      const appNow = (await pool.request().input("aid", sql.Int, booking.ApplicationId)
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid")).recordset[0];
+      if (appNow && appNow.Status === CrmStatus.CANCELLED) {
+        try {
+          await releaseAllHoldsForApplication(pool, booking.ApplicationId, actor);
+        } catch (holdErr) {
+          console.error("[crm-bookings] hold release after delete failed:", holdErr.message);
+        }
+      } else if (booking.UnitId) {
         try {
           await placeHoldIfNeeded(pool, {
             entityType: "Unit",

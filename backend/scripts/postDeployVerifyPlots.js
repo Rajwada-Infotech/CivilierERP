@@ -126,6 +126,27 @@ const one = async (s) => (await q(s))[0] || {};
       ? pass("Silver Woods: block A, 121 plots, 209,660.46 sq ft") : fail("Silver Woods plots", sw);
   }
 
+  console.log("\n[8] Villa types (migration 525)");
+  const vt = await one(`SELECT CASE WHEN OBJECT_ID('dbo.VillaTypeMaster') IS NULL THEN 0 ELSE 1 END AS Tbl,
+      CASE WHEN COL_LENGTH('dbo.PlotMaster','PlannedVillaTypeId') IS NULL THEN 0 ELSE 1 END AS PlotCol,
+      CASE WHEN COL_LENGTH('dbo.UnitMaster','VillaTypeId') IS NULL THEN 0 ELSE 1 END AS UnitCol`);
+  vt.Tbl && vt.PlotCol && vt.UnitCol ? pass("villa type master, planned type on plots, villa type on units") : fail("migration 525 objects", vt);
+  if (vt.Tbl && vt.PlotCol) {
+    const bad = await one(`SELECT COUNT(*) AS n FROM dbo.PlotMaster p JOIN dbo.VillaTypeMaster v ON v.Id = p.PlannedVillaTypeId
+                           WHERE p.IsActive = 1 AND v.ProjectId <> p.ProjectId`);
+    bad.n === 0 ? pass("every planned villa type belongs to its plot's project") : fail(`${bad.n} plot(s) plan a villa type of another project`);
+    const villas = await one(`SELECT COUNT(*) AS n FROM dbo.UnitMaster u WHERE u.IsActive = 1 AND u.BuiltUpAreaSqFt IS NULL
+                              AND EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id)`);
+    villas.n === 0 ? pass("every villa built on plots records its built-up area")
+      : warn(`${villas.n} villa(s) converted before the area fix have no built-up area; set it in Unit Master`);
+    const swt = await q(`SELECT v.Code, COUNT(p.Id) AS Plots FROM dbo.VillaTypeMaster v
+      LEFT JOIN dbo.PlotMaster p ON p.PlannedVillaTypeId = v.Id AND p.IsActive = 1
+      WHERE v.ProjectId = 1012 AND v.IsActive = 1 GROUP BY v.Code ORDER BY v.Code`);
+    const got = swt.map((r) => `${r.Code}=${r.Plots}`).join(" ");
+    if (sw.Plots === 0) warn("Silver Woods villa types: expected on production only");
+    else got === "T1=75 T2=6 T3=5 T4=13 T5=5 T6=4" ? pass(`Silver Woods villa types: ${got}`) : fail("Silver Woods villa types", got || "none");
+  }
+
   console.log(`\n${fails ? fails + " FAIL(S)" : "ALL CHECKS PASSED"}${warns ? `, ${warns} warning(s)` : ""} (read-only, nothing changed)`);
   await closeDB?.();
   process.exit(fails ? 1 : 0);

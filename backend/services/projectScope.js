@@ -1,10 +1,14 @@
-// Per-user project scoping (dbo.UserProjectAccess, migration 524).
+// Per-user and per-role project scoping (dbo.UserProjectAccess, migration 524;
+// dbo.RoleProjectAccess, migration 534).
 //
 //   getProjectScope(user) -> null       unrestricted (admin role, or no rows)
 //                         -> number[]   the only project ids the user may see
 //
-// Opt-in by design: a user with no rows keeps seeing everything, so nobody is
-// locked out on deploy. Document rows with a NULL project are hidden from a
+// Resolution: the user's own list if they have one, else their role's list,
+// else unrestricted (a personal list overrides the role's, like page rights).
+//
+// Opt-in by design: a user or role with no rows keeps seeing everything, so
+// nobody is locked out on deploy. Document rows with a NULL project are hidden from a
 // restricted user, since they can't be shown to sit inside the allowed set.
 
 const { getPool, sql } = require("../db");
@@ -42,6 +46,21 @@ async function getProjectScope(user) {
     // unrestricted rather than 500-ing every API call for every non-admin.
     if (err.number === 208) return null;
     throw err;
+  }
+  // No personal list: fall back to the role's. A missing role table (code
+  // deployed before migration 534) just means "no role restriction".
+  const roleId = Number(user.roleId);
+  if (!rows.length && Number.isFinite(roleId)) {
+    try {
+      rows = (
+        await getPool()
+          .request()
+          .input("rid", sql.Int, roleId)
+          .query("SELECT ProjectId FROM dbo.RoleProjectAccess WHERE RoleId = @rid")
+      ).recordset;
+    } catch (err) {
+      if (err.number !== 208) throw err;
+    }
   }
   const ids = rows.length ? rows.map((x) => Number(x.ProjectId)) : null;
   cache.set(key, { ids, at: Date.now() });
@@ -132,7 +151,71 @@ async function assertRungAllowed(req, res, rungId) {
   return true;
 }
 
+// Expense bookings keep their project as text in EProjectName: the numeric
+// enterprise id for most rows, the literal project name for some. This
+// resolves either form to the project id (NULL if it matches nothing).
+const ebProjectIdSql = (alias = "eb") =>
+  `COALESCE(TRY_CAST(${alias}.EProjectName AS INT),
+     (SELECT TOP 1 pj.id FROM dbo.enterprise pj WHERE pj.business_type = 'P' AND pj.name = ${alias}.EProjectName))`;
+
+function ebProjectPredicate(scope, alias = "eb", prefix = "AND") {
+  return projectPredicate(scope, ebProjectIdSql(alias), prefix);
+}
+
+// Same, plus the fallback the Expense Register uses: a GRN-sourced booking
+// with no project of its own takes its GRN's PO project.
+const ebResolvedProjectSql = (alias = "eb") => `COALESCE(
+  TRY_CAST(${alias}.EProjectName AS INT),
+  (SELECT TOP 1 pj.id FROM dbo.enterprise pj WHERE pj.business_type = 'P' AND pj.name = ${alias}.EProjectName),
+  (SELECT TOP 1 pg.ProjectId FROM dbo.GoodsReceiptNotes gg
+     JOIN dbo.PurchaseOrders pg ON pg.PurchaseOrderID = gg.POID
+    WHERE ${alias}.ESourceType = 'GRN' AND gg.GRNID = TRY_CAST(${alias}.ESourceId AS INT)))`;
+
+// A payment's project: its invoice's, else its own PProject text (id or name).
+const paymentProjectSql = (alias = "np") => `COALESCE(
+  (SELECT TOP 1 ${ebResolvedProjectSql("pe")} FROM dbo.ExpenseBooking pe WHERE pe.EDocNo = ${alias}.PExpenseRef),
+  TRY_CAST(${alias}.PProject AS INT),
+  (SELECT TOP 1 pj2.id FROM dbo.enterprise pj2 WHERE pj2.business_type = 'P' AND pj2.name = ${alias}.PProject))`;
+
+// For a create/update body that carries a project as text (an id, or a name):
+// a restricted user must name a project they can see. A body with no project
+// is refused too, since the saved row would be invisible to them afterwards.
+async function assertProjectRawAllowed(req, res, rawProject) {
+  if (!req.projectScope) return true;
+  const raw = rawProject == null ? "" : String(rawProject).trim();
+  let id = /^\d+$/.test(raw) ? parseInt(raw, 10) : null;
+  if (id == null && raw) {
+    const r = await getPool().request().input("n", sql.NVarChar(255), raw)
+      .query("SELECT TOP 1 id FROM dbo.enterprise WHERE business_type = 'P' AND name = @n");
+    id = r.recordset[0]?.id ?? null;
+  }
+  if (id == null || !projectAllowed(req.projectScope, id)) {
+    res.status(403).json({ error: "Choose a project you have access to." });
+    return false;
+  }
+  return true;
+}
+
+// A godown belongs to a project (Godowns.ProjectID). Company-level godowns with
+// no project are not reachable by a restricted user.
+async function assertGodownAllowed(req, res, godownId) {
+  if (!req.projectScope || godownId == null || godownId === "") return true;
+  const id = parseInt(godownId, 10);
+  if (!Number.isFinite(id)) return true;
+  const r = await getPool().request().input("g", sql.Int, id)
+    .query("SELECT ProjectID FROM dbo.Godowns WHERE GodownID = @g");
+  if (r.recordset.length && projectAllowed(req.projectScope, r.recordset[0].ProjectID)) return true;
+  res.status(403).json({ error: "You don't have access to this godown's project." });
+  return false;
+}
+
 module.exports = {
+  assertGodownAllowed,
+  ebResolvedProjectSql,
+  paymentProjectSql,
+  assertProjectRawAllowed,
+  ebProjectIdSql,
+  ebProjectPredicate,
   rungParamGuard,
   assertRungAllowed,
   projectParamGuard,

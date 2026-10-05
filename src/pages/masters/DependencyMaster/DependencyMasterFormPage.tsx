@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, GitBranch, Loader2, CheckCircle2, Circle, Copy } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { EngineeringShell } from "@/components/engineering/EngineeringShell";
+import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { Button } from "@/components/ui/button";
 import { getDependencyMaster } from "@/api/dependencyMasterApi";
 import { useDependencyMasterForm } from "./hooks/useDependencyMasterForm";
@@ -48,12 +48,12 @@ export default function DependencyMasterFormPage() {
   if (editingId && loadingEditing) {
     return (
       <>
-        <Breadcrumbs items={["Dashboard", "Engineering", "Dependency Master", "Edit"]} />
-        <EngineeringShell title="Dependency Master" subtitle="Loading record…" icon={GitBranch}>
+        <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Dependency Master", "Edit"]} />
+        <CivilWorkDprShell title="Dependency Master" subtitle="Loading record…" icon={GitBranch}>
           <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground text-sm">
             <Loader2 size={16} className="animate-spin" /> Loading…
           </div>
-        </EngineeringShell>
+        </CivilWorkDprShell>
       </>
     );
   }
@@ -67,8 +67,8 @@ export default function DependencyMasterFormPage() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Engineering", "Dependency Master", editingId ? "Edit" : "New"]} />
-      <EngineeringShell
+      <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Dependency Master", editingId ? "Edit" : "New"]} />
+      <CivilWorkDprShell
         title={editingId ? "Edit Dependency" : "New Dependency"}
         subtitle="Room-level activity chain — task scope, alias, and a strictly linear dependency sequence"
         icon={GitBranch}
@@ -177,14 +177,14 @@ export default function DependencyMasterFormPage() {
               <Button
                 onClick={form.submit}
                 disabled={!form.canSubmit || form.isSaving}
-                className="gradient-engineering shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto hover:opacity-90"
+                className="gradient-civilworkdpr shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto hover:opacity-90"
               >
                 {form.isSaving ? "Saving…" : editingId ? "Update" : "Save"}
               </Button>
             </div>
           </div>
         </div>
-      </EngineeringShell>
+      </CivilWorkDprShell>
 
       <ActivityPickerModal
         open={pickerOpen}

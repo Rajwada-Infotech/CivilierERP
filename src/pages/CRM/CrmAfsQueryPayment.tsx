@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/afs-query-payment";
 const BKG_API = "/api/crm/bookings";
@@ -1164,7 +1165,7 @@ const CrmAfsQueryPayment: React.FC<{
                 <div className="px-5 py-4 space-y-4">
                   <div>
                     <label className="text-xs font-semibold text-foreground block mb-1.5">Booking <span className="text-red-500">*</span></label>
-                    <select value={newForm.BookingId} onChange={(e) => {
+                    <SearchableNativeSelect value={newForm.BookingId} onChange={(e) => {
                       const bid = e.target.value;
                       const bk = (bookings as any[]).find((b: any) => String(b.Id) === bid);
                       const stamp = bk?.AfsStampDuty != null ? String(bk.AfsStampDuty) : "";
@@ -1177,7 +1178,7 @@ const CrmAfsQueryPayment: React.FC<{
                       {startableBookings.map((b: any) => (
                         <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ApplicantName} ({b.AgreementStatus})</option>
                       ))}
-                    </select>
+                    </SearchableNativeSelect>
                     {startableBookings.length === 0 && (
                       <p className="text-[0.6875rem] text-sky-600 mt-1">No eligible bookings — Agreement for Sale must be Executed first. Go to <span className="font-semibold">Documents → Agreements</span>.</p>
                     )}

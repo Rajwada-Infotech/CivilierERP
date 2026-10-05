@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstDateTime } from "@/lib/istTime";
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -2172,7 +2173,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <span className="font-medium">{a.ChangeType === "ParkingAllotment" ? "Parking" : a.ChangeType === "ExtraCharge" ? "Extra Charge" : a.ChangeType}</span>
                         {" — "}{a.Action}
                         <span className="text-muted-foreground"> by {a.RequestedByName || "—"}</span>
-                        {a.RequestedAt && <span className="text-muted-foreground"> · {new Date(a.RequestedAt.replace(/Z$/, "")).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                        {a.RequestedAt && <span className="text-muted-foreground"> · {fmtIstDateTime(a.RequestedAt, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
                         {a.Reason && <div className="text-muted-foreground mt-0.5 italic">"{a.Reason}"</div>}
                       </div>
                     ))}

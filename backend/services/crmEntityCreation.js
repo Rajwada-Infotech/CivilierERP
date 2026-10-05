@@ -83,7 +83,7 @@ async function validatePlotSelection(pool, plotIds, { projectId = null, applicat
           SELECT 1 FROM dbo.CrmBookingPlot bp
           JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
           WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-            AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+            AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
         )
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmApplicationPlot ap
@@ -843,7 +843,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
     WHERE p.Id IN (${unitIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
   ` : `
-    SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
+    SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.UnitKind, u.AreaSqFt,
            u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
            proj.name AS ProjectName, proj.company_id AS CompanyId,
            blk.BlockName
@@ -858,6 +858,18 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // Order to match input array (primary is first)
   const unitRows = unitIds.map((id) => unitsRes.recordset.find((u) => u.Id === id));
   const unitRow = unitRows[0]; // Primary unit provides the descriptive fields
+
+  // The project / block type decides what may be sold and whether several
+  // units can share one booking (Project Type Master flags).
+  {
+    const { bookingTypeViolation, loadLandKinds, loadCommercialKinds } = require("./projectType");
+    const why = await bookingTypeViolation(pool, unitRows, {
+      isPlotBooking,
+      landKinds: await loadLandKinds(pool),
+      commercialKinds: await loadCommercialKinds(pool),
+    });
+    if (why) throw new CrmCreationError(why);
+  }
 
   // A customer can't actually get their Booking approved/paid against an
   // unapproved Application, so the real "confirm within N days" clock only

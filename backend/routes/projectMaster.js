@@ -318,12 +318,30 @@ router.get("/", cache("project-master", 60, { shared: true }), async (req, res) 
 //
 // Authenticated but not admin-gated: picking a type is part of ordinary project
 // creation, and the write itself is still behind adminOnly below.
+// GET /unit-options — what a unit can be, for intake forms (lead / application
+// "property type" and "BHK preference"): active unit kinds and the layout
+// types defined in Unit Composition. Authenticated, not page-gated, like /types.
+router.get("/unit-options", async (_req, res) => {
+  try {
+    const pool = getPool();
+    const [kinds, layouts] = await Promise.all([
+      pool.request().query("SELECT Code, Name FROM dbo.CrmConstructedAssetKind WHERE IsActive = 1 ORDER BY SortOrder, Name"),
+      pool.request().query("SELECT Label FROM dbo.RoomLayoutType ORDER BY Label"),
+    ]);
+    res.json({ kinds: kinds.recordset, layouts: layouts.recordset.map((l) => l.Label) });
+  } catch (err) {
+    console.error("[projectMaster] GET /unit-options:", err.message);
+    res.status(500).json({ error: "Failed to load unit options" });
+  }
+});
+
 router.get("/types", async (_req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT Id, Code, Name, Description,
-             HasFloors, SellsLand, SellsConstruction, AllowsMultiUnitSale
+             HasFloors, SellsLand, SellsConstruction, AllowsMultiUnitSale,
+             SellsResidential, SellsCommercial
       FROM dbo.ProjectTypeMaster
       WHERE IsActive = 1
       ORDER BY SortOrder, Name
@@ -365,6 +383,7 @@ router.post("/", adminOnly, async (req, res) => {
   const f = req.body;
   try {
     const pool = getPool();
+    f.projectTypeId = await require("../services/defaultProjectType").resolveProjectTypeId(pool, f.projectTypeId);
     await pool
       .request()
       .input("name", sql.NVarChar(255), f.name || null)
@@ -535,6 +554,18 @@ router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
   try {
     const pool = getPool();
+    f.projectTypeId = await require("../services/defaultProjectType").resolveProjectTypeId(pool, f.projectTypeId);
+    // A new project type must not strand floors / plots or make unsold units
+    // unsellable — same rule as Auto Project Setup (services/typeGuard.js).
+    {
+      const newTypeId = f.projectTypeId != null && f.projectTypeId !== "" ? parseInt(f.projectTypeId, 10) : null;
+      const cur = (await pool.request().input("id", sql.Int, parseInt(req.params.id, 10))
+        .query("SELECT project_type_id AS t FROM dbo.enterprise WHERE id = @id")).recordset[0];
+      if (cur && newTypeId != null && cur.t !== newTypeId) {
+        const problem = await require("../services/typeGuard").projectTypeChangeProblem(pool, parseInt(req.params.id, 10), newTypeId);
+        if (problem) return res.status(400).json({ error: problem });
+      }
+    }
     await pool
       .request()
       .input("id", sql.Int, parseInt(req.params.id))

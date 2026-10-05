@@ -4,6 +4,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 const { getPool, sql } = require("../db");
+const { projectPredicate } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -202,7 +203,13 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
         ON sl.RefType = 'ISS' AND iss.IssueId = sl.RefID
     `;
 
-    const where = buildWhere(filters, ledgerDateExpr, hasGodownID, hasDocNo);
+    let where = buildWhere(filters, ledgerDateExpr, hasGodownID, hasDocNo);
+    // Project scoping: a restricted user only sees ledger rows of godowns that
+    // belong to their projects (company-level godowns with no project are hidden).
+    if (req.projectScope && hasGodownID) {
+      const inScope = `sl.GodownID IN (SELECT sg.GodownID FROM dbo.Godowns sg WHERE 1=1${projectPredicate(req.projectScope, "sg.ProjectID")})`;
+      where = where ? `${where} AND ${inScope}` : `WHERE ${inScope}`;
+    }
 
     // ── Bind helper — includes godownId when present ──────────────────────────
     function bindAll(request) {
@@ -311,8 +318,8 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
           ISNULL(gd.IsMain, 0) AS IsMain
         FROM dbo.StockLedger sl
         INNER JOIN dbo.Godowns gd ON gd.GodownID = sl.GodownID
-        WHERE gd.IsDeleted = 0 OR gd.IsDeleted IS NULL
-        ORDER BY gd.IsMain DESC, gd.GodownName ASC
+        WHERE (gd.IsDeleted = 0 OR gd.IsDeleted IS NULL)${projectPredicate(req.projectScope, "gd.ProjectID")}
+        ORDER BY ISNULL(gd.IsMain, 0) DESC, ISNULL(gd.GodownName, 'Main Godown') ASC
       `);
       godowns = godownListResult.recordset;
     }

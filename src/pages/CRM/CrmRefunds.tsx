@@ -15,6 +15,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/refunds";
 const BKG_API = "/api/crm/bookings";
@@ -260,12 +261,12 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
           {/* Step 4 — destination: re-booking target, or payout details */}
           {mode === "rebook" ? (
             <Section icon={ArrowRightLeft} title="Apply to booking">
-              <select value={toBookingId} onChange={(e) => setToBookingId(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2.5 bg-background">
+              <SearchableNativeSelect value={toBookingId} onChange={(e) => setToBookingId(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2.5 bg-background">
                 <option value="">Select target booking (same customer)…</option>
                 {heldRebookTargets.map((b) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ProjectName || b.UnitNo || ""} · {b.CompanyId === picked?.CompanyId ? "same company" : "cross-company"}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
               <p className="text-[0.6875rem] text-muted-foreground">A cross-company target raises an Inter-Company Fund Transfer for Finance to approve; the credit lands afterwards.</p>
             </Section>
           ) : (

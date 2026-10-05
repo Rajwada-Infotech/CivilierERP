@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { ParkingNamingPanel } from "./autoSetup/NamingPanel";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -61,6 +62,8 @@ const CrmProjectAutoSetupParking: React.FC = () => {
   const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
   const [editingSlot, setEditingSlot] = useState<{ SlotNo: string; ParkingType: string } | null>(null);
   const [savingSlotId, setSavingSlotId] = useState<number | null>(null);
+  // Which generated block's mix is open for editing (locked otherwise).
+  const [editingTemplateFor, setEditingTemplateFor] = useState<number | null>(null);
 
   // Own query keys (prefixed crm-auto-project-setup-parking-*), separate
   // from the Block/Floor/Unit page's ["crm-auto-project-setup-status", ...]
@@ -125,8 +128,8 @@ const CrmProjectAutoSetupParking: React.FC = () => {
 
   const handleSaveTemplate = async (blockId: number) => {
     const rows = parkingTemplates[blockId] || [];
-    if (!rows.length) { toast.error("Add at least one Parking Type row"); return; }
-    if (rows.some((r) => !r.ParkingType || !parseInt(r.Count, 10))) { toast.error("Every row needs a Parking Type and a Count of at least 1"); return; }
+    if (!rows.length) { toast.error("Add at least one Parking Type row"); return false; }
+    if (rows.some((r) => !r.ParkingType || !parseInt(r.Count, 10))) { toast.error("Every row needs a Parking Type and a Count of at least 1"); return false; }
     setSavingTemplateBlockId(blockId);
     try {
       const res = await fetchWithAuth(`${API}/blocks/${blockId}/parking-template`, {
@@ -143,9 +146,11 @@ const CrmProjectAutoSetupParking: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to save parking template");
-      toast.success(`Template saved — ${data.total} slot(s)`);
+      toast.success(`Saved — ${data.total} slot(s)`);
+      return true;
     } catch (e: any) {
       toast.error(translateError(e.message));
+      return false;
     } finally {
       setSavingTemplateBlockId(null);
     }
@@ -312,60 +317,136 @@ const CrmProjectAutoSetupParking: React.FC = () => {
             {blocks.some((b) => b.ParkingSlotCount > 0) && <CheckCircle2 size={13} className="text-green-600" />}
           </h3>
 
-          <div className="space-y-4">
+          <ParkingNamingPanel projectId={Number(projectId)} shortName={status?.project?.ShortCode} blocks={blocks} canEdit={rights.canEdit} />
+
+          {/* One compact card per block: locked summary once slots exist
+              (Edit to change), an editable table while setting up. */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             {blocks.map((b) => {
               const rows = parkingTemplates[b.Id] || [];
+              const generatedCount = b.ParkingSlotCount || 0;
+              const locked = generatedCount > 0 && editingTemplateFor !== b.Id;
+              const total = templateTotal(b.Id);
+              const pending = Math.max(0, total - generatedCount);
+              const inr = (v: string) => (v === "" || v == null ? "—" : `₹${Number(v).toLocaleString("en-IN")}`);
               return (
-                <div key={b.Id} className="rounded-lg border border-border/60 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold">{b.BlockName}</div>
-                    {b.ParkingSlotCount > 0 && (
-                      <button onClick={() => handleToggleExpand(b)}
-                        className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-primary">
-                        {expandedBlockId === b.Id ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
-                        <Lock size={9} /> {b.ParkingSlotCount} slot(s) generated — click to manage
-                      </button>
+                <div key={b.Id} className="rounded-xl border border-border/60 bg-background/50 p-3 sm:p-4 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold">Block {b.BlockName}</span>
+                    {generatedCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-[0.6875rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                        <CheckCircle2 size={11} /> {generatedCount} slot{generatedCount === 1 ? "" : "s"} created
+                      </span>
+                    ) : (
+                      <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Not created yet</span>
                     )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    {rows.map((row, idx) => (
-                      <div key={idx} className="flex items-center gap-2 flex-wrap">
-                        <select value={row.ParkingType} onChange={(e) => updateTemplateRow(b.Id, idx, { ParkingType: e.target.value })}
-                          className={`${inputCls} !py-1 flex-1 min-w-[90px]`}>
-                          {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                        <input type="number" min={1} max={500} placeholder="Count" value={row.Count}
-                          onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
-                          className={`${inputCls} !py-1 !w-20`} />
-                        <div className="relative flex items-center">
-                          <span className="absolute left-2.5 text-xs text-muted-foreground">₹</span>
-                          <input type="number" min={0} placeholder="Charge" value={row.Charge}
-                            onChange={(e) => updateTemplateRow(b.Id, idx, { Charge: e.target.value })}
-                            className={`${inputCls} !py-1 !w-28 pl-6`} />
-                        </div>
-                        <div className="relative flex items-center">
-                          <input type="number" min={0} max={100} step={0.01} placeholder="GST%" value={row.GstRate}
-                            onChange={(e) => updateTemplateRow(b.Id, idx, { GstRate: e.target.value })}
-                            className={`${inputCls} !py-1 !w-20 pr-6`} />
-                          <span className="absolute right-2.5 text-xs text-muted-foreground">%</span>
-                        </div>
-                        <button onClick={() => removeTemplateRow(b.Id, idx)} className="text-muted-foreground hover:text-red-600 shrink-0">
-                          <X size={12} />
+                    {pending > 0 && generatedCount > 0 && (
+                      <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400">+{pending} to create</span>
+                    )}
+                    <div className="ml-auto flex items-center gap-1.5">
+                      {generatedCount > 0 && (
+                        <button onClick={() => handleToggleExpand(b)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted/50">
+                          {expandedBlockId === b.Id ? <ChevronDown size={11} /> : <ChevronRight size={11} />} Slots
                         </button>
-                      </div>
-                    ))}
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => addTemplateRow(b.Id)} className="text-xs text-primary hover:underline">+ Add Type</button>
-                      <span className="text-[0.6875rem] text-muted-foreground ml-auto">Total: {templateTotal(b.Id)} slot(s)</span>
-                      {rights.canEdit && (
-                        <button onClick={() => handleSaveTemplate(b.Id)} disabled={savingTemplateBlockId === b.Id}
-                          className="px-2.5 py-1 text-[0.6875rem] bg-muted rounded-lg font-medium hover:bg-muted/70 disabled:opacity-40">
-                          Save Template
+                      )}
+                      {locked && rights.canEdit && (
+                        <button onClick={() => setEditingTemplateFor(b.Id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border text-primary hover:bg-primary/5">
+                          <Pencil size={11} /> Edit
                         </button>
                       )}
                     </div>
                   </div>
+
+                  {/* Mix table — read-only when locked, inputs while editing. */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                          <th className="text-left font-medium pb-1.5">Type</th>
+                          <th className="text-right font-medium pb-1.5 w-20">Slots</th>
+                          <th className="text-right font-medium pb-1.5 w-32">Charge</th>
+                          <th className="text-right font-medium pb-1.5 w-20">GST</th>
+                          {!locked && <th className="w-6" />}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {rows.map((row, idx) => locked ? (
+                          <tr key={idx}>
+                            <td className="py-1.5">{row.ParkingType}</td>
+                            <td className="py-1.5 text-right tabular-nums">{row.Count}</td>
+                            <td className="py-1.5 text-right tabular-nums">{inr(row.Charge)}</td>
+                            <td className="py-1.5 text-right tabular-nums">{row.GstRate === "" ? "—" : `${row.GstRate}%`}</td>
+                          </tr>
+                        ) : (
+                          <tr key={idx}>
+                            <td className="py-1 pr-2">
+                              <select value={row.ParkingType} onChange={(e) => updateTemplateRow(b.Id, idx, { ParkingType: e.target.value })}
+                                className="w-full max-w-[180px] h-8 px-2 text-xs rounded-lg border border-border bg-background">
+                                {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                              </select>
+                            </td>
+                            <td className="py-1 pl-1">
+                              <input type="number" min={1} max={500} value={row.Count} aria-label="Slots"
+                                onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
+                                className="w-full h-8 px-2 text-xs text-right rounded-lg border border-border bg-background tabular-nums" />
+                            </td>
+                            <td className="py-1 pl-1">
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
+                                <input type="number" min={0} value={row.Charge} placeholder="0" aria-label="Charge"
+                                  onChange={(e) => updateTemplateRow(b.Id, idx, { Charge: e.target.value })}
+                                  className="w-full h-8 pl-5 pr-2 text-xs text-right rounded-lg border border-border bg-background tabular-nums" />
+                              </div>
+                            </td>
+                            <td className="py-1 pl-1">
+                              <div className="relative">
+                                <input type="number" min={0} max={100} step={0.01} value={row.GstRate} placeholder="0" aria-label="GST %"
+                                  onChange={(e) => updateTemplateRow(b.Id, idx, { GstRate: e.target.value })}
+                                  className="w-full h-8 pl-2 pr-5 text-xs text-right rounded-lg border border-border bg-background tabular-nums" />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
+                              </div>
+                            </td>
+                            <td className="py-1 pl-1 text-center">
+                              {rows.length > 1 && (
+                                <button onClick={() => removeTemplateRow(b.Id, idx)} aria-label="Remove type"
+                                  className="text-muted-foreground hover:text-red-600"><X size={13} /></button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t border-border">
+                          <td className="pt-1.5 text-muted-foreground">
+                            {!locked && <button onClick={() => addTemplateRow(b.Id)} className="text-primary hover:underline">+ Add type</button>}
+                          </td>
+                          <td className="pt-1.5 text-right font-semibold tabular-nums">{total}</td>
+                          <td colSpan={locked ? 2 : 3} />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  {!locked && generatedCount > 0 && (
+                    <p className="text-[0.6875rem] text-muted-foreground">
+                      Raising a count adds new slots when you create them. Lowering it doesn&apos;t remove slots already created — delete those under “Slots”.
+                    </p>
+                  )}
+                  {!locked && rights.canEdit && (
+                    <div className="flex justify-end gap-2">
+                      {generatedCount > 0 && (
+                        <button onClick={() => setEditingTemplateFor(null)}
+                          className="px-3 py-1.5 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted/50">Cancel</button>
+                      )}
+                      <button onClick={async () => { if (await handleSaveTemplate(b.Id)) setEditingTemplateFor(null); }}
+                        disabled={savingTemplateBlockId === b.Id}
+                        className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">
+                        {savingTemplateBlockId === b.Id ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  )}
 
                   {expandedBlockId === b.Id && (
                     <ParkingSlotList
@@ -396,7 +477,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
           {rights.canCreate && blocks.some((b) => templateTotal(b.Id) > (b.ParkingSlotCount || 0)) && (
             <button onClick={handleGenerate} disabled={generating}
               className="px-4 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-              {generating ? "Generating…" : "Generate Parking Slots"}
+              {generating ? "Creating…" : `Create ${blocks.reduce((s, b) => s + Math.max(0, templateTotal(b.Id) - (b.ParkingSlotCount || 0)), 0)} parking slot(s)`}
             </button>
           )}
         </div>

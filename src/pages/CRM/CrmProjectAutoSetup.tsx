@@ -9,6 +9,9 @@ import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil
 import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { NamingPanel } from "./autoSetup/NamingPanel";
+import { ProjectTypeBar } from "./autoSetup/ProjectTypeBar";
+import { BlockStackEditor } from "./autoSetup/BlockStackEditor";
 import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 
 const API = "/api/crm/project-auto-setup";
@@ -25,9 +28,9 @@ function firstPickableType(types: LayoutType[]): string {
   return types.find((t) => t.roomCount > 0)?.label ?? "";
 }
 
-type TemplateRow = { UnitType: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
+type TemplateRow = { UnitType: string; UnitKind?: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 type PaymentPlan = { Id: number; PlanName: string; IsActive: boolean };
-type UnitEdit = { UnitName: string; FloorNo: string; UnitType: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
+type UnitEdit = { UnitName: string; FloorNo: string; UnitType: string; UnitKind?: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 
 async function fetchApplicablePlans(projectId: string): Promise<PaymentPlan[]> {
   try {
@@ -167,6 +170,14 @@ const SetupProgress: React.FC<{ steps: { label: string; detail: string; done: bo
 // is identical. Real layouts have plots of differing sizes, each with its own
 // area, dimensions, facing and survey number, edited per plot afterwards.
 // Generating uniform plots and refining them beats hand-creating sixty rows.
+// Common plot-number styles (as used on site plans): P-1, Plot 1, PLOT NO 1, plain 1.
+const PLOT_PREFIXES = [
+  { label: "dash", value: "P-" },
+  { label: "plot", value: "Plot " },
+  { label: "plotno", value: "PLOT NO " },
+  { label: "plain", value: "" },
+];
+
 const PlotLayoutStep: React.FC<{
   blocks: any[];
   projectTypeName?: string;
@@ -264,6 +275,44 @@ const PlotLayoutStep: React.FC<{
               />
             </div>
           );
+          // Plots entered or imported directly in Plot Master: nothing to lay out here.
+          if (t?.FromPlotMaster) return (
+            <div key={b.Id} className="rounded-lg border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-foreground">{b.BlockName}</span>
+                <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-medium">{t.PlotsCreated} plot(s) in Plot Master</span>
+              </div>
+              <p className="text-xs text-muted-foreground">These plots were entered in Plot Master, each with its own number and area. Edit them there.</p>
+            </div>
+          );
+          // Created: a locked summary — plots are managed in Plot Master from here on.
+          if (generated) {
+            const pre = t.NumberPrefix ?? "";
+            const start = Number(t.StartNumber || 1);
+            const last = start + Number(t.PlotsCreated || t.PlotCount || 1) - 1;
+            const val = (v: any, unit = "") => (v == null || v === "" ? "—" : `${unit}${Number.isFinite(Number(v)) ? Number(v).toLocaleString("en-IN") : v}`);
+            return (
+              <div key={b.Id} className="rounded-xl border border-border/60 bg-background/50 p-3 sm:p-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Lock size={12} className="text-muted-foreground" />
+                  <span className="text-sm font-semibold">Block {b.BlockName}</span>
+                  <span className="inline-flex items-center gap-1 text-[0.6875rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                    <CheckCircle2 size={11} /> {t.PlotsCreated} plot(s) created
+                  </span>
+                  <a href="/crm/setup/plot-master" className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border text-primary hover:bg-primary/5">
+                    Manage in Plot Master <ExternalLink size={11} />
+                  </a>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+                  <div className="sm:col-span-2"><div className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">Plot names</div><div className="font-mono">{pre}{start}, {pre}{start + 1} … {pre}{last}</div></div>
+                  <div><div className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">Area</div><div className="tabular-nums">{val(t.DefaultAreaSqFt)}{t.DefaultAreaSqFt ? " sq ft" : ""}</div></div>
+                  <div><div className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">Rate / sq ft</div><div className="tabular-nums">{val(t.DefaultRatePerSqFt, "₹")}</div></div>
+                  <div><div className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">Road · Facing</div><div>{val(t.DefaultRoadWidthFt)}{t.DefaultRoadWidthFt ? " ft" : ""} · {t.DefaultFacing || "—"}</div></div>
+                </div>
+                <p className="text-[0.6875rem] text-muted-foreground">Each plot's own area, rate, facing and survey number are edited in Plot Master.</p>
+              </div>
+            );
+          }
           return (
             <div key={b.Id} className="rounded-lg border border-border p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -279,8 +328,28 @@ const PlotLayoutStep: React.FC<{
 
               <div className="grid grid-cols-3 gap-2">
                 {f("Plots", "PlotCount")}
-                {f("Prefix", "NumberPrefix", "text", "P-")}
                 {f("Start No.", "StartNumber")}
+                {f("Own prefix", "NumberPrefix", "text", "P-")}
+                {/* Plot names — pick a common style or type your own prefix above. */}
+                <div className="col-span-3 space-y-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground mr-1">Plot names</span>
+                    {PLOT_PREFIXES.map((pre) => (
+                      <button key={pre.label} type="button" disabled={generated || !canEdit || working}
+                        onClick={() => patch(b.Id, { NumberPrefix: pre.value })}
+                        className={`px-2 py-0.5 text-xs rounded-md border font-mono transition-colors disabled:opacity-50 ${(d.NumberPrefix ?? "") === pre.value ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/50"}`}>
+                        {pre.value}{d.StartNumber || 1}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-[0.6875rem] text-muted-foreground">
+                    {generated ? "Created as " : "Will be named "}
+                    <span className="font-mono text-emerald-700 dark:text-emerald-400">
+                      {[0, 1].map((i) => `${d.NumberPrefix ?? ""}${Number(d.StartNumber || 1) + i}`).join(", ")}
+                      {Number(d.PlotCount) > 2 ? ` … ${d.NumberPrefix ?? ""}${Number(d.StartNumber || 1) + Number(d.PlotCount) - 1}` : ""}
+                    </span>
+                  </div>
+                </div>
                 {f("Area (sq ft)", "DefaultAreaSqFt")}
                 {f("Rate / sq ft", "DefaultRatePerSqFt")}
                 {f("Road (ft)", "DefaultRoadWidthFt")}
@@ -631,7 +700,16 @@ const CrmProjectAutoSetup: React.FC = () => {
   // HasFloors flag, resolved server-side in /status — never from its name, so
   // a type added in Project Type master works here with no change. A project
   // with no type set resolves to floors, which is the legacy behaviour.
-  const isPlotted = status?.projectType ? !status.projectType.HasFloors : false;
+  // Each block follows its OWN effective type (block override, else the
+  // project's): tower blocks get floors + units, plot blocks get a plot
+  // layout — so a mixed township sets up both side by side.
+  const towerBlocks = blocks.filter((b: any) => b.HasFloors !== false);
+  const plotBlocks = blocks.filter((b: any) => b.HasFloors === false);
+  const hasTowers = towerBlocks.length > 0;
+  const hasPlots = plotBlocks.length > 0;
+  // Whole-project wording only: plotted when every block is plots, or when
+  // there are no blocks yet and the project's type has no floors.
+  const isPlotted = blocks.length ? !hasTowers : (status?.projectType ? !status.projectType.HasFloors : false);
 
   const step1Done = blocks.length > 0;
   const step2Done = floors.length > 0;
@@ -649,6 +727,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         const rows: TemplateRow[] = (data.items || []).length
           ? data.items.map((it: any) => ({
               UnitType: it.UnitType,
+              UnitKind: it.UnitKind || "",
               Count: String(it.Count),
               AreaSqFt: it.AreaSqFt != null ? String(it.AreaSqFt) : "",
               CarpetAreaSqFt: it.CarpetAreaSqFt != null ? String(it.CarpetAreaSqFt) : "",
@@ -705,7 +784,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   // backend, so re-sending an unchanged count for an already-set-up block is
   // always a safe no-op.
   const handleSaveFloors = async () => {
-    const payload = blocks
+    const payload = towerBlocks
       .map((b) => ({ BlockId: b.Id, FloorCount: parseInt(floorCounts[b.Id] || "", 10) }))
       .filter((p) => Number.isFinite(p.FloorCount) && p.FloorCount >= 1);
     if (!payload.length) { toast.error("Enter a floor count for at least one block"); return; }
@@ -728,7 +807,37 @@ const CrmProjectAutoSetup: React.FC = () => {
     }
   };
 
-  const handleFloorFieldSave = async (floor: any, patch: { UnitCount?: number; HasUnits?: boolean }) => {
+  // Unit kinds this project's type may use — drives the per-floor "use" picker.
+  type KindRow = { Code: string; Name: string; IsCommercial: boolean };
+  const { data: kindsData } = useQuery<{ project: KindRow[]; blocks: Record<string, KindRow[]>; defaultKind?: string | null }>({
+    queryKey: ["auto-setup-kinds", projectId, status?.blocks?.map((b: any) => `${b.Id}:${b.OwnTypeId ?? ""}`).join(",")],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/kinds?ProjectId=${projectId}`);
+      return r.ok ? r.json() : { project: [], blocks: {}, defaultKind: null };
+    },
+    enabled: !!projectId,
+    staleTime: 60 * 1000,
+  });
+  // Each block allows what its OWN effective type sells (block override, else project).
+  const kindsFor = (blockId: number): KindRow[] => kindsData?.blocks?.[blockId] ?? kindsData?.project ?? [];
+  // Commercial kinds any block here may use — offered when editing a unit;
+  // the server refuses a kind the unit's own block type doesn't sell.
+  const projectCommercialKinds: KindRow[] = Object.values(kindsData?.blocks ?? {}).flat()
+    .filter((k, i, all) => k.IsCommercial && all.findIndex((x) => x.Code === k.Code) === i);
+
+  // Per-floor kind, only where the block's type sells commercial: the floor's
+  // default kind (from the database) means "follow the unit mix".
+  const floorKindPicker = (blockId: number, f: any) =>
+    kindsFor(blockId).some((k) => k.IsCommercial) ? (
+      <select value={f.UnitKind || kindsData?.defaultKind || ""} disabled={!rights.canEdit || f.IsGenerated}
+        onChange={(e) => handleFloorFieldSave(f, { UnitKind: e.target.value === kindsData?.defaultKind ? "" : e.target.value })}
+        title="What this floor's units are" className="bg-transparent text-xs outline-none text-muted-foreground">
+        {!kindsFor(blockId).some((k) => k.Code === kindsData?.defaultKind) && <option value="">As unit mix</option>}
+        {kindsFor(blockId).map((k) => <option key={k.Code} value={k.Code}>{k.Name}</option>)}
+      </select>
+    ) : null;
+
+  const handleFloorFieldSave = async (floor: any, patch: { UnitCount?: number; HasUnits?: boolean; UnitKind?: string }) => {
     try {
       const res = await fetchWithAuth(`${API}/floors/${floor.Id}`, {
         method: "PUT",
@@ -843,7 +952,8 @@ const CrmProjectAutoSetup: React.FC = () => {
     setEditingUnit({
       UnitName: unit.UnitName || "",
       FloorNo: unit.FloorNo != null ? String(unit.FloorNo) : "",
-      UnitType: unit.UnitType || firstPickableType(unitTypesMaster),
+      UnitKind: projectCommercialKinds.some((k) => k.Code === unit.UnitKind) ? unit.UnitKind : "",
+      UnitType: projectCommercialKinds.some((k) => k.Code === unit.UnitKind) ? "" : (unit.UnitType || firstPickableType(unitTypesMaster)),
       AreaSqFt: unit.AreaSqFt != null ? String(unit.AreaSqFt) : "",
       CarpetAreaSqFt: unit.CarpetAreaSqFt != null ? String(unit.CarpetAreaSqFt) : "",
       BuiltUpAreaSqFt: unit.BuiltUpAreaSqFt != null ? String(unit.BuiltUpAreaSqFt) : "",
@@ -869,7 +979,8 @@ const CrmProjectAutoSetup: React.FC = () => {
           BlockId: unit.BlockId,
           UnitName: unitName,
           FloorNo: floorNo,
-          UnitType: editingUnit.UnitType || null,
+          UnitType: editingUnit.UnitKind ? null : (editingUnit.UnitType || null),
+          UnitKind: editingUnit.UnitKind || kindsData?.defaultKind || undefined,
           AreaSqFt: editingUnit.AreaSqFt || null,
           CarpetAreaSqFt: editingUnit.CarpetAreaSqFt || null,
           BuiltUpAreaSqFt: editingUnit.BuiltUpAreaSqFt || null,
@@ -895,7 +1006,9 @@ const CrmProjectAutoSetup: React.FC = () => {
       setFloorUnits((m) => ({
         ...m,
         [floorId]: (m[floorId] || []).map((u) => u.Id === unit.Id
-          ? { ...u, UnitName: unitName, UnitType: editingUnit.UnitType,
+          ? { ...u, UnitName: unitName, UnitType: editingUnit.UnitKind ? null : editingUnit.UnitType,
+              UnitKind: editingUnit.UnitKind || kindsData?.defaultKind || u.UnitKind,
+              KindName: editingUnit.UnitKind ? projectCommercialKinds.find((k) => k.Code === editingUnit.UnitKind)?.Name : null,
               CarpetAreaSqFt: editingUnit.CarpetAreaSqFt || null,
               BuiltUpAreaSqFt: editingUnit.BuiltUpAreaSqFt || null,
               SuperBuiltUpAreaSqFt: editingUnit.SuperBuiltUpAreaSqFt || null,
@@ -936,6 +1049,7 @@ const CrmProjectAutoSetup: React.FC = () => {
         body: JSON.stringify({
           Items: rows.map((r) => ({
             UnitType: r.UnitType,
+            UnitKind: r.UnitKind || null,
             Count: r.Count,
             AreaSqFt: r.AreaSqFt || null,
             CarpetAreaSqFt: r.CarpetAreaSqFt || null,
@@ -1120,6 +1234,12 @@ const CrmProjectAutoSetup: React.FC = () => {
             below (Option B synthetic bucket). This note stays as a lightweight
             signpost so staff know what the amber row means without having to
             guess — it disappears automatically once all units are fixed. */}
+        {/* What this project is — type, what it sells, and each block's layout. */}
+        {projectId && status && (
+          <ProjectTypeBar projectId={Number(projectId)} status={status} canEdit={rights.canEdit}
+            onChanged={() => { refetchStatus(); invalidateSyncedMasters(); qc.invalidateQueries({ queryKey: ["auto-setup-kinds", projectId] }); }} />
+        )}
+
         {projectId && status && !isPlotted && status.legacyUnitCount > 0 && (
           <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-2.5 text-sm text-sky-600 flex items-center gap-2">
             <span>
@@ -1321,6 +1441,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onSaveUnit={handleSaveUnit}
                                 onDeleteUnit={handleDeleteUnit}
                                 unitTypesMaster={unitTypesMaster}
+                                commercialKinds={projectCommercialKinds}
                               />
                             </div>
                           )}
@@ -1444,6 +1565,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     onSaveUnit={handleSaveUnit}
                     onDeleteUnit={handleDeleteUnit}
                     unitTypesMaster={unitTypesMaster}
+                    commercialKinds={projectCommercialKinds}
                   />
                 </div>
               ))}
@@ -1513,9 +1635,9 @@ const CrmProjectAutoSetup: React.FC = () => {
                 replaced rather than hidden field-by-field — the backend refuses
                 POST /floors for such a block anyway, and leaving the step
                 visible would invite an action that can only fail. */}
-            {step1Done && isPlotted && (
+            {step1Done && hasPlots && (
               <PlotLayoutStep
-                blocks={blocks}
+                blocks={plotBlocks}
                 projectTypeName={status?.projectType?.Name}
                 canEdit={rights.canEdit}
                 canCreate={rights.canCreate}
@@ -1528,18 +1650,18 @@ const CrmProjectAutoSetup: React.FC = () => {
                 expand a block to browse every plot, check availability status,
                 and delete a plot (with the booking/hold lock guard in place).
                 Detailed editing stays in Unit Master. */}
-            {step1Done && isPlotted && blocks.some((b) => b.PlotTemplate?.IsGenerated) && (
+            {step1Done && hasPlots && plotBlocks.some((b) => b.PlotTemplate?.IsGenerated) && (
               <div className={`${cardCls} border-l-2 border-l-sky-500`}>
                 <SectionHeader
                   icon={MapIcon}
                   colorClass="bg-sky-500/10 text-sky-600"
                   title="Land Inventory"
-                  done={blocks.every((b) => !b.PlotTemplate || b.PlotTemplate.IsGenerated)}
+                  done={plotBlocks.every((b) => !b.PlotTemplate || b.PlotTemplate.IsGenerated)}
                   right={<a href={`/crm/setup/plot-master?projectId=${projectId}`} className="ml-auto inline-flex items-center gap-1 text-[0.6875rem] text-primary hover:underline">Open Plot Master <ExternalLink size={11} /></a>}
                 />
                 <p className="text-[0.6875rem] text-muted-foreground -mt-1">Review live availability below. Use Plot Master for filters, plot history, and conversion to Unit Master after construction.</p>
                 <div className="space-y-1.5">
-                  {blocks.map((b) => {
+                  {plotBlocks.map((b) => {
                     const tpl = b.PlotTemplate;
                     if (!tpl?.IsGenerated) {
                       return (
@@ -1557,7 +1679,7 @@ const CrmProjectAutoSetup: React.FC = () => {
               </div>
             )}
 
-            {step1Done && !isPlotted && (
+            {step1Done && hasTowers && (
               <div className={`${cardCls} border-l-4 border-l-cyan-500`}>
                 <SectionHeader icon={Layers} colorClass="bg-cyan-500/10 text-cyan-600" title="2 · Floor Plan" done={step2Done}
                   hint={step2Done ? "Click a floor to see its units. Use Edit to remove empty floors." : "Enter how many floors each block has."}
@@ -1571,7 +1693,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                 } />
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  {blocks.map((b) => {
+                  {towerBlocks.map((b) => {
                     const blockFloors = floorsByBlock.get(b.Id) || [];
                     const hasFloors = blockFloors.length > 0;
                     // Open by default when there's nothing to summarize yet;
@@ -1634,6 +1756,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   editingUnit={editingUnit}
                                   savingUnitId={savingUnitId}
                                   unitTypesMaster={unitTypesMaster}
+                                  commercialKinds={projectCommercialKinds}
                                   onStartEdit={startEditUnit}
                                   onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
                                   onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
@@ -1689,6 +1812,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   editingUnit={editingUnit}
                                   savingUnitId={savingUnitId}
                                   unitTypesMaster={unitTypesMaster}
+                                  commercialKinds={projectCommercialKinds}
                                   onStartEdit={startEditUnit}
                                   onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
                                   onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
@@ -1703,7 +1827,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     );
                   })}
                 </div>
-                {blocks.some((b) => !(floorsByBlock.get(b.Id) || []).length || floorFormOpenFor[b.Id]) && (
+                {towerBlocks.some((b) => !(floorsByBlock.get(b.Id) || []).length || floorFormOpenFor[b.Id]) && (
                   <div className="flex justify-end pt-1 border-t border-border/60">
                     <button onClick={async () => { await handleSaveFloors(); setFloorFormOpenFor({}); }} disabled={savingFloors}
                       className="w-full sm:w-auto mt-3 px-5 py-2.5 text-sm btn-module text-white rounded-lg font-semibold shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
@@ -1715,13 +1839,17 @@ const CrmProjectAutoSetup: React.FC = () => {
             )}
 
             {/* Unit Types & Generation */}
-            {step2Done && !isPlotted && (
+            {step2Done && hasTowers && (
               <div className={`${cardCls} border-l-4 border-l-sky-500`}>
                 <SectionHeader icon={Ruler} colorClass="bg-sky-500/10 text-sky-600" title="3 · Unit Types & Generation"
                   hint="Define the unit mix per floor for each block, apply it to the floors, then generate the units." />
 
+                {/* How the units will be named — project default, block and
+                    floor overrides, with the exact names previewed first. */}
+                <NamingPanel projectId={Number(projectId)} shortName={status?.project?.ShortCode} blocks={towerBlocks} floorsByBlock={floorsByBlock} canEdit={rights.canEdit} />
+
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  {blocks.map((b) => {
+                  {towerBlocks.map((b) => {
                     const rows = templates[b.Id] || [];
                     const nonGroundFloors = (floorsByBlock.get(b.Id) || []).filter((f) => f.FloorNo !== 0);
                     const groundFloor = (floorsByBlock.get(b.Id) || []).find((f) => f.FloorNo === 0);
@@ -1787,6 +1915,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 onSave={handleSaveUnit}
                                 onDelete={handleDeleteUnit}
                                 unitTypesMaster={unitTypesMaster}
+                                commercialKinds={projectCommercialKinds}
                               />
                             ))}
                           </div>
@@ -1803,222 +1932,18 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 </button>
                               )}
                             </div>
-                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Unit mix per floor</div>
-
-                        {/* Unit Type template — defined ONCE per block, then
-                            applied to every non-Ground floor in one click.
-                            A floor whose count is later customized away from
-                            this total still gets typed by cycling through
-                            this same sequence (see getBlockUnitSequence). */}
-                        <div className="space-y-1.5">
-                          {!firstPickableType(unitTypesMaster) && (
-                            <p className="text-[0.6875rem] text-sky-600 dark:text-sky-400">
-                              No Unit Type has a room layout yet — define one in Civil Work DPR › Unit Composition first.
-                            </p>
-                          )}
-                          {rows.map((row, idx) => (
-                            <div key={idx} className="rounded-lg border border-border/60 bg-muted/20 p-2.5 space-y-2">
-                              <div className="flex items-center gap-2">
-                                <select value={row.UnitType} onChange={(e) => updateTemplateRow(b.Id, idx, { UnitType: e.target.value })}
-                                  title={unitTypesMaster.find((t) => t.label === row.UnitType)?.summary || undefined}
-                                  className={`${inputCls} !py-1 flex-1`}>
-                                  {!row.UnitType && <option value="" disabled>Select Unit Type</option>}
-                                  {unitTypeOptions(unitTypesMaster, row.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
-                                </select>
-                                <input type="number" min={1} max={100} placeholder="Count" value={row.Count}
-                                  onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
-                                  className={`${inputCls} !py-1 !w-20`} />
-                                <button onClick={() => removeTemplateRow(b.Id, idx)} title="Remove unit type" className="p-1 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10 shrink-0 ml-auto">
-                                  <X size={14} />
-                                </button>
-                              </div>
-                              <div className="grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-6 gap-2">
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.AreaSqFt}
-                                    onChange={(e) => updateTemplateRow(b.Id, idx, { AreaSqFt: e.target.value })}
-                                    className={`${inputCls} !py-1`} />
-                                </div>
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Rate/sqft (₹)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.RatePerSqFt}
-                                    onChange={(e) => updateTemplateRow(b.Id, idx, { RatePerSqFt: e.target.value })}
-                                    className={`${inputCls} !py-1`} />
-                                </div>
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Carpet (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.CarpetAreaSqFt}
-                                    onChange={(e) => updateTemplateRow(b.Id, idx, { CarpetAreaSqFt: e.target.value })}
-                                    className={`${inputCls} !py-1`} />
-                                </div>
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Built-up (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.BuiltUpAreaSqFt}
-                                    onChange={(e) => updateTemplateRow(b.Id, idx, { BuiltUpAreaSqFt: e.target.value })}
-                                    className={`${inputCls} !py-1`} />
-                                </div>
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">SBU (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.SuperBuiltUpAreaSqFt}
-                                    onChange={(e) => updateTemplateRow(b.Id, idx, { SuperBuiltUpAreaSqFt: e.target.value })}
-                                    className={`${inputCls} !py-1`} />
-                                </div>
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Open Terrace (sqft)</span>
-                                  <input type="number" min={0} placeholder="—" value={row.OpenTerraceAreaSqFt}
-                                    onChange={(e) => updateTemplateRow(b.Id, idx, { OpenTerraceAreaSqFt: e.target.value })}
-                                    className={`${inputCls} !py-1`} />
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button onClick={() => addTemplateRow(b.Id)} className="text-xs px-2.5 py-1.5 rounded-lg border border-dashed border-primary/50 text-primary hover:bg-primary/5">+ Add Type</button>
-                            <span className="text-xs text-muted-foreground ml-auto">Total: <span className="font-semibold text-foreground">{templateTotal(b.Id)}</span> unit(s)/floor</span>
-                            {rights.canEdit && (
-                              <button onClick={() => handleSaveTemplate(b.Id)} disabled={savingTemplateBlockId === b.Id}
-                                className="px-3 py-1.5 text-xs border border-border bg-background rounded-lg font-medium hover:bg-muted/60 disabled:opacity-40">
-                                Save Template
-                              </button>
-                            )}
-                            {rights.canEdit && (
-                              <button onClick={() => handleApplyTemplate(b.Id)} disabled={applyingTemplateBlockId === b.Id || !templateTotal(b.Id)}
-                                className="px-3 py-1.5 text-xs btn-module text-white rounded-lg font-medium shadow-sm disabled:opacity-40">
-                                Apply to Floors
-                              </button>
-                            )}
-                          </div>
-                          {applicablePlans.length > 0 && (
-                            <div className="pt-1.5 border-t border-border/40">
-                              <div className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mb-1">
-                                Payment Plans — forward-filled to every unit generated in this block
-                              </div>
-                              <div className="flex flex-wrap gap-1.5">
-                                {applicablePlans.map((plan) => {
-                                  const selected = (blockPaymentPlans[b.Id] || []).includes(plan.Id);
-                                  return (
-                                    <button
-                                      key={plan.Id}
-                                      onClick={() => setBlockPaymentPlans((m) => ({
-                                        ...m,
-                                        [b.Id]: selected
-                                          ? (m[b.Id] || []).filter((id) => id !== plan.Id)
-                                          : [...(m[b.Id] || []), plan.Id],
-                                      }))}
-                                      className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${
-                                        selected
-                                          ? "btn-module text-white border-primary"
-                                          : "bg-muted/40 border-border text-muted-foreground hover:text-foreground"
-                                      }`}
-                                    >
-                                      {plan.PlanName}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              {(blockPaymentPlans[b.Id] || []).length > 0 && (
-                                <div className="text-[0.625rem] text-green-600 mt-1">
-                                  {(blockPaymentPlans[b.Id] || []).length} plan{(blockPaymentPlans[b.Id] || []).length > 1 ? "s" : ""} selected — saved with template
-                                </div>
+                            {/* The block as a building: typical floor once, any floor its own mix. */}
+                            <BlockStackEditor blockId={b.Id} blockName={b.BlockName} kinds={kindsFor(b.Id)} layoutTypes={unitTypesMaster} paymentPlans={applicablePlans}
+                              onOpenGeneratedFloor={(f) => { if (!floorUnits[f.Id]) handleToggleExpandFloor(f); }}
+                              renderGeneratedFloor={(fid) => (
+                                <FloorUnitList floorId={fid} units={floorUnits[fid]} loading={loadingUnitsFloorId === fid}
+                                  editingUnitId={editingUnitId} editingUnit={editingUnit} savingUnitId={savingUnitId}
+                                  unitTypesMaster={unitTypesMaster} commercialKinds={projectCommercialKinds}
+                                  onStartEdit={startEditUnit} onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
+                                  onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
+                                  onSave={handleSaveUnit} onDelete={handleDeleteUnit} />
                               )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Ground floor stays its own explicit row — never
-                            covered by the block template above. */}
-                        {groundFloor && (
-                          <div className="pt-3 border-t border-border/60 space-y-2">
-                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Ground floor</div>
-                            {groundFloor.IsGenerated ? (
-                              <button onClick={() => handleToggleExpandFloor(groundFloor)}
-                                className="text-xs text-muted-foreground flex items-center gap-1 hover:text-primary">
-                                {expandedFloorId === groundFloor.Id ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                                <Lock size={10} /> Ground: {groundFloor.GeneratedUnitCount} unit(s) generated — click to manage
-                              </button>
-                            ) : (
-                              <label className="flex items-center gap-1.5 cursor-pointer text-xs">
-                                <input type="checkbox" checked={!!groundFloor.HasUnits}
-                                  onChange={(e) => handleFloorFieldSave(groundFloor, { HasUnits: e.target.checked, UnitCount: e.target.checked ? (groundFloor.UnitCount || 0) : 0 })} />
-                                <span className="text-muted-foreground">This block's ground floor has sellable units</span>
-                                {groundFloor.HasUnits && (
-                                  <input type="number" min={0} max={500} value={groundFloor.UnitCount}
-                                    onChange={(e) => handleFloorFieldSave(groundFloor, { UnitCount: parseInt(e.target.value, 10) || 0, HasUnits: true })}
-                                    className={`${inputCls} !w-20 !py-1`} />
-                                )}
-                              </label>
-                            )}
-                            {expandedFloorId === groundFloor.Id && (
-                              <FloorUnitList
-                                floorId={groundFloor.Id}
-                                units={floorUnits[groundFloor.Id]}
-                                loading={loadingUnitsFloorId === groundFloor.Id}
-                                editingUnitId={editingUnitId}
-                                editingUnit={editingUnit}
-                                savingUnitId={savingUnitId}
-                                onStartEdit={startEditUnit}
-                                onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
-                                onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
-                                onSave={handleSaveUnit}
-                                onDelete={handleDeleteUnit}
-                                unitTypesMaster={unitTypesMaster}
-                              />
-                            )}
-                          </div>
-                        )}
-
-                        {/* Non-Ground floors — compact one-liner by default
-                            (generated by the template above); a pencil
-                            reveals the editable count for a real exception. */}
-                        {nonGroundFloors.length > 0 && (
-                          <div className="pt-3 border-t border-border/60 space-y-2">
-                          <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Units per floor</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {nonGroundFloors.map((f) => (
-                              <div key={f.Id} className="text-xs">
-                                {f.IsGenerated ? (
-                                  <button onClick={() => handleToggleExpandFloor(f)}
-                                    className="inline-flex items-center gap-1 text-muted-foreground hover:text-primary px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:border-sky-500/40">
-                                    {expandedFloorId === f.Id ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
-                                    <Lock size={9} /> {f.FloorLabel}: {f.GeneratedUnitCount}
-                                  </button>
-                                ) : editingFloorId === f.Id ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-primary/40 bg-muted/40">
-                                    {f.FloorLabel}:
-                                    <input autoFocus type="number" min={0} max={500} value={f.UnitCount}
-                                      onChange={(e) => handleFloorFieldSave(f, { UnitCount: parseInt(e.target.value, 10) || 0 })}
-                                      onBlur={() => setEditingFloorId(null)}
-                                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditingFloorId(null); }}
-                                      className="w-14 bg-transparent border-b border-primary outline-none" />
-                                  </span>
-                                ) : (
-                                  <button onClick={() => setEditingFloorId(f.Id)}
-                                    className="group inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:bg-muted/70" title="Edit unit count for this floor">
-                                    <span>{f.FloorLabel}: {f.UnitCount}</span>
-                                    <Pencil size={10} className="opacity-40 group-hover:opacity-80" />
-                                  </button>
-                                )}
-                                {expandedFloorId === f.Id && (
-                                  <FloorUnitList
-                                    floorId={f.Id}
-                                    units={floorUnits[f.Id]}
-                                    loading={loadingUnitsFloorId === f.Id}
-                                    editingUnitId={editingUnitId}
-                                    editingUnit={editingUnit}
-                                    savingUnitId={savingUnitId}
-                                    onStartEdit={startEditUnit}
-                                    onEditChange={(patch) => setEditingUnit((u) => u ? { ...u, ...patch } : u)}
-                                    onCancelEdit={() => { setEditingUnitId(null); setEditingUnit(null); }}
-                                    onSave={handleSaveUnit}
-                                    onDelete={handleDeleteUnit}
-                                    unitTypesMaster={unitTypesMaster}
-                                  />
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                          </div>
-                        )}
+                              canEdit={rights.canEdit} onChanged={() => { refetchStatus(); invalidateSyncedMasters(); }} />
                           </>
                         )}
                       </div>
@@ -2030,7 +1955,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                     actually eligible to generate anywhere on this project —
                     otherwise it's just an invitation to re-click into the
                     same "No eligible floors" toast with nothing to act on. */}
-                {blocks.some((b) => {
+                {towerBlocks.some((b) => {
                   const bf = floorsByBlock.get(b.Id) || [];
                   const ng = bf.filter((f) => f.FloorNo !== 0);
                   const g = bf.find((f) => f.FloorNo === 0);
@@ -2083,7 +2008,8 @@ const BlockFloorTree: React.FC<{
   onSaveUnit: (floorId: number, unit: any) => void;
   onDeleteUnit: (floorId: number, unit: any) => void;
   unitTypesMaster: LayoutType[];
-}> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit, unitTypesMaster }) => (
+  commercialKinds?: { Code: string; Name: string }[];
+}> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit, unitTypesMaster, commercialKinds: projectCommercialKinds = [] }) => (
   <div className="space-y-0.5">
     {blockFloors.length === 0 ? (
       <div className="text-muted-foreground py-0.5">No floors yet.</div>
@@ -2133,6 +2059,7 @@ const BlockFloorTree: React.FC<{
               editingUnit={editingUnit}
               savingUnitId={savingUnitId}
               unitTypesMaster={unitTypesMaster}
+              commercialKinds={projectCommercialKinds}
               onStartEdit={onStartEditUnit}
               onEditChange={onEditUnitChange}
               onCancelEdit={onCancelEditUnit}
@@ -2159,7 +2086,8 @@ const FloorUnitList: React.FC<{
   onCancelEdit: () => void;
   onSave: (floorId: number, unit: any) => void;
   onDelete: (floorId: number, unit: any) => void;
-}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, unitTypesMaster, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete }) => {
+  commercialKinds?: { Code: string; Name: string }[];
+}> = ({ floorId, units, loading, editingUnitId, editingUnit, savingUnitId, unitTypesMaster, onStartEdit, onEditChange, onCancelEdit, onSave, onDelete, commercialKinds = [] }) => {
   // Tapping a unit expands it into a small detail panel (status + real
   // Edit/Delete buttons) instead of always showing a bare pencil/× stranded
   // at the far edge of the row. Local to this floor's list — each floor
@@ -2197,12 +2125,24 @@ const FloorUnitList: React.FC<{
                       onChange={(e) => onEditChange({ UnitName: e.target.value })}
                       placeholder="Unit name"
                       className="h-7 rounded border border-border bg-background px-2 text-[0.6875rem] font-mono outline-none focus:border-primary" />
-                    <select value={editingUnit.UnitType}
-                      onChange={(e) => onEditChange({ UnitType: e.target.value })}
+                    <select value={editingUnit.UnitKind ? `kind:${editingUnit.UnitKind}` : editingUnit.UnitType}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        onEditChange(v.startsWith("kind:") ? { UnitKind: v.slice(5), UnitType: "" } : { UnitKind: "", UnitType: v });
+                      }}
                       title={unitTypesMaster.find((t) => t.label === editingUnit.UnitType)?.summary || undefined}
                       className="h-7 rounded border border-border bg-background px-1 text-[0.6875rem] outline-none focus:border-primary">
                       {!editingUnit.UnitType && <option value="" disabled>Select Unit Type</option>}
-                      {unitTypeOptions(unitTypesMaster, u.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
+                      {commercialKinds.length ? (
+                        <>
+                          <optgroup label="Residential">
+                            {unitTypeOptions(unitTypesMaster, u.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
+                          </optgroup>
+                          <optgroup label="Commercial">
+                            {commercialKinds.map((k) => <option key={k.Code} value={`kind:${k.Code}`}>{k.Name}</option>)}
+                          </optgroup>
+                        </>
+                      ) : unitTypeOptions(unitTypesMaster, u.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
                     </select>
                   </div>
                   {/* Floor No. input — only shown for Unassigned units (FloorNo IS NULL)
@@ -2280,7 +2220,7 @@ const FloorUnitList: React.FC<{
                   <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} title={lockReason || "Available"} />
                 </div>
                 <div className="text-muted-foreground truncate">
-                  {u.UnitType || "No type set"}
+                  {commercialKinds.some((k) => k.Code === u.UnitKind) ? (u.KindName || u.UnitKind) : (u.UnitType || "No type set")}
                   {u.AreaSqFt ? ` · ${u.AreaSqFt} sqft` : ""}
                   {u.RatePerSqFt ? ` · ₹${Number(u.RatePerSqFt).toLocaleString("en-IN")}/sqft` : ""}
                 </div>

@@ -3,6 +3,33 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectAllowed } = require("../services/projectScope");
+
+// A transfer belongs to the projects of its two godowns. A restricted user can
+// see it if EITHER end is one of their projects (the receiving project needs to
+// see what's coming in), but can only create one out of their own project.
+const scopedGodownIds = (scope) => scope.map(Number).filter(Number.isFinite).join(",") || "NULL";
+const transferVisibleSql = (scope, alias = "st") =>
+  scope
+    ? ` AND EXISTS (SELECT 1 FROM dbo.Godowns sg WHERE sg.GodownID IN (${alias}.FromGodownID, ${alias}.ToGodownID) AND sg.ProjectID IN (${scopedGodownIds(scope)}))`
+    : "";
+
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const tid = parseInt(id, 10);
+  if (!Number.isFinite(tid)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, tid).query(
+      `SELECT 1 AS found, CASE WHEN 1=1${transferVisibleSql(req.projectScope, "st")} THEN 1 ELSE 0 END AS visible FROM dbo.StockTransfers st WHERE st.TransferID = @id`,
+    );
+    if (r.recordset.length && !r.recordset[0].visible) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { cache } = require("../middleware/cache");
@@ -35,7 +62,7 @@ router.get("/", cache("stock-transfers", 60), async (req, res) => {
       .input("limit", sql.Int, parseInt(limit))
       .input("offset", sql.Int, offset);
 
-    let where = "WHERE 1=1";
+    let where = "WHERE 1=1" + transferVisibleSql(req.projectScope, "st");
     if (fromGodown) {
       request.input("from", sql.Int, parseInt(fromGodown));
       where += " AND st.FromGodownID=@from";
@@ -105,6 +132,13 @@ router.post("/", requirePageRight("stock-transfers", "create"), async (req, res)
       return res
         .status(400)
         .json({ error: "FromGodownID and ToGodownID are required" });
+    if (req.projectScope) {
+      const fg = await pool.request().input("g", sql.Int, parseInt(FromGodownID, 10))
+        .query("SELECT ProjectID FROM dbo.Godowns WHERE GodownID = @g");
+      if (!projectAllowed(req.projectScope, fg.recordset[0]?.ProjectID)) {
+        return res.status(403).json({ error: "You can only transfer stock out of a godown in your own projects." });
+      }
+    }
     if (FromGodownID === ToGodownID)
       return res
         .status(400)

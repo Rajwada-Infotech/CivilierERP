@@ -1,0 +1,6 @@
+{"source":"Gloria sheet heading 'SHOP NO' + project types agreed 2026-10-04",
+"unitKinds":[{"Code":"SHOP","Name":"Shop","IsCommercial":true,"SortOrder":30},{"Code":"FLAT","BuiltOn":"FLOORS"},{"Code":"VILLA","BuiltOn":"PLOTS"}],
+"projectTypes":[
+ {"Code":"MIXED_USE","Name":"Commercial + Residential","Description":"Shops / offices and flats in one building (e.g. Gloria)","HasFloors":true,"SellsLand":false,"SellsConstruction":true,"SellsResidential":true,"SellsCommercial":true,"AllowsMultiUnitSale":false,"SortOrder":60},
+ {"Code":"COMMERCIAL","Name":"Commercial Building","Description":"Wholly commercial — shops, offices, showrooms","HasFloors":true,"SellsLand":false,"SellsConstruction":true,"SellsResidential":false,"SellsCommercial":true,"AllowsMultiUnitSale":false,"SortOrder":70}
+]}

@@ -6,6 +6,7 @@
 // edit are supported (editingRecord prop, mirroring PaymentFormModal's
 // modal-prop pattern). Deliberately dropped vs. web: Contract-linking
 // (on-account advance tagging), print, and submit-for-approval.
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -126,6 +127,14 @@ export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { 
   const { data: companies = [] } = useQuery({ queryKey: ["rp-form-companies"], queryFn: fetchCompanyOptions, enabled: visible });
   const { data: projects = [] } = useQuery({ queryKey: ["rp-form-projects"], queryFn: fetchProjectOptions, enabled: visible });
   const { data: finYears = [] } = useQuery({ queryKey: ["rp-form-finyears"], queryFn: fetchFinYearOptions, enabled: visible });
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(visible && !editingRecord);
+  const finYearLocked = (visible && !editingRecord) && !!lockedFY;
+  useEffect(() => {
+    if (!(visible && !editingRecord) || !lockedFY) return;
+    set("finYear", lockedFY.label);
+  }, [visible, editingRecord, lockedFY?.id]);
   const { data: customers = [] } = useQuery({ queryKey: ["rp-form-customers"], queryFn: fetchCustomerOptions, enabled: visible });
   const { data: banks = [] } = useQuery({ queryKey: ["rp-form-banks"], queryFn: fetchBankOptions, enabled: visible });
 
@@ -233,7 +242,7 @@ export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { 
             onPress={() => setPicker("company")}
           />
           <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-          <PickerRow label="Financial Year" value={form.finYear} onPress={() => setPicker("finYear")} />
+          <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYear} onPress={() => setPicker("finYear")} disabled={finYearLocked} />
 
           <FieldLabel required>Date of Receipt</FieldLabel>
           <TextField value={form.date} onChangeText={(v) => set("date", v)} placeholder="YYYY-MM-DD" />

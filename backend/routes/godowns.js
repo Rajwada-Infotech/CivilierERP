@@ -4,6 +4,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard } = require("../services/projectScope");
+
+// Any :id route — refuse a godown whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectID AS ProjectId FROM dbo.Godowns WHERE GodownID = @id"));
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
@@ -41,7 +45,7 @@ router.get("/", cache("godowns", 120), async (req, res) => {
       FROM dbo.Godowns g
       LEFT JOIN dbo.enterprise e ON e.id = g.EnterpriseID
       LEFT JOIN dbo.enterprise p ON p.id = g.ProjectID AND p.business_type = 'P'
-      WHERE g.IsDeleted = 0
+      WHERE g.IsDeleted = 0${projectPredicate(req.projectScope, "g.ProjectID")}
       ORDER BY g.GodownName
     `);
     res.json({ data: result.recordset, total: result.recordset.length });

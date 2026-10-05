@@ -136,7 +136,10 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   const overflow = chosen.length - shown.length;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    // modal: inside a Dialog the list is portaled outside it, and the dialog's
+    // scroll lock swallows wheel/touch scrolling there. A modal popover takes
+    // over the scroll lock, so its own list scrolls.
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <button
           type="button"

@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/unit-matrix";
 const APP_API = "/api/crm/applications";
@@ -29,6 +30,8 @@ interface Option {
 }
 
 interface MatrixUnit {
+  KindName?: string | null;
+  IsCommercial?: boolean | number;
   Id: number;
   UnitName: string;
   FloorNo: number | null;
@@ -175,13 +178,13 @@ function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; proje
         <div className="space-y-3">
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Customer (Application) *</label>
-            <select value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
+            <SearchableNativeSelect value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
               <option value="">Select customer</option>
               {apps.map((a: any) => (
                 <option key={a.Id} value={String(a.Id)}>{a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})</option>
               ))}
-            </select>
+            </SearchableNativeSelect>
             {apps.length === 0 && (
               <p className="text-[0.6875rem] text-amber-600 mt-1">No open Applications for this Project yet — only Applications for the same Project as this unit can hold it.</p>
             )}
@@ -674,6 +677,10 @@ export function UnitMatrixPage() {
                               >
                                 <div className="flex items-center justify-between gap-2 mb-1.5">
                                   <span className="font-bold text-sm text-foreground truncate">{u.UnitName}</span>
+                                  {/* Commercial units (shop, office…) — name from the unit kind master. */}
+                                  {!!u.IsCommercial && u.KindName && (
+                                    <span className="shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-300">{u.KindName}</span>
+                                  )}
                                   <span className={`shrink-0 text-[0.625rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[u.Status]}`}>
                                     {u.Status === "OnHold" ? "Hold" : u.Status}
                                   </span>

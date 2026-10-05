@@ -5,6 +5,11 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard, ebResolvedProjectSql: ebResolvedProject, assertProjectRawAllowed: assertBodyProjectAllowed } = require("../services/projectScope");
+
+router.param("id", projectParamGuard(`SELECT ${ebResolvedProject("eb")} AS ProjectId FROM dbo.ExpenseBooking eb WHERE eb.Eid = @id`));
+
+
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, getRecordStatus } = require("../services/approvalService");
@@ -851,7 +856,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster direct_supp_opt ON direct_supp_opt.LHeadId = eb.LHeadId
         LEFT JOIN dbo.AccountHeadMaster party_opt ON party_opt.LHeadId = @PartyId
         WHERE
-          (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
+          (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)${projectPredicate(req.projectScope, ebResolvedProject("eb"))}
           AND eb.EStatus = 'Approved'
           AND (
             ISNULL(eb.EBillStatus, '') <> 'Paid'
@@ -950,7 +955,7 @@ router.get("/options", async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster direct_supp_emi ON direct_supp_emi.LHeadId = eb.LHeadId
         WHERE
           eb.EEmiPayment = 1
-          AND eb.EStatus = 'Approved'
+          AND eb.EStatus = 'Approved'${projectPredicate(req.projectScope, ebResolvedProject("eb"))}
           AND ei.Status = 'Pending'
           AND NOT EXISTS (
             SELECT 1 FROM dbo.DebitNote dn
@@ -1153,7 +1158,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           SUM(ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))) AS totalAmount
         FROM dbo.ExpenseBooking eb
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
-          AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
+          AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'${projectPredicate(req.projectScope, ebResolvedProject("eb"))}
         GROUP BY eb.EStatus
       `),
       pool
@@ -1264,7 +1269,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         ${ebSupplierList.joins}
         WHERE ISNULL(eb.EStatus, '') != 'Draft'
           AND ISNULL(eb.ERemarks, '') NOT LIKE 'Auto-created for remaining items from GRN%'
-          AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+          AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)${projectPredicate(req.projectScope, ebResolvedProject("eb"))}
           AND (@DateFrom IS NULL OR eb.EDocDate >= @DateFrom)
           AND (@DateTo IS NULL OR eb.EDocDate <= @DateTo)
           AND (@CompanyIds IS NULL OR eb.ECompanyId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@CompanyIds, ',')))
@@ -1611,7 +1616,7 @@ router.get("/emi-reminders", async (req, res) => {
       FROM dbo.EmiInstallments ei
       INNER JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
       LEFT JOIN dbo.enterprise proj ON proj.id = TRY_CAST(eb.EProjectName AS INT)
-      WHERE ei.Status = 'Pending'
+      WHERE ei.Status = 'Pending'${projectPredicate(req.projectScope, ebResolvedProject("eb"))}
         AND eb.EStatus = 'Approved'
         AND eb.EEmiPayment = 1
       ORDER BY ei.DueDate ASC
@@ -2285,6 +2290,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
 }
 
 router.post("/", requirePageRight("expense-booking", "create"), validateBody(expenseBookingBodySchema), async (req, res) => {
+  if (!(await assertBodyProjectAllowed(req, res, req.body?.EProjectName))) return;
   const {
     EName,
     EProjectName,
@@ -3468,6 +3474,7 @@ router.put(
   requirePageRight("expense-booking", "edit"),
   validateBody(expenseBookingUpdateSchema),
   async (req, res) => {
+    if (!(await assertBodyProjectAllowed(req, res, req.body?.EProjectName))) return;
     const numericId = parseInt(req.params.id, 10);
     if (!Number.isFinite(numericId) || numericId <= 0)
       return res.status(400).json({ error: "Invalid record id" });

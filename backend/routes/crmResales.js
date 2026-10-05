@@ -28,6 +28,7 @@
 //   CrmCancellation       unwinds a sale; a resale unwinds nothing
 
 const express = require("express");
+const { releaseBookingInventoryLines } = require("../services/crmWorkflowGuards");
 const { getNextDocNumber } = require("../services/docNumber");
 const { resolveResaleFeeGst, GstSetupError } = require("../services/crmGst");
 const router = express.Router();
@@ -120,7 +121,7 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
         JOIN dbo.CrmBooking bk ON bk.Id = bp.BookingId
         JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
         WHERE bp.PlotId = @p AND bp.Status = N'${LineStatus.ACTIVE}'
-          AND bk.IsActive = 1 AND bk.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+          AND bk.IsActive = 1 AND bk.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
         ORDER BY bp.Id DESC
       `);
       const row = held.recordset[0];
@@ -133,13 +134,33 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
         SELECT TOP 1 vb.BookingNo
         FROM dbo.PlotMaster p
         JOIN dbo.CrmBooking vb ON vb.UnitId = p.ConvertedUnitId
-        WHERE p.Id = @p AND vb.IsActive = 1 AND vb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')`);
+        WHERE p.Id = @p AND vb.IsActive = 1 AND vb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')`);
       if (villaBooked.recordset.length)
         return res.status(409).json({ error: `The villa on this plot is already booked (${villaBooked.recordset[0].BookingNo}). A plot with a booked villa can't be resold as bare land.` });
       fromBookingId = row.BookingId;
       fromCustomerId = row.CustomerId;
       // Snapshotted so a later rate change cannot restate an already-agreed gain.
       originalValue = row.AllocatedValue;
+    } else {
+      // A unit resale is the villa built on a plot (see /complete) — never a
+      // flat or shop, which this flow can't transfer. The seller is whoever
+      // holds the villa now, read from the live booking like a plot's.
+      const held = await pool.request().input("u", sql.Int, unitId).query(`
+        SELECT TOP 1 bk.Id AS BookingId, bk.TotalValue, a.CustomerId
+        FROM dbo.CrmBooking bk
+        JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
+        WHERE bk.UnitId = @u AND bk.IsActive = 1 AND bk.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
+        ORDER BY bk.Id DESC`);
+      const onPlot = (await pool.request().input("u", sql.Int, unitId)
+        .query("SELECT COUNT(*) AS n FROM dbo.PlotMaster WHERE ConvertedUnitId = @u")).recordset[0].n > 0;
+      if (!onPlot)
+        return res.status(400).json({ error: "Only a villa built on a plot can be resold here — this unit isn't one." });
+      const row = held.recordset[0];
+      if (!row)
+        return res.status(400).json({ error: "That villa is not currently held by anyone — there is nothing to resell." });
+      fromBookingId = row.BookingId;
+      fromCustomerId = row.CustomerId;
+      originalValue = row.TotalValue;
     }
 
     // The fee's GST comes from the masters, never from the request.
@@ -303,6 +324,20 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
       .query(`UPDATE dbo.CrmUnitResale
               SET Status = N'${ResaleStatus.COMPLETED}', ToBookingId = @tb, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
               WHERE Id = @id`);
+
+    // The seller's booking closes as 'Transferred' once nothing is left on it —
+    // its villa, or its last plot, now belongs to the buyer. Not 'Cancelled':
+    // the sale stands and nothing is refunded. Every "is this booking live"
+    // check treats Transferred as closed (no dues, no workflow, no ownership);
+    // money already received from the seller still shows in their history.
+    if (resale.FromBookingId != null) {
+      const closed = await tx.request().input("b", sql.Int, resale.FromBookingId).input("rid", sql.Int, id).input("by", sql.Int, actorId(req))
+        .query(`UPDATE dbo.CrmBooking SET Status = N'Transferred', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+                WHERE Id = @b AND IsActive = 1 AND Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
+                  AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = @b AND bp.Status = N'${LineStatus.ACTIVE}')
+                  AND (UnitId IS NULL OR UnitId = (SELECT r.UnitId FROM dbo.CrmUnitResale r WHERE r.Id = @rid))`);
+      if (closed.rowsAffected[0]) await releaseBookingInventoryLines(tx, resale.FromBookingId, "Transferred");
+    }
 
     await tx.commit();
 

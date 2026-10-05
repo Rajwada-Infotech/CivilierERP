@@ -4,6 +4,30 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectAllowed } = require("../services/projectScope");
+
+// A sale order moves stock from one project to another: a restricted user can
+// see it if either end is theirs, but can only raise one out of their own project.
+const soScopeIds = (scope) => scope.map(Number).filter(Number.isFinite).join(",") || "NULL";
+const soVisibleSql = (scope, alias = "so") =>
+  scope ? ` AND (${alias}.FromProjectID IN (${soScopeIds(scope)}) OR ${alias}.ToProjectID IN (${soScopeIds(scope)}))` : "";
+
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const oid = parseInt(id, 10);
+  if (!Number.isFinite(oid)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, oid).query(
+      `SELECT CASE WHEN 1=1${soVisibleSql(req.projectScope, "so")} THEN 1 ELSE 0 END AS visible FROM dbo.SaleOrders so WHERE so.SaleOrderID = @id`,
+    );
+    if (r.recordset.length && !r.recordset[0].visible) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -69,7 +93,7 @@ router.get("/", requirePageRight("sale-order", "view"), cache("sale-orders", 60)
       .input("limit", sql.Int, parseInt(limit))
       .input("offset", sql.Int, offset);
 
-    let where = "WHERE 1=1";
+    let where = "WHERE 1=1" + soVisibleSql(req.projectScope, "so");
     if (fromCompany) {
       request.input("fromCompany", sql.Int, parseInt(fromCompany));
       where += " AND so.FromCompanyID=@fromCompany";
@@ -151,6 +175,9 @@ router.get("/:id", requirePageRight("sale-order", "view"), async (req, res) => {
 // posted once the order clears its final approval level (see PUT /:id/approve).
 router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
   const pool = getPool();
+  if (req.projectScope && !projectAllowed(req.projectScope, parseInt(req.body?.FromProjectID, 10))) {
+    return res.status(403).json({ error: "You can only raise a sale order out of one of your own projects." });
+  }
   try {
     const {
       FromCompanyID,

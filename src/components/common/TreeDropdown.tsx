@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronRight,
@@ -171,7 +171,18 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
-  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
+  // The panel is portalled to <body>. Until it has been positioned it must not
+  // exist on screen: an unpositioned panel lands at the very END of the page,
+  // and focusing the search box while it is still there makes the browser
+  // scroll the whole page down to it. So it starts out fixed + hidden, and is
+  // positioned in a layout effect (before first paint) below.
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({
+    position: "fixed",
+    top: 0,
+    left: 0,
+    visibility: "hidden",
+    zIndex: 9999,
+  });
   // Flat-variant-only — filters the (often long, e.g. account group filter
   // lists) options list client-side instead of making the user scroll
   // through every entry to find one.
@@ -190,8 +201,9 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
       setQuery("");
       if (variant === "flat") {
         // Let the panel mount/position first so focus doesn't fight the
-        // portal's own initial layout.
-        requestAnimationFrame(() => searchInputRef.current?.focus());
+        // portal's own initial layout. preventScroll: focusing must never move
+        // the page - the panel is position:fixed and already in view.
+        requestAnimationFrame(() => searchInputRef.current?.focus({ preventScroll: true }));
       }
     }
   }, [open, variant]);
@@ -240,7 +252,9 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
     });
   }, [variant, options.length]);
 
-  useEffect(() => {
+  // Layout effect (not useEffect): the position is applied before the browser
+  // paints, so the panel is never visible or focusable while unpositioned.
+  useLayoutEffect(() => {
     if (open) recalcPosition();
   }, [open, recalcPosition]);
 

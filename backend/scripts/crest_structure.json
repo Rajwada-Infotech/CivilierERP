@@ -1,0 +1,127 @@
+{
+ "source": "Crest availability list",
+ "projects": [
+  {
+   "name": "Crest",
+   "blocks": [
+    {
+     "name": "1",
+     "floors": {
+      "1": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 2
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 3
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "2": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 2
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 3
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "3": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 2
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 3
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "4": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "H",
+        "bhk": 3
+       },
+       {
+        "flat": "I",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 3
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

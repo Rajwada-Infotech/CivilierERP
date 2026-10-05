@@ -1,0 +1,270 @@
+{
+ "project": "LA FORTUNA",
+ "areaColumn": "BuiltUpAreaSqFt",
+ "blocks": [
+  {
+   "name": "1",
+   "floors": [
+    1,
+    1
+   ],
+   "flats": {
+    "A": {
+     "type": "2 BHK",
+     "area": 880,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 880
+     },
+     "facing": "NE"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 885,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 885
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "1",
+   "floors": [
+    2,
+    2
+   ],
+   "flats": {
+    "A": {
+     "type": "2 BHK",
+     "area": 880,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 880
+     },
+     "facing": "NE"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 885,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 885
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "1",
+   "floors": [
+    3,
+    3
+   ],
+   "flats": {
+    "A": {
+     "type": "2 BHK",
+     "area": 880,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 880
+     },
+     "facing": "NE"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 885,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 885
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "1",
+   "floors": [
+    4,
+    4
+   ],
+   "flats": {
+    "A": {
+     "type": "2 BHK",
+     "area": 880,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 880
+     },
+     "facing": "NE"
+    },
+    "B": {
+     "type": "2 BHK",
+     "area": 885,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 885
+     },
+     "facing": "SE"
+    }
+   }
+  },
+  {
+   "name": "2",
+   "floors": [
+    1,
+    1
+   ],
+   "flats": {
+    "A": {
+     "type": "2 BHK",
+     "area": 815,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 815
+     },
+     "facing": "NE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1025,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1025
+     },
+     "facing": "SE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "2 BHK",
+     "area": 815,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 815
+     },
+     "facing": "NW"
+    }
+   }
+  },
+  {
+   "name": "2",
+   "floors": [
+    2,
+    2
+   ],
+   "flats": {
+    "A": {
+     "type": "2 BHK",
+     "area": 815,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 815
+     },
+     "facing": "NE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1025,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1025
+     },
+     "facing": "SE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "2 BHK",
+     "area": 815,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 815
+     },
+     "facing": "NW"
+    }
+   }
+  },
+  {
+   "name": "2",
+   "floors": [
+    3,
+    3
+   ],
+   "flats": {
+    "A": {
+     "type": "2 BHK",
+     "area": 815,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 815
+     },
+     "facing": "NE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1025,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1025
+     },
+     "facing": "SE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "2 BHK",
+     "area": 815,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 815
+     },
+     "facing": "NW"
+    }
+   }
+  },
+  {
+   "name": "2",
+   "floors": [
+    4,
+    4
+   ],
+   "flats": {
+    "A": {
+     "type": "2 BHK",
+     "area": 815,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 815
+     },
+     "facing": "NE"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1025,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1025
+     },
+     "facing": "SE"
+    },
+    "C": {
+     "type": "3 BHK",
+     "area": 1015,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1015
+     },
+     "facing": "SW"
+    },
+    "D": {
+     "type": "2 BHK",
+     "area": 815,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 815
+     },
+     "facing": "NW"
+    }
+   }
+  }
+ ]
+}

@@ -3,6 +3,7 @@
 // don't exist here: localStorage/sessionStorage (-> expo-secure-store,
 // async) and window.location.href (-> sessionEvents, consumed by
 // AuthContext).
+import { fetch as expoFetch } from "expo/fetch";
 import { apiUrl, API_BASE_URL } from "@/utils/apiBase";
 import { getToken, clearAuthStorage } from "./authStorage";
 import { emitSessionExpired } from "./sessionEvents";
@@ -18,6 +19,13 @@ export class ApiError extends Error {
 
 export interface FetchWithAuthOptions extends RequestInit {
   skipActivityLog?: boolean;
+  /**
+   * Send through expo/fetch instead of React Native's fetch. Required for a
+   * multipart body that carries expo-file-system `File`s (photo uploads): RN's
+   * own fetch fails those on-device with a generic network error before the
+   * request ever leaves the phone.
+   */
+  useExpoFetch?: boolean;
 }
 
 // A Promise (not a boolean) so concurrent 401s share the same in-flight
@@ -31,7 +39,7 @@ export async function fetchWithAuth(
   url: string,
   options: FetchWithAuthOptions = {},
 ): Promise<Response> {
-  const { skipActivityLog, ...fetchOptions } = options;
+  const { skipActivityLog, useExpoFetch, ...fetchOptions } = options;
   const token = await getToken();
 
   if (sessionExpiredFlow) {
@@ -47,7 +55,8 @@ export async function fetchWithAuth(
 
   let response: Response;
   try {
-    response = await fetch(apiUrl(url), {
+    const doFetch = useExpoFetch ? (expoFetch as unknown as typeof fetch) : fetch;
+    response = await doFetch(apiUrl(url), {
       ...fetchOptions,
       headers: {
         ...(!isFormData ? { "Content-Type": "application/json" } : {}),

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, ShieldCheck, Plus, Trash2, Users } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, ShieldCheck, Plus, Trash2, Users, Search } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
@@ -22,6 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -33,12 +34,15 @@ const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking
 // the Engineers dropdown, the QC dropdown, and each Approval Level's own
 // picker below — same look everywhere a "pick some people" control appears
 // in this modal.
-function UserMultiSelect({
+export function UserMultiSelect({
   users, selected, onChange, placeholder = "Select…", noneLabel = "No one available.",
 }: {
   users: Engineer[]; selected: number[]; onChange: (ids: number[]) => void; placeholder?: string; noneLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const visibleUsers = q ? users.filter((u) => (u.name || "").toLowerCase().includes(q)) : users;
   const toggle = (id: number) =>
     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
 
@@ -50,7 +54,7 @@ function UserMultiSelect({
         : `${selected.length} selected`;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(""); }}>
       <PopoverTrigger asChild>
         <button type="button" className={`${inputCls} flex items-center justify-between gap-2 text-left`}>
           <span className={selected.length ? "text-foreground" : "text-muted-foreground"}>{label}</span>
@@ -61,10 +65,25 @@ function UserMultiSelect({
         align="start"
         className="w-[var(--radix-popover-trigger-width)] max-h-72 overflow-y-auto p-1.5"
       >
+        {users.length > 0 && (
+          <div className="relative mb-1.5">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search…"
+              autoFocus
+              className="w-full pl-7 pr-2 py-1.5 rounded-md text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+            />
+          </div>
+        )}
         {users.length === 0 ? (
           <p className="text-xs text-muted-foreground italic px-2 py-1.5">{noneLabel}</p>
+        ) : visibleUsers.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic px-2 py-1.5">No matches.</p>
         ) : (
-          users.map((u) => (
+          visibleUsers.map((u) => (
             <label
               key={u.id}
               className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm text-foreground hover:bg-muted cursor-pointer transition-colors"
@@ -94,7 +113,7 @@ const newLevel = (index: number): ApprovalLevel => ({
 // "one-by-one, then either" chain. Whoever ends up named here (plus
 // super_admin, always) gets the right to approve this activity's finished
 // work — enforced where that approval action itself lives (Work Reporting).
-function ApprovalLevelsEditor({
+export function ApprovalLevelsEditor({
   levels, onChange, users,
 }: {
   levels: ApprovalLevel[]; onChange: (levels: ApprovalLevel[]) => void; users: Engineer[];
@@ -505,7 +524,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   <HardHat size={11} /> Labour Given By
                 </label>
                 <div className="flex items-center gap-2">
-                  <select
+                  <SearchableNativeSelect
                     value={givenByValue(labourSource, labourContractorId)}
                     onChange={(e) => {
                       const { source, contractorId } = parseGivenBy(e.target.value);
@@ -521,7 +540,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                   {labourSource && (
                     <span
                       className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[labourSource].className}`}
@@ -536,7 +555,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   <Package size={11} /> Material Given By
                 </label>
                 <div className="flex items-center gap-2">
-                  <select
+                  <SearchableNativeSelect
                     value={givenByValue(materialSource, materialContractorId)}
                     onChange={(e) => {
                       const { source, contractorId } = parseGivenBy(e.target.value);
@@ -552,7 +571,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                   {materialSource && (
                     <span
                       className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[materialSource].className}`}

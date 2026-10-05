@@ -48,6 +48,7 @@ import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ─── Shared styles ──────────────────────────────────────────────────────────────
 
@@ -823,7 +824,7 @@ export default function Quotation() {
             <SectionHeader icon={Users} title="Suppliers to Quote" sub="Tag every supplier who should receive this RFQ" />
             <div className="flex items-center gap-2 mb-3">
               <div className="relative flex-1 max-w-sm">
-                <select value={addSupplierId} onChange={(e) => setAddSupplierId(e.target.value)} className={selectCls}>
+                <SearchableNativeSelect value={addSupplierId} onChange={(e) => setAddSupplierId(e.target.value)} className={selectCls}>
                   <option value="">Select a supplier…</option>
                   {(suppliers as any[])
                     .filter((s) => !supplierIds.includes(String(s.LHeadId ?? s.id)))
@@ -832,7 +833,7 @@ export default function Quotation() {
                         {s.LHeadName ?? s.label ?? s.name}
                       </option>
                     ))}
-                </select>
+                </SearchableNativeSelect>
                 <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               </div>
               <Button type="button" variant="outline" size="sm" onClick={addSupplier} disabled={!addSupplierId} className="gap-1.5 shrink-0">
@@ -1189,9 +1190,14 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
       }
     >
       <Breadcrumbs items={[{ label: "Material", path: "/material" }, { label: "Quotation" }]} />
-      {viewMode === "list" && <ListView />}
-      {viewMode === "form" && <FormView />}
-      {viewMode === "view" && <ViewMode />}
+      {/* Called as functions, not rendered as <ListView/> etc.: they are
+          defined inside this component, so JSX would give React a brand-new
+          component type on every render and remount the whole form on each
+          keystroke (Remarks accepted one letter, then lost focus). None of
+          them use hooks. */}
+      {viewMode === "list" && ListView()}
+      {viewMode === "form" && FormView()}
+      {viewMode === "view" && ViewMode()}
     </MaterialShell>
   );
 }

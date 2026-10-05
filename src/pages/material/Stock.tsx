@@ -528,7 +528,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
               ) : (
                 rows.map((row, idx) => (
                   <tr
-                    key={row.ItemID}
+                    key={`${row.ItemID}|${row.UOMCode ?? ""}`}
                     onClick={() =>
                       setSelectedItem({ ItemID: row.ItemID, ItemName: row.ItemName })
                     }

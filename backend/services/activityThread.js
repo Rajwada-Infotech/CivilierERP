@@ -65,6 +65,33 @@ function invalidateThread(rungId) {
   }
 }
 
+// Bulk form of invalidateThread for thousands of activities at once (Dependency
+// Master "Bulk Assign"). Drops every cached participant set (they are re-read on
+// demand within the 30 s TTL anyway) and tells only the rooms that actually exist
+// -- i.e. have someone in them -- to re-join. Walking the adapter's room table is
+// cheaper than addressing one room per activity, and needs no id list.
+const ROOM_PREFIX = "activity-thread:";
+function invalidateAllThreads() {
+  cache.clear();
+  let io = null;
+  try {
+    io = require("../socket").getIo();
+  } catch {
+    return; // socket server not running (tests / scripts)
+  }
+  const rooms = io?.sockets?.adapter?.rooms;
+  if (!rooms) return;
+  for (const room of [...rooms.keys()]) {
+    if (typeof room !== "string" || !room.startsWith(ROOM_PREFIX)) continue;
+    try {
+      io.in(room).emit("activity-thread:rejoin", { rungId: Number(room.slice(ROOM_PREFIX.length)) });
+      io.in(room).socketsLeave(room);
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 function emitComment(rungId, comment) {
   try {
     require("../socket").getIo().to(roomOf(rungId)).emit("activity-comment:new", { rungId: Number(rungId), comment });
@@ -73,4 +100,4 @@ function emitComment(rungId, comment) {
   }
 }
 
-module.exports = { roomOf, canUseThread, invalidateThread, emitComment };
+module.exports = { roomOf, canUseThread, invalidateThread, invalidateAllThreads, emitComment };

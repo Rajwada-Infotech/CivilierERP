@@ -32,9 +32,12 @@ const APPLIES_TO = Object.freeze({
  * @param {number}  ctx.value               pre-tax amount the band is tested against
  * @param {boolean} ctx.landOwnedByCustomer tri-state; undefined/null = unknown,
  *                                          which matches only rules that don't care
+ * @param {boolean} ctx.commercial          tri-state, same semantics: true =
+ *                                          commercial unit, false = residential,
+ *                                          null = unknown (only usage-agnostic rules)
  * @returns {Promise<{hsnCode: string|null, ruleId: number|null, ruleName: string|null}>}
  */
-async function resolveHsnCode(pool, appliesTo, { value = 0, landOwnedByCustomer = null } = {}) {
+async function resolveHsnCode(pool, appliesTo, { value = 0, landOwnedByCustomer = null, commercial = null } = {}) {
   const amount = Number(value) || 0;
 
   // Band semantics reproduce the original `base <= 4500000` test exactly:
@@ -53,6 +56,15 @@ async function resolveHsnCode(pool, appliesTo, { value = 0, landOwnedByCustomer 
       ? "r.LandOwnedByCustomer IS NULL"
       : "(r.LandOwnedByCustomer IS NULL OR r.LandOwnedByCustomer = @land)";
   if (landOwnedByCustomer != null) request.input("land", sql.Bit, landOwnedByCustomer ? 1 : 0);
+  // Usage (migration 526): identical tri-state contract to land ownership.
+  // Before 526 the column doesn't exist, so usage is simply not considered.
+  const usageReady = (await pool.request().query("SELECT COL_LENGTH('dbo.CrmGstRule', 'ForCommercial') AS c")).recordset?.[0]?.c != null;
+  const usageClause = !usageReady
+    ? "1 = 1"
+    : commercial == null
+      ? "r.ForCommercial IS NULL"
+      : "(r.ForCommercial IS NULL OR r.ForCommercial = @commercial)";
+  if (usageReady && commercial != null) request.input("commercial", sql.Bit, commercial ? 1 : 0);
 
   const result = await request.query(`
     SELECT TOP 1 r.Id, r.Name, r.HsnCode
@@ -62,10 +74,13 @@ async function resolveHsnCode(pool, appliesTo, { value = 0, landOwnedByCustomer 
       AND (r.MinValue IS NULL OR @amount >  r.MinValue)
       AND (r.MaxValue IS NULL OR @amount <= r.MaxValue)
       AND ${landClause}
+      AND ${usageClause}
     ORDER BY
       -- A rule that explicitly matches the land-ownership question is more
       -- specific than one that ignores it, so it wins regardless of Priority.
       CASE WHEN r.LandOwnedByCustomer IS NULL THEN 1 ELSE 0 END,
+      -- Likewise a rule written for this unit's usage beats a generic one.
+      ${usageReady ? "CASE WHEN r.ForCommercial IS NULL THEN 1 ELSE 0 END," : ""}
       r.Priority, r.Id
   `);
 

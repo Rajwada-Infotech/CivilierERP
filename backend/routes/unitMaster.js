@@ -108,7 +108,7 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         WHERE upp.UnitId = u.Id AND upp.IsActive = 1
       ) tags
       LEFT JOIN dbo.CrmBooking bk
-        ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
+        ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmInventoryHold h
         ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
       LEFT JOIN dbo.BlockUnitTypeSpec spec
@@ -187,6 +187,67 @@ router.get("/applicable-payment-plans", async (req, res) => {
 });
 
 // POST — add unit
+// Unit kind (FLAT, SHOP, OFFICE…) — validated against the kind master, never
+// a fixed list. Land kinds belong to Plot Master, so they're refused here.
+// Undefined / "" means "leave the unit's kind as it is".
+async function applyUnitKind(db, unitId, rawKind) {
+  if (rawKind === undefined || rawKind === null || String(rawKind).trim() === "") {
+    // No kind chosen: the unit keeps its current one (or the default) — still
+    // has to be something this project's type sells.
+    const u = (await db.request().input("id", sql.Int, unitId).query("SELECT ProjectId, BlockId, UnitKind FROM dbo.UnitMaster WHERE Id = @id")).recordset[0];
+    const isLand = u && u.UnitKind && (await db.request().input("c", sql.NVarChar(20), u.UnitKind)
+      .query("SELECT IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @c")).recordset[0]?.IsLand;
+    if (u && u.UnitKind && !isLand) { // legacy land rows are Plot Master's business
+      const ok = await unitKindSvc.allowedKinds(db, { projectId: u.ProjectId, blockId: u.BlockId });
+      if (ok.length && !ok.some((x) => x.Code === String(u.UnitKind).toUpperCase())) {
+        throw new LayoutValidationError(`This project's type doesn't sell "${u.UnitKind}" units — pick a Unit Kind it does sell.`);
+      }
+    }
+    return;
+  }
+  const code = String(rawKind).trim().toUpperCase();
+  const k = (await db.request().input("c", sql.NVarChar(20), code)
+    .query("SELECT TOP 1 Code, IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @c AND IsActive = 1")).recordset[0];
+  if (!k) throw new LayoutValidationError(`Unit kind "${code}" is not defined (or inactive) in the unit kind master.`);
+  if (k.IsLand) throw new LayoutValidationError(`"${code}" is a land kind — land is managed in Plot Master, not as a unit.`);
+  const unit = (await db.request().input("id", sql.Int, unitId).query("SELECT ProjectId, BlockId FROM dbo.UnitMaster WHERE Id = @id")).recordset[0];
+  if (unit) {
+    const ok = await unitKindSvc.allowedKinds(db, { projectId: unit.ProjectId, blockId: unit.BlockId });
+    if (!ok.some((x) => x.Code === k.Code)) throw new LayoutValidationError(`This project's type doesn't sell "${code}" units — change the project type or pick another kind.`);
+  }
+  await db.request().input("id", sql.Int, unitId).input("k", sql.NVarChar(20), k.Code)
+    .query("UPDATE dbo.UnitMaster SET UnitKind = @k WHERE Id = @id");
+}
+
+// Unit kind master — managed here (Flat, Villa, Shop, Office… with Land /
+// Commercial flags). Shared logic in services/unitKind.js.
+const unitKindSvc = require("../services/unitKind");
+router.get("/kinds/manage", requirePageRight("followup-unit-master", "view"), async (_req, res) => {
+  try { res.json(await unitKindSvc.listKinds({ activeOnly: false })); }
+  catch (err) { console.error("[unit-master] GET kinds/manage:", err.message); res.status(500).json({ error: err.message }); }
+});
+router.post("/kinds", requirePageRight("followup-unit-master", "create"), async (req, res) => {
+  try { const r = await unitKindSvc.createKind(req.body, req.user?.userId); res.status(r.status).json(r.body); }
+  catch (err) { console.error("[unit-master] POST kinds:", err.message); res.status(500).json({ error: err.message }); }
+});
+router.put("/kinds/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
+  try { const r = await unitKindSvc.updateKind(Number(req.params.id), req.body, req.user?.userId); res.status(r.status).json(r.body); }
+  catch (err) { console.error("[unit-master] PUT kinds:", err.message); res.status(500).json({ error: err.message }); }
+});
+
+// GET /kinds — the active non-land unit kinds, for the Unit Master form.
+// ?projectId= / ?blockId= narrows to what that project's type allows.
+router.get("/kinds", requirePageRight("followup-unit-master", "view"), async (req, res) => {
+  try {
+    const n = (v) => (v === undefined || v === "" ? null : parseInt(v, 10));
+    const kinds = await unitKindSvc.allowedKinds(getPool(), { projectId: n(req.query.projectId), blockId: n(req.query.blockId) });
+    res.json(kinds.map((k) => ({ Code: k.Code, Name: k.Name, IsCommercial: !!k.IsCommercial })));
+  } catch (err) {
+    console.error("[unit-master] GET kinds error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post("/", requirePageRight("followup-unit-master", "create"), async (req, res) => {
   const { ProjectId, BlockId, UnitName, FloorNo, LayoutTypeId, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
@@ -347,6 +408,7 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
         OUTPUT INSERTED.Id
         VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @LayoutTypeId, @Area, @CarpetArea, @BuiltUpArea, @SuperBuiltUpArea, @OpenTerraceArea, @Rate, @IsActive, @CreatedBy, @CreatedAt)
       `);
+      await applyUnitKind(tx, result.recordset[0].Id, req.body.UnitKind);
       roomSync = await syncUnitRooms(tx, result.recordset[0].Id, { removeUnused: false, createdBy });
       await tx.commit();
     } catch (e) {
@@ -496,6 +558,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UpdatedAt = @UpdatedAt
         WHERE Id = @Id
       `);
+      await applyUnitKind(tx, parseInt(id), req.body.UnitKind);
       // A room carries its unit's Project/Block/Floor — keep them in step if
       // the unit was moved.
       await tx.request()

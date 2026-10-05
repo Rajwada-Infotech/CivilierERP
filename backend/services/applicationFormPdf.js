@@ -56,7 +56,7 @@ async function fetchApplicationFormData(pool, applicationId) {
       comp.logo AS CompanyLogo,
       proj.name AS ProjectFullName, proj.rera_no AS ProjectRera,
       proj.address AS ProjectAddress, proj.city AS ProjectCity, proj.state AS ProjectState,
-      um.UnitName, um.UnitType, um.AreaSqFt, um.BlockId, blk.BlockName,
+      um.UnitName, COALESCE(um.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = um.UnitKind)) AS UnitType, um.AreaSqFt, um.BlockId, blk.BlockName,
       cust.CustomerNo, cust.PanNo AS CustomerPanNo, cust.AadhaarNo AS CustomerAadhaar,
       cust.Address AS CustomerAddress, cust.City AS CustomerCity, cust.State AS CustomerState,
       cust.Pincode AS CustomerPincode, cust.Occupation AS CustomerOccupation,
@@ -184,7 +184,9 @@ async function fetchApplicationFormData(pool, applicationId) {
     const upTotal = unitValue + parkingBase;
     // Same resolver the booking itself uses, so the printed form can never
     // quote a different bracket from the one that will be charged.
-    const hsnCode = (await resolveUnitParkingHsn(pool, upTotal)).hsnCode;
+    const { getUnitCommercial } = require("./projectType");
+    const commercial = await getUnitCommercial(pool, d.PreferredUnitId ?? null);
+    const hsnCode = (await resolveUnitParkingHsn(pool, upTotal, { commercial })).hsnCode;
     const gstRate = upTotal > 0 ? await getHsnRate(pool, hsnCode) : 0;
     // Resolved once here, in async context, and carried on d.pricing: the row
     // builder below renders synchronously, and this code is PRINTED on the

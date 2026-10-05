@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -26,6 +27,7 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 
 const API = "/api/crm/sales-deed";
@@ -1844,7 +1846,7 @@ const CrmSalesDeed: React.FC = () => {
                             <div className="font-medium text-sm">{detail.LegalExecutiveName || <span className="text-sky-600">Unassigned</span>}</div>
                           ) : (
                             <div className="flex items-center gap-2">
-                              <select
+                              <SearchableNativeSelect
                                 value={selectedLegalExec}
                                 disabled={assigningLegal}
                                 onChange={(e) => setSelectedLegalExec(e.target.value)}
@@ -1852,7 +1854,7 @@ const CrmSalesDeed: React.FC = () => {
                                   selectedLegalExec ? "border-border" : "border-sky-300 text-sky-600"}`}>
                                 <option value="">— Unassigned —</option>
                                 {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                              </select>
+                              </SearchableNativeSelect>
                               <button onClick={() => handleAssignLegal(selectedLegalExec)} disabled={!selectedLegalExec || assigningLegal}
                                 className="h-[34px] px-3 text-xs btn-module text-white rounded-lg disabled:opacity-50">
                                 {assigningLegal ? "Assigning..." : "Assign"}
@@ -1993,7 +1995,7 @@ const CrmSalesDeed: React.FC = () => {
                                 </p>
                                 {sent && (
                                   <p className="text-xs text-blue-600 flex items-center gap-1">
-                                    <Send size={11} /> Sent {String(detail.SentToCustomerAt).slice(0,16).replace("T"," ")}
+                                    <Send size={11} /> Sent {fmtIstIso(detail.SentToCustomerAt)}
                                   </p>
                                 )}
                                 {seniorApproved && detail.BookingStatus !== 'Cancelled' && (
@@ -2949,13 +2951,13 @@ const CrmSalesDeed: React.FC = () => {
             <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
               <div className="space-y-1.5">
                 <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Booking *</label>
-                <select value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value, DeedValue: "" }))}
+                <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value, DeedValue: "" }))}
                   className="w-full h-10 text-sm border border-border rounded-lg px-3 bg-background">
                   <option value="">Select booking</option>
                   {(eligible as any[]).map((b: any) => (
                     <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ApplicantName} · {b.UnitNo}</option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
                 {!(eligible as any[]).length && (
                   <p className="text-xs text-muted-foreground">No eligible bookings — AFS must be Registered first.</p>
                 )}

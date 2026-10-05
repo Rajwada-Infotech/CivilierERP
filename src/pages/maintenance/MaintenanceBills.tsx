@@ -37,6 +37,7 @@ import {
 import { getMaintenanceDirectory } from "@/api/maintenanceApi";
 import { getActiveChargeHeads, type ChargeHeadRow } from "@/api/chargeHeadApi";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const fmt = (n: number | null | undefined) =>
   `₹${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -636,7 +637,7 @@ function BillFormDialog({
                 <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Customer / Flat
                 </label>
-                <select
+                <SearchableNativeSelect
                   value={bookingId}
                   onChange={(e) => setBookingId(e.target.value)}
                   className="w-full appearance-none px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground"
@@ -648,7 +649,7 @@ function BillFormDialog({
                       {c.CustomerName} — {[c.BlockName, c.UnitNo].filter(Boolean).join(" / ")} ({c.BookingNo})
                     </option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
               </div>
             )}
 

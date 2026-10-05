@@ -3,6 +3,9 @@
 // for a plain UOM picker (any active UOM, no category filtering) — the
 // most complex part of the web form and not needed for correctness, since
 // quantity/UOM are stored as entered either way.
+import { DateTimeField } from "@/components/DateTimeField";
+import { filterProjectsByCompany } from "@/utils/projectBelongsTo";
+import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -91,6 +94,14 @@ export function MaterialRequestFormModal({
   const { data: companies = [] } = useQuery({ queryKey: ["mr-form-companies"], queryFn: getMRCompanies, enabled: visible });
   const { data: projects = [] } = useQuery({ queryKey: ["mr-form-projects"], queryFn: getMRProjects, enabled: visible });
   const { data: finYears = [] } = useQuery({ queryKey: ["mr-form-finyears"], queryFn: getMRFinYears, enabled: visible });
+  // New records are locked to the current financial year (else the most
+  // recent one); an existing record keeps the year it was saved with.
+  const lockedFY = useLockedFinYear(visible && editingId == null);
+  const finYearLocked = (visible && editingId == null) && !!lockedFY;
+  useEffect(() => {
+    if (!(visible && editingId == null) || !lockedFY) return;
+    setForm((f) => ({ ...f, finYearId: String(lockedFY.id), finYearName: lockedFY.label }));
+  }, [visible, editingId == null, lockedFY?.id]);
   const { data: itemOptions = [] } = useQuery({ queryKey: ["mr-form-items", form.projectId], queryFn: () => getMRItemOptions(form.projectId || null), enabled: visible });
   const { data: uoms = [] } = useQuery({ queryKey: ["mr-form-uoms"], queryFn: getMRUomOptions, enabled: visible });
 
@@ -190,7 +201,8 @@ export function MaterialRequestFormModal({
   };
 
   const companyOptions: PickerOption[] = companies.map((c) => ({ key: String(c.id), label: c.name }));
-  const projectOptions: PickerOption[] = projects.map((p) => ({ key: String(p.id), label: p.name }));
+  // Only the projects that belong to the chosen company (own or tagged).
+  const projectOptions: PickerOption[] = filterProjectsByCompany(projects, form.companyId).map((p) => ({ key: String(p.id), label: p.name }));
   const finYearOptions: PickerOption[] = finYears.map((f) => ({ key: String(f.id), label: f.name }));
   const itemPickerOptions: PickerOption[] = itemOptions.map((i) => ({
     key: i.M_Id, label: i.M_Name, sublabel: [i.M_Group, i.AvailableStock != null ? `Stock: ${Number(i.AvailableStock).toFixed(2)}` : null].filter(Boolean).join(" · "),
@@ -219,7 +231,7 @@ export function MaterialRequestFormModal({
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
             <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
             <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label="Financial Year" value={form.finYearName} placeholder="Auto" onPress={() => setPicker("finYear")} />
+            <PickerRow label={finYearLocked ? "Financial Year · locked to current" : "Financial Year"} value={form.finYearName} placeholder="Auto" onPress={() => setPicker("finYear")} disabled={finYearLocked} />
 
             <FieldLabel required>Priority</FieldLabel>
             <View className="flex-row flex-wrap gap-2 mb-4">
@@ -235,9 +247,9 @@ export function MaterialRequestFormModal({
             </View>
 
             <FieldLabel required>Request Date</FieldLabel>
-            <TextField value={form.requestDate} onChangeText={(v) => set("requestDate", v)} placeholder="YYYY-MM-DD" />
+            <DateTimeField mode="date" value={form.requestDate} onChange={(v) => set("requestDate", v)} title="Request date" />
             <FieldLabel>Required By Date</FieldLabel>
-            <TextField value={form.requiredByDate} onChangeText={(v) => set("requiredByDate", v)} placeholder="YYYY-MM-DD" />
+            <DateTimeField mode="date" value={form.requiredByDate} onChange={(v) => set("requiredByDate", v)} title="Required by" placeholder="Select a date (optional)" clearable />
 
             <View className="rounded-xl px-3.5 py-3 mb-4" style={{ borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" }}>
               <Text style={{ color: colors.mutedForeground, fontSize: 10, textTransform: "uppercase" }}>Doc Number</Text>

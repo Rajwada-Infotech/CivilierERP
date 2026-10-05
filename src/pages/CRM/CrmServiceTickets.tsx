@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -14,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API         = "/api/crm/service-tickets";
 const BKG_API     = "/api/crm/bookings";
@@ -241,7 +243,7 @@ const CrmServiceTickets: React.FC = () => {
         const overdue = isOverdue(t);
         return (
           <span className={`text-xs ${overdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
-            {t.SlaDueDate ? String(t.SlaDueDate).slice(0, 16).replace("T", " ") : "—"}
+            {t.SlaDueDate ? fmtIstIso(t.SlaDueDate) : "—"}
             {overdue && " (OVERDUE)"}
           </span>
         );
@@ -261,7 +263,7 @@ const CrmServiceTickets: React.FC = () => {
           <div className="flex items-center gap-2 flex-wrap">
             {/* Open: Assign dropdown */}
             {t.Status === CrmStatus.OPEN && (
-              <select
+              <SearchableNativeSelect
                 defaultValue=""
                 onChange={(e) => handleAssign(t.Id, e.target.value)}
                 className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
@@ -270,13 +272,13 @@ const CrmServiceTickets: React.FC = () => {
                 {(users as any[]).map((u: any) => (
                   <option key={u.value} value={u.value}>{u.label}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             )}
             {/* Assigned: Start work + Reassign */}
             {t.Status === "Assigned" && (
               <>
                 <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-primary hover:underline">Start</button>
-                <select
+                <SearchableNativeSelect
                   defaultValue=""
                   onChange={(e) => handleAssign(t.Id, e.target.value)}
                   className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
@@ -285,12 +287,12 @@ const CrmServiceTickets: React.FC = () => {
                   {(users as any[]).map((u: any) => (
                     <option key={u.value} value={u.value}>{u.label}</option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
               </>
             )}
             {/* InProgress: Reassign available */}
             {t.Status === CrmStatus.IN_PROGRESS && (
-              <select
+              <SearchableNativeSelect
                 defaultValue=""
                 onChange={(e) => handleAssign(t.Id, e.target.value)}
                 className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none"
@@ -299,7 +301,7 @@ const CrmServiceTickets: React.FC = () => {
                 {(users as any[]).map((u: any) => (
                   <option key={u.value} value={u.value}>{u.label}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             )}
             {/* Assigned/InProgress/Reopened: Resolve */}
             {["Assigned", "InProgress", "Reopened"].includes(t.Status) && (
@@ -377,13 +379,13 @@ const CrmServiceTickets: React.FC = () => {
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(bookings as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} ({b.UnitNo})</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -413,11 +415,11 @@ const CrmServiceTickets: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Assign To</label>
-              <select value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
+              <SearchableNativeSelect value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">— Unassigned —</option>
                 {(users as any[]).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
-              </select>
+              </SearchableNativeSelect>
             </div>
           </div>
           <DialogFooter>

@@ -1,6 +1,6 @@
 const { sql } = require("../db");
 const { resolveOcCcGate } = require("./crmWorkflowGuards");
-const { getBookingLandSplit } = require("./projectType");
+const { getBookingLandSplit, getBookingCommercial } = require("./projectType");
 const { resolveHsnCode, APPLIES_TO } = require("./gstRules");
 
 // Fixed business rule (migration 283) — never a per-booking input, never
@@ -135,7 +135,7 @@ async function resolveLandOwnedByBookingCustomer(pool, bookingId) {
          JOIN dbo.CrmApplication landApplication ON landApplication.Id = landBooking.ApplicationId
          WHERE p.IsActive = 1
            AND landBooking.IsActive = 1
-           AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+           AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
            AND landApplication.CustomerId = (SELECT CustomerId FROM BuyingCustomer)
       ) AS CustomerOwnedPlotCount
   `);
@@ -166,6 +166,8 @@ async function resolveUnitParkingHsn(pool, bracketBase, opts = {}) {
   const resolved = await resolveHsnCode(pool, APPLIES_TO.UNIT_PARKING, {
     value: bracketBase,
     landOwnedByCustomer: opts.landOwnedByCustomer ?? null,
+    // Commercial vs residential (migration 526) — from the unit's kind.
+    commercial: opts.commercial ?? null,
   });
   if (resolved.hsnCode) return { hsnCode: resolved.hsnCode, fromRule: true, ruleName: resolved.ruleName };
   return {
@@ -265,7 +267,8 @@ async function recalculateBookingGst(pool, bookingId) {
   let hsnCode = null;
   if (!outsideGst) {
     const landOwnedByCustomer = await resolveLandOwnedByBookingCustomer(pool, bookingId);
-    hsnCode = (await resolveUnitParkingHsn(pool, bracketBase, { landOwnedByCustomer })).hsnCode;
+    const commercial = await getBookingCommercial(pool, bookingId);
+    hsnCode = (await resolveUnitParkingHsn(pool, bracketBase, { landOwnedByCustomer, commercial })).hsnCode;
   }
   const unitParkingRate = outsideGst ? 0 : await getHsnRate(pool, hsnCode);
 

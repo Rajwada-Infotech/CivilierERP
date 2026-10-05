@@ -169,7 +169,14 @@ async function checkRoomSync() {
   const roomsByUnit = new Map();
   for (const r of rooms) (roomsByUnit.get(r.UnitId) || roomsByUnit.set(r.UnitId, []).get(r.UnitId)).push(r);
 
-  const out = { missingRooms: [], surplusRemovable: [], surplusBlockedByWork: [], uncategorized: [], flatNoLayout: [], layoutNoComposition: [], unitTypeTextOnly: [] };
+  const out = { missingRooms: [], surplusRemovable: [], surplusBlockedByWork: [], uncategorized: [], flatNoLayout: [], roomlessByKind: [], layoutNoComposition: [], unitTypeTextOnly: [] };
+  // Kinds that carry no rooms by design — land and commercial (shops, offices…),
+  // read from the unit kind master, not listed here.
+  const roomlessKinds = new Set(["PLOT"]);
+  if (hasCol("CrmConstructedAssetKind", "IsLand")) {
+    const flags = ["IsLand", hasCol("CrmConstructedAssetKind", "IsCommercial") ? "IsCommercial" : null].filter(Boolean).map((c) => `${c} = 1`).join(" OR ");
+    for (const k of await q(`SELECT Code FROM dbo.CrmConstructedAssetKind WHERE ${flags}`)) roomlessKinds.add(String(k.Code).toUpperCase());
+  }
   const perProject = new Map();
   const bump = (u, key) => {
     const p = perProject.get(u.ProjectId) || perProject.set(u.ProjectId, { project: u.ProjectName, units: 0, inSync: 0, outOfSync: 0 }).get(u.ProjectId);
@@ -183,7 +190,11 @@ async function checkRoomSync() {
     const unitRooms = roomsByUnit.get(u.Id) || [];
     const active = unitRooms.filter((r) => r.IsActive);
     if (!layout) {
-      if (u.UnitKind === "PLOT") { bump(u, "inSync"); continue; } // plots have no rooms by design
+      if (roomlessKinds.has(String(u.UnitKind || "").toUpperCase())) { // land / commercial: no rooms by design
+        out.roomlessByKind.push({ unitId: u.Id, where, kind: u.UnitKind });
+        bump(u, "inSync");
+        continue;
+      }
       out.flatNoLayout.push({ unitId: u.Id, where, unitType: u.UnitType, layoutTypeId: u.LayoutTypeId, activeRooms: active.length });
       bump(u, "outOfSync");
       continue;
@@ -249,6 +260,7 @@ async function checkRoomSync() {
   record(sec, "Units with SURPLUS empty rooms beyond their layout  [fix: Room Master > Generate]", out.surplusRemovable);
   record(sec, "Units with surplus rooms that HAVE WORK (Generate keeps them; needs a human decision)", out.surplusBlockedByWork);
   record(sec, "Flats with NO layout type (no rooms can be generated)", out.flatNoLayout);
+  record(sec, "Land / commercial units without rooms (by design — kind from the unit kind master)", out.roomlessByKind, { severity: "INFO" });
   record(sec, "Units whose layout has NO composition defined", out.layoutNoComposition);
   record(sec, "Active rooms with no category (never counted or synced — renamed/manual rooms)", out.uncategorized, { severity: "INFO" });
   record(sec, "Units typed by UnitType text only, not linked by LayoutTypeId", out.unitTypeTextOnly, { severity: "INFO" });

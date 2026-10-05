@@ -20,6 +20,7 @@ import {
   type InterviewStatus,
 } from "@/api/interviewApi";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const inputCls = "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
@@ -184,14 +185,14 @@ const InterviewPage: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className={labelCls}>Candidate *</label>
-                  <select className={inputCls} value={form.candidateId} onChange={(e) => setField("candidateId", e.target.value)}>
+                  <SearchableNativeSelect className={inputCls} value={form.candidateId} onChange={(e) => setField("candidateId", e.target.value)}>
                     <option value="">Select...</option>
                     {candidates.map((c) => (
                       <option key={c.CandidateId} value={c.CandidateId}>
                         {c.CandidateCode} — {c.CandidateName}
                       </option>
                     ))}
-                  </select>
+                  </SearchableNativeSelect>
                 </div>
                 <div>
                   <label className={labelCls}>Document Number</label>

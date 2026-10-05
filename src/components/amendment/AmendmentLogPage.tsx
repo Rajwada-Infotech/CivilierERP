@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { fmtIstDateTime } from "@/lib/istTime";
 import { History, X, FileDiff } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -147,24 +148,9 @@ function fmtCellValue(v: string | null): string {
   return v;
 }
 
+// Timestamps come from the database clock (UTC) — always shown in IST (+5:30).
 function fmtDateTime(value: string | null) {
-  if (!value) return "—";
-  // Backend timestamps here come from SQL Server's SYSDATETIME(), which is
-  // timezone-naive wall-clock IST — but gets JSON-serialized with a
-  // trailing "Z" as if it were UTC. Parsing that at face value would make
-  // the browser "correct" it by adding another +5:30 on top of a value
-  // that's already IST. Stripping the "Z" makes Date parse it as a plain
-  // local wall-clock time instead, so it displays as recorded.
-  const naive = value.replace(/Z$/, "");
-  const d = new Date(naive);
-  if (isNaN(d.getTime())) return value;
-  return d.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return fmtIstDateTime(value);
 }
 
 interface ShellProps {

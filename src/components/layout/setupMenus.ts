@@ -365,13 +365,6 @@ export const engineeringSetupItems: SetupItem[] = [
     color: "text-orange-400",
     pageKey: "engineering-activity-master",
   },
-  {
-    icon: GitBranch,
-    label: "Dependency Master",
-    path: "/masters/dependency",
-    color: "text-cyan-400",
-    pageKey: "dependency-master",
-  },
 ];
 
 export const civilWorkDprSetupItems: SetupItem[] = [
@@ -409,6 +402,13 @@ export const civilWorkDprSetupItems: SetupItem[] = [
     path: "/civilworkdpr/work-checkpoint-master",
     color: "text-cyan-500",
     pageKey: "work-checkpoint-master",
+  },
+  {
+    icon: GitBranch,
+    label: "Dependency Master",
+    path: "/masters/dependency",
+    color: "text-cyan-500",
+    pageKey: "dependency-master",
   },
 ];
 
@@ -460,6 +460,13 @@ export const crmSetupItems: SetupItem[] = [
     pageKey: "crm-auto-project-setup",
   },
   {
+    icon: LayoutGrid,
+    label: "Project Type",
+    path: "/masters/project-type-master",
+    color: "text-violet-500",
+    pageKey: "project-type-master",
+  },
+  {
     icon: Ruler,
     label: "Unit Master",
     path: "/crm/setup/unit-master",
@@ -507,6 +514,13 @@ export const crmSetupItems: SetupItem[] = [
     path: "/crm/brokerage-rate-tiers",
     color: "text-rose-500",
     pageKey: "crm-brokerage-rate-tiers",
+  },
+  {
+    icon: Percent,
+    label: "GST Rules",
+    path: "/crm/setup/gst-rules",
+    color: "text-amber-500",
+    pageKey: "crm-gst-rule-master",
   },
   {
     icon: Car,

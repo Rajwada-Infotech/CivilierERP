@@ -410,6 +410,13 @@
         background: linear-gradient(135deg, #ea6c0a, #f97316);
         box-shadow: 0 4px 14px rgba(249,115,22,0.35);
     }
+    .gradient-civilworkdpr {
+        background: linear-gradient(135deg, #0891b2, #06b6d4);
+    }
+    .gradient-civilworkdpr:hover {
+        background: linear-gradient(135deg, #0e7490, #0891b2);
+        box-shadow: 0 4px 14px rgba(8,145,178,0.35);
+    }
     .gradient-maintenance {
         background: linear-gradient(135deg, #65a30d, #84cc16);
     }
