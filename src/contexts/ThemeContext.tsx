@@ -39,7 +39,7 @@ export const isThemeAllowed = (t: Theme, isSuperAdmin: boolean): boolean =>
  * instead of `theme === "light"` so the BW theme (light background, black
  * accents) is treated correctly.
  */
-export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw";
+export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw" || t === "glass";
 
 /**
  * Fixed 3-tone chart palette for the BW theme: maroon / green / orange.
@@ -64,7 +64,7 @@ export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
   light: { bg: "#a78bfa", label: "Light" },
   midnight: { bg: "#2dd4bf", label: "Midnight" },
   root: { bg: "#f0a500", label: "Root" },
-  glass: { bg: "#a5b4fc", label: "Glass" },
+  glass: { bg: "#f3e6cf", label: "Glass" },
   bw: { bg: "#111111", label: "BW" },
   cyberpunk: { bg: "#00f0ff", label: "Cyberpunk" },
 };

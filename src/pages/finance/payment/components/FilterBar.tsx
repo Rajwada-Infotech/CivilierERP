@@ -1,6 +1,6 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Building2, FolderKanban, CalendarDays, Users, Search, X, ChevronDown } from "lucide-react";
 import type { BookingFilters } from "../types";
 import { PARTY_TYPE_LABELS } from "../api";
@@ -249,7 +249,7 @@ export function FilterBar({
   ];
 
   const { theme: _fbTheme } = useTheme();
-  const _fbDark = _fbTheme !== "light";
+  const _fbDark = !isLightTheme(_fbTheme);
   return (
     <div
       className="rounded-xl p-3 space-y-3"
