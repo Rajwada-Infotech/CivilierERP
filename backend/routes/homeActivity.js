@@ -5,6 +5,7 @@ router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
 
 // ── Lightweight sales summary for Home dashboard ─────────────────────────────
 // Returns only SQL-aggregated scalars — no row transfer — so the home page
@@ -358,7 +359,7 @@ const SOURCES = {
         NULL AS DocNo,
         CONCAT('User added — ', u.name) AS Title,
         ISNULL((SELECT TOP 1 r.RName FROM dbo.Role r WHERE r.RId = u.RoleId), u.email) AS Subtitle,
-        NULL AS Actor,
+        /*USER_ACTOR*/NULL AS Actor,
         CAST(NULL AS DECIMAL(18,2)) AS Amount,
         CASE WHEN ISNULL(u.discontinue, 0) = 1 THEN 'Inactive' ELSE 'Active' END AS Status,
         CAST(COALESCE(u.created_datetime, '2000-01-01') AS DATETIME2) AS At,
@@ -367,6 +368,12 @@ const SOURCES = {
       ORDER BY u.id DESC`,
   },
 };
+
+// Who added a user, when the column exists (migration 535); otherwise the feed shows no actor.
+const USER_ACTOR_SQL =
+  "(SELECT TOP 1 COALESCE(NULLIF(cu.name, ''), cu.email) FROM dbo.users cu WHERE cu.id = u.CreatedBy)";
+const sourceSql = (s, hasCreatedBy) =>
+  s.sql.replace("/*USER_ACTOR*/NULL", hasCreatedBy ? USER_ACTOR_SQL : "NULL");
 
 router.get("/activity-feed", cache("home-activity-feed", 45), async (req, res) => {
   try {
@@ -380,9 +387,10 @@ router.get("/activity-feed", cache("home-activity-feed", 45), async (req, res) =
       .filter(Boolean);
     const allow = requested.length ? new Set(requested) : null;
 
+    const hasCreatedBy = await usersHaveCreatedBy(pool);
     const branches = Object.values(SOURCES)
       .filter((s) => !allow || allow.has(s.module))
-      .map((s) => `SELECT * FROM (${s.sql}) x`);
+      .map((s) => `SELECT * FROM (${sourceSql(s, hasCreatedBy)}) x`);
 
     if (!branches.length) return res.json({ items: [] });
 
@@ -434,9 +442,10 @@ router.get("/activity-week", cache("home-activity-week", 60), async (req, res) =
       return d.toISOString().slice(0, 10);
     });
 
+    const hasCreatedBy = await usersHaveCreatedBy(pool);
     const branches = Object.values(SOURCES)
       .filter((s) => !allow || allow.has(s.module))
-      .map((s) => `SELECT * FROM (${s.sql}) x`);
+      .map((s) => `SELECT * FROM (${sourceSql(s, hasCreatedBy)}) x`);
     if (!branches.length) {
       return res.json({ days: days.map((date) => ({ date, count: 0, amount: 0 })) });
     }
