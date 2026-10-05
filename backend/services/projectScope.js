@@ -1,10 +1,14 @@
-// Per-user project scoping (dbo.UserProjectAccess, migration 524).
+// Per-user and per-role project scoping (dbo.UserProjectAccess, migration 524;
+// dbo.RoleProjectAccess, migration 534).
 //
 //   getProjectScope(user) -> null       unrestricted (admin role, or no rows)
 //                         -> number[]   the only project ids the user may see
 //
-// Opt-in by design: a user with no rows keeps seeing everything, so nobody is
-// locked out on deploy. Document rows with a NULL project are hidden from a
+// Resolution: the user's own list if they have one, else their role's list,
+// else unrestricted (a personal list overrides the role's, like page rights).
+//
+// Opt-in by design: a user or role with no rows keeps seeing everything, so
+// nobody is locked out on deploy. Document rows with a NULL project are hidden from a
 // restricted user, since they can't be shown to sit inside the allowed set.
 
 const { getPool, sql } = require("../db");
@@ -42,6 +46,21 @@ async function getProjectScope(user) {
     // unrestricted rather than 500-ing every API call for every non-admin.
     if (err.number === 208) return null;
     throw err;
+  }
+  // No personal list: fall back to the role's. A missing role table (code
+  // deployed before migration 534) just means "no role restriction".
+  const roleId = Number(user.roleId);
+  if (!rows.length && Number.isFinite(roleId)) {
+    try {
+      rows = (
+        await getPool()
+          .request()
+          .input("rid", sql.Int, roleId)
+          .query("SELECT ProjectId FROM dbo.RoleProjectAccess WHERE RoleId = @rid")
+      ).recordset;
+    } catch (err) {
+      if (err.number !== 208) throw err;
+    }
   }
   const ids = rows.length ? rows.map((x) => Number(x.ProjectId)) : null;
   cache.set(key, { ids, at: Date.now() });
