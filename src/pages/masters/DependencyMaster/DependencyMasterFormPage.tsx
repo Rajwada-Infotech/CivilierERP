@@ -177,7 +177,7 @@ export default function DependencyMasterFormPage() {
               <Button
                 onClick={form.submit}
                 disabled={!form.canSubmit || form.isSaving}
-                className="gradient-engineering shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto hover:opacity-90"
+                className="gradient-civilworkdpr shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto hover:opacity-90"
               >
                 {form.isSaving ? "Saving…" : editingId ? "Update" : "Save"}
               </Button>

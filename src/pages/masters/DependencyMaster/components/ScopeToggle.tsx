@@ -23,8 +23,8 @@ export function ScopeToggle({ active, value, onChange }: Props) {
             className={`px-3 py-1.5 text-xs font-heading font-semibold tracking-wide transition-colors ${
               value === opt
                 ? opt === "INTERNAL"
-                  ? "bg-orange-500 text-white"
-                  : "bg-sky-500 text-white"
+                  ? "bg-cyan-600 text-white"
+                  : "bg-violet-500 text-white"
                 : "bg-background text-muted-foreground hover:bg-muted"
             }`}
           >

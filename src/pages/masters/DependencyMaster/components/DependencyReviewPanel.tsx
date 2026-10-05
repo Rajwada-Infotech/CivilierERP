@@ -35,7 +35,7 @@ export function DependencyReviewPanel({ resolvedPath, alias, workType, rungs }: 
           <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Work Type</p>
           <span
             className={`text-[0.625rem] font-heading uppercase tracking-wide px-2 py-0.5 rounded ${
-              workType === "INTERNAL" ? "bg-orange-500/10 text-orange-500" : "bg-sky-500/10 text-sky-500"
+              workType === "INTERNAL" ? "bg-cyan-600/10 text-cyan-600" : "bg-violet-500/10 text-violet-500"
             }`}
           >
             {workType === "INTERNAL" ? "Internal" : "External"}
