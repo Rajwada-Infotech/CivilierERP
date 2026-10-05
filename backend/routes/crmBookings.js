@@ -679,7 +679,8 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     }
 
     const taken = await pool.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id)
-      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
+      .query(`SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())
+              UNION SELECT BookingId FROM dbo.CrmBookingUnit WHERE UnitId = @uid AND BookingId <> @id AND Status = N'Active'`);
     if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
 
     const bookingAppId = await pool.request().input("id", sql.Int, id)
@@ -750,6 +751,28 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
             UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
+
+      // The allocation line is what actually reserves a unit (active-only
+      // unique index; booking creation checks it). Move it with the booking —
+      // otherwise the old unit stays locked forever and the new one isn't
+      // protected against a second sale.
+      const moved = await tx.request()
+        .input("id", sql.Int, id).input("old", sql.Int, oldUnitId).input("uid", sql.Int, newUnitId)
+        .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), rate).input("tot", sql.Decimal(18, 2), total)
+        .input("ub", sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmBookingUnit SET UnitId = @uid, AreaSqFt = @area, RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+                 AllocatedValue = @tot, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE BookingId = @id AND Status = N'Active' AND UnitId = @old
+        `);
+      if (!moved.rowsAffected[0]) {
+        await tx.request().input("id", sql.Int, id).input("uid", sql.Int, newUnitId)
+          .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), rate).input("tot", sql.Decimal(18, 2), total).input("ub", sql.Int, actor)
+          .query(`
+            INSERT INTO dbo.CrmBookingUnit (BookingId, UnitId, AreaSqFt, RatePerSqFt, AllocatedValue, Status, IsPrimary, CreatedBy, CreatedAt)
+            VALUES (@id, @uid, @area, @rate, @tot, N'Active', 1, @ub, SYSDATETIME())
+          `);
+      }
 
       // New unit means a new TotalValue — Unit+Parking could have crossed the
       // Rs. 45L GST bracket.

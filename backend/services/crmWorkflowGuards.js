@@ -16,6 +16,21 @@ const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 // the same lock PUT /crm/bookings/:id applies to rate / value. Parking and extra
 // charges change the total too, so they wait until it's back in Review (or
 // approved: adding parking to a confirmed sale is normal and allowed).
+// Frees a dead booking's inventory: its unit / plot allocation lines (and the
+// application's plot lines) leave 'Active'. Those tables carry active-only
+// unique indexes and booking creation checks them — a line left Active locks
+// the unit / plot against every future buyer even though the booking itself
+// is Cancelled / Expired. Every path that ends a booking must call this.
+async function releaseBookingInventoryLines(executor, bookingId, lineStatus = "Cancelled") {
+  await executor.request().input("bid", sql.Int, bookingId).input("st", sql.NVarChar(30), lineStatus).query(`
+    UPDATE dbo.CrmBookingUnit SET Status = @st WHERE BookingId = @bid AND Status = N'Active';
+    UPDATE dbo.CrmBookingPlot SET Status = @st WHERE BookingId = @bid AND Status = N'Active';
+    UPDATE ap SET Status = @st
+    FROM dbo.CrmApplicationPlot ap JOIN dbo.CrmBooking b ON b.ApplicationId = ap.ApplicationId
+    WHERE b.Id = @bid AND ap.Status = N'Active';
+  `);
+}
+
 async function requireNotMidApproval(pool, bookingId) {
   const r = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT WorkflowStage FROM dbo.CrmBooking WHERE Id = @bid");
@@ -1358,7 +1373,7 @@ async function resolveOcCcGate(pool, bookingId, certType = null) {
   return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
 }
 
-module.exports = { requireNotMidApproval,
+module.exports = { requireNotMidApproval, releaseBookingInventoryLines,
   resolveNocType,
   resolveOcCcGate,
   validateAgreementPreparationPrerequisites,

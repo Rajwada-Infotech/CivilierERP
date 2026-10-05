@@ -228,6 +228,9 @@ const REGISTRY = [
         { field: "Status", oldVal: "Pending", newVal: "Expired" },
       ]);
 
+      // Its unit / plot lines too — or the expired sale locks them for good.
+      await require("./crmWorkflowGuards").releaseBookingInventoryLines(pool, row.Id);
+
       // Free the Unit back up — release its hold if the sweep hasn't
       // already caught it separately (it may still be 'Converted', not
       // 'Active', since guardAndConvertHold ran at Booking creation; only

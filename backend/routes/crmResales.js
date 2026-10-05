@@ -28,6 +28,7 @@
 //   CrmCancellation       unwinds a sale; a resale unwinds nothing
 
 const express = require("express");
+const { releaseBookingInventoryLines } = require("../services/crmWorkflowGuards");
 const { getNextDocNumber } = require("../services/docNumber");
 const { resolveResaleFeeGst, GstSetupError } = require("../services/crmGst");
 const router = express.Router();
@@ -330,11 +331,12 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
     // check treats Transferred as closed (no dues, no workflow, no ownership);
     // money already received from the seller still shows in their history.
     if (resale.FromBookingId != null) {
-      await tx.request().input("b", sql.Int, resale.FromBookingId).input("rid", sql.Int, id).input("by", sql.Int, actorId(req))
+      const closed = await tx.request().input("b", sql.Int, resale.FromBookingId).input("rid", sql.Int, id).input("by", sql.Int, actorId(req))
         .query(`UPDATE dbo.CrmBooking SET Status = N'Transferred', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
                 WHERE Id = @b AND IsActive = 1 AND Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
                   AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp WHERE bp.BookingId = @b AND bp.Status = N'${LineStatus.ACTIVE}')
                   AND (UnitId IS NULL OR UnitId = (SELECT r.UnitId FROM dbo.CrmUnitResale r WHERE r.Id = @rid))`);
+      if (closed.rowsAffected[0]) await releaseBookingInventoryLines(tx, resale.FromBookingId, "Transferred");
     }
 
     await tx.commit();

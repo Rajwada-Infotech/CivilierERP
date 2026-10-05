@@ -16,7 +16,7 @@ const { applyPagination } = require("../services/crmListPagination");
 // engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any
 // editor being able to self-approve a cancellation/refund on this page.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, releaseBookingInventoryLines } = require("../services/crmWorkflowGuards");
 const { releaseAllParkingForBooking } = require("./crmParking");
 const { emitNotification } = require("../services/notify");
 const { getIo } = require("../socket");
@@ -511,19 +511,9 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       await tx.request().input("bid", sql.Int, bookingId)
         .query("UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
 
-      // CrmBookingPlot has an active-only unique index. A cancelled booking
-      // must release its plot lines in the same transaction as its header,
-      // otherwise the land inventory can never be sold again.
-      await tx.request().input("bid", sql.Int, bookingId).query(`
-        UPDATE dbo.CrmBookingPlot SET Status = N'Cancelled'
-        WHERE BookingId = @bid AND Status = N'Active'
-      `);
-      await tx.request().input("bid", sql.Int, bookingId).query(`
-        UPDATE ap SET Status = N'Cancelled'
-        FROM dbo.CrmApplicationPlot ap
-        JOIN dbo.CrmBooking b ON b.ApplicationId = ap.ApplicationId
-        WHERE b.Id = @bid AND ap.Status = N'Active'
-      `);
+      // Release the unit / plot lines in the same transaction as the header —
+      // otherwise the inventory can never be sold again.
+      await releaseBookingInventoryLines(tx, bookingId);
 
       // The Application was force-advanced to 'Approved' the instant this
       // Booking was created and nothing has touched it since — without this,
