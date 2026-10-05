@@ -220,7 +220,7 @@ export function BulkAssignModal({
             type="button"
             onClick={() => apply.mutate()}
             disabled={!canApply}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-4 text-xs font-heading font-semibold text-white gradient-engineering shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-4 text-xs font-heading font-semibold text-white gradient-civilworkdpr shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-50"
           >
             {apply.isPending && <Loader2 size={13} className="animate-spin" />}
             {summary && summary.willChange > 0 ? `Assign ${summary.willChange} ${summary.willChange === 1 ? "activity" : "activities"}` : "Assign"}
