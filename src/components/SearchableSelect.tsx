@@ -182,11 +182,11 @@ export function SearchableSelect({
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder={searchPlaceholder}
-              className="w-full pl-7 pr-2 py-1.5 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+              className="w-full pl-7 pr-2 py-1.5 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
         </div>
-        <div ref={listRef} style={{ maxHeight: Math.max(80, panelMax - SEARCH_BAR) }} className="overflow-y-auto py-1">
+        <div ref={listRef} style={{ maxHeight: Math.max(80, panelMax - SEARCH_BAR) }} className="overflow-y-auto p-1">
           {filtered.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted-foreground text-center">No matches</p>
           ) : (
@@ -198,12 +198,12 @@ export function SearchableSelect({
                 disabled={o.disabled}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => pick(o)}
-                className={`w-full flex items-center gap-2 text-left px-3 py-1.5 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  i === active ? "bg-emerald-500/10 text-foreground" : "text-foreground"
-                }`}
+                className={`w-full flex items-center gap-2 text-left px-2.5 py-1.5 rounded-md text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  i === active ? "bg-primary/10 text-foreground" : "text-foreground"
+                } ${o.value === value ? "font-medium" : ""}`}
               >
                 <span className="flex-1 truncate">{o.label}</span>
-                {o.value === value && <Check size={13} className="text-emerald-500 shrink-0" />}
+                {o.value === value && <Check size={13} className="text-primary shrink-0" />}
               </button>
             ))
           )}
@@ -220,7 +220,7 @@ export function SearchableSelect({
         type="button"
         disabled={disabled}
         onClick={() => (open ? close() : setOpen(true))}
-        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-background text-sm text-left focus:outline-none focus:ring-2 focus:ring-emerald-500/30 disabled:opacity-50 ${className}`}
+        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-background text-sm text-left focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 ${className}`}
       >
         <span className={`truncate ${selected ? "text-foreground" : "text-muted-foreground"}`}>
           {selected ? selected.label : placeholder}

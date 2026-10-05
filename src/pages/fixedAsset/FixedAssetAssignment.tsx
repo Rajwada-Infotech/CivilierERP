@@ -117,7 +117,7 @@ function UserCombobox({
               {users.map((u) => (
                 <CommandItem key={u.id} value={u.name}
                   onSelect={() => { onChange(String(u.id)); setOpen(false); }}
-                  className="data-[selected=true]:bg-neutral-900 data-[selected=true]:text-neutral-50">
+                  className="data-[selected=true]:bg-primary/10 data-[selected=true]:text-foreground">
                   <Check className={cn("mr-2 h-4 w-4", String(u.id) === value ? "opacity-100" : "opacity-0")} />
                   <UserAvatar id={u.id} name={u.name} avatarUrl={u.avatar_url} size={18} />
                   <span className="ml-2 text-sm truncate">{u.name}</span>
@@ -174,7 +174,7 @@ function FAItemCodeCombobox({
                       key={a.AssetId}
                       value={`${a.FAItemCode} ${a.AssetName}`}
                       onSelect={() => { onSelect(a); setOpen(false); }}
-                      className="data-[selected=true]:bg-neutral-900 data-[selected=true]:text-neutral-50"
+                      className="data-[selected=true]:bg-primary/10 data-[selected=true]:text-foreground"
                     >
                       <Check className={cn("mr-2 h-4 w-4", String(a.AssetId) === value ? "opacity-100" : "opacity-0")} />
                       <span className="flex flex-col min-w-0">

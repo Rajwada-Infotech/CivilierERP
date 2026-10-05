@@ -180,12 +180,13 @@ describe("notifyTransition (approval recipients)", () => {
     expect(bodyOf()[0].body).toBe("Purchase Order PO-2026-00042 is waiting for your approval.");
   });
 
-  it("approval pushes go only to the apps where approvals are handled", async () => {
+  it("approval pushes go to the Admin app only — never to Finance & Material", async () => {
     const w = world();
     await notifyTransition({ ...base, targetStatus: "Pending", result: { newStatus: "Pending" } });
     const tokenQuery = w.queries.find((q) => /SELECT Token/.test(q.text));
-    expect(tokenQuery.text).toMatch(/AppKey IN \(@a0,@a1\)/);
-    expect(Object.values(tokenQuery.inputs)).toEqual(expect.arrayContaining(["admin", "finance-material"]));
+    expect(tokenQuery.text).toMatch(/AppKey IN \(@a0\)/);
+    const apps = Object.entries(tokenQuery.inputs).filter(([k]) => /^a\d+$/.test(k)).map(([, v]) => v);
+    expect(apps).toEqual(["admin"]);
   });
 
   it("a cleared level opens the next one: pings level 2's approver", async () => {
