@@ -18,6 +18,8 @@
 // sheet's own "SHOP NO" heading). It is matched to the unit kind master by code
 // or name — the master (Unit Master › Unit kinds) is the only place kinds are
 // defined; nothing is created here, and the run refuses if there's no match.
+// A flat's optional "facing" = its facing as the source lists it (e.g. "NE"),
+// written to UnitMaster.Facing as-is.
 // A flat's optional "rooms" = its full room list; when it differs from its
 // layout's composition it is saved as a UNIT override (Unit Composition), so
 // only that flat differs and the shared layout type is left alone.
@@ -119,7 +121,7 @@ async function main() {
     const bid = blockId(b.name);
     const [ff, ft] = b.floors;
     const units = await one(pool, `
-      SELECT Id, UnitName, FloorNo, UnitType, LayoutTypeId, UnitKind${areaCol ? `, ${areaCol} AS Area` : ""}${extraCols.map((c) => `, ${c} AS x_${c}`).join("")}
+      SELECT Id, UnitName, FloorNo, UnitType, LayoutTypeId, UnitKind, Facing${areaCol ? `, ${areaCol} AS Area` : ""}${extraCols.map((c) => `, ${c} AS x_${c}`).join("")}
       FROM dbo.UnitMaster WHERE BlockId = @b AND IsActive = 1 AND FloorNo BETWEEN @ff AND @ft`,
       { b: [sql.Int, bid], ff: [sql.Int, ff], ft: [sql.Int, ft] });
     const lines = [];
@@ -139,7 +141,9 @@ async function main() {
       const wantKind = want.kind ? kindCode.get(want.kind) : null;
       const kindDiff = !!wantKind && String(u.UnitKind || "").toUpperCase() !== String(wantKind).toUpperCase();
       const kindNote = kindDiff ? ` kind ${u.UnitKind || "-"}->${wantKind}` : "";
-      if (!typeDiff && !areaDiff && !extraAreas.length && !kindDiff) { totals.unchanged++; }
+      const facingDiff = want.facing != null && String(u.Facing || "").trim() !== String(want.facing).trim();
+      const facingNote = facingDiff ? ` facing ${u.Facing || "-"}->${want.facing}` : "";
+      if (!typeDiff && !areaDiff && !extraAreas.length && !kindDiff && !facingDiff) { totals.unchanged++; }
       // Flat-specific rooms -> UNIT override, only when its effective rooms
       // (layout + any override already in force) differ from the plan.
       let ovrNote = "";
@@ -188,6 +192,11 @@ async function main() {
             .query("UPDATE dbo.UnitMaster SET UnitKind = @k WHERE Id = @id");
           totals.kindChanged = (totals.kindChanged || 0) + 1;
         }
+        if (facingDiff) {
+          await tx.request().input("id", sql.Int, u.Id).input("f", sql.NVarChar(20), String(want.facing).trim())
+            .query("UPDATE dbo.UnitMaster SET Facing = @f WHERE Id = @id");
+          totals.facingChanged = (totals.facingChanged || 0) + 1;
+        }
         if (typeDiff || areaDiff || extraAreas.length) {
           const r = tx.request().input("id", sql.Int, u.Id).input("lt", sql.Int, t.layoutTypeId).input("t", sql.NVarChar(100), t.unitType);
           let set = typeDiff ? "LayoutTypeId = @lt, UnitType = @t" : "UnitType = UnitType";
@@ -204,9 +213,9 @@ async function main() {
         totals.roomsKeptWithWork += (rs.keptWithWork || []).length;
         if (typeDiff) totals.typeChanged++;
         if (areaDiff) totals.areaChanged++;
-        if (typeDiff || areaDiff || extraAreas.length || kindDiff || rs.created || rs.deactivated || ovrNote) {
+        if (typeDiff || areaDiff || extraAreas.length || kindDiff || facingDiff || rs.created || rs.deactivated || ovrNote) {
           changed++;
-          lines.push(`   ${u.UnitName}: ${u.UnitType || "-"}/${u.Area ?? "-"} -> ${t.unitType}/${want.area ?? "-"}  rooms +${(rs.created || 0) + (rs.reactivated || 0)} -${rs.deactivated || 0}${(rs.keptWithWork || []).length ? ` KEPT(work): ${rs.keptWithWork.length}` : ""}${extraNote}${kindNote}${ovrNote}`);
+          lines.push(`   ${u.UnitName}: ${u.UnitType || "-"}/${u.Area ?? "-"} -> ${t.unitType}/${want.area ?? "-"}  rooms +${(rs.created || 0) + (rs.reactivated || 0)} -${rs.deactivated || 0}${(rs.keptWithWork || []).length ? ` KEPT(work): ${rs.keptWithWork.length}` : ""}${extraNote}${kindNote}${facingNote}${ovrNote}`);
         }
         if (APPLY) await tx.commit(); else await tx.rollback();
       } catch (e) {
