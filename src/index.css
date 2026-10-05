@@ -261,6 +261,111 @@
         --sidebar-border: 0 0% 18%;
         --sidebar-ring: 0 0% 70%;
     }
+    /* CYBERPUNK THEME — super admin only.
+       Deep violet-black ground, neon cyan primary, hot-magenta secondary, acid-yellow
+       highlight. Dark surface, so isLightTheme() is false for it. */
+    [data-theme="cyberpunk"] {
+        --background: 258 55% 4%;
+        --foreground: 180 60% 92%;
+        --card: 262 45% 8%;
+        --card-foreground: 180 60% 92%;
+        --popover: 262 48% 7%;
+        --popover-foreground: 180 60% 92%;
+        --primary: 183 100% 50%;
+        --primary-foreground: 258 55% 5%;
+        --secondary: 322 100% 58%;
+        --secondary-foreground: 0 0% 100%;
+        --muted: 262 38% 13%;
+        --muted-foreground: 255 20% 66%;
+        --accent: 322 100% 58%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 348 100% 58%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 270 55% 22%;
+        --input: 270 55% 22%;
+        --ring: 183 100% 50%;
+        --radius: 0.25rem;
+        --surface: 262 42% 10%;
+        --accent-1: 183 100% 50%;
+        --accent-2: 322 100% 58%;
+        --accent-3: 54 100% 55%;
+        --sidebar-background: 258 58% 3%;
+        --sidebar-foreground: 180 45% 82%;
+        --sidebar-primary: 183 100% 50%;
+        --sidebar-primary-foreground: 258 55% 5%;
+        --sidebar-accent: 270 45% 12%;
+        --sidebar-accent-foreground: 183 100% 80%;
+        --sidebar-border: 270 55% 20%;
+        --sidebar-ring: 183 100% 50%;
+    }
+}
+
+/* CYBERPUNK theme — neon edge on surfaces over a faint grid. Sharp corners come from
+   --radius; everything else is colour-token driven, so no component needs to know. */
+[data-theme="cyberpunk"] body {
+    background-color: hsl(var(--background));
+    background-image:
+        linear-gradient(hsl(183 100% 50% / 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, hsl(183 100% 50% / 0.035) 1px, transparent 1px),
+        radial-gradient(ellipse at 15% -10%, hsl(322 100% 58% / 0.12), transparent 50%),
+        radial-gradient(ellipse at 90% 110%, hsl(183 100% 50% / 0.10), transparent 50%);
+    background-size: 32px 32px, 32px 32px, auto, auto;
+    background-attachment: fixed;
+}
+[data-theme="cyberpunk"] .bg-background {
+    background-color: transparent;
+}
+[data-theme="cyberpunk"] .bg-card {
+    box-shadow:
+        0 0 0 1px hsl(183 100% 50% / 0.16),
+        0 0 18px hsl(183 100% 50% / 0.07),
+        inset 0 1px 0 hsl(183 100% 50% / 0.10);
+}
+[data-theme="cyberpunk"] .shadow-lg,
+[data-theme="cyberpunk"] .shadow-xl,
+[data-theme="cyberpunk"] .shadow-2xl {
+    box-shadow:
+        0 0 0 1px hsl(322 100% 58% / 0.28),
+        0 0 28px hsl(322 100% 58% / 0.16),
+        0 12px 32px rgba(0, 0, 0, 0.55) !important;
+}
+[data-theme="cyberpunk"] .bg-primary {
+    box-shadow: 0 0 14px hsl(183 100% 50% / 0.45);
+}
+[data-theme="cyberpunk"] input:focus,
+[data-theme="cyberpunk"] select:focus,
+[data-theme="cyberpunk"] textarea:focus {
+    box-shadow: 0 0 0 1px hsl(183 100% 50% / 0.7), 0 0 12px hsl(183 100% 50% / 0.35);
+}
+[data-theme="cyberpunk"] h1,
+[data-theme="cyberpunk"] h2 {
+    text-shadow: 0 0 14px hsl(183 100% 50% / 0.35);
+}
+[data-theme="cyberpunk"] ::selection {
+    background: hsl(322 100% 58% / 0.55);
+    color: #fff;
+}
+[data-theme="cyberpunk"] .recharts-cartesian-grid line {
+    stroke: hsl(183 100% 50% / 0.10);
+}
+[data-theme="cyberpunk"] ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+[data-theme="cyberpunk"] ::-webkit-scrollbar-track {
+    background: hsl(258 55% 4%);
+}
+[data-theme="cyberpunk"] ::-webkit-scrollbar-thumb {
+    background: hsl(183 100% 50% / 0.45);
+    border-radius: 0;
+}
+[data-theme="cyberpunk"] ::-webkit-scrollbar-thumb:hover {
+    background: hsl(322 100% 58% / 0.7);
+}
+@media (prefers-reduced-motion: no-preference) {
+    [data-theme="cyberpunk"] .bg-primary {
+        transition: box-shadow 0.2s ease;
+    }
 }
 
 /* BW theme "no other colour" enforcement.

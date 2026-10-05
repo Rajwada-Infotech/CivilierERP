@@ -73,7 +73,7 @@ import {
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
+import { useTheme, useThemeOptions, Theme } from "@/contexts/ThemeContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useReminders } from "@/hooks/useReminders";
 import { BillingIcon } from "@/components/icons/BillingIcon";
@@ -657,6 +657,7 @@ export const MobileNav: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
+  const themeOptions = useThemeOptions();
   const { currentUser, canAccessPage } = useAuth();
   const { activeModule, setActiveModule } = useModule();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
@@ -872,6 +873,7 @@ export const MobileNav: React.FC = () => {
     root: "#f59e0b",
     glass: "#fb7185",
     bw: "#111111",
+    cyberpunk: "#00f0ff",
   };
 
   const tabs: Array<{ id: "nav" | "setup" | "theme"; label: string }> = [
@@ -1424,12 +1426,7 @@ export const MobileNav: React.FC = () => {
                     Colour theme
                   </p>
                   <div className="grid grid-cols-1 gap-2">
-                    {(
-                      Object.entries(THEME_DOTS) as [
-                        Theme,
-                        { bg: string; label: string },
-                      ][]
-                    ).map(([t, { bg, label }], i) => {
+                    {themeOptions.map(([t, { bg, label }], i) => {
                       const isSelected = theme === t;
                       return (
                         <button
