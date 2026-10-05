@@ -39,12 +39,34 @@ interface Props {
 
 // One editable mix (typical or a floor's own) — a compact table with every
 // field visible: type, units, areas and rate. Nothing folded away.
+// [field, header, unit shown inside the box]
 const AREA_COLS = [
-  ["CarpetAreaSqFt", "Carpet"],
-  ["BuiltUpAreaSqFt", "Built-up"],
-  ["SuperBuiltUpAreaSqFt", "Super built-up"],
-  ["RatePerSqFt", "Rate / sq ft"],
+  ["CarpetAreaSqFt", "Carpet", "sq ft"],
+  ["BuiltUpAreaSqFt", "Built-up", "sq ft"],
+  ["SuperBuiltUpAreaSqFt", "Super built-up", "sq ft"],
+  ["RatePerSqFt", "Rate", "₹/sq ft"],
 ] as const;
+
+const FIELD_LABEL = "text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground";
+
+// Number box with its unit inside, on the right — wide enough for real
+// figures (1,800 / 12,500) and no spinner arrows eating the space.
+function NumBox({ value, onChange, disabled, unit, label, min = 0, max }: {
+  value: string | number | null | undefined; onChange: (v: string) => void; disabled: boolean;
+  unit?: string; label: string; min?: number; max?: number;
+}) {
+  return (
+    <div className="relative">
+      <input type="number" inputMode="decimal" min={min} max={max} value={value ?? ""} disabled={disabled}
+        placeholder="—" aria-label={label} onChange={(e) => onChange(e.target.value)}
+        className={`h-9 w-full rounded-lg border border-border bg-background pl-2.5 text-sm text-right tabular-nums
+          placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary
+          disabled:opacity-60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none
+          ${unit ? "pr-12" : "pr-2.5"}`} />
+      {unit && <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[0.6875rem] text-muted-foreground">{unit}</span>}
+    </div>
+  );
+}
 
 function MixEditor({ rows, onChange, kinds, layoutTypes, canEdit }: {
   rows: MixRow[]; onChange: (r: MixRow[]) => void; kinds: KindRow[]; layoutTypes: LayoutType[]; canEdit: boolean;
@@ -52,63 +74,53 @@ function MixEditor({ rows, onChange, kinds, layoutTypes, canEdit }: {
   const commercial = kinds.filter((k) => k.IsCommercial);
   const set = (i: number, patch: Partial<MixRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const firstType = unitTypeOptions(layoutTypes)[0]?.value ?? "";
-  const cell = "h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-right tabular-nums disabled:opacity-60";
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-            <th className="text-left font-medium pb-1.5 pr-2">Type</th>
-            <th className="text-right font-medium pb-1.5 px-1 w-16">Units</th>
-            {AREA_COLS.map(([, label]) => <th key={label} className="text-right font-medium pb-1.5 px-1 w-24">{label}</th>)}
-            <th className="w-6" />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>
-              <td className="py-1 pr-2">
-                <select value={r.UnitKind ? `kind:${r.UnitKind}` : r.UnitType} disabled={!canEdit}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v.startsWith("kind:")) { const k = commercial.find((x) => x.Code === v.slice(5)); set(i, { UnitKind: v.slice(5), UnitType: k?.Name || v.slice(5) }); }
-                    else set(i, { UnitKind: null, UnitType: v });
-                  }} className="h-8 w-full min-w-[8rem] rounded-md border border-border bg-background px-2 text-xs">
-                  {commercial.length ? (
-                    <>
-                      <optgroup label="Residential">
-                        {unitTypeOptions(layoutTypes, r.UnitKind ? "" : r.UnitType).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </optgroup>
-                      <optgroup label="Commercial">
-                        {commercial.map((k) => <option key={k.Code} value={`kind:${k.Code}`}>{k.Name}</option>)}
-                      </optgroup>
-                    </>
-                  ) : unitTypeOptions(layoutTypes, r.UnitType).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </td>
-              <td className="py-1 px-1">
-                <input type="number" min={1} max={100} value={r.Count} disabled={!canEdit} aria-label="Units"
-                  onChange={(e) => set(i, { Count: e.target.value })} className={cell} />
-              </td>
-              {AREA_COLS.map(([key, label]) => (
-                <td key={key} className="py-1 px-1">
-                  <input type="number" min={0} value={r[key] ?? ""} disabled={!canEdit} placeholder="—" aria-label={label}
-                    onChange={(e) => set(i, { [key]: e.target.value })}
-                    className={cell} />
-                </td>
-              ))}
-              <td className="py-1 pl-1 text-center">
-                {canEdit && rows.length > 1 && (
-                  <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label="Remove" className="text-muted-foreground hover:text-red-600"><X size={13} /></button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div>
+      {/* One line per type: labelled fields that wrap onto a second line when
+          the panel is narrow — never squeezed, never a sideways scrollbar. */}
+      <div className="space-y-2">
+        {rows.map((r, i) => (
+          <div key={i} className="flex flex-wrap items-end gap-x-2.5 gap-y-2 rounded-lg border border-border/60 bg-background/40 p-2.5">
+            <label className="flex min-w-[10rem] flex-[1.6_1_10rem] flex-col gap-1">
+              <span className={FIELD_LABEL}>Type</span>
+              <select value={r.UnitKind ? `kind:${r.UnitKind}` : r.UnitType} disabled={!canEdit}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v.startsWith("kind:")) { const k = commercial.find((x) => x.Code === v.slice(5)); set(i, { UnitKind: v.slice(5), UnitType: k?.Name || v.slice(5) }); }
+                  else set(i, { UnitKind: null, UnitType: v });
+                }} className="h-9 w-full rounded-lg border border-border bg-background px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-60">
+                {commercial.length ? (
+                  <>
+                    <optgroup label="Residential">
+                      {unitTypeOptions(layoutTypes, r.UnitKind ? "" : r.UnitType).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </optgroup>
+                    <optgroup label="Commercial">
+                      {commercial.map((k) => <option key={k.Code} value={`kind:${k.Code}`}>{k.Name}</option>)}
+                    </optgroup>
+                  </>
+                ) : unitTypeOptions(layoutTypes, r.UnitType).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label className="flex w-[5.5rem] flex-none flex-col gap-1">
+              <span className={FIELD_LABEL}>Units</span>
+              <NumBox value={r.Count} min={1} max={100} disabled={!canEdit} label="Units" onChange={(v) => set(i, { Count: v })} />
+            </label>
+            {AREA_COLS.map(([key, label, unit]) => (
+              <label key={key} className="flex min-w-[8rem] flex-[1_1_8rem] flex-col gap-1">
+                <span className={FIELD_LABEL}>{label}</span>
+                <NumBox value={r[key]} unit={unit} disabled={!canEdit} label={label} onChange={(v) => set(i, { [key]: v })} />
+              </label>
+            ))}
+            {canEdit && rows.length > 1 && (
+              <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label="Remove this type" title="Remove this type"
+                className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-lg text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30"><X size={15} /></button>
+            )}
+          </div>
+        ))}
+      </div>
       {canEdit && (
-        <button type="button" onClick={() => onChange([...rows, { UnitType: firstType, Count: 1 }])} className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline">
-          <Plus size={11} /> Add a type
+        <button type="button" onClick={() => onChange([...rows, { UnitType: firstType, Count: 1 }])} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+          <Plus size={12} /> Add a type
         </button>
       )}
     </div>
