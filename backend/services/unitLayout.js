@@ -295,6 +295,24 @@ function floorLabelOf(floorNo) {
   return floorNo === 0 ? "G" : floorNo != null ? String(floorNo) : null;
 }
 
+// The Floor a work chain (dbo.DependencyMaster.Floor) records for a unit.
+// A unit with a floor uses it. A unit with none follows its block's effective
+// project type: a type without floors (plotted) places the villa by the
+// plot(s) it was built on; a type with floors means the floor is missing, which
+// is reported rather than written as the text "null".
+async function chainFloorLabel(db, unit, { asLabel = true } = {}) {
+  if (unit.FloorNo != null) return asLabel ? floorLabelOf(unit.FloorNo) : String(unit.FloorNo);
+  const { getEffectiveType } = require("./projectType");
+  const type = await getEffectiveType(db, { blockId: unit.BlockId });
+  if (type.HasFloors) throw new Error(`${unit.UnitName} has no floor — set its floor in Auto Project Setup first`);
+  const r = await db.request().input("u", sql.Int, unit.UnitId ?? unit.Id).query(`
+    SELECT STRING_AGG(PlotName, '+') WITHIN GROUP (ORDER BY PlotName) AS Plots
+    FROM dbo.PlotMaster WHERE ConvertedUnitId = @u AND IsActive = 1`);
+  const plots = r.recordset[0]?.Plots;
+  if (!plots) throw new Error(`${unit.UnitName} is in a ${type.Name} block but isn't built on a plot — convert it from its plot first`);
+  return plots;
+}
+
 // Brings one unit's RoomMaster rows in line with its layout's composition.
 // Matching is by RoomCategoryId COUNT, not by name — so a Bathroom going
 // from 1 to 2 turns "Bathroom" into "Bathroom 1" + a new "Bathroom 2"
@@ -858,4 +876,5 @@ module.exports = {
   ROOM_NAME_MAX,
   ROOM_HAS_WORK,
   floorLabelOf,
+  chainFloorLabel,
 };
