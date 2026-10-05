@@ -641,6 +641,38 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
     const unitRow = unit.recordset[0];
 
+    // The same rules a new booking must pass (crmEntityCreation.js) — a unit
+    // change must not slip a sale past them.
+    const ctx = (await pool.request().input("id", sql.Int, id).input("nu", sql.Int, newUnitId).query(`
+      SELECT b.ProjectId, a.CustomerId, u.UnitKind
+      FROM dbo.CrmBooking b
+      LEFT JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      CROSS JOIN (SELECT UnitKind FROM dbo.UnitMaster WHERE Id = @nu) u
+      WHERE b.Id = @id`)).recordset[0] || {};
+    if (ctx.ProjectId != null && unitRow.ProjectId !== ctx.ProjectId) {
+      return res.status(400).json({ error: "A booking stays in its own project — pick a unit from the same project, or cancel and book afresh." });
+    }
+    {
+      const { bookingTypeViolation, loadLandKinds, loadCommercialKinds } = require("../services/projectType");
+      const why = await bookingTypeViolation(pool, [{ ...unitRow, UnitKind: ctx.UnitKind }], {
+        isPlotBooking: false,
+        landKinds: await loadLandKinds(pool),
+        commercialKinds: await loadCommercialKinds(pool),
+      });
+      if (why) return res.status(400).json({ error: why });
+    }
+    try {
+      await require("../services/villaLand").assertVillaBuyerOwnsLand(pool, [newUnitId], ctx.CustomerId);
+    } catch (e) {
+      if (e.status) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+    // Priced from the new unit's saleable area — without one the booking
+    // would silently keep the old unit's price.
+    if (!(Number(unitRow.AreaSqFt) > 0)) {
+      return res.status(400).json({ error: `${unitRow.UnitName} has no saleable area — set it in Unit Master first, so the booking can be re-priced.` });
+    }
+
     const taken = await pool.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id)
       .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
     if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
