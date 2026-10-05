@@ -186,39 +186,42 @@
     }
 
     /* GLAS THEME — Premium Glassmorphism */
+    /* Glass — light, cream, Apple-style frosted glass. Warm cream page,
+       milky translucent surfaces (see the GLASS THEME block below for the
+       blur), dark readable text, soft blue accents. */
     [data-theme="glass"] {
-        --background: 240 35% 7%;
-        --foreground: 220 20% 94%;
-        --card: 240 30% 12%;
-        --card-foreground: 220 20% 94%;
-        --popover: 240 30% 10%;
-        --popover-foreground: 220 20% 94%;
-        --primary: 258 90% 66%;
+        --background: 40 45% 96%;
+        --foreground: 222 35% 9%;
+        --card: 40 60% 98%;
+        --card-foreground: 222 35% 9%;
+        --popover: 40 60% 98%;
+        --popover-foreground: 222 35% 9%;
+        --primary: 211 90% 50%;
         --primary-foreground: 0 0% 100%;
-        --secondary: 217 91% 60%;
-        --secondary-foreground: 0 0% 100%;
-        --muted: 240 25% 16%;
-        --muted-foreground: 220 15% 58%;
-        --accent: 258 90% 66%;
+        --secondary: 32 40% 91%;
+        --secondary-foreground: 222 30% 12%;
+        --muted: 38 38% 92%;
+        --muted-foreground: 220 14% 30%;
+        --accent: 211 90% 50%;
         --accent-foreground: 0 0% 100%;
-        --destructive: 0 72% 51%;
+        --destructive: 0 72% 50%;
         --destructive-foreground: 0 0% 100%;
-        --border: 240 20% 22%;
-        --input: 240 25% 18%;
-        --ring: 258 90% 66%;
-        --radius: 0.75rem;
-        --surface: 240 28% 11%;
-        --accent-1: 258 90% 66%;
-        --accent-2: 217 91% 60%;
-        --accent-3: 280 85% 65%;
-        --sidebar-background: 240 35% 8%;
-        --sidebar-foreground: 220 20% 88%;
-        --sidebar-primary: 258 90% 66%;
+        --border: 35 28% 84%;
+        --input: 38 32% 89%;
+        --ring: 211 90% 50%;
+        --radius: 0.85rem;
+        --surface: 40 50% 97%;
+        --accent-1: 211 90% 50%;
+        --accent-2: 196 85% 46%;
+        --accent-3: 262 65% 60%;
+        --sidebar-background: 40 50% 95%;
+        --sidebar-foreground: 222 30% 12%;
+        --sidebar-primary: 211 90% 50%;
         --sidebar-primary-foreground: 0 0% 100%;
-        --sidebar-accent: 240 28% 14%;
-        --sidebar-accent-foreground: 220 20% 94%;
-        --sidebar-border: 240 20% 18%;
-        --sidebar-ring: 258 90% 66%;
+        --sidebar-accent: 38 40% 90%;
+        --sidebar-accent-foreground: 222 35% 9%;
+        --sidebar-border: 35 28% 85%;
+        --sidebar-ring: 211 90% 50%;
     }
 
     /* BW THEME — strictly black & white SaaS / Web3 dashboard.
@@ -447,60 +450,131 @@
     animation: slide-up 0.3s ease-out;
 }
 
-/* ── GLAS THEME — glass effects ─────────────────────────────────────────────── */
+/* ── GLASS THEME — "glass over water" (Apple-style, light) ────────────────
+   A soft water-colour page (aqua / sky / cream / peach pools) sits behind
+   clear, light glass panels: high transparency + strong blur, a diagonal
+   sheen, bright rim and inner highlight — so the colours behind refract
+   through every surface. */
 
-/* Page background: deep indigo-to-purple gradient */
 [data-theme="glass"] body {
-    background: linear-gradient(
-        135deg,
-        hsl(240 55% 5%) 0%,
-        hsl(258 60% 9%) 35%,
-        hsl(240 50% 7%) 65%,
-        hsl(220 55% 6%) 100%
-    ) !important;
+    background:
+        radial-gradient(42rem 32rem at 6% 4%, rgba(125, 211, 252, 0.55), transparent 62%),
+        radial-gradient(38rem 30rem at 96% 8%, rgba(253, 186, 140, 0.45), transparent 60%),
+        radial-gradient(46rem 34rem at 78% 92%, rgba(94, 234, 212, 0.38), transparent 62%),
+        radial-gradient(40rem 32rem at 12% 96%, rgba(196, 181, 253, 0.40), transparent 60%),
+        radial-gradient(30rem 24rem at 50% 45%, rgba(255, 237, 213, 0.65), transparent 70%),
+        linear-gradient(160deg, #f7fbff 0%, #fdf6ec 50%, #f1faf8 100%) !important;
     background-attachment: fixed !important;
 }
 
-/* The main layout wrapper uses bg-background — make it transparent so the body gradient shows */
 [data-theme="glass"] .bg-background {
     background-color: transparent !important;
 }
 
-/* Cards: frosted glass */
-[data-theme="glass"] .bg-card {
-    background: rgba(255, 255, 255, 0.055) !important;
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border-color: rgba(255, 255, 255, 0.09) !important;
+/* Clear glass panels with a 3D pearl finish: an iridescent pearl sheen over
+   high transparency + strong blur; a bright top rim and a soft inner shade
+   at the bottom for curvature; layered shadows (tight contact + wide soft
+   drop) so the panel sits raised above the water. */
+[data-theme="glass"] :is(.bg-card, .bg-sidebar, [class^="bg-card/"], [class*=" bg-card/"]) {
+    background:
+        linear-gradient(115deg,
+            rgba(255, 228, 240, 0.30) 0%,
+            rgba(214, 233, 255, 0.22) 30%,
+            rgba(214, 255, 244, 0.20) 55%,
+            rgba(255, 244, 222, 0.26) 80%,
+            rgba(240, 228, 255, 0.24) 100%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.46) 0%, rgba(255, 255, 255, 0.12) 60%, rgba(255, 255, 255, 0.24) 100%) !important;
+    backdrop-filter: blur(28px) saturate(190%) brightness(1.04);
+    -webkit-backdrop-filter: blur(28px) saturate(190%) brightness(1.04);
+    border: 1px solid rgba(255, 255, 255, 0.85) !important;
+    box-shadow:
+        inset 0 1.5px 0 rgba(255, 255, 255, 1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+        inset 0 -10px 18px -12px rgba(30, 64, 110, 0.18),
+        inset 10px 0 18px -14px rgba(255, 255, 255, 0.9),
+        0 1px 2px rgba(30, 64, 110, 0.08),
+        0 4px 10px -2px rgba(30, 64, 110, 0.10),
+        0 18px 40px -12px rgba(30, 64, 110, 0.24),
+        0 30px 60px -30px rgba(120, 90, 160, 0.22) !important;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+/* Clickable cards lift a little on hover */
+[data-theme="glass"] :is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"]):is(a, button, [role="button"], .cursor-pointer):hover {
+    transform: translateY(-2px);
+    box-shadow:
+        inset 0 1.5px 0 rgba(255, 255, 255, 1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+        inset 0 -10px 18px -12px rgba(30, 64, 110, 0.18),
+        0 2px 4px rgba(30, 64, 110, 0.08),
+        0 10px 22px -6px rgba(30, 64, 110, 0.16),
+        0 28px 56px -16px rgba(30, 64, 110, 0.30) !important;
 }
 
-/* Popovers / dropdowns: darker glass */
+/* Header bar: thin clear glass */
+[data-theme="glass"] header {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.28)) !important;
+    backdrop-filter: blur(26px) saturate(190%);
+    -webkit-backdrop-filter: blur(26px) saturate(190%);
+    border-color: rgba(255, 255, 255, 0.7) !important;
+    box-shadow: 0 6px 24px -10px rgba(30, 64, 110, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.6);
+}
+
+/* Menus / dropdowns: a little denser so text stays crisp */
 [data-theme="glass"] .bg-popover {
-    background: rgba(12, 10, 28, 0.88) !important;
-    backdrop-filter: blur(28px) saturate(180%);
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
-    border-color: rgba(255, 255, 255, 0.1) !important;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.62)) !important;
+    backdrop-filter: blur(32px) saturate(190%);
+    -webkit-backdrop-filter: blur(32px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.8) !important;
+    box-shadow: 0 16px 44px -8px rgba(30, 64, 110, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
-/* Muted surfaces */
+/* Dialogs / drawers: glass sheet over a soft watery veil */
+[data-theme="glass"] [role="dialog"]:is(.bg-background, .crm-dialog) {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.26)) !important;
+    backdrop-filter: blur(40px) saturate(200%);
+    -webkit-backdrop-filter: blur(40px) saturate(200%);
+    border: 1px solid rgba(255, 255, 255, 0.85) !important;
+    box-shadow: 0 30px 70px -16px rgba(30, 64, 110, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+[data-theme="glass"] .dlg-sticky :is([data-dlg-head], [data-dlg-foot]) {
+    background: rgba(255, 255, 255, 0.42) !important;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+[data-theme="glass"] [data-radix-dialog-overlay],
+[data-theme="glass"] .fixed.inset-0[class*="bg-black"],
+[data-theme="glass"] .fixed.inset-0[class*="bg-background/"],
+[data-theme="glass"] .absolute.inset-0[class*="bg-black"],
+[data-theme="glass"] .fixed .flex-1[class*="bg-black/"] {
+    background: rgba(214, 236, 245, 0.35) !important;
+    backdrop-filter: blur(8px) saturate(140%);
+    -webkit-backdrop-filter: blur(8px) saturate(140%);
+}
+
+/* Muted surfaces & inputs: faint warm tint */
 [data-theme="glass"] .bg-muted {
-    background: rgba(255, 255, 255, 0.045) !important;
+    background: rgba(255, 255, 255, 0.38) !important;
+}
+[data-theme="glass"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+    background-color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.85);
+    box-shadow: inset 0 1px 2px rgba(30, 64, 110, 0.06);
 }
 
 /* Scrollbar */
 [data-theme="glass"] ::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
 }
 [data-theme="glass"] ::-webkit-scrollbar-track {
     background: transparent;
 }
 [data-theme="glass"] ::-webkit-scrollbar-thumb {
-    background: rgba(139, 92, 246, 0.35);
-    border-radius: 3px;
+    background: rgba(30, 64, 110, 0.18);
+    border-radius: 4px;
 }
 [data-theme="glass"] ::-webkit-scrollbar-thumb:hover {
-    background: rgba(139, 92, 246, 0.6);
+    background: rgba(30, 64, 110, 0.3);
 }
 
 /* ── Sidebar scrollbar — thin, pill-shaped, visible on all themes ─────────── */
@@ -571,12 +645,12 @@
 /* All dark-background themes (dark/midnight/root/glass): icon is inverted via
    Tailwind class → white icon. Light theme needs a reset to keep the native
    dark icon visible on its white background. */
-[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
-[data-theme="light"]
+:is([data-theme="light"], [data-theme="glass"]) input[type="date"]::-webkit-calendar-picker-indicator,
+:is([data-theme="light"], [data-theme="glass"])
     input[type="datetime-local"]::-webkit-calendar-picker-indicator,
-[data-theme="light"] input[type="month"]::-webkit-calendar-picker-indicator,
-[data-theme="light"] input[type="week"]::-webkit-calendar-picker-indicator,
-[data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
+:is([data-theme="light"], [data-theme="glass"]) input[type="month"]::-webkit-calendar-picker-indicator,
+:is([data-theme="light"], [data-theme="glass"]) input[type="week"]::-webkit-calendar-picker-indicator,
+:is([data-theme="light"], [data-theme="glass"]) input[type="time"]::-webkit-calendar-picker-indicator {
     filter: none !important;
     opacity: 0.6;
 }
@@ -745,10 +819,10 @@
 .crm-dialog input[type="time"] {
     color-scheme: dark;
 }
-[data-theme="light"] .crm-dialog input[type="date"],
-[data-theme="light"] .crm-dialog input[type="number"],
-[data-theme="light"] .crm-dialog input[type="datetime-local"],
-[data-theme="light"] .crm-dialog input[type="time"],
+:is([data-theme="light"], [data-theme="glass"]) .crm-dialog input[type="date"],
+:is([data-theme="light"], [data-theme="glass"]) .crm-dialog input[type="number"],
+:is([data-theme="light"], [data-theme="glass"]) .crm-dialog input[type="datetime-local"],
+:is([data-theme="light"], [data-theme="glass"]) .crm-dialog input[type="time"],
 [data-theme="bw"] .crm-dialog input[type="date"],
 [data-theme="bw"] .crm-dialog input[type="number"],
 [data-theme="bw"] .crm-dialog input[type="datetime-local"],
@@ -1442,4 +1516,94 @@ button[role="combobox"]:focus-visible,
 select:focus,
 button[role="combobox"]:focus {
   border-color: hsl(var(--foreground) / 0.25) !important;
+}
+
+/* Glass: dialog fields and labels stay crisp on the clearer glass */
+[data-theme="glass"] [role="dialog"] :is(label, .text-muted-foreground) {
+    color: hsl(220 14% 28%);
+}
+[data-theme="glass"] [role="dialog"] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+    background-color: rgba(255, 255, 255, 0.45);
+    color: hsl(222 35% 9%);
+}
+
+/* Glass: Setup (masters) dropdown tiles — small pearl-glass buttons with a
+   pearl icon bubble, lifting on hover. */
+[data-theme="glass"] .setup-item {
+    background:
+        linear-gradient(120deg, rgba(255, 232, 242, 0.32), rgba(214, 233, 255, 0.24) 45%, rgba(214, 255, 244, 0.22) 75%, rgba(255, 246, 226, 0.30)),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.22)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.85) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 1),
+        inset 0 -6px 12px -8px rgba(30, 64, 110, 0.16),
+        0 1px 2px rgba(30, 64, 110, 0.06),
+        0 6px 14px -6px rgba(30, 64, 110, 0.16);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+[data-theme="glass"] .setup-item:hover {
+    transform: translateY(-2px);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 1),
+        inset 0 -6px 12px -8px rgba(30, 64, 110, 0.16),
+        0 2px 4px rgba(30, 64, 110, 0.08),
+        0 12px 24px -8px rgba(30, 64, 110, 0.24);
+}
+[data-theme="glass"] .setup-item > div > div:first-child {
+    background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.35) 60%, rgba(214, 233, 255, 0.35)) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 2px 6px rgba(30, 64, 110, 0.12);
+}
+
+/* Glass: floating panels (header dropdowns like Setup / Reports, menus,
+   pop-overs) sit above page content. A panel inside the blurred header can't
+   blur the page behind it (nested backdrop-filter), so it gets a nearly
+   opaque pearl surface — same sheen, rim and 3D shadow, but nothing from the
+   page shows through. */
+[data-theme="glass"] :is(.absolute, .fixed)[class*="z-"]:is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"]),
+[data-theme="glass"] header :is(.absolute, .fixed):is(.bg-card, [class^="bg-card/"], [class*=" bg-card/"]) {
+    background:
+        linear-gradient(115deg,
+            rgba(255, 236, 246, 0.55) 0%,
+            rgba(226, 238, 255, 0.45) 35%,
+            rgba(226, 252, 244, 0.40) 65%,
+            rgba(255, 246, 228, 0.50) 100%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(250, 248, 244, 0.95)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.95) !important;
+    box-shadow:
+        inset 0 1.5px 0 rgba(255, 255, 255, 1),
+        inset 0 -12px 22px -14px rgba(30, 64, 110, 0.16),
+        0 2px 4px rgba(30, 64, 110, 0.08),
+        0 18px 44px -10px rgba(30, 64, 110, 0.30),
+        0 40px 80px -30px rgba(120, 90, 160, 0.28) !important;
+}
+[data-theme="glass"] .bg-popover {
+    background:
+        linear-gradient(115deg, rgba(255, 236, 246, 0.5), rgba(226, 238, 255, 0.4) 40%, rgba(255, 246, 228, 0.45)),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(250, 248, 244, 0.95)) !important;
+}
+
+/* ── Glass: water-pearl icons ─────────────────────────────────────────────
+   Small icon badges (square / round containers holding just an icon — page
+   & section headers, cards, sidebar, module strip) become glossy pearl
+   bubbles: white specular highlight top-left, faint iridescent body, bright
+   rim and soft drop shadow. Every icon gets a subtle embossed glint.
+   Coloured action buttons (module gradients, solid fills) are untouched. */
+[data-theme="glass"] :is(.rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-full):is(.w-5, .w-6, .w-7, .w-8, .w-9, .w-10, .w-11, .w-12, .w-14):has(> svg:only-child):not(.btn-module):not(.gradient-accent):not([class*="bg-red-"]):not([class*="bg-green-"]):not([class*="bg-emerald-6"]):not([class*="bg-primary"]):not(.bg-destructive) {
+    background:
+        radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.55) 28%, transparent 58%),
+        linear-gradient(140deg, rgba(255, 228, 242, 0.55), rgba(214, 233, 255, 0.55) 45%, rgba(208, 250, 238, 0.5) 75%, rgba(255, 244, 222, 0.55)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.95) !important;
+    box-shadow:
+        inset 0 1px 1px rgba(255, 255, 255, 1),
+        inset 0 -4px 8px -3px rgba(30, 64, 110, 0.18),
+        0 2px 5px rgba(30, 64, 110, 0.12),
+        0 6px 14px -6px rgba(30, 64, 110, 0.22) !important;
+}
+/* Embossed glint on icons */
+[data-theme="glass"] :is(svg.lucide, svg[class*="icon"], :is(aside, nav, header, .setup-item, button, a) svg:not([class*="recharts"])) {
+    filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.85)) drop-shadow(0 1px 1.5px rgba(30, 64, 110, 0.18));
+}
+/* …but not on icons inside solid coloured buttons / badges */
+[data-theme="glass"] :is(.btn-module, .gradient-accent, [class*="bg-red-6"], [class*="bg-emerald-6"], [class*="bg-green-6"], .bg-destructive) svg {
+    filter: none;
 }
