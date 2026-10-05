@@ -13,6 +13,7 @@ import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependency
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { ScopeLocationTree } from "@/components/civilworkdpr/ScopeLocationTree";
+import { BulkAssignModal } from "@/pages/masters/DependencyMaster/components/BulkAssignModal";
 import {
   Hammer,
   Layers,
@@ -27,6 +28,7 @@ import {
   UserRound,
   CalendarDays,
   ListChecks,
+  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -212,6 +214,10 @@ function DependencyChainCards({
 
 export default function WorkDone() {
   const rights = usePageRights("civilworkdpr-work-done");
+  // Bulk assign writes Work Allocation data, so it needs the same edit right as saving one allocation.
+  const reportingRights = usePageRights("civilworkdpr-activity-reporting");
+  const canBulkAssign = rights.canEdit || reportingRights.canEdit;
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [form, setForm] = useState<WorkDoneLocationForm>(EMPTY_FORM);
   const [activeAssignment, setActiveAssignment] = useState<{ rung: LadderActivity; chain: DependencyMasterListRow } | null>(null);
 
@@ -392,6 +398,17 @@ export default function WorkDone() {
         title="Work Allocation"
         subtitle="Tag a work-done entry to the exact Project / Tower / Floor / Unit"
         icon={Hammer}
+        action={
+          canBulkAssign && allChains.length > 0 ? (
+            <button
+              onClick={() => setBulkOpen(true)}
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-foreground border border-border bg-background hover:bg-muted text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-all"
+            >
+              <Users className="h-3.5 w-3.5" />
+              Bulk Assign
+            </button>
+          ) : undefined
+        }
       >
         {!rights.canView ? (
           <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
@@ -804,6 +821,7 @@ export default function WorkDone() {
           </div>
         )}
       </CivilWorkDprShell>
+      <BulkAssignModal open={bulkOpen} onClose={() => setBulkOpen(false)} rows={allChains} />
       {activeAssignment && (
         <RungAssignmentModal
           rung={activeAssignment.rung}
