@@ -383,6 +383,7 @@ router.post("/", adminOnly, async (req, res) => {
   const f = req.body;
   try {
     const pool = getPool();
+    f.projectTypeId = await require("../services/defaultProjectType").resolveProjectTypeId(pool, f.projectTypeId);
     await pool
       .request()
       .input("name", sql.NVarChar(255), f.name || null)
@@ -553,6 +554,7 @@ router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
   try {
     const pool = getPool();
+    f.projectTypeId = await require("../services/defaultProjectType").resolveProjectTypeId(pool, f.projectTypeId);
     // A new project type must not strand floors / plots or make unsold units
     // unsellable — same rule as Auto Project Setup (services/typeGuard.js).
     {
