@@ -53,7 +53,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
         AND m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
     `);
 
@@ -155,7 +155,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         ISNULL((SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
           JOIN dbo.CrmBooking b ON b.Id = m.BookingId
           WHERE m.Status = '${CrmStatus.PENDING}' AND CAST(m.DueDate AS DATE) = d.D
-            AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}), 0) AS MilestonesDue
+            AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}), 0) AS MilestonesDue
       FROM Days d
       ORDER BY d.D
     `);
@@ -166,7 +166,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     const unitsSoldThisMonthQ = addPid(pool.request()).query(`
       SELECT COUNT(*) AS Cnt, ISNULL(SUM(TotalValue), 0) AS TotalValue
       FROM dbo.CrmBooking b
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
         AND CAST(b.BookingDate AS DATE) >= DATEFROMPARTS(YEAR(SYSDATETIME()), MONTH(SYSDATETIME()), 1)
     `);
 
@@ -194,7 +194,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
           (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND Status = '${CrmStatus.PENDING}' AND DueDate < CAST(SYSDATETIME() AS DATE)) AS OverdueCount
         FROM dbo.CrmBooking b
         LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-        WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+        WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
       )
       SELECT ProjectName, SUM(TotalDue) AS TotalDue, SUM(TotalPaid) AS TotalPaid, SUM(OverdueCount) AS OverdueCount
       FROM BookingTotals
@@ -209,7 +209,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         COUNT(*) AS MilestoneCount
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
         AND m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate BETWEEN CAST(SYSDATETIME() AS DATE)
             AND DATEADD(DAY, 30, CAST(SYSDATETIME() AS DATE))
@@ -224,7 +224,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         ) AS Applications,
         (SELECT COUNT(*) FROM dbo.CrmBooking b
           WHERE b.IsActive = 1
-            AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired')
+            AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred')
             ${projectId ? "AND b.ProjectId = @pid" : ""}
         ) AS Bookings,
         (SELECT COUNT(*) FROM dbo.CrmAgreement ag
@@ -267,12 +267,12 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
           SELECT SUM(oa.Amount - ISNULL(oa.AppliedAmount,0))
           FROM dbo.CrmOnAccountPayment oa
           JOIN dbo.CrmBooking b2 ON b2.Id = oa.BookingId
-          WHERE b2.IsActive = 1 AND b2.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b2.Status = 'Approved' OR b2.ConfirmDeadline IS NULL OR b2.ConfirmDeadline >= SYSDATETIME()) ${projectId ? "AND b2.ProjectId = @pid" : ""}
+          WHERE b2.IsActive = 1 AND b2.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b2.Status = 'Approved' OR b2.ConfirmDeadline IS NULL OR b2.ConfirmDeadline >= SYSDATETIME()) ${projectId ? "AND b2.ProjectId = @pid" : ""}
         ), 0) AS TotalPaid,
         SUM(CASE WHEN m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
     `);
 
     const ticketsQ = addPid(pool.request()).query(`

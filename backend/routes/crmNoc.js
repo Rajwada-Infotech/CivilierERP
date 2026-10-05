@@ -172,7 +172,7 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred')
         -- Agreement for Sale, registered at the Sub-Registrar, is mandatory
         -- for every booking regardless of project type — no exception.
         AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}')

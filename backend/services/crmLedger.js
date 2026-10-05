@@ -684,6 +684,49 @@ async function postCrmRefundPaid(pool, refundId, userEmail) {
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
   const legs = [];
 
+  // Where did this booking's money actually sit? Receipts now post to the
+  // pooled Advance from Customer head (postCrmReceiptToGL / postCrmOnAccountToGL);
+  // older ones went to the customer's own head. The NewPayment payout debits
+  // the customer head for NetAmount — when the money sat on Advance, clear
+  // Advance here and hand the customer head back exactly what the payout
+  // took, so neither head is left carrying a balance:
+  //   Dr Advance ............ base of (net + deduction)
+  //   Dr GST Output ......... GST on the refunded (net) part — credit note
+  //   Cr Customer ........... net (offsets the payout voucher's debit)
+  //   Cr Forfeiture income .. base of the deduction (its GST stays payable)
+  if (row.BookingId) {
+    const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+    const onAdvance = (await pool.request().input("bid", sql.Int, row.BookingId).input("h", sql.Int, advanceHeadId).query(`
+      SELECT COUNT(*) AS n FROM dbo.GeneralLedgerEntry g
+      WHERE g.LHeadId = @h AND g.CreditAmount > 0 AND ISNULL(g.IsReversed, 0) = 0 AND (
+        (g.SourceType = 'CrmOnAccountPayment' AND g.SourceId IN (SELECT Id FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid OR HeldFromBookingId = @bid))
+        OR (g.SourceType = 'CrmPaymentReceipt' AND g.SourceId IN (
+          SELECT r.Id FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid)))`)).recordset[0].n > 0;
+    if (onAdvance) {
+      const gstNet = netAmount > 0 ? (await getGstSplit(pool, row.BookingId, netAmount)).gstAmount : 0;
+      const gstDed = deduction > 0 ? (await getGstSplit(pool, row.BookingId, deduction)).gstAmount : 0;
+      const round2 = (n) => Math.round(n * 100) / 100;
+      const advanceDebit = round2(netAmount - gstNet + deduction - gstDed);
+      if (advanceDebit > 0) legs.push({ lHeadId: advanceHeadId, debit: advanceDebit, narration: `${docNo} — advance cleared on refund / forfeiture` });
+      if (gstNet > 0) legs.push({ lHeadId: await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT), debit: gstNet, narration: `${docNo} — GST output liability reversed (credit note on refund; verify Sec.34 time limit)` });
+      if (netAmount > 0) legs.push({ lHeadId: customerHeadId, credit: netAmount, narration: `${docNo} — offsets the refund payout's debit to the customer` });
+      if (deduction > 0) legs.push({ lHeadId: await getGLHeadId(pool, CRM_FORFEITURE_ACCOUNT), credit: round2(deduction - gstDed), narration: `${docNo} — booking cancellation forfeiture income (excl. GST)` });
+      if (!legs.length) return { none: true, reason: `Refund ${refundId} has nothing to post` };
+      await postVoucher(pool, {
+        voucherNo: `${docNo}-ADJ`,
+        voucherDate: row.PaidAt || new Date(),
+        sourceType: "CrmRefund",
+        sourceId: refundId,
+        companyId: row.CompanyId ?? null,
+        projectId: row.ProjectId ?? null,
+        createdBy: userEmail,
+        legs,
+      });
+      return { posted: true };
+    }
+  }
+  // Legacy: the money sat on the customer's own head — unchanged treatment.
+
   // GST reversal on the portion actually credited BACK to the customer —
   // the "issue a credit note, reduce output liability" mechanism under
   // Section 34 CGST Act for a cancelled supply. Only the amount genuinely

@@ -935,6 +935,12 @@ router.put("/registry/:id/documents/:docId", requirePageRight("crm-registry", "e
       return res.status(400).json({ error: "Remarks are required when rejecting a document" });
     }
 
+    if (Status === "Verified") {
+      // Same rule as Agreement documents: nothing is verified without a file.
+      const f = await pool.request().input("docid", sql.Int, docId)
+        .query("SELECT FileBase64 FROM dbo.CrmRegistryDocument WHERE Id = @docid");
+      if (!f.recordset[0]?.FileBase64) return res.status(400).json({ error: "Upload the file before verifying this document." });
+    }
     await pool.request()
       .input("docid", sql.Int, docId)
       .input("st", sql.NVarChar(30), Status)
@@ -2240,6 +2246,12 @@ router.put("/:id/documents/:docId", requirePageRight("crm-sales-deed", "edit"), 
       return res.status(400).json({ error: "Documents can no longer be reviewed once the deed has been Executed" });
     }
 
+    if (Status === "Verified") {
+      // Same rule as Agreement documents: nothing is verified without a file.
+      const f = await pool.request().input("docid", sql.Int, docId)
+        .query("SELECT FileBase64 FROM dbo.CrmSalesDeedDocument WHERE Id = @docid");
+      if (!f.recordset[0]?.FileBase64) return res.status(400).json({ error: "Upload the file before verifying this document." });
+    }
     await pool.request()
       .input("docid", sql.Int, docId)
       .input("st", sql.NVarChar(30), Status)

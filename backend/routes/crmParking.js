@@ -12,7 +12,7 @@ const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../serv
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
-const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus, requireNotMidApproval } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
 
@@ -252,11 +252,16 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   // see crmWorkflowGuards.js.
   await rollupBookingTotals(pool, bookingId);
   await syncParkingPaymentStatus(pool, bookingId);
+  // The roll-up reprices the allotment to the booking's own Unit+Parking GST
+  // (0 when exempt / land) — report that figure, not the pre-roll-up one.
+  const repriced = await pool.request().input("id", sql.Int, allotmentId)
+    .query("SELECT TotalAmount FROM dbo.CrmParkingAllotment WHERE Id = @id");
+  const finalAmount = Number(repriced.recordset[0]?.TotalAmount ?? totalAmount);
   await logCrmAudit(pool, "Booking", bookingId, actorUserId, [
-    { field: "ParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${totalAmount}` },
+    { field: "ParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${finalAmount}` },
   ]);
 
-  return { id: allotmentId, TotalAmount: totalAmount };
+  return { id: allotmentId, TotalAmount: finalAmount };
 }
 
 async function applyEditParking(pool, id, b) {
@@ -322,6 +327,10 @@ async function applyEditParking(pool, id, b) {
   if (BookingId != null) {
     await rollupBookingTotals(pool, BookingId);
     await syncParkingPaymentStatus(pool, BookingId);
+    // Repriced by the roll-up to the booking's own GST — report that.
+    const repriced = await pool.request().input("id", sql.Int, id)
+      .query("SELECT TotalAmount FROM dbo.CrmParkingAllotment WHERE Id = @id");
+    return { TotalAmount: Number(repriced.recordset[0]?.TotalAmount ?? totalAmount), RateSnapshot: effectiveRate };
   }
   return { TotalAmount: totalAmount, RateSnapshot: effectiveRate };
 }
@@ -892,6 +901,8 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    const midApproval = await requireNotMidApproval(pool, bookingId);
+    if (midApproval) return res.status(400).json({ error: midApproval });
 
     if (await isSaleDeedRegistered(pool, bookingId))
       return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
@@ -931,6 +942,8 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "
     if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
+      const midApproval = await requireNotMidApproval(pool, bookingId);
+      if (midApproval) return res.status(400).json({ error: midApproval });
     }
 
     if (bookingId != null && await isSaleDeedRegistered(pool, bookingId))
@@ -1033,6 +1046,8 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
     if (bookingId != null) {
       const activeErr = await requireActiveBooking(pool, bookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
+      const midApproval = await requireNotMidApproval(pool, bookingId);
+      if (midApproval) return res.status(400).json({ error: midApproval });
     }
 
     if (bookingId != null && await isSaleDeedRegistered(pool, bookingId))
