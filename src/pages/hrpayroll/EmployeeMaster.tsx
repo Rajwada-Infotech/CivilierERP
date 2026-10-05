@@ -418,17 +418,18 @@ export default function EmployeeMaster() {
         );
       },
     },
+    // Rows of three on desktop: identity → contact → personal → photo/address.
     { name: "employeeCode", label: "Employee ID / Employee Code", type: "text", required: true, uppercase: true, placeholder: "e.g. EMP-0001" },
-    { name: "employeeName", label: "Employee Name", type: "text", required: true, fullWidth: true },
+    { name: "employeeName", label: "Employee Name", type: "text", required: true },
     { name: "companyId", label: "Company", type: "select", asyncOptions: async () => companyOptions },
-    { name: "photoBase64", label: "Photo", type: "custom", fullWidth: true, render: (p) => <PhotoField value={p.value} onChange={p.onChange} /> },
-    { name: "dateOfBirth", label: "Date of Birth", type: "date" },
-    { name: "gender", label: "Gender", type: "select", options: GENDERS },
     { name: "mobile", label: "Mobile", type: "text" },
     { name: "email", label: "Email", type: "text" },
-    { name: "address", label: "Address", type: "textarea", fullWidth: true },
+    { name: "dateOfBirth", label: "Date of Birth", type: "date" },
+    { name: "gender", label: "Gender", type: "select", options: GENDERS },
     { name: "emergencyContactName", label: "Emergency Contact Name", type: "text" },
     { name: "emergencyContactPhone", label: "Emergency Contact Phone", type: "text" },
+    { name: "photoBase64", label: "Photo", type: "custom", fullWidth: true, render: (p) => <PhotoField value={p.value} onChange={p.onChange} /> },
+    { name: "address", label: "Address", type: "textarea", fullWidth: true },
 
     { name: "sec-employment", label: "Employment Details", type: "section" },
     { name: "joiningDate", label: "Joining Date", type: "date" },
@@ -554,6 +555,7 @@ export default function EmployeeMaster() {
       <HrPayrollShell title="Employee Master" subtitle="Employees, roles, statutory & bank details" icon={Profile2User}>
         <MasterPage
           title="Employee"
+          gridCols={3}
           collapsibleAddForm
           fields={fields}
           columns={columns}
