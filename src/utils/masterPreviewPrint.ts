@@ -5,9 +5,21 @@ type PreviewField = {
   value?: string | number | boolean | null;
 };
 
-type PreviewSection = {
+type PreviewCell = string | number | null | undefined;
+
+/** Tabular section body (line items, ledger lines, ...) — rendered as a real
+ *  table in both Print and PDF instead of label/value pairs. */
+type PreviewTable = {
+  columns: { header: string; align?: "left" | "right" | "center" }[];
+  rows: PreviewCell[][];
+  /** Optional totals row, one cell per column. */
+  footer?: PreviewCell[];
+};
+
+export type PreviewSection = {
   title: string;
   fields: PreviewField[];
+  table?: PreviewTable;
 };
 
 type PrintPreviewOptions = {
@@ -46,12 +58,36 @@ export function printMasterPreview({
     ? `<img src="${escapeHtml(logo)}" alt="Logo" style="height:58px;max-width:180px;object-fit:contain;" />`
     : `<span style="font-size:20px;font-weight:800;color:#4f46e5;">Civilier ERP</span>`;
 
+  const tableHtml = (t: PreviewTable) => {
+    const align = (a?: string) => (a === "right" ? "right" : a === "center" ? "center" : "left");
+    const head = t.columns
+      .map((c) => `<th style="text-align:${align(c.align)}">${escapeHtml(c.header)}</th>`)
+      .join("");
+    const body = t.rows
+      .map(
+        (r) =>
+          `<tr>${t.columns
+            .map((c, i) => `<td style="text-align:${align(c.align)}">${escapeHtml(display(r[i]))}</td>`)
+            .join("")}</tr>`,
+      )
+      .join("");
+    const foot = t.footer
+      ? `<tfoot><tr>${t.columns
+          .map((c, i) => `<td style="text-align:${align(c.align)}">${escapeHtml(t.footer![i] ?? "")}</td>`)
+          .join("")}</tr></tfoot>`
+      : "";
+    return `<table class="items"><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${foot}</table>`;
+  };
+
   const sectionsHtml = sections
     .map(
       (section) => `
         <div class="section">
           <div class="section-title">${escapeHtml(section.title)}</div>
-          <div class="grid">
+          ${
+            section.table
+              ? tableHtml(section.table)
+              : `<div class="grid">
             ${section.fields
               .map(
                 (field) => `
@@ -61,7 +97,8 @@ export function printMasterPreview({
                   </div>`,
               )
               .join("")}
-          </div>
+          </div>`
+          }
         </div>`,
     )
     .join("");
@@ -86,6 +123,10 @@ export function printMasterPreview({
     .field { min-width: 0; }
     .field label { display: block; margin-bottom: 3px; color: #9ca3af; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
     .field span { display: block; color: #111827; font-size: 12px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+    table.items { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table.items th { background: #f3f4f6; color: #6b7280; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; padding: 8px 10px; border-bottom: 1px solid #e5e7eb; }
+    table.items td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; color: #111827; }
+    table.items tfoot td { font-weight: 700; background: #f9fafb; border-top: 1px solid #e5e7eb; }
     .footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; }
     @media print {
       body { padding: 16px; }
@@ -202,6 +243,27 @@ export async function downloadMasterPreviewPdf({
     doc.setLineWidth(0.6);
     doc.line(marginX, y + 4, pageW - marginX, y + 4);
     y += 18;
+
+    if (section.table) {
+      const t = section.table;
+      const { default: autoTable } = await import("jspdf-autotable");
+      const cell = (v: PreviewCell) => sanitizeForPdf(v === null || v === undefined || v === "" ? "-" : String(v));
+      autoTable(doc, {
+        startY: y,
+        margin: { left: marginX, right: marginX, bottom: 40 },
+        head: [t.columns.map((c) => sanitizeForPdf(c.header))],
+        body: t.rows.map((r) => t.columns.map((_, i) => cell(r[i]))),
+        foot: t.footer ? [t.columns.map((_, i) => cell(t.footer![i]))] : undefined,
+        showFoot: "lastPage",
+        theme: "grid",
+        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5, textColor: [17, 24, 39], lineColor: [229, 231, 235], lineWidth: 0.5 },
+        headStyles: { fillColor: [243, 244, 246], textColor: [107, 114, 128], fontSize: 7.5, fontStyle: "bold" },
+        footStyles: { fillColor: [249, 250, 251], textColor: [17, 24, 39], fontStyle: "bold" },
+        columnStyles: Object.fromEntries(t.columns.map((c, i) => [i, { halign: c.align ?? "left" }])),
+      });
+      y = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY ?? y) + 16;
+      continue;
+    }
 
     const colW = contentW / 2 - 8;
     let col = 0;

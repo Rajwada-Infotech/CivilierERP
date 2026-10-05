@@ -67,7 +67,7 @@ import {
   Printer,
   FileDown,
 } from "lucide-react";
-import { printMasterPreview, downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
+import { printMasterPreview, downloadMasterPreviewPdf, type PreviewSection } from "@/utils/masterPreviewPrint";
 import { toast } from "sonner";
 
 // ─── Approval chain types — matches GET /api/approval-workflows/trail ────────
@@ -416,7 +416,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   // Approval Chain) so the exported doc can never show something the
   // reviewer didn't actually see here.
   const previewSections = (() => {
-    const sections: { title: string; fields: { label: string; value?: string | number | boolean | null }[] }[] = [];
+    const sections: PreviewSection[] = [];
 
     const overviewFields: { label: string; value?: string | number | boolean | null }[] = [
       { label: usesRungDetail ? "Start Date" : "Date", value: fmtDate(item.RecordDate) },
@@ -440,31 +440,76 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     sections.push({ title: "Overview", fields: overviewFields });
 
     if (lineItems.length > 0) {
-      const itemFields = isJournalVoucher
-        ? lineItems.map((li, i) => {
-            const debit = Number(li.DebitAmount) || 0;
-            const credit = Number(li.CreditAmount) || 0;
-            return {
-              label: `${i + 1}. ${(li.LHeadName as string) || "—"}`,
-              value: debit > 0 ? `Dr ${fmtAmount(debit)}` : `Cr ${fmtAmount(credit)}`,
-            };
-          })
-        : isMaterialRequest
-          ? lineItems.map((li, i) => {
-              const name = (li.ItemName ?? li.itemName ?? "—") as string;
+      const money = (n: number) => fmtAmount(n);
+      if (isJournalVoucher) {
+        const totalDr = lineItems.reduce((a, li) => a + (Number(li.DebitAmount) || 0), 0);
+        const totalCr = lineItems.reduce((a, li) => a + (Number(li.CreditAmount) || 0), 0);
+        sections.push({
+          title: "Journal Entry",
+          fields: [],
+          table: {
+            columns: [
+              { header: "#", align: "center" },
+              { header: "Ledger" },
+              { header: "Debit", align: "right" },
+              { header: "Credit", align: "right" },
+            ],
+            rows: lineItems.map((li, i) => {
+              const debit = Number(li.DebitAmount) || 0;
+              const credit = Number(li.CreditAmount) || 0;
+              return [i + 1, (li.LHeadName as string) || "—", debit > 0 ? money(debit) : "", credit > 0 ? money(credit) : ""];
+            }),
+            footer: ["", "Total", money(totalDr), money(totalCr)],
+          },
+        });
+      } else if (isMaterialRequest) {
+        sections.push({
+          title: `Items (${lineItems.length})`,
+          fields: [],
+          table: {
+            columns: [
+              { header: "#", align: "center" },
+              { header: "Item" },
+              { header: "Qty", align: "right" },
+              { header: "UOM" },
+            ],
+            rows: lineItems.map((li, i) => [
+              i + 1,
+              (li.ItemName ?? li.itemName ?? "—") as string,
+              Number(li.Quantity ?? li.quantity ?? 0).toLocaleString("en-IN"),
+              (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string,
+            ]),
+          },
+        });
+      } else {
+        sections.push({
+          title: `Items (${lineItems.length})`,
+          fields: [],
+          table: {
+            columns: [
+              { header: "#", align: "center" },
+              { header: "Item" },
+              { header: "Qty", align: "right" },
+              { header: "UOM" },
+              { header: "Rate", align: "right" },
+              { header: "Amount", align: "right" },
+            ],
+            rows: lineItems.map((li, i) => {
               const qty = Number(li.Quantity ?? li.quantity ?? 0);
-              const uom = (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
-              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""}` };
-            })
-          : lineItems.map((li, i) => {
-              const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
-              const qty = Number(li.Quantity ?? li.quantity ?? 0);
-              const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
               const rate = Number(li.Rate ?? li.rate ?? 0);
               const amount = Number(li.LineAmount ?? li.AmountInclGst ?? li.amount ?? qty * rate);
-              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""} × ${fmtAmount(rate)} = ${fmtAmount(amount)}` };
-            });
-      sections.push({ title: isJournalVoucher ? "Journal Entry" : `Items (${lineItems.length})`, fields: itemFields });
+              return [
+                i + 1,
+                (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string,
+                qty.toLocaleString("en-IN"),
+                (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string,
+                money(rate),
+                money(amount),
+              ];
+            }),
+          },
+        });
+      }
     }
 
     if (!usesRungDetail && extraFields.length > 0) {

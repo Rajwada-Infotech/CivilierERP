@@ -2463,19 +2463,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
         ? po.POItems
         : [];
 
-    const itemFields = lineItemsArr.map((li: any, i: number) => {
-      const name = li.ItemName ?? li.itemName ?? li.Description ?? "—";
-      const qty = Number(li.Quantity ?? li.quantity ?? 0);
-      const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
-      const rate = Number(li.Rate ?? li.rate ?? 0);
-      const tax = Number(li.TaxPct ?? li.gstRate ?? li.tax ?? 0);
-      const amt = Number(li.LineAmount ?? li.amount ?? qty * rate);
-      return {
-        label: `${i + 1}. ${name}`,
-        value: `${qty.toLocaleString("en-IN")} ${unit} × ${fmt(rate)}${tax > 0 ? ` (+${tax}% GST)` : ""} = ${fmt(amt)}`,
-      };
-    });
-
     const grandTotal = Number(po.TotalAmount ?? po.totalAmount ?? 0);
     const subtotalVal = lineItemsArr.reduce(
       (s: number, li: any) => s + Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0),
@@ -2503,7 +2490,37 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
           { label: "Payment Terms", value: payTerms || "—" },
         ],
       },
-      ...(itemFields.length > 0 ? [{ title: `Order Items (${itemFields.length})`, fields: itemFields }] : []),
+      ...(lineItemsArr.length > 0
+        ? [{
+            title: `Order Items (${lineItemsArr.length})`,
+            fields: [],
+            table: {
+              columns: [
+                { header: "#", align: "center" as const },
+                { header: "Item" },
+                { header: "Qty", align: "right" as const },
+                { header: "UOM" },
+                { header: "Rate", align: "right" as const },
+                { header: "GST %", align: "center" as const },
+                { header: "Amount", align: "right" as const },
+              ],
+              rows: lineItemsArr.map((li: any, i: number) => {
+                const qty = Number(li.Quantity ?? li.quantity ?? 0);
+                const rate = Number(li.Rate ?? li.rate ?? 0);
+                const tax = Number(li.TaxPct ?? li.gstRate ?? li.tax ?? 0);
+                return [
+                  i + 1,
+                  li.ItemName ?? li.itemName ?? li.Description ?? "—",
+                  qty.toLocaleString("en-IN"),
+                  li.UomName ?? li.UOMSymbol ?? li.unit ?? "—",
+                  fmt(rate),
+                  tax > 0 ? `${tax}%` : "—",
+                  fmt(Number(li.LineAmount ?? li.amount ?? qty * rate)),
+                ];
+              }),
+            },
+          }]
+        : []),
       {
         title: "Totals",
         fields: [

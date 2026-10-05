@@ -1318,11 +1318,26 @@ export default function VehicleInOut() {
       },
       ...(Array.isArray(rec.Items) && rec.Items.length > 0
         ? [{
-            title: `Items (${rec.Items.length})`,
-            fields: rec.Items.map((it: any, i: number) => ({
-              label: `${i + 1}. ${it.ItemName ?? "—"}${it.Brand ? ` (${it.Brand})` : ""}${it.Quality ? ` [${it.Quality}]` : ""}`,
-              value: `${it.ReceivedQty ?? it.Quantity ?? "—"} ${it.UomName ?? ""}`.trim(),
-            })),
+            title: `Received Items (${rec.Items.length})`,
+            fields: [],
+            table: {
+              columns: [
+                { header: "#", align: "center" as const },
+                { header: "Item" },
+                { header: "Brand" },
+                { header: "Quality" },
+                { header: "Received", align: "right" as const },
+                { header: "UOM" },
+              ],
+              rows: rec.Items.map((it: any, i: number) => [
+                i + 1,
+                it.ItemName ?? "—",
+                it.Brand ?? "—",
+                it.Quality ?? "—",
+                it.ReceivedQty ?? it.Quantity ?? "—",
+                it.UomName ?? "—",
+              ]),
+            },
           }]
         : []),
       ...(rec.Remarks ? [{ title: "Remarks", fields: [{ label: "Remarks", value: rec.Remarks }] }] : []),
