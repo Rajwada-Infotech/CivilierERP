@@ -38,7 +38,7 @@ export const getGodowns = async (): Promise<Godown[]> => {
   }));
 };
 
-export interface NameOption { id: string; name: string }
+export interface NameOption { id: string; name: string; companyId?: string | null }
 
 export const getCompanies = async (): Promise<NameOption[]> => {
   const raw = await fetchWithAuth("/api/enterprises/options?business_type=C").then((r) => r.json().catch(() => []));
@@ -47,7 +47,7 @@ export const getCompanies = async (): Promise<NameOption[]> => {
 
 export const getProjects = async (): Promise<NameOption[]> => {
   const raw = await fetchWithAuth("/api/enterprises/options?business_type=P").then((r) => r.json().catch(() => []));
-  return normalizeArray<any>(raw).map((p) => ({ id: String(p.id), name: p.label ?? "" }));
+  return normalizeArray<any>(raw).map((p) => ({ id: String(p.id), name: p.label ?? "", companyId: p.company_id != null ? String(p.company_id) : null }));
 };
 
 export interface InventoryMasterRow {

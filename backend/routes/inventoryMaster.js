@@ -120,10 +120,17 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     // sl.UOM; only an item with NO ledger rows in that window (genuinely
     // zero stock) falls back to its own declared default UOM so it still
     // appears in the list.
+    //
+    // A movement whose UOM is blank, or is text the UOM master doesn't know (a GRN line saved
+    // as "PIECE" while the master calls it PSC), is not a different unit. The ledger UOM is
+    // first resolved to a master code by code / name / symbol; whatever can't be resolved
+    // belongs to the item's own unit (or its only ledger unit). Otherwise a 650 PSC opening
+    // and a 7000 "PIECE" receipt for the same item showed as two lines, with the issue going
+    // negative on one.
     const uomKeyExpr = hasUomCol
       ? hasUomOnItem
-        ? "COALESCE(sl.UOM, img.M_UOM)"
-        : "sl.UOM"
+        ? "COALESCE(ucan.UOMCode, img.M_UOM, solo.OnlyUom, NULLIF(sl.UOM, ''))"
+        : "COALESCE(ucan.UOMCode, solo.OnlyUom, NULLIF(sl.UOM, ''))"
       : hasUomOnItem
         ? "img.M_UOM"
         : null;
@@ -134,7 +141,24 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     let uomGroupBy = "";
 
     if (uomKeyExpr) {
-      uomJoinClause = `LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = ${uomKeyExpr}`;
+      uomJoinClause = `OUTER APPLY (
+          SELECT TOP 1 um.UOMCode
+          FROM dbo.UOMMaster um
+          WHERE sl.UOM IS NOT NULL AND (
+            um.UOMCode = sl.UOM
+            OR UPPER(um.UOMName) = UPPER(sl.UOM)
+            OR UPPER(um.Symbol) = UPPER(sl.UOM)
+          )
+          ORDER BY CASE WHEN um.UOMCode = sl.UOM THEN 0 ELSE 1 END
+        ) ucan
+        LEFT JOIN (
+          SELECT CONVERT(NVARCHAR(50), ItemID) AS ItemKey, MAX(UOM) AS OnlyUom
+          FROM dbo.StockLedger
+          WHERE UOM IS NOT NULL AND LTRIM(RTRIM(UOM)) <> ''
+          GROUP BY CONVERT(NVARCHAR(50), ItemID)
+          HAVING COUNT(DISTINCT UOM) = 1
+        ) solo ON solo.ItemKey = CONVERT(NVARCHAR(50), img.M_Id)
+        LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = ${uomKeyExpr}`;
       uomSelect =
         "uom.Id AS UOMID, uom.UOMName AS UOMName, uom.UOMCode AS UOMCode, uom.Symbol AS UOMSymbol";
       uomGroupBy = `, ${uomKeyExpr}, uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol`;

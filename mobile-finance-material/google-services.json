@@ -1,0 +1,124 @@
+{
+  "project_info": {
+    "project_number": "123025530611",
+    "project_id": "civilier-erp",
+    "storage_bucket": "civilier-erp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123025530611:android:16ff505dc7d8faac44a186",
+        "android_client_info": {
+          "package_name": "com.rajwadainfotech.civiliererp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdiXBTLJoXbt315lxp5sNg25_8VfXQrM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123025530611:android:678b443a6b6102eb44a186",
+        "android_client_info": {
+          "package_name": "com.rajwadainfotech.civiliererpadmin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdiXBTLJoXbt315lxp5sNg25_8VfXQrM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123025530611:android:11b7d9ce199c4fea44a186",
+        "android_client_info": {
+          "package_name": "com.rajwadainfotech.civiliererpfixedasset"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdiXBTLJoXbt315lxp5sNg25_8VfXQrM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123025530611:android:9a51abda0213cb2444a186",
+        "android_client_info": {
+          "package_name": "com.rajwadainfotech.civiliererpsupplier"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdiXBTLJoXbt315lxp5sNg25_8VfXQrM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123025530611:android:1714fa5022f87af744a186",
+        "android_client_info": {
+          "package_name": "com.rajwadainfotech.civilierfollowup"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdiXBTLJoXbt315lxp5sNg25_8VfXQrM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123025530611:android:37c4d93592a3318d44a186",
+        "android_client_info": {
+          "package_name": "com.rajwadainfotech.civiliermaintenance"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdiXBTLJoXbt315lxp5sNg25_8VfXQrM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
