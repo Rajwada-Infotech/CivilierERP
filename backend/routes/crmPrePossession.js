@@ -248,7 +248,7 @@ router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"
       "LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id",
       "LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
       "WHERE b.IsActive = 1",
-      "  AND b.Status NOT IN ('" + cancelled + "', '" + rejected + "')",
+      "  AND b.Status NOT IN ('" + cancelled + "', '" + rejected + "', 'Transferred')",
       "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
       // Agreement for Sale, registered at the Sub-Registrar, is mandatory
       // for every booking regardless of project type — no exception.

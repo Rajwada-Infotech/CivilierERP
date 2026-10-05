@@ -44,7 +44,7 @@ const PLAN_API = "/api/crm/payment-plans";
 const PROJECT_BANK_API = "/api/crm/project-banks";
 const BANK_MASTER_API = "/api/bank-master";
 
-const STATUSES    = ["Pending", "Approved", "Rejected", "Cancelled"];
+const STATUSES    = ["Pending", "Approved", "Rejected", "Cancelled", "Transferred"];
 const PAY_MODES   = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 const TOKEN_TYPES = ["Percentage", "Amount"];
 
@@ -60,6 +60,8 @@ const statusColor: Record<string, string> = {
   Approved:  "text-green-600 bg-green-50 border-green-200",
   Rejected:  "text-red-600 bg-red-50 border-red-200",
   Cancelled: "text-muted-foreground bg-muted/50 border-border",
+  // Closed by a resale — the sale stands, the land / villa now has a new owner.
+  Transferred: "text-violet-600 bg-violet-50 border-violet-200",
 };
 
 const workflowStageLabel: Record<string, string> = {

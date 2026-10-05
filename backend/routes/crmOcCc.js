@@ -24,14 +24,14 @@ function buildSelect() {
     "  (SELECT COUNT(*) FROM dbo.CrmBooking b",
     "   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
     "   WHERE b.ProjectId = oc.ProjectId AND b.IsActive = 1",
-    "     AND b.Status NOT IN ('Cancelled','Rejected')",
+    "     AND b.Status NOT IN ('Cancelled','Rejected','Transferred')",
     "     AND (oc.BlockId IS NULL OR um.BlockId = oc.BlockId)",
     "  ) AS BookingCount,",
     "  (SELECT COUNT(*) FROM dbo.CrmBooking b",
     "   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
     "   JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id AND ag.Status = 'Registered'",
     "   WHERE b.ProjectId = oc.ProjectId AND b.IsActive = 1",
-    "     AND b.Status NOT IN ('Cancelled','Rejected')",
+    "     AND b.Status NOT IN ('Cancelled','Rejected','Transferred')",
     "     AND (oc.BlockId IS NULL OR um.BlockId = oc.BlockId)",
     "     AND NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
     "  ) AS BookingsAwaitingPossession",
@@ -139,7 +139,7 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
           SELECT bk.Id FROM dbo.CrmBooking bk
           LEFT JOIN dbo.UnitMaster um ON um.Id = bk.UnitId
           WHERE bk.ProjectId = @pid AND bk.IsActive = 1
-            AND bk.Status NOT IN ('Cancelled','Rejected')
+            AND bk.Status NOT IN ('Cancelled','Rejected','Transferred')
             AND (@bid IS NULL OR b.BlockId = @bid)
         `);
       for (const row of affected.recordset) {
@@ -222,7 +222,7 @@ router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
           SELECT b.Id FROM dbo.CrmBooking b
           LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
           WHERE b.ProjectId = @pid AND b.IsActive = 1
-            AND b.Status NOT IN ('Cancelled','Rejected')
+            AND b.Status NOT IN ('Cancelled','Rejected','Transferred')
             AND (@bid IS NULL OR b.BlockId = @bid)
         `);
       for (const row of affected.recordset) {

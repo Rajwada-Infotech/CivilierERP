@@ -299,7 +299,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
           WHERE ${showDeleted ? "b.IsActive = 0" : "b.IsActive = 1"}
-            AND (@st2 IS NULL AND (${includeCancelled ? "1=1" : "b.Status NOT IN ('Cancelled', 'Rejected')"}) OR b.Status = @st2)
+            AND (@st2 IS NULL AND (${includeCancelled ? "1=1" : "b.Status NOT IN ('Cancelled', 'Rejected', 'Transferred')"}) OR b.Status = @st2)
             AND (@appId2 IS NULL OR b.ApplicationId = @appId2)
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
@@ -679,7 +679,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     }
 
     const taken = await pool.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id)
-      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
+      .query("SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())");
     if (taken.recordset.length) return res.status(409).json({ error: "This unit is already booked" });
 
     const bookingAppId = await pool.request().input("id", sql.Int, id)

@@ -47,7 +47,7 @@ const PLOT_SELECT = `
     SELECT TOP 1 cb.BookingNo
     FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking cb ON cb.Id = bp.BookingId
     WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND cb.IsActive = 1
-      AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+      AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
   ) bk
   OUTER APPLY (
     SELECT TOP 1 ca.ApplicationNo

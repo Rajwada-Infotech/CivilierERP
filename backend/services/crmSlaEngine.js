@@ -205,7 +205,7 @@ const REGISTRY = [
         FROM dbo.CrmBooking bk
         JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
         LEFT JOIN dbo.UnitMaster u ON u.Id = bk.UnitId
-        WHERE bk.IsActive = 1 AND bk.Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired')
+        WHERE bk.IsActive = 1 AND bk.Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired', 'Transferred')
           AND bk.ConfirmDeadline IS NOT NULL AND bk.ConfirmDeadline < SYSDATETIME()
       `);
       return r.recordset;
@@ -220,7 +220,7 @@ const REGISTRY = [
       const claimed = await pool.request().input("id", sql.Int, row.Id).query(`
         UPDATE dbo.CrmBooking SET Status = 'Expired'
         OUTPUT INSERTED.Id
-        WHERE Id = @id AND IsActive = 1 AND Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired')
+        WHERE Id = @id AND IsActive = 1 AND Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired', 'Transferred')
       `);
       if (!claimed.recordset.length) return false;
 

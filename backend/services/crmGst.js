@@ -135,7 +135,7 @@ async function resolveLandOwnedByBookingCustomer(pool, bookingId) {
          JOIN dbo.CrmApplication landApplication ON landApplication.Id = landBooking.ApplicationId
          WHERE p.IsActive = 1
            AND landBooking.IsActive = 1
-           AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+           AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
            AND landApplication.CustomerId = (SELECT CustomerId FROM BuyingCustomer)
       ) AS CustomerOwnedPlotCount
   `);

@@ -83,7 +83,7 @@ async function validatePlotSelection(pool, plotIds, { projectId = null, applicat
           SELECT 1 FROM dbo.CrmBookingPlot bp
           JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
           WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-            AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+            AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
         )
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmApplicationPlot ap

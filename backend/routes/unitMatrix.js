@@ -99,7 +99,7 @@ router.get("/plots", requirePageRight("crm-unit-matrix", "view"), async (req, re
         FROM dbo.CrmBookingPlot bp
         JOIN dbo.CrmBooking cb ON cb.Id = bp.BookingId
         WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND cb.IsActive = 1
-          AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+          AND cb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
       ) bk
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
@@ -200,7 +200,7 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
       OUTER APPLY (SELECT TOP 1 k.Name, ${commercialCol ? "k.IsCommercial" : "CAST(0 AS BIT) AS IsCommercial"} FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind) knd
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
       LEFT JOIN dbo.users assn ON assn.id = a.AssignedTo
       LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()

@@ -35,6 +35,9 @@ async function requireActiveBooking(pool, bookingId) {
   if (["Cancelled", "Rejected"].includes(b.Status)) {
     return `This booking has been ${b.Status} — no further workflow actions are allowed on it`;
   }
+  if (b.Status === "Transferred") {
+    return "This booking was transferred to a new owner by a resale — no further workflow actions are allowed on it";
+  }
   if (b.IsFrozen) {
     // Auto-lift the freeze if its expiry has passed — fire-and-forget, don't
     // block the request on the UPDATE completing.

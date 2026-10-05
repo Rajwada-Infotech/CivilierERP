@@ -274,7 +274,7 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
       JOIN dbo.CrmCustomer cu ON cu.Id = a.CustomerId
       WHERE ISNULL(oa.Status,'') IN ('Unapplied','PartiallyApplied')
         AND (oa.Amount - ISNULL(oa.AppliedAmount,0) - ${RESERVED_SUBQUERY}) > 0.01
-        AND b.Status NOT IN ('Cancelled','Rejected') ${custFilter}
+        AND b.Status NOT IN ('Cancelled','Rejected','Transferred') ${custFilter}
       ORDER BY AsOf DESC
     `);
     res.json(result.recordset);
