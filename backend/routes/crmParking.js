@@ -252,11 +252,16 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   // see crmWorkflowGuards.js.
   await rollupBookingTotals(pool, bookingId);
   await syncParkingPaymentStatus(pool, bookingId);
+  // The roll-up reprices the allotment to the booking's own Unit+Parking GST
+  // (0 when exempt / land) — report that figure, not the pre-roll-up one.
+  const repriced = await pool.request().input("id", sql.Int, allotmentId)
+    .query("SELECT TotalAmount FROM dbo.CrmParkingAllotment WHERE Id = @id");
+  const finalAmount = Number(repriced.recordset[0]?.TotalAmount ?? totalAmount);
   await logCrmAudit(pool, "Booking", bookingId, actorUserId, [
-    { field: "ParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${totalAmount}` },
+    { field: "ParkingAllotment", oldVal: null, newVal: `${ParkingType} x${qty} = ₹${finalAmount}` },
   ]);
 
-  return { id: allotmentId, TotalAmount: totalAmount };
+  return { id: allotmentId, TotalAmount: finalAmount };
 }
 
 async function applyEditParking(pool, id, b) {
@@ -322,6 +327,10 @@ async function applyEditParking(pool, id, b) {
   if (BookingId != null) {
     await rollupBookingTotals(pool, BookingId);
     await syncParkingPaymentStatus(pool, BookingId);
+    // Repriced by the roll-up to the booking's own GST — report that.
+    const repriced = await pool.request().input("id", sql.Int, id)
+      .query("SELECT TotalAmount FROM dbo.CrmParkingAllotment WHERE Id = @id");
+    return { TotalAmount: Number(repriced.recordset[0]?.TotalAmount ?? totalAmount), RateSnapshot: effectiveRate };
   }
   return { TotalAmount: totalAmount, RateSnapshot: effectiveRate };
 }
