@@ -4360,10 +4360,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                         </option>
                       ))}
                     </SearchableNativeSelect>
-                    <ChevronDown
-                      size={13}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
                   </div>
                 )}
               </div>
