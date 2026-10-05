@@ -32,7 +32,8 @@ export interface BulkAssignSummary {
 
 export interface BulkAssignResult {
   applied: boolean;
-  summary: BulkAssignSummary;
+  /** Present on a preview; apply answers with `changed` only (it skips the per-field count to stay fast). */
+  summary?: BulkAssignSummary;
   changed?: { activities: number; engineers: number; qc: number; approval: number; created: number };
 }
 
