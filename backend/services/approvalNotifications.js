@@ -16,9 +16,10 @@ const { getPool, sql } = require("../db");
 const logger = require("../logger");
 const { sendToUsers } = require("./pushNotifications");
 
-// Apps where an approver can act on / see approvals. An approval push goes only to
-// these, so someone logged into several Civilier apps isn't pinged on all of them.
-const APPROVAL_APPS = ["admin", "finance-material"];
+// Approval pushes ("Approval needed", "Approved", "Rejected") go to the Admin app only,
+// so someone logged into several Civilier apps isn't pinged on all of them — the
+// Finance & Material app gets none.
+const APPROVAL_APPS = ["admin"];
 
 const MODULE_LABELS = {
   "expense-booking": "Expense Booking",
