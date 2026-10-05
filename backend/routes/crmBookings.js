@@ -818,7 +818,7 @@ router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, 
 // truth (the checklist), one action per fact.
 async function checkBookingApprovalReadiness(pool, id) {
   const row = await pool.request().input("id", sql.Int, id).query(`
-    SELECT b.ApplicationId
+    SELECT b.ApplicationId, b.TotalValue
     FROM dbo.CrmBooking b
     WHERE b.Id = @id
   `);
@@ -830,6 +830,10 @@ async function checkBookingApprovalReadiness(pool, id) {
 
   const missing = [];
   if (uncheckedCount > 0) missing.push(`Data Review Checklist (${uncheckedCount} item(s) unchecked)`);
+  // A booking can start at ₹0 (e.g. a plot with no rate yet, or a unit with
+  // no saleable area), but it can never be approved at ₹0 — a ticked
+  // checklist alone mustn't let a zero-value sale through.
+  if (!(Number(chk.TotalValue) > 0)) missing.push("Total value is ₹0 — set the rate (and the unit's saleable area)");
   return { notFound: false, missing };
 }
 

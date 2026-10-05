@@ -184,7 +184,7 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   }
 
   const readiness = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT b.Status
+    SELECT b.Status, b.TotalValue
     FROM dbo.CrmBooking b
     WHERE b.Id = @bid
   `);
@@ -193,6 +193,10 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
 
   if (chk.Status === "Approved") {
     return { ok: true, noop: true, stage: STAGE_CONFIRMED };
+  }
+  // Same rule as checkBookingApprovalReadiness (crmBookings.js): never into approval at ₹0.
+  if (!(Number(chk.TotalValue) > 0)) {
+    throw Object.assign(new Error("Total value is ₹0 — set the rate (and the unit's saleable area) before sending for approval"), { status: 400 });
   }
 
 
