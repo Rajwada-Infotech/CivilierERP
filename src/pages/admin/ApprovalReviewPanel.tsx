@@ -69,6 +69,12 @@ import {
 } from "lucide-react";
 import { printMasterPreview, downloadMasterPreviewPdf, type PreviewSection } from "@/utils/masterPreviewPrint";
 import { toast } from "sonner";
+import {
+  loadMRCompany,
+  mrDocFromRecord,
+  printMaterialRequest,
+  downloadMaterialRequestPdf,
+} from "@/utils/materialRequestDocument";
 
 // ─── Approval chain types — matches GET /api/approval-workflows/trail ────────
 
@@ -534,18 +540,37 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   })();
 
   const previewTitle = item.Reference || `#${item.RecordId}`;
+
+  // Material Requests have their own letterhead-style document (same one the
+  // Material Request page prints) instead of the generic label/value layout.
+  // Needs the full record (company, items); until it has loaded, fall back to
+  // the generic document below.
+  const mrDocument = async () => {
+    const rec = detail as Record<string, any>;
+    const company = await loadMRCompany(rec.CompanyId, rec.CompanyName);
+    return mrDocFromRecord(
+      { ...rec, DocNo: rec.DocNo ?? item.Reference, CreatedBy: rec.CreatedByName ?? item.CreatedBy ?? rec.CreatedBy, Status: rec.Status ?? item.Status },
+      company,
+    );
+  };
+  const useMrDocument = item.Module === "material-requests" && !!detail;
+
   const docActions = (
     <div className="flex items-center gap-1.5 shrink-0">
       <button
-        onClick={() =>
+        onClick={async () => {
+          if (useMrDocument) {
+            printMaterialRequest(await mrDocument());
+            return;
+          }
           printMasterPreview({
             title: previewTitle,
             subtitle: item.ModuleLabel,
             code: item.Reference,
             status: item.Status,
             sections: previewSections,
-          })
-        }
+          });
+        }}
         title="Print"
         className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
       >
@@ -554,6 +579,14 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
       <button
         onClick={() => {
           const toastId = toast.loading("Generating PDF...");
+          const filename = `${(item.Reference || item.RecordId || "document").replace(/[^\w-]+/g, "_")}.pdf`;
+          if (useMrDocument) {
+            mrDocument()
+              .then((doc) => downloadMaterialRequestPdf(doc, filename))
+              .then(() => toast.success("PDF downloaded", { id: toastId }))
+              .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+            return;
+          }
           downloadMasterPreviewPdf({
             title: previewTitle,
             subtitle: item.ModuleLabel,

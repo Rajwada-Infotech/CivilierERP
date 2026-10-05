@@ -1,4 +1,5 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
+import { DM_SANS_FACE_CSS, printWhenFontsReady } from "@/utils/documentFont";
 import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -1009,8 +1010,9 @@ const PurchaseOrderMaster: React.FC = () => {
   <meta charset="utf-8" />
   <title>PO — ${escapeHtml(form.poNumber || "—")}</title>
   <style>
+    ${DM_SANS_FACE_CSS}
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
+    body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
     table { width: 100%; border-collapse: collapse; }
     thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; }
     @media print {
@@ -1111,10 +1113,7 @@ const PurchaseOrderMaster: React.FC = () => {
     }
     // Revoke after enough time for the window to load and print
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
+    printWhenFontsReady(win);
   };
 
   // ── Derived list data ─────────────────────────────────────────────────────
@@ -2350,7 +2349,7 @@ const PurchaseOrderMaster: React.FC = () => {
     );
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>PO — ${poNumberEsc}</title>
-<style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; } table { width: 100%; border-collapse: collapse; } thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; } @media print { body { padding: 16px; } }</style></head>
+<style>${DM_SANS_FACE_CSS}* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; } table { width: 100%; border-collapse: collapse; } thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; } @media print { body { padding: 16px; } }</style></head>
 <body>
 <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:2px solid #4f46e5;margin-bottom:28px;">
   <div>${logoHtml}</div>
@@ -2420,10 +2419,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
       return;
     }
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
+    printWhenFontsReady(win);
   };
 
   // Downloads a .pdf for a PO, built from the same fields as

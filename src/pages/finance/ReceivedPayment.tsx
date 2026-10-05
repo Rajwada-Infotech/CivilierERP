@@ -1,4 +1,5 @@
 import React from "react";
+import { DM_SANS_FACE_CSS, printWhenFontsReady } from "@/utils/documentFont";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
@@ -1093,8 +1094,9 @@ export default function ReceivedPaymentPage() {
   <meta charset="utf-8" />
   <title>Receipt — ${p.docNo || ""}</title>
   <style>
+    ${DM_SANS_FACE_CSS}
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #111827; padding: 36px; }
+    body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; background: #fff; color: #111827; padding: 36px; }
     table { border-collapse: collapse; width: 100%; }
     tr:nth-child(even) { background: #f9fafb; }
     @media print { body { padding: 16px; } }
@@ -1142,10 +1144,7 @@ export default function ReceivedPaymentPage() {
       return;
     }
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
+    printWhenFontsReady(win);
   };
 
   return (

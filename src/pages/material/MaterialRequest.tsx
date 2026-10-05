@@ -38,6 +38,7 @@ import {
   Upload,
   Loader2,
   Printer,
+  FileDown,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -66,7 +67,12 @@ import {
   convertItemQuantity,
 } from "@/lib/itemUomAlternates";
 import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
-import { printMasterPreview } from "@/utils/masterPreviewPrint";
+import {
+  loadMRCompany,
+  mrDocFromRecord,
+  printMaterialRequest,
+  downloadMaterialRequestPdf,
+} from "@/utils/materialRequestDocument";
 import { DateInput } from "@/components/ui/date-input";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
@@ -1811,42 +1817,33 @@ export default function MaterialRequest() {
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
               <button
-                onClick={() => {
+                onClick={async () => {
                   const rec = viewingRecord;
-                  const itms: any[] = rec.items || [];
-                  printMasterPreview({
-                    title: rec.DocNo || `MR-${rec.MRId}`,
-                    subtitle: "Material Request",
-                    code: rec.DocNo,
-                    status: rec.Status,
-                    sections: [
-                      {
-                        title: "Request Details",
-                        fields: [
-                          { label: "Doc No", value: rec.DocNo },
-                          { label: "Financial Year", value: rec.FinYearName },
-                          { label: "Request Date", value: fmtDate(rec.RequestDate) },
-                          { label: "Required By", value: fmtDate(rec.RequiredByDate) },
-                          { label: "Company", value: rec.CompanyName },
-                          { label: "Project / Site", value: rec.ProjectName },
-                          { label: "Priority", value: rec.Priority || "Normal" },
-                          { label: "Reason", value: rec.Reason },
-                          { label: "Remarks", value: rec.Remarks },
-                        ],
-                      },
-                      {
-                        title: `Requested Items (${itms.length})`,
-                        fields: itms.map((it, i) => ({
-                          label: `${i + 1}. ${it.ItemName || it.ItemId}`,
-                          value: `${Number(it.Quantity).toFixed(2)} ${it.UOMName || it.UOMCode || ""}${it.Remarks ? ` — ${it.Remarks}` : ""}`,
-                        })),
-                      },
-                    ],
-                  });
+                  const company = await loadMRCompany(rec.CompanyId, rec.CompanyName);
+                  printMaterialRequest(mrDocFromRecord(rec, company));
                 }}
                 className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition"
               >
                 <Printer size={13} /><span className="hidden sm:inline">Print</span>
+              </button>
+              <button
+                onClick={async () => {
+                  const rec = viewingRecord;
+                  const toastId = toast.loading("Generating PDF...");
+                  try {
+                    const company = await loadMRCompany(rec.CompanyId, rec.CompanyName);
+                    await downloadMaterialRequestPdf(
+                      mrDocFromRecord(rec, company),
+                      `${String(rec.DocNo || `MR-${rec.MRId}`).replace(/[^\w-]+/g, "_")}.pdf`,
+                    );
+                    toast.success("PDF downloaded", { id: toastId });
+                  } catch {
+                    toast.error("Could not generate PDF", { id: toastId });
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition"
+              >
+                <FileDown size={13} /><span className="hidden sm:inline">Generate PDF</span>
               </button>
             {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || viewingRecord.Status === "Approved" || viewingRecord.Status === "Rejected" || isAdmin) && (
               <button

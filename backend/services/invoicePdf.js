@@ -1,6 +1,7 @@
 const PDFDocument = require("pdfkit");
 const { sql } = require("../db");
 const { drawFinancialBreakdown } = require("./pdfFinancials");
+const { dmSansFonts } = require("./pdfFonts");
 const { getGstSplit } = require("./crmLedger");
 
 function money(n) {
@@ -116,6 +117,7 @@ async function fetchInvoiceData(pool, invoiceId) {
 function renderInvoicePdfBuffer(d) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: "A4", margin: 40 });
+    const F = dmSansFonts(doc);
     const chunks = [];
     doc.on("data", (c) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -151,9 +153,9 @@ function renderInvoicePdfBuffer(d) {
     }
 
     const leftColWidth = pageWidth * 0.62 - (textStartX - left);
-    doc.fillColor("#ffffff").fontSize(17).font("Helvetica-Bold")
+    doc.fillColor("#ffffff").fontSize(17).font(F.bold)
       .text(d.CompanyName || "Company Name Not Set", textStartX, headerTop + 12, { width: leftColWidth, lineBreak: false });
-    doc.fontSize(8).font("Helvetica")
+    doc.fontSize(8).font(F.regular)
       .text([d.CompanyAddress, d.CompanyAddress2].filter(Boolean).join(", "), textStartX, headerTop + 33, { width: leftColWidth, lineBreak: false })
       .text([d.CompanyCity, d.CompanyState, d.CompanyPincode].filter(Boolean).join(", "), textStartX, headerTop + 44, { width: leftColWidth, lineBreak: false });
     const gstPanLine = [d.CompanyGst ? `GSTIN: ${d.CompanyGst}` : null, d.CompanyPan ? `PAN: ${d.CompanyPan}` : null].filter(Boolean).join("   ");
@@ -163,15 +165,15 @@ function renderInvoicePdfBuffer(d) {
 
     const rightColX = left + pageWidth * 0.62;
     const rightColWidth = pageWidth * 0.38 - 14;
-    doc.fillColor("#ffffff").fontSize(19).font("Helvetica-Bold")
+    doc.fillColor("#ffffff").fontSize(19).font(F.bold)
       .text("TAX INVOICE", rightColX, headerTop + 14, { width: rightColWidth, align: "right", lineBreak: false });
-    doc.fontSize(9).font("Helvetica")
+    doc.fontSize(9).font(F.regular)
       .text(`No: ${d.InvoiceNo}`, rightColX, headerTop + 39, { width: rightColWidth, align: "right", lineBreak: false })
       .text(`Date: ${fmtDate(d.InvoiceDate || d.CreatedAt)}`, rightColX, headerTop + 52, { width: rightColWidth, align: "right", lineBreak: false });
     // Status pill, top-right of the header — quick visual read without
     // opening the record (Generated / Paid / Cancelled etc.).
     const statusText = (d.Status || "Generated").toUpperCase();
-    doc.fontSize(7.5).font("Helvetica-Bold")
+    doc.fontSize(7.5).font(F.bold)
       .fillColor("#94a3b8").text(statusText, rightColX, headerTop + 66, { width: rightColWidth, align: "right", lineBreak: false });
 
     doc.fillColor("#000000");
@@ -180,16 +182,16 @@ function renderInvoicePdfBuffer(d) {
     // ── Bill To / Booking Reference two-column block ────────────────────────
     const colW = pageWidth / 2 - 10;
     const blockTop = doc.y;
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a").text("BILLED TO", left, blockTop);
-    doc.font("Helvetica").fontSize(9.5).fillColor("#000000")
+    doc.font(F.bold).fontSize(9).fillColor("#0f172a").text("BILLED TO", left, blockTop);
+    doc.font(F.regular).fontSize(9.5).fillColor("#000000")
       .text(d.ApplicantName || "-", left, blockTop + 14, { width: colW, continued: false })
       .text([d.CustomerAddress, d.CustomerCity, d.CustomerState, d.CustomerPincode].filter(Boolean).join(", ") || "-", { width: colW })
       .text(d.Mobile ? `Mobile: ${d.Mobile}` : "", { width: colW })
       .text(d.Email ? `Email: ${d.Email}` : "", { width: colW });
 
     const blockRightColX = left + colW + 20;
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a").text("BOOKING REFERENCE", blockRightColX, blockTop);
-    doc.font("Helvetica").fontSize(9.5).fillColor("#000000")
+    doc.font(F.bold).fontSize(9).fillColor("#0f172a").text("BOOKING REFERENCE", blockRightColX, blockTop);
+    doc.font(F.regular).fontSize(9.5).fillColor("#000000")
       .text(`Booking No: ${d.BookingNo}`, blockRightColX, blockTop + 14, { width: colW })
       .text(`Application No: ${d.ApplicationNo || "-"}`, blockRightColX, undefined, { width: colW })
       .text(`Project: ${d.ProjectFullName || d.ProjectName || "-"}`, blockRightColX, undefined, { width: colW })
@@ -213,11 +215,11 @@ function renderInvoicePdfBuffer(d) {
       doc.strokeColor("#e2e8f0").rect(left, panelTop, pageWidth, panelH).stroke();
       const cellW = pageWidth / 3;
       const cellPad = 10;
-      doc.font("Helvetica").fontSize(7.5).fillColor("#64748b")
+      doc.font(F.regular).fontSize(7.5).fillColor("#64748b")
         .text(isOnAccount ? "PAYMENT REF" : "PAYMENT STAGE", left + cellPad, panelTop + 6, { width: cellW - cellPad })
         .text(isOnAccount ? "RECEIVED ON" : "PAID ON", left + cellW + cellPad, panelTop + 6, { width: cellW - cellPad })
         .text("PAYMENT MODE", left + 2 * cellW + cellPad, panelTop + 6, { width: cellW - cellPad });
-      doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#0f172a")
+      doc.font(F.bold).fontSize(9.5).fillColor("#0f172a")
         .text(isOnAccount ? (d.OnAccountReceiptNo || "-") : (d.MilestoneName || INVOICE_TYPE_LABEL[d.InvoiceType] || d.InvoiceType), left + cellPad, panelTop + 17, { width: cellW - cellPad, lineBreak: false })
         .text(fmtDate(isOnAccount ? d.OnAccountReceivedDate : d.MilestonePaidDate), left + cellW + cellPad, panelTop + 17, { width: cellW - cellPad, lineBreak: false })
         .text((isOnAccount ? d.OnAccountPaymentMode : d.MilestonePaymentMode) || "-", left + 2 * cellW + cellPad, panelTop + 17, { width: cellW - cellPad, lineBreak: false });
@@ -242,7 +244,7 @@ function renderInvoicePdfBuffer(d) {
     const particulars = d.MilestoneName || INVOICE_TYPE_LABEL[d.InvoiceType] || d.InvoiceType || "Payment";
     const freeDescription = d.Description && d.Description !== particulars ? d.Description : null;
     if (freeDescription) {
-      doc.font("Helvetica").fontSize(9).fillColor("#475569")
+      doc.font(F.regular).fontSize(9).fillColor("#475569")
         .text(freeDescription, left, doc.y, { width: pageWidth });
       doc.fillColor("#000000");
       doc.y += 6;
@@ -250,7 +252,7 @@ function renderInvoicePdfBuffer(d) {
     drawFinancialBreakdown(doc, [
       { label: particulars, hsn: d.HsnCode || "-", taxable: invBase, gstAmount: invGst, total: invAmt, ratePct: combinedRate },
     ], {
-      left, width: pageWidth,
+      left, width: pageWidth, fonts: F,
       grandTotal: invAmt, grandTotalLabel: "Total Amount",
       note: `Amount in words: ${numberToWordsIndian(invAmt)}`,
     });
@@ -259,8 +261,8 @@ function renderInvoicePdfBuffer(d) {
     // ── Terms & signature block ──────────────────────────────────────────
     const termsTop = doc.y;
     const termsColW = pageWidth * 0.6;
-    doc.font("Helvetica-Bold").fontSize(8).fillColor("#0f172a").text("TERMS & NOTES", left, termsTop);
-    doc.font("Helvetica").fontSize(7.5).fillColor("#475569");
+    doc.font(F.bold).fontSize(8).fillColor("#0f172a").text("TERMS & NOTES", left, termsTop);
+    doc.font(F.regular).fontSize(7.5).fillColor("#475569");
     const terms = [
       "This invoice reflects a payment already received against the booking referenced above.",
       "Please retain this document for your records; it may be required for loan disbursement or possession formalities.",
@@ -274,10 +276,10 @@ function renderInvoicePdfBuffer(d) {
 
     const sigColX = left + termsColW + 20;
     const sigColW = pageWidth - termsColW - 20;
-    doc.font("Helvetica").fontSize(8.5).fillColor("#0f172a")
+    doc.font(F.regular).fontSize(8.5).fillColor("#0f172a")
       .text(`For ${d.CompanyName || "the Company"}`, sigColX, termsTop, { width: sigColW, align: "center" });
     doc.moveTo(sigColX + 10, termsTop + 46).lineTo(sigColX + sigColW - 10, termsTop + 46).strokeColor("#94a3b8").stroke();
-    doc.font("Helvetica").fontSize(7.5).fillColor("#64748b")
+    doc.font(F.regular).fontSize(7.5).fillColor("#64748b")
       .text("Authorized Signatory", sigColX, termsTop + 50, { width: sigColW, align: "center" });
 
     doc.y = Math.max(ty, termsTop + 64) + 16;
@@ -286,7 +288,7 @@ function renderInvoicePdfBuffer(d) {
     // ── Footer ─────────────────────────────────────────────────────────────
     const footerY = doc.page.height - doc.page.margins.bottom - 46;
     doc.moveTo(left, footerY).lineTo(left + pageWidth, footerY).strokeColor("#cbd5e1").stroke();
-    doc.font("Helvetica").fontSize(7.5).fillColor("#94a3b8")
+    doc.font(F.regular).fontSize(7.5).fillColor("#94a3b8")
       .text("This is a system-generated invoice and does not require a physical signature.", left, footerY + 8, { width: pageWidth })
       .text(`Generated ${fmtDateTime(new Date())} — ${d.CompanyName || ""} — Invoice ${d.InvoiceNo}`, left, footerY + 19, { width: pageWidth });
 

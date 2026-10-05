@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { DM_SANS_FACE_CSS, embedDmSans, printWhenFontsReady } from "@/utils/documentFont";
 
 type PreviewField = {
   label: string;
@@ -109,8 +110,9 @@ export function printMasterPreview({
   <meta charset="utf-8" />
   <title>${escapeHtml(subtitle)} — ${escapeHtml(title || code || "")}</title>
   <style>
+    ${DM_SANS_FACE_CSS}
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
+    body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
     .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 20px; border-bottom: 2px solid #4f46e5; margin-bottom: 26px; gap: 24px; }
     .doc-block { text-align: right; }
     .doc-title { font-size: 24px; font-weight: 800; color: #4f46e5; letter-spacing: -0.5px; }
@@ -165,10 +167,7 @@ export function printMasterPreview({
     return;
   }
   setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-  win.onload = () => {
-    win.focus();
-    win.print();
-  };
+  printWhenFontsReady(win);
 }
 
 // ─── PDF (jsPDF) ────────────────────────────────────────────────────────────
@@ -197,6 +196,7 @@ export async function downloadMasterPreviewPdf({
 }: PrintPreviewOptions & { filename: string }) {
   const { default: jsPDF } = await import("jspdf");
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const FONT = await embedDmSans(doc);
 
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -214,11 +214,11 @@ export async function downloadMasterPreviewPdf({
   // Header band
   doc.setFillColor(79, 70, 229); // indigo-600, matches printMasterPreview's accent
   doc.rect(0, 0, pageW, 64, "F");
-  doc.setFont("helvetica", "bold");
+  doc.setFont(FONT, "bold");
   doc.setFontSize(16);
   doc.setTextColor(255, 255, 255);
   doc.text(sanitizeForPdf(subtitle), marginX, 28);
-  doc.setFont("helvetica", "normal");
+  doc.setFont(FONT, "normal");
   doc.setFontSize(10);
   doc.text(sanitizeForPdf(title || code || "—"), marginX, 44);
   if (code) {
@@ -235,7 +235,7 @@ export async function downloadMasterPreviewPdf({
 
   for (const section of sections) {
     ensureSpace(24);
-    doc.setFont("helvetica", "bold");
+    doc.setFont(FONT, "bold");
     doc.setFontSize(9);
     doc.setTextColor(79, 70, 229);
     doc.text(sanitizeForPdf(section.title).toUpperCase(), marginX, y);
@@ -256,7 +256,7 @@ export async function downloadMasterPreviewPdf({
         foot: t.footer ? [t.columns.map((_, i) => cell(t.footer![i]))] : undefined,
         showFoot: "lastPage",
         theme: "grid",
-        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5, textColor: [17, 24, 39], lineColor: [229, 231, 235], lineWidth: 0.5 },
+        styles: { font: FONT, fontSize: 8.5, cellPadding: 5, textColor: [17, 24, 39], lineColor: [229, 231, 235], lineWidth: 0.5 },
         headStyles: { fillColor: [243, 244, 246], textColor: [107, 114, 128], fontSize: 7.5, fontStyle: "bold" },
         footStyles: { fillColor: [249, 250, 251], textColor: [17, 24, 39], fontStyle: "bold" },
         columnStyles: Object.fromEntries(t.columns.map((c, i) => [i, { halign: c.align ?? "left" }])),
@@ -275,12 +275,12 @@ export async function downloadMasterPreviewPdf({
       const value = sanitizeForPdf(valueRaw);
       const x = marginX + col * (colW + 16);
 
-      doc.setFont("helvetica", "normal");
+      doc.setFont(FONT, "normal");
       doc.setFontSize(7);
       doc.setTextColor(156, 163, 175);
       doc.text(label.toUpperCase(), x, rowStartY);
 
-      doc.setFont("helvetica", "normal");
+      doc.setFont(FONT, "normal");
       doc.setFontSize(9.5);
       doc.setTextColor(17, 24, 39);
       const lines = doc.splitTextToSize(value, colW);
@@ -299,7 +299,7 @@ export async function downloadMasterPreviewPdf({
     y = rowStartY + 10;
   }
 
-  doc.setFont("helvetica", "normal");
+  doc.setFont(FONT, "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(156, 163, 175);
   const pageCount = doc.getNumberOfPages();
