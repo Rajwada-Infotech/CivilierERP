@@ -121,14 +121,16 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     // zero stock) falls back to its own declared default UOM so it still
     // appears in the list.
     //
-    // A movement recorded with NO UOM at all (e.g. a GRN line saved without one) is not a
-    // different unit — if the item has exactly one UOM anywhere in its ledger, the blank
-    // movements belong to it. Otherwise a 650 PSC opening and a blank-UOM +7000 receipt
-    // for the same item showed up as two separate lines, with the issue going negative on one.
+    // A movement whose UOM is blank, or is text the UOM master doesn't know (a GRN line saved
+    // as "PIECE" while the master calls it PSC), is not a different unit. The ledger UOM is
+    // first resolved to a master code by code / name / symbol; whatever can't be resolved
+    // belongs to the item's own unit (or its only ledger unit). Otherwise a 650 PSC opening
+    // and a 7000 "PIECE" receipt for the same item showed as two lines, with the issue going
+    // negative on one.
     const uomKeyExpr = hasUomCol
       ? hasUomOnItem
-        ? "COALESCE(NULLIF(sl.UOM, ''), img.M_UOM, solo.OnlyUom)"
-        : "COALESCE(NULLIF(sl.UOM, ''), solo.OnlyUom)"
+        ? "COALESCE(ucan.UOMCode, img.M_UOM, solo.OnlyUom, NULLIF(sl.UOM, ''))"
+        : "COALESCE(ucan.UOMCode, solo.OnlyUom, NULLIF(sl.UOM, ''))"
       : hasUomOnItem
         ? "img.M_UOM"
         : null;
@@ -139,7 +141,17 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     let uomGroupBy = "";
 
     if (uomKeyExpr) {
-      uomJoinClause = `LEFT JOIN (
+      uomJoinClause = `OUTER APPLY (
+          SELECT TOP 1 um.UOMCode
+          FROM dbo.UOMMaster um
+          WHERE sl.UOM IS NOT NULL AND (
+            um.UOMCode = sl.UOM
+            OR UPPER(um.UOMName) = UPPER(sl.UOM)
+            OR UPPER(um.Symbol) = UPPER(sl.UOM)
+          )
+          ORDER BY CASE WHEN um.UOMCode = sl.UOM THEN 0 ELSE 1 END
+        ) ucan
+        LEFT JOIN (
           SELECT CONVERT(NVARCHAR(50), ItemID) AS ItemKey, MAX(UOM) AS OnlyUom
           FROM dbo.StockLedger
           WHERE UOM IS NOT NULL AND LTRIM(RTRIM(UOM)) <> ''

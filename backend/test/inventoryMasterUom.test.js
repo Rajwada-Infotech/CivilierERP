@@ -29,11 +29,12 @@ describe("inventory master UOM grouping", () => {
     expect(res.status).toBe(200);
     const main = mockQueries.find((q) => /FROM dbo\.Item_Master_Group img/.test(q));
     expect(main).toBeDefined();
-    // blank / empty UOM falls through to the item's single ledger UOM
-    expect(main).toMatch(/COALESCE\(NULLIF\(sl\.UOM, ''\), img\.M_UOM, solo\.OnlyUom\)/);
+    // ledger UOM resolves by code / name / symbol; blank or unknown text falls back to the item's own unit
+    expect(main).toMatch(/UPPER\(um\.UOMName\) = UPPER\(sl\.UOM\)/);
+    expect(main).toMatch(/COALESCE\(ucan\.UOMCode, img\.M_UOM, solo\.OnlyUom, NULLIF\(sl\.UOM, ''\)\)/);
     // the "only UOM" lookup only applies when an item has exactly ONE distinct UOM (never merges real units)
     expect(main).toMatch(/HAVING COUNT\(DISTINCT UOM\) = 1/);
     // and the grouping key uses the same expression
-    expect(main).toMatch(/GROUP BY[\s\S]*COALESCE\(NULLIF\(sl\.UOM, ''\), img\.M_UOM, solo\.OnlyUom\)/);
+    expect(main).toMatch(/GROUP BY[\s\S]*COALESCE\(ucan\.UOMCode, img\.M_UOM, solo\.OnlyUom, NULLIF\(sl\.UOM, ''\)\)/);
   });
 });
