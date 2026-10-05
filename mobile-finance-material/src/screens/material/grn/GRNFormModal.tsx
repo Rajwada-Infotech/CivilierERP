@@ -155,6 +155,19 @@ export function GRNFormModal({
     setItems(existing.GRNItems?.length ? existing.GRNItems : [createEmptyGRNItem()]);
   }, [visible, editingId, existing]);
 
+  // Same rule as web: once a project is picked, the godown is the one linked to
+  // that project (not any godown company-wide). No project yet → every non-main godown.
+  const projectGodown = useMemo(
+    () => (form.projectId ? godowns.find((g) => g.projectId != null && String(g.projectId) === form.projectId) ?? null : null),
+    [godowns, form.projectId],
+  );
+  useEffect(() => {
+    if (!visible || editingId != null || !form.projectId) return;
+    const id = projectGodown ? String(projectGodown.id) : "";
+    const name = projectGodown?.name ?? "";
+    setForm((f) => (f.godownId === id && f.godownName === name ? f : { ...f, godownId: id, godownName: name }));
+  }, [visible, editingId, form.projectId, projectGodown]);
+
   const filteredProjects = useMemo(() => (form.companyId ? projects.filter((p) => p.companyId === form.companyId) : projects), [projects, form.companyId]);
 
   const poOptions: PickerOption[] = useMemo(() => purchaseOrders
@@ -295,7 +308,7 @@ export function GRNFormModal({
 
   const companyOptions: PickerOption[] = companies.map((c) => ({ key: c.id, label: c.name }));
   const projectOptions: PickerOption[] = filteredProjects.map((p) => ({ key: p.id, label: p.name }));
-  const godownOptions: PickerOption[] = godowns.map((g) => ({ key: String(g.id), label: g.name }));
+  const godownOptions: PickerOption[] = godowns.filter((g) => !g.isMain).map((g) => ({ key: String(g.id), label: g.name }));
   const finYearOptions: PickerOption[] = finYears.map((f) => ({ key: f.label, label: f.label }));
 
   const isLocked = form.grnSourceMode === "vehicleInOut";
@@ -322,7 +335,13 @@ export function GRNFormModal({
             <SectionHeading>Purchase Order</SectionHeading>
             <PickerRow label="Company" value={form.companyName} onPress={() => setPicker("company")} />
             <PickerRow label="Project" value={form.projectName} onPress={() => setPicker("project")} />
-            <PickerRow label="Godown" value={form.godownName} placeholder="Main Godown" onPress={() => setPicker("godown")} />
+            <PickerRow
+              label={form.projectId ? "Godown (linked to project)" : "Godown"}
+              value={form.projectId ? (projectGodown?.name ?? "") : form.godownName}
+              placeholder="Main Godown"
+              disabled={!!form.projectId}
+              onPress={() => setPicker("godown")}
+            />
             <PickerRow label="Purchase Order" value={form.poNumber} onPress={() => setPicker("po")} disabled={editingId != null} />
 
             {!!form.poId && (
