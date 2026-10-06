@@ -1266,7 +1266,7 @@ export default function FundTransfer() {
                 </p>
                 <div className="space-y-1.5">
                   <label className="text-[0.6875rem] font-medium text-muted-foreground">Company *</label>
-                  <Select value={sourceCompanyId} onValueChange={setSourceCompanyId}>
+                  <Select value={sourceCompanyId || undefined} onValueChange={setSourceCompanyId}>
                     <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder="Select company…" />
                     </SelectTrigger>
@@ -1279,7 +1279,7 @@ export default function FundTransfer() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[0.6875rem] font-medium text-muted-foreground">Bank Account *</label>
-                  <Select value={sourceBankId} onValueChange={setSourceBankId} disabled={!sourceCompanyId}>
+                  <Select value={sourceBankId || undefined} onValueChange={setSourceBankId} disabled={!sourceCompanyId}>
                     <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder={sourceCompanyId ? "Select bank…" : "Select a company first"} />
                     </SelectTrigger>
@@ -1312,7 +1312,7 @@ export default function FundTransfer() {
                 <div className="space-y-1.5">
                   <label className="text-[0.6875rem] font-medium text-muted-foreground">Company *</label>
                   <Select
-                    value={destCompanyId}
+                    value={destCompanyId || undefined}
                     onValueChange={setDestCompanyId}
                     disabled={transferType === "Intra"}
                   >
@@ -1330,7 +1330,7 @@ export default function FundTransfer() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[0.6875rem] font-medium text-muted-foreground">Bank Account *</label>
-                  <Select value={destBankId} onValueChange={setDestBankId} disabled={!destCompanyId}>
+                  <Select value={destBankId || undefined} onValueChange={setDestBankId} disabled={!destCompanyId}>
                     <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder={destCompanyId ? "Select bank…" : "Select a company first"} />
                     </SelectTrigger>
