@@ -2,7 +2,7 @@
 // created (e.g. a plot converted into a villa), so DPR follows conversion with
 // no script run. Same rule as scripts/cloneChainForChainlessRooms.js: each
 // room copies the step list most chains of its room category already use
-// (preferring this project's own), every step starting as a PENDING stub.
+// (this project's own when it has any), every step starting as a PENDING stub.
 // Floor comes from chainFloorLabel, so a villa is placed by its plot.
 // A room whose category has no chain anywhere yet is skipped and reported.
 const { sql } = require("../db");
@@ -31,7 +31,11 @@ async function createChainsForUnit(db, unitId, actor) {
     GROUP BY d.Id, d.WorkType, r.RoomCategoryId, d.ProjectId`)).recordset;
   const pick = new Map();
   for (const cat of cats) {
-    const cs = donors.filter((d) => d.RoomCategoryId === cat);
+    // The project's own chains win when it has any for this category: once a
+    // villa's steps are tailored, every later villa copies the tailored list.
+    const all = donors.filter((d) => d.RoomCategoryId === cat);
+    const own = all.filter((d) => d.ProjectId === unit.ProjectId);
+    const cs = own.length ? own : all;
     if (!cs.length) continue;
     const freq = new Map();
     for (const c of cs) freq.set(`${c.WorkType}|${c.Sig}`, (freq.get(`${c.WorkType}|${c.Sig}`) || 0) + 1);
