@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Home, Pencil, Trash2 } from "lucide-react";
+import { Home, Pencil, Trash2, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type { LayoutType } from "@/api/unitBhkConfigApi";
+import { VillaRoomPlanEditor } from "./VillaRoomPlanEditor";
 
 export const VILLA_TYPE_API = "/api/villa-type-master";
 
@@ -45,6 +46,8 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
   const queryClient = useQueryClient();
   const [projectId, setProjectId] = useState<string>("");
   const [draft, setDraft] = useState<Record<string, any>>({});
+  // The villa type whose rooms-by-floor editor is open.
+  const [planFor, setPlanFor] = useState<VillaType | null>(null);
   const [saving, setSaving] = useState(false);
   const [assignTo, setAssignTo] = useState("");
 
@@ -119,7 +122,7 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
         </DialogHeader>
         <div className="max-w-xs">
           <label className="mb-1 block text-xs text-muted-foreground">Project</label>
-          <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setDraft({}); }} className={fieldCls}>
+          <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setDraft({}); setPlanFor(null); }} className={fieldCls}>
             <option value="">Choose a project</option>
             {projects.map((p) => <option key={p.ProjectId} value={p.ProjectId}>{p.ProjectName}</option>)}
           </select>
@@ -161,6 +164,7 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
                       <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{t.VillaCount ?? 0}</td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-1">
+                          <button onClick={() => setPlanFor(t)} disabled={t.IsActive === false} className="p-1.5 rounded hover:bg-muted disabled:opacity-35" title="Rooms by floor"><LayoutGrid size={14} /></button>
                           <button onClick={() => setDraft({ ...t })} className="p-1.5 rounded hover:bg-muted" title="Edit"><Pencil size={14} /></button>
                           <button onClick={() => remove(t)} disabled={t.IsActive === false} title="Remove (blocked while unconverted plots plan it)"
                             className="p-1.5 rounded text-destructive hover:bg-destructive/10 disabled:opacity-35"><Trash2 size={14} /></button>
@@ -172,6 +176,15 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
                 </tbody>
               </table>
             </div>
+            {planFor && (
+              <VillaRoomPlanEditor
+                type={planFor}
+                siblings={types.filter((x) => x.Id !== planFor.Id && x.IsActive !== false)}
+                canEdit
+                onSaved={() => { refresh(); onPlotsChanged(); }}
+                onClose={() => setPlanFor(null)}
+              />
+            )}
             <div className="grid gap-3 sm:grid-cols-4 items-end">
               <div><label className="mb-1 block text-xs text-muted-foreground">Code *</label><input value={draft.Code || ""} maxLength={20} onChange={setField("Code")} placeholder="T4" className={`${fieldCls} font-mono`} /></div>
               <div><label className="mb-1 block text-xs text-muted-foreground">Name *</label><input value={draft.Name || ""} maxLength={100} onChange={setField("Name")} placeholder="Villa Type 4" className={fieldCls} /></div>

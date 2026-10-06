@@ -160,4 +160,52 @@ router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   }
 });
 
+// ── Rooms by floor (migration 539) ───────────────────────────────────────────
+// GET /:id/plan — the villa type's rooms on each of its floors.
+router.get("/:id/plan", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid villa type" });
+  try {
+    res.json({ rooms: await require("../services/villaComposition").getPlan(getPool(), id) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/plan { rooms: [{ storey, categoryId, quantity }] } — saves the
+// plan, rebuilds the type's own room layout from it, and brings every villa
+// already built to this type in line: missing rooms are added (with their
+// DPR steps) and every room gets its floor. Rooms are never removed here —
+// a room no longer in the plan is kept and reported by the DPR health check.
+router.put("/:id/plan", requirePageRight(PAGE, "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid villa type" });
+  const { savePlan, applyStoreys, VillaPlanError } = require("../services/villaComposition");
+  const { syncUnitRooms, bumpFlatMasterCaches } = require("../services/unitLayout");
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const saved = await savePlan(tx, id, req.body?.rooms, req.user?.email || null);
+    const villas = (await tx.request().input("v", sql.Int, id).input("lt", sql.Int, saved.layoutTypeId).input("l", sql.NVarChar(50), saved.label).query(`
+      UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @l, UpdatedAt = SYSDATETIME()
+      OUTPUT INSERTED.Id
+      WHERE VillaTypeId = @v AND IsActive = 1`)).recordset;
+    let roomsAdded = 0;
+    for (const v of villas) {
+      const s = await syncUnitRooms(tx, v.Id, { removeUnused: false, createdBy: req.user?.userId || null });
+      roomsAdded += s.created + (s.reactivated || 0);
+      await applyStoreys(tx, v.Id);
+    }
+    await tx.commit();
+    await bumpFlatMasterCaches().catch(() => {});
+    res.json({ success: true, roomCount: saved.roomCount, villasUpdated: villas.length, roomsAdded });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+    if (e instanceof VillaPlanError) return res.status(e.status).json({ error: e.message });
+    console.error("[villa-types] PUT plan:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

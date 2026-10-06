@@ -2292,7 +2292,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
       .query("SELECT Code FROM dbo.CrmConstructedAssetKind WHERE Code = @kind AND IsActive = 1");
     if (!kind.recordset.length) return res.status(400).json({ error: "Select an active constructed asset kind" });
     const resolvedType = await resolveUnitTypeInput(
-      pool, { UnitType: villaType ? villaType.LayoutLabel : unitType }, { requireComposition: true },
+      pool, villaType ? { LayoutTypeId: villaType.LayoutTypeId } : { UnitType: unitType }, { requireComposition: true },
     );
     const tx = pool.transaction();
     await tx.begin();
@@ -2421,6 +2421,8 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
           INSERT INTO dbo.CrmProjectAutoSetupFloor (ProjectId, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated, IsActive, CreatedAt)
           VALUES (@pid, @bid, -1, (SELECT TOP 1 Name FROM dbo.CrmConstructedAssetKind WHERE Code = @kind), @n, 1, 1, 1, SYSDATETIME());`);
       // DPR follows conversion: the villa's rooms get their work chains now.
+      // The villa type's rooms sit on its floors (G, 1, 2 …) before DPR is wired.
+      await require("../services/villaComposition").applyStoreys(tx, unitId);
       const dpr = await require("../services/autoDprChains").createChainsForUnit(tx, unitId, req.user?.email || req.user?.name || null);
       await tx.commit();
       await bumpCacheVersion("unit-master");

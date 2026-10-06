@@ -15,6 +15,8 @@ export interface LayoutType {
   typeKey: string;
   /** Display label, also the value stored as UnitMaster.UnitType ("2 BHK"). */
   label: string;
+  /** Set when a villa type owns this layout (edited from Plot Master > Villa types). */
+  ownerVillaTypeId?: number | null;
   /** Total rooms in its Unit Composition; 0 = no layout defined yet. */
   roomCount: number;
   /** e.g. "2 Bedroom · 1 Hall Room · 1 Kitchen"; empty when roomCount = 0. */
@@ -34,7 +36,8 @@ export const LAYOUT_TYPES_QUERY_KEY = ["layout-types"] as const;
 // of those, so an existing unit/template row still shows what it has.
 export function unitTypeOptions(types: LayoutType[], current?: string | null): { value: string; label: string; title?: string }[] {
   const opts = types
-    .filter((t) => t.roomCount > 0)
+    // A villa type's own layout is chosen by picking the villa type, not here.
+    .filter((t) => t.roomCount > 0 && !t.ownerVillaTypeId)
     .map((t) => ({ value: t.label, label: t.label, title: t.summary }));
   const cur = (current ?? "").trim();
   if (cur && !opts.some((o) => o.value === cur)) {
