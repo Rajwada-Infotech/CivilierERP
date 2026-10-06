@@ -211,6 +211,17 @@ router.get(
   const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
   const fromDate = req.query.fromDate ? String(req.query.fromDate) : null;
   const toDate = req.query.toDate ? String(req.query.toDate) : null;
+  // Narrowing for the mobile app, so it can page small slices instead of pulling everything:
+  //   search  — activity, project, chain, block/unit/room, or an engineer's name
+  //   qcPending — Completed activities still waiting for a Quality Check pass
+  //   overdue / dueSoon — same definitions as the Civil Work DPR dashboard's counts
+  //   rungId  — exactly one activity (its current attempt)
+  const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : null;
+  const overdueOnly = req.query.overdue === "1";
+  const dueSoonOnly = req.query.dueSoon === "1";
+  // Quality Check's queue: Completed work that hasn't already passed QC (a passed one is waiting on approval).
+  const qcPending = req.query.qcPending === "1";
+  const rungIdFilter = req.query.rungId ? parseInt(req.query.rungId, 10) : null;
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit, 10) || DEFAULT_LIMIT));
   const offset = (page - 1) * limit;
@@ -226,7 +237,7 @@ router.get(
     if (Number.isFinite(dependencyMasterId)) {
       request.input("dependencyMasterId", sql.Int, dependencyMasterId);
       conds.push("dm.Id = @dependencyMasterId");
-    } else {
+    } else if (!Number.isFinite(rungIdFilter)) {
       conds.push("dm.IsActive = 1");
     }
     if (roomIdIsNull) {
@@ -247,6 +258,27 @@ router.get(
     if (Number.isFinite(projectId)) {
       request.input("projectId", sql.Int, projectId);
       conds.push("dm.ProjectId = @projectId");
+    }
+    if (Number.isFinite(rungIdFilter)) {
+      request.input("rungIdFilter", sql.Int, rungIdFilter);
+      conds.push("daa.DependencyMasterActivityId = @rungIdFilter");
+    }
+    if (search) {
+      request.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push(`(
+        am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
+        bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search OR
+        EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer sdae JOIN dbo.users su ON su.id = sdae.EngineerId
+                WHERE sdae.AssignmentId = daa.Id AND su.name LIKE @search)
+      )`);
+    }
+    if (qcPending) {
+      conds.push("ISNULL((SELECT TOP 1 qcp.Decision FROM dbo.DependencyActivityQc qcp WHERE qcp.AssignmentId = daa.Id ORDER BY qcp.QcAt DESC, qcp.Id DESC), '') <> 'APPROVED'");
+    }
+    if (overdueOnly) {
+      conds.push("daa.Status IN ('ALLOCATED','IN_PROGRESS','HOLD','REWORK') AND daa.EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE))");
+    } else if (dueSoonOnly) {
+      conds.push("daa.Status IN ('ALLOCATED','IN_PROGRESS','HOLD') AND daa.EndDate >= CAST(GETDATE() AS DATE) AND daa.EndDate <= DATEADD(DAY, 2, CAST(GETDATE() AS DATE))");
     }
     if (req.projectScope) conds.push(projectPredicate(req.projectScope, "dm.ProjectId", "").trim());
     if (fromDate && !Number.isNaN(Date.parse(fromDate))) {

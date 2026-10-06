@@ -148,9 +148,9 @@ function Content({ d, firstName, trend, openList, showQc }: {
   const allClear = ins.overdue + ins.dueSoon + n("REWORK") + n("HOLD") === 0;
 
   const pipeline = (["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "REWORK", "COMPLETED", "APPROVED"] as const)
-    .map((s) => ({ key: s, value: n(s) }))
-    .filter((p) => p.value > 0);
-  const pipelineTotal = pipeline.reduce((a, p) => a + p.value, 0);
+    .map((s) => ({ key: s, count: n(s) }))
+    .filter((p) => p.count > 0);
+  const pipelineTotal = pipeline.reduce((a, p) => a + p.count, 0);
 
   return (
     <>
@@ -215,7 +215,7 @@ function Content({ d, firstName, trend, openList, showQc }: {
         <>
           <Title>Quality &amp; approval</Title>
           <View style={{ flexDirection: "row", gap: 10 }}>
-            <Tile label="Awaiting QC" value={ins.awaitingQc} caption="completed, not yet checked" icon={ShieldCheck} color={VIOLET} onPress={() => openList("COMPLETED")} />
+            <Tile label="Awaiting QC" value={ins.awaitingQc} caption="completed, not yet checked" icon={ShieldCheck} color={VIOLET} onPress={() => navigation.navigate("QualityCheck")} />
             <Tile label="To approve" value={ins.awaitingApproval} caption="QC passed" icon={BadgeCheck} color={TEAL} onPress={() => openList("COMPLETED")} />
           </View>
         </>
@@ -229,14 +229,14 @@ function Content({ d, firstName, trend, openList, showQc }: {
         ) : (
           <>
             <View style={{ flexDirection: "row", height: 12, borderRadius: 6, overflow: "hidden", gap: 2 }}>
-              {pipeline.map((p) => (<View key={p.key} style={{ flex: p.value, backgroundColor: STATUS_COLOR[p.key] }} />))}
+              {pipeline.map((p) => (<View key={p.key} style={{ flex: p.count, backgroundColor: STATUS_COLOR[p.key] }} />))}
             </View>
             <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 12, rowGap: 8 }}>
               {pipeline.map((p) => (
                 <Pressable key={p.key} onPress={() => openList(p.key)} style={{ width: "50%", flexDirection: "row", alignItems: "center", gap: 7 }}>
                   <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: STATUS_COLOR[p.key] }} />
                   <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, flex: 1 }}>{STATUS_LABEL[p.key]}</Text>
-                  <Text style={{ fontSize: 12, fontFamily: fonts.heading.bold, color: colors.foreground, marginRight: 12, fontVariant: ["tabular-nums"] }}>{p.value}</Text>
+                  <Text style={{ fontSize: 12, fontFamily: fonts.heading.bold, color: colors.foreground, marginRight: 12, fontVariant: ["tabular-nums"] }}>{p.count}</Text>
                 </Pressable>
               ))}
             </View>
