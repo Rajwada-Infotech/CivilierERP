@@ -1587,7 +1587,7 @@ button[role="combobox"]:focus {
    bubbles: white specular highlight top-left, faint iridescent body, bright
    rim and soft drop shadow. Every icon gets a subtle embossed glint.
    Coloured action buttons (module gradients, solid fills) are untouched. */
-[data-theme="glass"] :is(.rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-full):is(.w-5, .w-6, .w-7, .w-8, .w-9, .w-10, .w-11, .w-12, .w-14):has(> svg:only-child):not(.btn-module):not(.gradient-accent):not([class*="bg-red-"]):not([class*="bg-green-"]):not([class*="bg-emerald-6"]):not([class*="bg-primary"]):not(.bg-destructive) {
+[data-theme="glass"] :is(.rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-full):is(.w-5, .w-6, .w-7, .w-8, .w-9, .w-10, .w-11, .w-12, .w-14):has(> svg:only-child):not(.btn-module):not(.gradient-accent):not([class*="bg-red-"]):not([class*="bg-green-"]):not([class*="bg-emerald-6"]):not([class*="bg-primary"]):not(.bg-destructive):not(.login-page *) {
     background:
         radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.55) 28%, transparent 58%),
         linear-gradient(140deg, rgba(255, 255, 255, 0.55), rgba(214, 233, 255, 0.55) 45%, rgba(208, 250, 238, 0.5) 75%, rgba(255, 255, 255, 0.55)) !important;
@@ -1599,7 +1599,7 @@ button[role="combobox"]:focus {
         0 6px 14px -6px rgba(30, 64, 110, 0.22) !important;
 }
 /* Embossed glint on icons */
-[data-theme="glass"] :is(svg.lucide, svg[class*="icon"], :is(aside, nav, header, .setup-item, button, a) svg:not([class*="recharts"])) {
+[data-theme="glass"] :is(svg.lucide, svg[class*="icon"], :is(aside, nav, header, .setup-item, button, a) svg:not([class*="recharts"])):not(.login-page *) {
     filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.85)) drop-shadow(0 1px 1.5px rgba(30, 64, 110, 0.18));
 }
 /* …but not on icons inside solid coloured buttons / badges */

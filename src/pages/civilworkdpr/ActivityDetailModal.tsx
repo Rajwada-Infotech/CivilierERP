@@ -1576,7 +1576,7 @@ export default function ActivityDetailModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4 overscroll-contain">
-      <div className="w-full max-w-3xl h-[92dvh] max-h-[92dvh] rounded-2xl overflow-hidden flex flex-col">
+      <div className="w-full max-w-3xl max-h-[92dvh] rounded-2xl overflow-hidden flex flex-col [&>*]:min-h-0 [&>*]:h-auto">
         <CivilWorkDprShell
           fillHeight
           title={row.activityName}
