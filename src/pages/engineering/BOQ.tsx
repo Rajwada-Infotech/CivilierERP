@@ -73,6 +73,9 @@ interface BoqActivity {
   _key: string;
   /** Total area of the activity (optional) — with Qty it is the basis for per-unit figures. */
   area: string;
+  /** Activity Group picked first; the activity can only come from this group. */
+  groupId: string;
+  groupName: string;
   activityId: string;
   activityName: string;
   activityCode: string;
@@ -144,6 +147,12 @@ interface ActivityOption {
   id: string;
   name: string;
   code: string;
+  /** Activity Group (Activity Master, type 0) this activity belongs to. */
+  groupId: string;
+}
+interface ActivityGroupOption {
+  id: string;
+  name: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,6 +226,8 @@ const blankItem = (): BoqItem => ({
 const blankActivity = (): BoqActivity => ({
   _key: uid(),
   area: "",
+  groupId: "",
+  groupName: "",
   activityId: "",
   activityName: "",
   activityCode: "",
@@ -248,6 +259,8 @@ const rowToActivity = (r: any): BoqActivity => ({
   Id: r.Id,
   _key: uid(),
   area: r.Area != null ? String(r.Area) : "",
+  groupId: r.GroupId ?? "",
+  groupName: r.GroupName ?? "",
   activityId: r.ActivityId ?? "",
   activityName: r.ActivityName ?? "",
   activityCode: r.ActivityCode ?? "",
@@ -263,6 +276,8 @@ const buildPayload = (
   form: FormState,
   items: BoqItem[],
   activities: BoqActivity[],
+  activityOptions: ActivityOption[] = [],
+  activityGroups: ActivityGroupOption[] = [],
 ) => ({
   BoqNo: form.BoqNo || undefined,
   BoqDate: form.BoqDate,
@@ -293,6 +308,13 @@ const buildPayload = (
     };
   }),
   BoqActivities: activities.map((ac) => ({
+    groupId: ac.groupId || activityOptions.find((o) => o.id === ac.activityId)?.groupId || null,
+    groupName:
+      ac.groupName ||
+      activityGroups.find(
+        (g) => g.id === (ac.groupId || activityOptions.find((o) => o.id === ac.activityId)?.groupId),
+      )?.name ||
+      null,
     area: ac.area,
     activityId: ac.activityId,
     activityName: ac.activityName,
@@ -358,6 +380,7 @@ interface LineEditorProps {
   uoms: UomOption[];
   itemOptions?: ItemOption[];
   activityOptions?: ActivityOption[];
+  activityGroups?: ActivityGroupOption[];
   /** Item mode: the activities already added to this BOQ, offered in the "Activity" column. */
   boqActivities?: BoqActivity[];
   itemsTotal?: number;
@@ -376,6 +399,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
   uoms,
   itemOptions = [],
   activityOptions = [],
+  activityGroups = [],
   boqActivities = [],
   itemsTotal = 0,
   activitiesTotal = 0,
@@ -385,6 +409,11 @@ const LineEditor: React.FC<LineEditorProps> = ({
   onActivitySelected,
 }) => {
   const isItem = mode === "item";
+
+  // The group an activity row is under: the one picked, else the one the saved
+  // activity belongs to (BOQs made before groups were recorded).
+  const rowGroupId = (r: any): string =>
+    r.groupId || activityOptions.find((o) => o.id === r.activityId)?.groupId || "";
 
   const upd = (idx: number, field: string, val: string) => {
     const next = (rows as any[]).map((r, i) => {
@@ -411,7 +440,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
   const grandTotal = itemsTotal + activitiesTotal;
   // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
   // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
-  const colCount = readOnly ? 12 : 13;
+  // Activities also get a leading "Activity Group" column.
+  const colCount = (isItem ? 12 : 13) + (readOnly ? 0 : 1);
 
   return (
     <div
@@ -513,6 +543,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
         >
           <colgroup>
             <col style={{ width: 36 }} />
+            {!isItem && <col style={{ width: 170 }} />}
             <col style={{ width: 180 }} />
             {isItem && <col style={{ width: 170 }} />}
             <col style={{ width: 80 }} />
@@ -538,6 +569,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
               {(
                 [
                   ["#", "center"],
+                  ...(!isItem ? [["Activity Group", "left"]] : []),
                   [isItem ? "Item" : "Activity", "left"],
                   ...(isItem ? [["For Activity", "left"]] : []),
                   ["Code", "left"],
@@ -633,6 +665,58 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       </span>
                     </td>
 
+                    {/* Activity Group (activities only) — chosen before the activity */}
+                    {!isItem && (
+                      <td
+                        style={{
+                          borderRight: "1px solid hsl(var(--border))",
+                          padding: "4px 6px",
+                        }}
+                      >
+                        {readOnly ? (
+                          <span style={{ fontSize: 12.5 }}>
+                            {row.groupName ||
+                              activityGroups.find((g) => g.id === row.groupId)?.name ||
+                              "—"}
+                          </span>
+                        ) : (
+                          <Select
+                            value={rowGroupId(row) || ""}
+                            onValueChange={(val) => {
+                              const g = activityGroups.find((x) => x.id === val);
+                              if (!g) return;
+                              // A different group invalidates the activity picked under the old one.
+                              onChange(
+                                (rows as any[]).map((r, i) =>
+                                  i !== idx
+                                    ? r
+                                    : {
+                                        ...r,
+                                        groupId: g.id,
+                                        groupName: g.name,
+                                        ...(rowGroupId(r) !== g.id
+                                          ? { activityId: "", activityName: "", activityCode: "" }
+                                          : {}),
+                                      },
+                                ),
+                              );
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                              <SelectValue placeholder="— Select group —" />
+                            </SelectTrigger>
+                            <SelectContent className="z-[300] max-h-60">
+                              {activityGroups.map((g) => (
+                                <SelectItem key={g.id} value={g.id} className="text-xs">
+                                  {g.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </td>
+                    )}
+
                     {/* Name select */}
                     <td
                       style={{
@@ -687,10 +771,11 @@ const LineEditor: React.FC<LineEditorProps> = ({
                         </Select>
                       ) : (
                         <Select
+                          disabled={!rowGroupId(row)}
                           value={row.activityId ? String(row.activityId) : ""}
                           onValueChange={(val) => {
                             const sel = activityOptions.find(
-                              (o) => o.id === val,
+                              (o) => o.id === val && o.groupId === rowGroupId(row),
                             );
                             if (!sel) return;
                             onChange(
@@ -709,10 +794,18 @@ const LineEditor: React.FC<LineEditorProps> = ({
                           }}
                         >
                           <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
-                            <SelectValue placeholder="— Select activity —" />
+                            <SelectValue
+                              placeholder={
+                                rowGroupId(row)
+                                  ? "— Select activity —"
+                                  : "Select a group first"
+                              }
+                            />
                           </SelectTrigger>
                           <SelectContent className="z-[300] max-h-60">
-                            {activityOptions.map((o) => (
+                            {activityOptions
+                              .filter((o) => o.groupId === rowGroupId(row))
+                              .map((o) => (
                               <SelectItem
                                 key={o.id}
                                 value={o.id}
@@ -1423,6 +1516,7 @@ interface FormModalProps {
   uoms: UomOption[];
   itemOptions: ItemOption[];
   activityOptions: ActivityOption[];
+  activityGroups: ActivityGroupOption[];
   finYears: { id?: number | string; year: string; status?: string; locked?: boolean }[];
   activeFinYear?: string;
   onClose: () => void;
@@ -1437,6 +1531,7 @@ const FormModal: React.FC<FormModalProps> = ({
   uoms,
   itemOptions,
   activityOptions,
+  activityGroups,
   finYears,
   activeFinYear,
   onClose,
@@ -1566,7 +1661,7 @@ const FormModal: React.FC<FormModalProps> = ({
     if (!validate()) return;
     setSaving(true);
     try {
-      const payload = buildPayload(form, items, activities);
+      const payload = buildPayload(form, items, activities, activityOptions, activityGroups);
       if (isEdit) {
         await apiFetch(`/boq/${record!.BoqID}`, {
           method: "PUT",
@@ -1923,6 +2018,7 @@ const FormModal: React.FC<FormModalProps> = ({
               uoms={uoms}
               itemOptions={itemOptions}
               activityOptions={activityOptions}
+              activityGroups={activityGroups}
               boqActivities={activities}
               itemsTotal={itemsTotal}
               activitiesTotal={activitiesTotal}
@@ -2318,6 +2414,7 @@ export default function BOQ() {
   const [uoms, setUoms] = useState<UomOption[]>([]);
   const [itemOptions, setItemOptions] = useState<ItemOption[]>([]);
   const [activityOptions, setActivityOptions] = useState<ActivityOption[]>([]);
+  const [activityGroups, setActivityGroups] = useState<ActivityGroupOption[]>([]);
 
   const [showForm, setShowForm] = useState(false);
   const [editRecord, setEditRecord] = useState<BoqRecord | null>(null);
@@ -2505,7 +2602,13 @@ export default function BOQ() {
             id: String(a.id),
             name: a.activity_name ?? "",
             code: String(a.id),
+            groupId: a.group_id != null ? String(a.group_id) : "",
           })),
+      );
+      setActivityGroups(
+        activityData
+          .filter((a) => a.activity_type === 0 && a.is_active !== false)
+          .map((a) => ({ id: String(a.id), name: a.activity_name ?? "" })),
       );
     } catch (err) {
       toast.error("Failed to load dropdown data");
@@ -2746,6 +2849,7 @@ export default function BOQ() {
           uoms={uoms}
           itemOptions={itemOptions}
           activityOptions={activityOptions}
+          activityGroups={activityGroups}
           finYears={finYears}
           activeFinYear={activeFinYear}
           onClose={() => {

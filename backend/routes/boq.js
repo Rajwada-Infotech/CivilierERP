@@ -174,6 +174,8 @@ const syncBoqActivities = async (
       .input("ActivityId", sqlRef.NVarChar(100), ac.activityId || null)
       .input("ActivityName", sqlRef.NVarChar(255), activityName)
       .input("ActivityCode", sqlRef.NVarChar(50), ac.activityCode || null)
+      .input("GroupId", sqlRef.NVarChar(100), ac.groupId || null)
+      .input("GroupName", sqlRef.NVarChar(255), ac.groupName ? String(ac.groupName).substring(0, 255) : null)
       .input("Area", sqlRef.Decimal(18, 4), ac.area === "" || ac.area == null ? null : parseFloat(ac.area) || 0)
       .input("Description", sqlRef.NVarChar(sqlRef.MAX), ac.description || null)
       .input("Quantity", sqlRef.Decimal(18, 4), qty)
@@ -184,10 +186,10 @@ const syncBoqActivities = async (
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
       .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqActivities
-          (BoqID, ActivityId, ActivityName, ActivityCode, Area, Description,
+          (BoqID, ActivityId, ActivityName, ActivityCode, GroupId, GroupName, Area, Description,
            Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
         VALUES
-          (@BoqID, @ActivityId, @ActivityName, @ActivityCode, @Area, @Description,
+          (@BoqID, @ActivityId, @ActivityName, @ActivityCode, @GroupId, @GroupName, @Area, @Description,
            @Quantity, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
       `);
   }
