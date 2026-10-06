@@ -364,6 +364,7 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
       `b.Status NOT IN ${DEAD_BOOKING_SQL}`,
       "m.Status NOT IN ('Waived')",
     ];
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (view !== "all") {
       conds.push("(m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0");
     }

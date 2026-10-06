@@ -1,6 +1,9 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+// Project access: a refund's own project, else its booking's.
+const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+router.param("id", projectParamGuard("SELECT COALESCE(r.ProjectId, b.ProjectId) AS ProjectId FROM dbo.CrmRefund r LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId WHERE r.Id = @id"));
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -178,6 +181,7 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "COALESCE(r.ProjectId, b.ProjectId)", "").trim());
     if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("r.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("r.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("r.ProjectId = @projectId"); }

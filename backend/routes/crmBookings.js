@@ -3,6 +3,10 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
+// Project access (dbo.UserProjectAccess / RoleProjectAccess): a restricted user
+// gets 403 on any booking outside their projects. Lists filter the same way.
+const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const { triggerBookingConfirmed } = require("../services/communicationTriggers");
 const authMiddleware = require("../middleware/auth");
@@ -260,6 +264,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
     const req0 = pool.request();
     const showDeleted = deleted === "1" || deleted === "true";
     const conds = [showDeleted ? "b.IsActive = 0" : "b.IsActive = 1"];
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (status) {
       req0.input("st", sql.NVarChar(30), status);
       conds.push("b.Status = @st");
