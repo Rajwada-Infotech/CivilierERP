@@ -20,7 +20,9 @@ const PAD_BOTTOM = 20;
 const fmtAxisDate = (d: string) =>
   new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 
-export function TrendLineChart({ data, color = "#0891b2" }: { data: TrendPoint[]; color?: string }) {
+export function TrendLineChart({
+  data, color = "#0891b2", formatValue = formatCompactINR,
+}: { data: TrendPoint[]; color?: string; formatValue?: (n: number) => string }) {
   const [width, setWidth] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
 
@@ -67,8 +69,8 @@ export function TrendLineChart({ data, color = "#0891b2" }: { data: TrendPoint[]
               />
             );
           })}
-          <SvgText x={2} y={PAD_TOP + 4} fontSize={9} fill={colors.mutedForeground}>{formatCompactINR(max)}</SvgText>
-          <SvgText x={2} y={PAD_TOP + plotH / 2 + 4} fontSize={9} fill={colors.mutedForeground}>{formatCompactINR(max / 2)}</SvgText>
+          <SvgText x={2} y={PAD_TOP + 4} fontSize={9} fill={colors.mutedForeground}>{formatValue(max)}</SvgText>
+          <SvgText x={2} y={PAD_TOP + plotH / 2 + 4} fontSize={9} fill={colors.mutedForeground}>{formatValue(max / 2)}</SvgText>
           <SvgText x={2} y={PAD_TOP + plotH + 4} fontSize={9} fill={colors.mutedForeground}>0</SvgText>
 
           {/* Line */}

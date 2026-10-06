@@ -40,6 +40,30 @@ export interface CwdDashboard {
   };
   assignmentTimeline: { date: string; assigned: number; completed: number }[];
   asOf: string;
+  /** The live picture: only each activity's current attempt. */
+  current: { total: number; byStatus: Partial<Record<AssignmentStatus, number>>; active: number; completionRate: number };
+  insights: {
+    overdue: number;
+    dueSoon: number;
+    avgProgress: number | null;
+    doneThisWeek: number;
+    doneLastWeek: number;
+    awaitingQc: number;
+    awaitingApproval: number;
+  };
+  projects: { name: string; total: number; done: number; inProgress: number; overdue: number; avgProgress: number }[];
+  overdueList: {
+    rungId: number;
+    activityName: string | null;
+    projectName: string | null;
+    scopePath: string | null;
+    status: AssignmentStatus;
+    endDate: string | null;
+    daysOverdue: number;
+    progressPercent: number;
+    engineerNames: string | null;
+  }[];
+  engineerLoad: { name: string; active: number; overdue: number }[];
 }
 
 export const getCwdDashboard = (): Promise<CwdDashboard> =>
@@ -65,7 +89,7 @@ export interface ActivityAssignment {
   updatedAt: string | null;
 }
 
-export const getActivityAssignments = (limit = 300): Promise<ActivityAssignment[]> =>
+export const getActivityAssignments = (limit = 1000): Promise<ActivityAssignment[]> =>
   getJson(`/api/dependency-activity-assignment?limit=${limit}`, "Failed to load activities");
 
 // ── One activity: the allocation, its checkpoints, and the actions on it ──────────────────────────
