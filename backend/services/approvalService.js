@@ -551,6 +551,36 @@ async function guardEdit(module, id, { allowPostApproval = false } = {}) {
 }
 
 /**
+ * Edit guard for modules that allow editing a document at ANY stage (Journal Voucher,
+ * Fund Transfer): Draft/Rejected as always, Approved with the post-approval right (the
+ * edit reverses its posting and sends it back for approval), and — unlike guardEdit() —
+ * Pending too, which simply stays Pending. Returns the status the record was in.
+ */
+async function guardEditAnyStage(module, id, { allowPostApproval = false } = {}) {
+  const status = await getRecordStatus(module, parseInt(id, 10));
+  if (status === "Approved" && !allowPostApproval) {
+    throw new Error("Cannot edit an approved record.");
+  }
+  return status;
+}
+
+/**
+ * Start a fresh approval cycle for a record that is (still) Pending after an edit: a
+ * Level=0 'Pending' marker makes every earlier level's sign-off stop counting, so the
+ * edited document is reviewed from level 1 rather than riding on approvals given to the
+ * old numbers. (Approved → Pending edits get this automatically from resolveCurrentLevel.)
+ */
+async function restartApprovalCycle(module, id, userEmail, userRole, note, executor = null, userId = null) {
+  const map = MODULE_MAP[module];
+  if (!map) throw new Error(`Unknown module: ${module}`);
+  const tableName = map.table.replace("dbo.", "");
+  await writeAuditLog(
+    tableName, parseInt(id, 10), 0, userRole || null, userEmail || null,
+    "Pending", note || "Edited while pending — approval restarted", executor, userId,
+  );
+}
+
+/**
  * Transition a record to a new status.
  * Handles multi-level workflows:
  *  - Draft → Pending   (submit)
@@ -1008,6 +1038,8 @@ async function canApproveBookingAmendment(userId, userRole) {
 module.exports = {
   transition,
   guardEdit,
+  guardEditAnyStage,
+  restartApprovalCycle,
   getWorkflow,
   getApprovedLevelCount,
   getRecordStatus,

@@ -227,6 +227,9 @@ router.get(
         daa.FirstReportedAt AS firstReportedAt,
         daa.LabourSource AS labourSource,
         daa.MaterialSource AS materialSource,
+        -- Who that actually is: the project's developer company, or the named contractor.
+        CASE daa.LabourSource WHEN 'CONTRACTOR' THEN lc.LHeadName WHEN 'DEVELOPER' THEN dev.name END AS labourSourceName,
+        CASE daa.MaterialSource WHEN 'CONTRACTOR' THEN mc.LHeadName WHEN 'DEVELOPER' THEN dev.name END AS materialSourceName,
         daa.Description AS description,
         daa.Remarks AS remarks,
         daa.Status AS status,
@@ -280,6 +283,9 @@ router.get(
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+      LEFT JOIN dbo.enterprise  dev ON dev.id = ep.company_id
+      LEFT JOIN dbo.AccountHeadMaster lc ON lc.LHeadId = daa.LabourContractorId
+      LEFT JOIN dbo.AccountHeadMaster mc ON mc.LHeadId = daa.MaterialContractorId
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
@@ -1237,6 +1243,9 @@ router.patch(
     return res.status(400).json({ error: `status must be one of: ${[...STATUS_VALUES].join(", ")}` });
   }
   const remarks = hasRemarks ? String(req.body.remarks || "").slice(0, 1000) : null;
+  // append: this is one more remark, not an edit of the earlier one — the day's logbook
+  // entry keeps every remark of the day instead of being overwritten by the last.
+  const appendRemark = hasRemarks && req.body?.append === true && !!remarks.trim();
   const progressPercent = hasProgress ? parseInt(req.body.progressPercent, 10) : null;
   if (hasProgress && (!Number.isFinite(progressPercent) || progressPercent < 0 || progressPercent > 100)) {
     return res.status(400).json({ error: "progressPercent must be an integer between 0 and 100" });
@@ -1379,12 +1388,17 @@ router.patch(
         .input("rungId", sql.Int, rungId)
         .input("progressPercent", sql.Int, final.ProgressPercent ?? null)
         .input("remarks", sql.NVarChar(1000), final.Remarks ?? null)
+        .input("append", sql.Bit, appendRemark ? 1 : 0)
         .input("by", sql.NVarChar(200), actor).query(`
           MERGE dbo.DependencyActivityDailyLog AS target
           USING (VALUES (@rungId, CAST(SYSDATETIME() AS DATE))) AS src (RungId, LogDate)
             ON target.DependencyMasterActivityId = src.RungId AND target.LogDate = src.LogDate
           WHEN MATCHED THEN
-            UPDATE SET ProgressPercent = @progressPercent, Remarks = @remarks, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+            UPDATE SET ProgressPercent = @progressPercent,
+                       Remarks = CASE WHEN @append = 1 AND ISNULL(target.Remarks, N'') <> N''
+                                      THEN RIGHT(target.Remarks + NCHAR(10) + @remarks, 1000)
+                                      ELSE @remarks END,
+                       UpdatedBy = @by, UpdatedAt = SYSDATETIME()
           WHEN NOT MATCHED THEN
             INSERT (DependencyMasterActivityId, LogDate, ProgressPercent, Remarks, CreatedBy)
             VALUES (src.RungId, src.LogDate, @progressPercent, @remarks, @by);
@@ -1649,6 +1663,15 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
     if (!rungRes.recordset.length) return res.status(404).json({ error: "Activity rung not found" });
     const activityId = rungRes.recordset[0].ActivityId;
 
+    // "Days of Completion" from the Activity Master — the default for this allocation's Days.
+    // (Column arrives with migration 533; a server that hasn't applied it just has no default.)
+    let daysOfCompletion = null;
+    try {
+      const dayRes = await pool.request().input("activityId", sql.Int, activityId)
+        .query("SELECT days_of_completion FROM dbo.ActivityMaster WHERE id = @activityId");
+      daysOfCompletion = dayRes.recordset[0]?.days_of_completion ?? null;
+    } catch (_) { /* column not there yet */ }
+
     const itemsRes = await pool.request().input("activityId", sql.Int, activityId).query(`
       SELECT img.M_Id AS itemId, img.M_Name AS itemName, img.M_code AS itemCode, img.M_UOM AS uom
       FROM dbo.ActivityItems ai
@@ -1742,6 +1765,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
     res.json({
       rungId,
       activityId,
+      daysOfCompletion,
       candidateItems: itemsRes.recordset,
       assignment: assignment
         ? {
@@ -2387,6 +2411,61 @@ router.get("/:rungId/photos", authMiddleware, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// POST /:rungId/photos/carry-forward — day 1's After photos become day 2's Before.
+// Done here, in one INSERT…SELECT, rather than by the browser downloading and re-uploading
+// each photo: it happens whenever anyone opens the Photos tab or shoots a photo on a new
+// day, with no dependence on the right screen being opened first. Idempotent — once a
+// Before newer than that last After exists (the carried copy, or one the engineer took),
+// nothing more is added. Only After photos from an EARLIER day are carried; same-day
+// photos stay as shot.
+const CARRIED_FORWARD_NOTE = "Carried forward from previous After";
+router.post(
+  "/:rungId/photos/carry-forward",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const r = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("note", sql.NVarChar(500), CARRIED_FORWARD_NOTE)
+        .input("by", sql.NVarChar(200), "system").query(`
+          DECLARE @today DATE = CAST(SYSDATETIME() AS DATE);
+          DECLARE @n INT = 0;
+          DECLARE @lastDay DATE = (
+            SELECT MAX(COALESCE(LogDate, CAST(CapturedAt AS DATE))) FROM dbo.ActivityPhoto
+            WHERE DependencyMasterActivityId = @rungId AND Phase = 'after'
+              AND COALESCE(LogDate, CAST(CapturedAt AS DATE)) < @today);
+          IF @lastDay IS NOT NULL
+          BEGIN
+            DECLARE @lastAt DATETIME2 = (
+              SELECT MAX(CapturedAt) FROM dbo.ActivityPhoto
+              WHERE DependencyMasterActivityId = @rungId AND Phase = 'after'
+                AND COALESCE(LogDate, CAST(CapturedAt AS DATE)) = @lastDay);
+            IF NOT EXISTS (SELECT 1 FROM dbo.ActivityPhoto
+                           WHERE DependencyMasterActivityId = @rungId AND Phase = 'before' AND CapturedAt >= @lastAt)
+            BEGIN
+              INSERT INTO dbo.ActivityPhoto
+                (DependencyMasterActivityId, Phase, FileName, MimeType, FileData, Note, CapturedBy, CapturedAt, LogDate)
+              SELECT DependencyMasterActivityId, 'before', FileName, MimeType, FileData, @note, @by, SYSDATETIME(), @today
+              FROM dbo.ActivityPhoto
+              WHERE DependencyMasterActivityId = @rungId AND Phase = 'after'
+                AND COALESCE(LogDate, CAST(CapturedAt AS DATE)) = @lastDay;
+              SET @n = @@ROWCOUNT;
+            END
+          END
+          SELECT @n AS carried;
+        `);
+      res.json({ carried: r.recordset[0]?.carried ?? 0 });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] POST /:rungId/photos/carry-forward error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // GET /:rungId/photos/:photoId — one photo's base64 data, always reached
 // through fetchWithAuth (never a bare <img src>) for the same auth-token

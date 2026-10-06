@@ -50,6 +50,8 @@ jest.mock("../redis", () => ({
 jest.mock("../services/approvalService", () => ({
   transition: jest.fn(async () => {}),
   guardEdit: jest.fn(async () => {}),
+  guardEditAnyStage: jest.fn(async () => "Draft"),
+  restartApprovalCycle: jest.fn(async () => {}),
   getRecordStatus: jest.fn(async () => "Draft"),
 }));
 

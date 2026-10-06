@@ -33,6 +33,7 @@ import {
   getFundTransfers,
   getFundTransfer,
   createFundTransfer,
+  updateFundTransfer,
   getFundTransferPosting,
   updateFundTransferRemarks,
   type FundTransferSummary,
@@ -203,14 +204,25 @@ function DetailRow({ label, value, mono = false }: { label: string; value: React
   );
 }
 
+// What saving an edit does to the transfer, by its current status.
+const editTitle = (status: string) =>
+  status === "Approved"
+    ? "Edit (reverses its posting and reopens for approval)"
+    : status === "Pending"
+      ? "Edit (stays pending; approval restarts)"
+      : "Edit";
+
 function TransferDetailDialog({
   ftId,
   onClose,
   onUpdated,
+  onEdit,
 }: {
   ftId: number;
   onClose: () => void;
   onUpdated?: () => void;
+  /** Open the full edit form for this transfer. */
+  onEdit?: (detail: FundTransferDetail) => void;
 }) {
   const [detail, setDetail] = useState<FundTransferDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -228,6 +240,10 @@ function TransferDetailDialog({
   const { canDoAction, currentUser } = useAuth();
   const hasPostApproval =
     ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "") || canDoAction("fund-transfer", "post-approval");
+  // Full edit: any field, any stage (an Approved one needs the post-approval right). A legacy
+  // Inter-company transfer isn't editable here — that kind now lives in Loan Sanction.
+  const canEditAll = (d: { Status: string; TransferType: string }) =>
+    rights.canEdit && d.TransferType === "Intra" && (d.Status !== "Approved" || hasPostApproval);
   const canEditRemarks =
     rights.canEdit &&
     !!detail &&
@@ -498,6 +514,15 @@ function TransferDetailDialog({
         )}
 
         <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20 flex items-center justify-between sm:justify-between">
+          {detail && onEdit && canEditAll(detail) && (
+            <button
+              onClick={() => onEdit(detail)}
+              title={editTitle(detail.Status)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm font-medium text-foreground hover:bg-muted transition-colors"
+            >
+              <Pencil size={13} /> Edit
+            </button>
+          )}
           <button
             onClick={onClose}
             className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors ml-auto"
@@ -590,6 +615,22 @@ export default function FundTransfer() {
   const [digitalRefNumber, setDigitalRefNumber] = useState("");
 
   const [selectedFTId, setSelectedFTId] = useState<number | null>(null);
+  // Editing an existing transfer reuses the New dialog; editingId set means submit() updates it.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  // The cheque this transfer already holds — its own leaf must stay selectable while editing.
+  const [heldCheque, setHeldCheque] = useState<{ lotId: number | null; no: string } | null>(null);
+  const { canDoAction: pageCanDoAction, currentUser: pageUser } = useAuth();
+  const pageHasPostApproval =
+    ["super_admin", "admin", "dba"].includes(pageUser?.role ?? "") || pageCanDoAction("fund-transfer", "post-approval");
+  const canEditRow = (t: { Status: string; TransferType: string }) =>
+    rights.canEdit && t.TransferType === "Intra" && (t.Status !== "Approved" || pageHasPostApproval);
+  const startEditById = async (id: number) => {
+    try {
+      startEdit(await getFundTransfer(id));
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to load the transfer");
+    }
+  };
 
   const isChequeMode = CHEQUE_MODES.includes(mode as FundTransferMode);
   const isDigitalMode = DIGITAL_MODES.includes(mode as FundTransferMode);
@@ -651,7 +692,11 @@ export default function FundTransfer() {
   }, [destCompanyId]);
 
   const activeLot = chequeLots.find((l) => l.CId === chequeLotId) ?? null;
-  const availableCheques = chequeNumbers.filter((c) => !c.used && !c.bounced);
+  const availableCheques = chequeNumbers.filter(
+    (c) =>
+      (!c.used && !c.bounced) ||
+      (heldCheque && c.number === heldCheque.no && chequeLotId === heldCheque.lotId),
+  );
 
   const handleLotSelect = (lotIdStr: string) => {
     const lotId = Number(lotIdStr);
@@ -714,6 +759,8 @@ export default function FundTransfer() {
   }, [sourceCompanyId, transferType]);
 
   const resetForm = () => {
+    setEditingId(null);
+    setHeldCheque(null);
     setTransferType("Intra");
     setTransferDate(new Date().toISOString().slice(0, 10));
     setSourceCompanyId("");
@@ -776,6 +823,8 @@ export default function FundTransfer() {
 
   useEffect(() => {
     if (!ftDraftHydrated) return;
+    // An edit is not a draft of a new transfer — never save it as one.
+    if (editingId !== null) return;
     const isDirty =
       !!sourceCompanyId || !!destCompanyId || !!amount || !!narration.trim() || !!mode;
     try {
@@ -794,9 +843,30 @@ export default function FundTransfer() {
       // localStorage unavailable — the draft simply won't persist.
     }
   }, [
-    ftDraftHydrated, transferType, transferDate, sourceCompanyId, destCompanyId, sourceBankId,
+    ftDraftHydrated, editingId, transferType, transferDate, sourceCompanyId, destCompanyId, sourceBankId,
     destBankId, amount, narration, mode, chequeLotNumber, chequeNo, chequeDate, digitalRefNumber,
   ]);
+
+  const startEdit = (d: FundTransferDetail) => {
+    setEditingId(d.FTId);
+    setHeldCheque(d.ChequeNo ? { lotId: d.ChequeLotId ?? null, no: d.ChequeNo } : null);
+    setTransferType(d.TransferType);
+    setTransferDate((d.TransferDate || "").slice(0, 10) || new Date().toISOString().slice(0, 10));
+    setSourceCompanyId(String(d.SourceCompanyId));
+    setDestCompanyId(String(d.DestinationCompanyId));
+    setSourceBankId(String(d.SourceBankId));
+    setDestBankId(String(d.DestinationBankId));
+    setAmount(String(d.Amount ?? ""));
+    setNarration(d.Narration || "");
+    setMode((d.Mode || "") as FundTransferMode | "");
+    setChequeLotId(d.ChequeLotId ?? null);
+    setChequeLotNumber(d.ChequeLotNumber || "");
+    setChequeNo(d.ChequeNo || "");
+    setChequeDate((d.ChequeDate || "").slice(0, 10));
+    setDigitalRefNumber(d.DigitalRefNumber || "");
+    setSelectedFTId(null);
+    setDialogOpen(true);
+  };
 
   const handleModeChange = (m: FundTransferMode) => {
     setMode(m);
@@ -833,7 +903,7 @@ export default function FundTransfer() {
 
     setSaving(true);
     try {
-      await createFundTransfer({
+      const payload = {
         TransferDate: transferDate,
         TransferType: transferType,
         SourceCompanyId: parseInt(sourceCompanyId, 10),
@@ -850,13 +920,19 @@ export default function FundTransfer() {
           ChequeDate: chequeDate,
         } : {}),
         ...(isDigitalMode && digitalRefNumber ? { DigitalRefNumber: digitalRefNumber } : {}),
-      });
-      toast.success("Fund Transfer created and submitted for approval");
+      };
+      if (editingId) {
+        const result = await updateFundTransfer(editingId, payload);
+        toast.success(result.message || "Fund Transfer updated");
+      } else {
+        await createFundTransfer(payload);
+        toast.success("Fund Transfer created and submitted for approval");
+      }
       setDialogOpen(false);
       resetForm();
       load();
     } catch (err: any) {
-      toast.error(err?.message || "Failed to create Fund Transfer");
+      toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} Fund Transfer`);
     } finally {
       setSaving(false);
     }
@@ -1048,19 +1124,20 @@ export default function FundTransfer() {
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Mode</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Status</th>
+                <th className="w-10 px-2 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-16 text-center">
+                  <td colSpan={8} className="py-16 text-center">
                     <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
                     <p className="text-sm text-muted-foreground mt-2">Loading transfers…</p>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-20 text-center">
+                  <td colSpan={8} className="py-20 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <ArrowLeftRight size={36} className="opacity-20" />
                       <p className="text-sm font-medium">
@@ -1111,6 +1188,17 @@ export default function FundTransfer() {
                       {formatINR(t.Amount || 0)}
                     </td>
                     <td className="px-4 py-3"><StatusBadge status={t.Status} /></td>
+                    <td className="px-2 py-3 text-right">
+                      {canEditRow(t) && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startEditById(t.FTId); }}
+                          title={editTitle(t.Status)}
+                          className="w-7 h-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))
               )}
@@ -1128,7 +1216,7 @@ export default function FundTransfer() {
       </FinanceShell>
 
       {selectedFTId != null && (
-        <TransferDetailDialog ftId={selectedFTId} onClose={() => setSelectedFTId(null)} onUpdated={load} />
+        <TransferDetailDialog ftId={selectedFTId} onClose={() => setSelectedFTId(null)} onUpdated={load} onEdit={startEdit} />
       )}
 
       {/* ── New Fund Transfer Dialog ── */}
@@ -1140,9 +1228,11 @@ export default function FundTransfer() {
                 <ArrowLeftRight size={18} className="text-primary" />
               </div>
               <div className="min-w-0">
-                <DialogTitle className="text-base font-semibold font-heading">New Fund Transfer</DialogTitle>
+                <DialogTitle className="text-base font-semibold font-heading">{editingId ? "Edit Fund Transfer" : "New Fund Transfer"}</DialogTitle>
                 <DialogDescription className="text-xs mt-0.5">
-                  Move cash between two banks of the same company. Moving money between two different companies is a loan — use the Loan Sanction module for that instead.
+                  {editingId
+                    ? "Every field can be changed. An approved transfer has its GL posting reversed and goes back for approval; a pending one stays pending and its approval restarts."
+                    : "Move cash between two banks of the same company. Moving money between two different companies is a loan — use the Loan Sanction module for that instead."}
                 </DialogDescription>
               </div>
             </div>
@@ -1457,7 +1547,7 @@ export default function FundTransfer() {
 
           <DialogFooter className="shrink-0 px-4 sm:px-7 py-3 border-t border-border bg-muted/20">
             <button
-              onClick={() => setDialogOpen(false)}
+              onClick={() => { setDialogOpen(false); if (editingId) resetForm(); }}
               className="w-full sm:w-auto px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
             >
               Cancel
@@ -1468,7 +1558,7 @@ export default function FundTransfer() {
               className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
             >
               {saving && <Loader2 size={13} className="animate-spin" />}
-              Submit for Approval
+              {editingId ? "Save Changes" : "Submit for Approval"}
             </button>
           </DialogFooter>
         </DialogContent>
