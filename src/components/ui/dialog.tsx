@@ -62,7 +62,14 @@ export function dedupeCloseControls(el: HTMLElement, anchor: HTMLElement | null)
     !!b.querySelector("svg.lucide-x, svg.lucide-circle-x, svg.lucide-x-circle") &&
     !(b.textContent || "").replace(/close/i, "").trim();
   const buttons = Array.from(el.querySelectorAll<HTMLElement>("button")).filter((b) => !anchor?.contains(b));
-  const ownX = buttons.find(isXIcon);
+  // Only an × in the dialog's top-right corner counts as its own close button
+  // (not the little × on tag chips, file rows, search clears, etc.).
+  const box = el.getBoundingClientRect();
+  const inCorner = (b: Element) => {
+    const r = b.getBoundingClientRect();
+    return r.width > 0 && r.top - box.top < 96 && box.right - r.right < 140;
+  };
+  const ownX = buttons.find((b) => isXIcon(b) && inCorner(b));
   if (builtIn) builtIn.toggleAttribute("data-dup-close", !!ownX);
   const hasX = !!ownX || (!!builtIn && !builtIn.hasAttribute("data-dup-close"));
   el.querySelectorAll("[data-dup-close-bar]").forEach((x) => x.removeAttribute("data-dup-close-bar"));

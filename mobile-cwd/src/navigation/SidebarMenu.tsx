@@ -1,170 +1,173 @@
-// RN port of the web app's MobileNav.tsx nav-item-list styling — a
-// module-colored FAB (bottom-right, same trigger idea as web's) opens a
-// full-screen slide-up sheet listing every screen this app has: rounded
-// rows with an icon chip, active-state accent border/background and a
-// trailing dot, exactly like web MobileNav's `navItems.map(...)` block.
-// This app is single-module (no module-switcher strip or Setup tab needed,
-// unlike web's multi-module version) — just the plain nav list.
-//
-// Replaces BottomPillNav as this app's sole navigation surface: a
-// single-tab pill bar stopped making sense once there were five real
-// screens to reach.
-import { useEffect, useState } from "react";
-import { View, Text, Pressable, Modal, Animated } from "react-native";
+// Same navigation surface as the Finance & Material app's NavSheet.tsx: a pulsing floating trigger opens a
+// bottom sheet with the signed-in user (profile / sign out / close), the module strip and that module's
+// screens. This app is single-module, so the strip holds just Civil DPR, always selected.
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Home, ClipboardList, Grip, X } from "lucide-react-native";
+import { Home, ArrowRightLeft, GitBranch, Hammer, FileBarChart, ShieldCheck, Grip, X, User, LogOut, Pickaxe } from "lucide-react-native";
+import { useAuth } from "@/auth/AuthContext";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { navigationRef } from "./navigationRef";
 import type { MainStackParamList } from "./MainStack";
 
 const ACCENT = "#0891b2";
-const ACCENT_SOFT = "#67e8f9";
 
-type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "Activities">;
+type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "WorkTransfer" | "DependencyManagement" | "WorkAllocation" | "Reporting" | "QualityCheck">;
+type NavItemDef = { route: NavRoute; label: string; icon: React.ComponentType<{ size?: number; color?: string }>; params?: object; key: string };
 
-const NAV_ITEMS: { route: NavRoute; label: string; icon: React.ComponentType<{ size?: number; color?: string }> }[] = [
-  { route: "Dashboard",  label: "Dashboard",  icon: Home          },
-  { route: "Activities", label: "Activities", icon: ClipboardList },
+const NAV_ITEMS: NavItemDef[] = [
+  { key: "Dashboard",  route: "Dashboard",  label: "Dashboard",     icon: Home          },
+  { key: "Transfer",   route: "WorkTransfer", label: "Work Transfer", icon: ArrowRightLeft },
+  { key: "Dependency", route: "DependencyManagement", label: "Dependency Management", icon: GitBranch },
+  { key: "Allocation", route: "WorkAllocation", label: "Work Allocation", icon: Hammer },
+  { key: "Reporting",  route: "Reporting",  label: "Work Reporting", icon: FileBarChart },
+  { key: "Quality",    route: "QualityCheck", label: "Quality Check",  icon: ShieldCheck },
 ];
 
 export function SidebarMenu({ activeRoute }: { activeRoute: string }) {
-  const [open, setOpen] = useState(false);
   const insets = useSafeAreaInsets();
-  const slide = useState(() => new Animated.Value(0))[0];
+  const { currentUser, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const slide = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
 
+  // Pulsing halo behind the trigger (web MobileNav's animate-pulse glow).
   useEffect(() => {
-    Animated.timing(slide, { toValue: open ? 1 : 0, duration: 220, useNativeDriver: true }).start();
-  }, [open, slide]);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1000, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 900, easing: Easing.in(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
 
-  const go = (route: NavRoute) => {
-    setOpen(false);
-    if (navigationRef.isReady() && route !== activeRoute) navigationRef.navigate(route);
+  const openSheet = () => {
+    setOpen(true);
+    Animated.spring(slide, { toValue: 1, useNativeDriver: true, bounciness: 6, speed: 16 }).start();
   };
+  const closeSheet = () => {
+    Animated.timing(slide, { toValue: 0, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => setOpen(false));
+  };
+
+  const go = (item: NavItemDef) => {
+    closeSheet();
+    // Same screen with a different filter (Activities → Quality Check) still has to navigate.
+    if (navigationRef.isReady() && (item.route !== activeRoute || item.params)) {
+      (navigationRef.navigate as (name: string, params?: object) => void)(item.route, item.params);
+    }
+  };
+  const goProfile = () => {
+    closeSheet();
+    if (navigationRef.isReady()) navigationRef.navigate("Profile" as never);
+  };
+
+  const initials = (currentUser?.name ?? "?").split(" ").filter(Boolean).map((n) => n[0]).join("").toUpperCase().slice(0, 2);
 
   return (
     <>
-      {/* ── FAB trigger ─────────────────────────────────────────────────── */}
-      <Pressable
-        onPress={() => setOpen(true)}
-        style={{
-          position: "absolute",
-          right: 20,
-          bottom: insets.bottom + 20,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 8,
-          paddingHorizontal: 16,
-          paddingVertical: 13,
-          borderRadius: 16,
-          backgroundColor: ACCENT,
-          shadowColor: "#000",
-          shadowOpacity: 0.35,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 6 },
-          elevation: 10,
-        }}
-      >
-        <Grip size={16} color="#04181d" />
-        <Text style={{ fontSize: 12, fontFamily: fonts.heading.bold, color: "#04181d" }}>Menu</Text>
-      </Pressable>
-
-      {/* ── Full-screen slide-up sheet ──────────────────────────────────── */}
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.65)" }} onPress={() => setOpen(false)}>
-          <Animated.View
-            onStartShouldSetResponder={() => true}
+      {/* Trigger */}
+      <View style={{ position: "absolute", right: 20, bottom: insets.bottom + 20 }}>
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute", top: 0, left: 0, right: 0, bottom: 0, borderRadius: 20, backgroundColor: ACCENT,
+            opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] }),
+            transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] }) }],
+          }}
+        />
+        <Pressable onPress={openSheet}>
+          <View
             style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: 0,
-              maxHeight: "80%",
-              borderTopLeftRadius: 28,
-              borderTopRightRadius: 28,
-              backgroundColor: colors.card,
-              borderWidth: 1,
-              borderColor: colors.border,
-              paddingBottom: insets.bottom + 12,
-              transform: [
-                {
-                  translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }),
-                },
-              ],
-              opacity: slide,
+              flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16,
+              backgroundColor: ACCENT, shadowColor: ACCENT, shadowOpacity: 0.5, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8,
             }}
           >
-            {/* Accent bar */}
-            <View style={{ height: 3, borderTopLeftRadius: 28, borderTopRightRadius: 28, backgroundColor: ACCENT }} />
+            <Grip size={16} color="#fff" />
+            <Text style={{ color: "#fff", fontSize: 12, fontFamily: fonts.heading.semibold }}>Module</Text>
+          </View>
+        </Pressable>
+      </View>
 
-            {/* Drag handle */}
-            <View style={{ alignItems: "center", paddingTop: 10, paddingBottom: 4 }}>
-              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${colors.mutedForeground}4d` }} />
-            </View>
+      {/* One animated value drives both the backdrop and the sheet, so they move together. */}
+      <Modal visible={open} transparent animationType="none" onRequestClose={closeSheet}>
+        <Animated.View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", opacity: slide }}>
+          <Pressable style={{ flex: 1 }} onPress={closeSheet} />
+          <Animated.View
+            style={{
+              position: "absolute", left: 0, right: 0, bottom: 0, maxHeight: "85%", backgroundColor: colors.card,
+              borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: colors.border, overflow: "hidden",
+              transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [400, 0] }) }],
+            }}
+          >
+            <Pressable onPress={() => {}}>
+              <View style={{ height: 3, backgroundColor: ACCENT }} />
+              <View style={{ alignItems: "center", paddingTop: 8, paddingBottom: 4 }}>
+                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: `${colors.mutedForeground}4d` }} />
+              </View>
 
-            {/* Header row */}
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 18, paddingVertical: 12 }}>
-              <Text style={{ fontSize: 10, fontFamily: fonts.heading.bold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 1.6 }}>
-                Navigation
-              </Text>
-              <Pressable
-                onPress={() => setOpen(false)}
-                style={{ width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border }}
-              >
-                <X size={13} color={colors.mutedForeground} />
-              </Pressable>
-            </View>
+              {/* User row */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 12 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: ACCENT }}>
+                  <Text style={{ color: "#fff", fontSize: 13, fontFamily: fonts.heading.bold }}>{initials}</Text>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold }}>{currentUser?.name}</Text>
+                  <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular }}>{currentUser?.email}</Text>
+                </View>
+                <Pressable onPress={goProfile} style={{ width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border }}>
+                  <User size={15} color={colors.mutedForeground} />
+                </Pressable>
+                <Pressable
+                  onPress={() => { closeSheet(); logout(); }}
+                  style={{ width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: `${colors.destructive}4d` }}
+                >
+                  <LogOut size={15} color={colors.destructive} />
+                </Pressable>
+                <Pressable onPress={closeSheet} style={{ width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border }}>
+                  <X size={15} color={colors.mutedForeground} />
+                </Pressable>
+              </View>
 
-            {/* Nav items */}
-            <View style={{ paddingHorizontal: 14, paddingBottom: 8, gap: 3 }}>
+              {/* Module strip */}
+              <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingBottom: 12, gap: 8 }}>
+                <View
+                  style={{
+                    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8,
+                    borderRadius: 8, borderWidth: 1, borderColor: ACCENT, backgroundColor: `${ACCENT}1f`,
+                  }}
+                >
+                  <Pickaxe size={13} color={ACCENT} />
+                  <Text style={{ color: ACCENT, fontSize: 11, fontFamily: fonts.heading.medium }}>Civil DPR</Text>
+                  <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: ACCENT, marginLeft: 2 }} />
+                </View>
+              </View>
+            </Pressable>
+
+            {/* Module screens */}
+            <ScrollView style={{ paddingHorizontal: 16, paddingTop: 4 }} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
               {NAV_ITEMS.map((item) => {
-                const active = item.route === activeRoute;
+                const active = item.route === activeRoute || (item.route === "QualityCheck" && activeRoute === "QcInspect") || (item.route === "WorkAllocation" && activeRoute === "AllocationForm");
                 const Icon = item.icon;
                 return (
                   <Pressable
-                    key={item.route}
-                    onPress={() => go(item.route)}
+                    key={item.key}
+                    onPress={() => go(item)}
                     style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 12,
-                      paddingHorizontal: 12,
-                      paddingVertical: 11,
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      borderColor: active ? `${ACCENT}59` : "transparent",
-                      backgroundColor: active ? `${ACCENT}1a` : "transparent",
+                      flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 12, marginBottom: 6,
+                      borderWidth: 1, borderColor: active ? `${ACCENT}4d` : "transparent", backgroundColor: active ? `${ACCENT}1f` : "transparent",
                     }}
                   >
-                    <View
-                      style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: 10,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor: active ? `${ACCENT}26` : colors.muted,
-                      }}
-                    >
-                      <Icon size={15} color={active ? ACCENT_SOFT : colors.mutedForeground} />
-                    </View>
-                    <Text
-                      style={{
-                        flex: 1,
-                        fontSize: 13.5,
-                        fontFamily: active ? fonts.heading.semibold : fonts.body.medium,
-                        color: active ? ACCENT_SOFT : colors.foreground,
-                      }}
-                    >
-                      {item.label}
-                    </Text>
-                    {active && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: ACCENT_SOFT }} />}
+                    <Icon size={14} color={active ? ACCENT : colors.mutedForeground} />
+                    <Text style={{ color: active ? ACCENT : colors.foreground, fontSize: 11.5, fontFamily: fonts.body.medium }}>{item.label}</Text>
                   </Pressable>
                 );
               })}
-            </View>
+            </ScrollView>
           </Animated.View>
-        </Pressable>
+        </Animated.View>
       </Modal>
     </>
   );

@@ -24,6 +24,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.rajwadainfotech.civiliercwd",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "REQUEST_INSTALL_PACKAGES"
       ]
@@ -45,6 +46,11 @@
         }
       ]
     ],
-    "owner": "grenxnja"
+    "owner": "grenxnja",
+    "extra": {
+      "eas": {
+        "projectId": "dcea2c7e-68f1-4541-bf09-55f12e4c296a"
+      }
+    }
   }
 }

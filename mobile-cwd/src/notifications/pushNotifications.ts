@@ -9,22 +9,38 @@
 // configured, a denied permission, or a flaky connection must not break login.
 // Identical in every Civilier mobile app; only the `appKey` differs.
 import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
-import Constants from "expo-constants";
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
 const TOKEN_KEY = "push_token";
 
-// While the app is open, still show the notification as a banner.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Expo Go can't do push notifications (removed in SDK 53) — loading expo-notifications there throws at
+// import time and takes the whole app down with it. So the module is only ever loaded outside Expo Go
+// (a development build or a real APK), and every caller treats `null` as "push isn't available here".
+export const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+
+type NotificationsModule = typeof import("expo-notifications");
+let loaded: NotificationsModule | null | undefined;
+
+export function getNotifications(): NotificationsModule | null {
+  if (isExpoGo || Platform.OS === "web") return null;
+  if (loaded === undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const N: NotificationsModule = require("expo-notifications");
+    // While the app is open, still show the notification as a banner.
+    N.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+    loaded = N;
+  }
+  return loaded;
+}
 
 async function post(path: string, body: unknown): Promise<boolean> {
   try {
@@ -37,7 +53,8 @@ async function post(path: string, body: unknown): Promise<boolean> {
 
 /** Returns the Expo push token once it is registered with the backend, else null. */
 export async function registerForPushAsync(appKey: string): Promise<string | null> {
-  if (Platform.OS === "web") return null;
+  const Notifications = getNotifications();
+  if (!Notifications) return null;
   try {
     // Android needs a channel before it will show the permission prompt (13+) or any notification.
     if (Platform.OS === "android") {

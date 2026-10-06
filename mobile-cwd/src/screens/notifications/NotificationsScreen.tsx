@@ -1,6 +1,6 @@
 // Client-derived alerts for the Civil Work DPR app — see hooks/useCwdAlerts.ts —
 // dark-card styling to match the app shell.
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { Bell, ChevronRight, Info, PauseCircle, RotateCcw } from "lucide-react-native";
 import { useState } from "react";
 import { fonts } from "@/theme/fonts";
@@ -71,19 +71,20 @@ export default function NotificationsScreen() {
             const m = META[alert.type];
             const Icon = m.icon;
             return (
-              <Pressable
+              <TouchableOpacity
                 key={alert.id}
+                activeOpacity={0.8}
                 onPress={() => navigate(alert.route as never, alert.params as never)}
-                style={({ pressed }) => ({
+                style={{
                   flexDirection: "row",
                   alignItems: "flex-start",
                   gap: 12,
                   borderRadius: 14,
                   borderWidth: 1,
-                  borderColor: pressed ? m.color : m.border,
-                  backgroundColor: pressed ? m.wash : colors.card,
+                  borderColor: m.border,
+                  backgroundColor: colors.card,
                   padding: 14,
-                })}
+                }}
               >
                 <View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: m.wash, alignItems: "center", justifyContent: "center" }}>
                   <Icon size={16} color={m.color} />
@@ -107,7 +108,7 @@ export default function NotificationsScreen() {
                   </View>
                 </View>
                 <ChevronRight size={14} color={colors.mutedForeground} style={{ marginTop: 2 }} />
-              </Pressable>
+              </TouchableOpacity>
             );
           })}
         </View>
