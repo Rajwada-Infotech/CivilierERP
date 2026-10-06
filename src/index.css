@@ -2240,3 +2240,13 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
     color: hsl(0 0% 10%) !important;
     -webkit-text-fill-color: hsl(0 0% 10%) !important;
 }
+
+/* BW: white text/icons sitting on a gradient that BW turned light grey (avatars, chips) → dark. */
+[data-theme="bw"] [class*="bg-gradient-to-"]:not(.btn-module):not(.h-full):not(.w-1):not(.w-0\.5) :is(.text-white, [class*="text-white/"]),
+[data-theme="bw"] [class*="bg-gradient-to-"]:not(.btn-module):not(.h-full):not(.w-1):not(.w-0\.5):is(.text-white, [class*="text-white/"]) {
+    color: hsl(0 0% 15%) !important;
+}
+[data-theme="bw"] [class*="bg-gradient-to-"]:is(.rounded-full, .rounded-xl, .rounded-lg, .rounded-2xl):not(.btn-module):has(> .text-white, > svg) {
+    background-color: hsl(0 0% 88%) !important;
+    border: 1px solid hsl(0 0% 78%);
+}
