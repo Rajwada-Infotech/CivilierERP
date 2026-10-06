@@ -46,6 +46,12 @@ router.get("/", async (req, res) => {
       recentAssignments,
       assignedTimeline,
       completedTimeline,
+      currentByStatus,
+      pace,
+      qcSplit,
+      projectRows,
+      overdueRows,
+      engineerRows,
     ] = await Promise.all([
       // ── Activities ──────────────────────────────────────────────────────────
       pool.request().query(`
@@ -135,11 +141,125 @@ router.get("/", async (req, res) => {
           AND CAST(UpdatedAt AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE)) ${rungInScope}
         GROUP BY CAST(UpdatedAt AS DATE)
       `),
+
+      // ── What's live NOW: only each activity's CURRENT attempt (the queries above count every attempt,
+      // so a reworked activity shows up twice there). ─────────────────────────────────────────────────
+      pool.request().query(`
+        SELECT Status, COUNT(*) AS Cnt
+        FROM dbo.DependencyActivityAssignment
+        WHERE IsCurrent = 1 ${rungInScope}
+        GROUP BY Status
+      `),
+
+      // Overdue / due soon / average progress / this week vs last week — current attempts only.
+      pool.request().query(`
+        SELECT
+          COUNT(CASE WHEN Status IN ('ALLOCATED','IN_PROGRESS','HOLD','REWORK')
+                      AND EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE)) THEN 1 END)                   AS Overdue,
+          COUNT(CASE WHEN Status IN ('ALLOCATED','IN_PROGRESS','HOLD')
+                      AND EndDate >= CAST(GETDATE() AS DATE)
+                      AND EndDate <= DATEADD(DAY, 2, CAST(GETDATE() AS DATE)) THEN 1 END) AS DueSoon,
+          AVG(CASE WHEN Status IN ('IN_PROGRESS','HOLD') THEN CAST(ISNULL(ProgressPercent, 0) AS FLOAT) END) AS AvgProgress,
+          COUNT(CASE WHEN Status IN ('COMPLETED','APPROVED')
+                      AND UpdatedAt >= DATEADD(DAY, -6, CAST(GETDATE() AS DATE)) THEN 1 END)  AS DoneThisWeek,
+          COUNT(CASE WHEN Status IN ('COMPLETED','APPROVED')
+                      AND UpdatedAt >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+                      AND UpdatedAt <  DATEADD(DAY, -6, CAST(GETDATE() AS DATE)) THEN 1 END)  AS DoneLastWeek
+        FROM dbo.DependencyActivityAssignment
+        WHERE IsCurrent = 1 ${rungInScope}
+      `),
+
+      // Completed work, split into "waiting for Quality Check" and "QC passed, waiting for approval".
+      pool.request().query(`
+        SELECT
+          COUNT(*)                                                    AS Completed,
+          COUNT(CASE WHEN qc.AssignmentId IS NULL THEN 1 END)          AS AwaitingQc
+        FROM dbo.DependencyActivityAssignment daa
+        LEFT JOIN (SELECT DISTINCT AssignmentId FROM dbo.DependencyActivityQc WHERE Decision = 'APPROVED') qc
+               ON qc.AssignmentId = daa.Id
+        WHERE daa.IsCurrent = 1 AND daa.Status = 'COMPLETED' ${rungInScope}
+      `),
+
+      // Progress by project — biggest first.
+      pool.request().query(`
+        SELECT TOP 6
+          ep.name AS ProjectName,
+          COUNT(*) AS Total,
+          COUNT(CASE WHEN daa.Status IN ('COMPLETED','APPROVED') THEN 1 END) AS Done,
+          COUNT(CASE WHEN daa.Status = 'IN_PROGRESS' THEN 1 END) AS InProgress,
+          COUNT(CASE WHEN daa.Status IN ('ALLOCATED','IN_PROGRESS','HOLD','REWORK')
+                      AND daa.EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE)) THEN 1 END) AS Overdue,
+          AVG(CAST(CASE WHEN daa.Status IN ('COMPLETED','APPROVED') THEN 100 ELSE ISNULL(daa.ProgressPercent, 0) END AS FLOAT)) AS AvgProgress
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        WHERE daa.IsCurrent = 1 AND daa.Status <> 'CANCELLED'${dmProject}
+        GROUP BY ep.name
+        ORDER BY COUNT(*) DESC
+      `),
+
+      // The five most overdue activities.
+      pool.request().query(`
+        SELECT TOP 5
+          daa.DependencyMasterActivityId AS RungId,
+          am.activity_name               AS ActivityName,
+          ep.name                        AS ProjectName,
+          CONCAT(ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor, ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')) AS ScopePath,
+          daa.Status                     AS Status,
+          daa.EndDate                    AS EndDate,
+          DATEDIFF(DAY, daa.EndDate, CAST(GETDATE() AS DATE)) AS DaysOverdue,
+          ISNULL(daa.ProgressPercent, 0) AS ProgressPercent,
+          (
+            SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+            FROM dbo.DependencyActivityEngineer dae
+            JOIN dbo.users u ON u.id = dae.EngineerId
+            WHERE dae.AssignmentId = daa.Id
+          )                              AS EngineerNames
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster rm ON rm.Id = dm.RoomId
+        WHERE daa.IsCurrent = 1
+          AND daa.Status IN ('ALLOCATED','IN_PROGRESS','HOLD','REWORK')
+          AND daa.EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE))${dmProject}
+        ORDER BY daa.EndDate ASC
+      `),
+
+      // Who's carrying the most live work, and how much of it is late.
+      pool.request().query(`
+        SELECT TOP 5
+          u.name AS Name,
+          COUNT(*) AS Active,
+          COUNT(CASE WHEN daa.EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE)) THEN 1 END) AS Overdue
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyActivityEngineer dae ON dae.AssignmentId = daa.Id
+        JOIN dbo.users u ON u.id = dae.EngineerId
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        WHERE daa.IsCurrent = 1 AND daa.Status IN ('ALLOCATED','IN_PROGRESS','HOLD','REWORK')${dmProject}
+        GROUP BY u.name
+        ORDER BY COUNT(*) DESC
+      `),
     ]);
 
     const act = activityStats.recordset[0];
     const alloc = allocationStats.recordset[0];
     const labour = labourStats.recordset[0];
+
+    const currentMap = {};
+    let total = 0;
+    for (const row of currentByStatus.recordset) {
+      currentMap[row.Status] = row.Cnt;
+      total += row.Cnt;
+    }
+    const totalExCancelled = total - (currentMap.CANCELLED || 0);
+    const pc = pace.recordset[0];
+    const qcs = qcSplit.recordset[0];
 
     // One row per status, each carrying its own today-count (rows created
     // today under that status) — sum both across rows for the totals.
@@ -202,6 +322,42 @@ router.get("/", async (req, res) => {
         reworkCount: assignedWorkByStatus.REWORK || 0,
       },
       recentAssignments: recentAssignments.recordset,
+      // Live picture (current attempts only) — what the mobile dashboard is built on.
+      current: {
+        total,
+        byStatus: currentMap,
+        active: (currentMap.ALLOCATED || 0) + (currentMap.IN_PROGRESS || 0) + (currentMap.HOLD || 0) + (currentMap.REWORK || 0),
+        completionRate: totalExCancelled ? Math.round((((currentMap.COMPLETED || 0) + (currentMap.APPROVED || 0)) / totalExCancelled) * 100) : 0,
+      },
+      insights: {
+        overdue: pc.Overdue,
+        dueSoon: pc.DueSoon,
+        avgProgress: pc.AvgProgress == null ? null : Math.round(pc.AvgProgress),
+        doneThisWeek: pc.DoneThisWeek,
+        doneLastWeek: pc.DoneLastWeek,
+        awaitingQc: qcs.AwaitingQc,
+        awaitingApproval: Math.max(0, qcs.Completed - qcs.AwaitingQc),
+      },
+      projects: projectRows.recordset.map((r) => ({
+        name: r.ProjectName || "Unassigned",
+        total: r.Total,
+        done: r.Done,
+        inProgress: r.InProgress,
+        overdue: r.Overdue,
+        avgProgress: Math.round(r.AvgProgress || 0),
+      })),
+      overdueList: overdueRows.recordset.map((r) => ({
+        rungId: r.RungId,
+        activityName: r.ActivityName,
+        projectName: r.ProjectName,
+        scopePath: r.ScopePath,
+        status: r.Status,
+        endDate: r.EndDate,
+        daysOverdue: r.DaysOverdue,
+        progressPercent: r.ProgressPercent,
+        engineerNames: r.EngineerNames,
+      })),
+      engineerLoad: engineerRows.recordset.map((r) => ({ name: r.Name, active: r.Active, overdue: r.Overdue })),
       assignmentTimeline,
       asOf: new Date().toISOString(),
     });

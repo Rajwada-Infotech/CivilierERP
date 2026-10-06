@@ -14,7 +14,23 @@ import { usePageRights } from "@/hooks/usePageRights";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
 const ACCENT = "#0891b2";
-const FILTERS = ["ALL", "IN_PROGRESS", "HOLD", "REWORK", "COMPLETED", "ALLOCATED", "APPROVED"] as const;
+const FILTERS = ["ALL", "OVERDUE", "DUE_SOON", "IN_PROGRESS", "HOLD", "REWORK", "COMPLETED", "ALLOCATED", "APPROVED"] as const;
+const FILTER_LABEL: Record<string, string> = { ALL: "All", OVERDUE: "Overdue", DUE_SOON: "Due soon" };
+
+// Same rules as the dashboard's counts: overdue = still live and past its end date (junk dates ignored);
+// due soon = live and finishing within 2 days.
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function matchesFilter(a: ActivityAssignment, filter: string): boolean {
+  if (filter === "ALL") return true;
+  if (filter !== "OVERDUE" && filter !== "DUE_SOON") return a.status === filter;
+  const end = a.endDate?.slice(0, 10);
+  if (!end || end < "2000-01-01") return false;
+  const today = iso(new Date());
+  if (filter === "OVERDUE") return ["ALLOCATED", "IN_PROGRESS", "HOLD", "REWORK"].includes(a.status) && end < today;
+  const soon = new Date();
+  soon.setDate(soon.getDate() + 2);
+  return ["ALLOCATED", "IN_PROGRESS", "HOLD"].includes(a.status) && end >= today && end <= iso(soon);
+}
 
 const fmtDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—";
@@ -65,7 +81,7 @@ export default function ActivitiesScreen() {
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return (q.data ?? []).filter((a) => {
-      if (filter !== "ALL" && a.status !== filter) return false;
+      if (!matchesFilter(a, filter)) return false;
       if (!needle) return true;
       return [a.activityName, a.scopePath, a.projectName, a.engineerNames].some((v) => (v ?? "").toLowerCase().includes(needle));
     });
@@ -115,7 +131,7 @@ export default function ActivitiesScreen() {
                 style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: on ? ACCENT : colors.border, backgroundColor: on ? `${ACCENT}22` : "transparent" }}
               >
                 <Text style={{ fontSize: 11, fontFamily: fonts.heading.semibold, color: on ? ACCENT : colors.mutedForeground }}>
-                  {item === "ALL" ? "All" : STATUS_LABEL[item]}
+                  {FILTER_LABEL[item] ?? STATUS_LABEL[item]}
                 </Text>
               </Pressable>
             );
