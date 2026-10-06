@@ -677,7 +677,7 @@ const CrmPlotMaster: React.FC = () => {
             const missing = rows.filter((row) => !row.bua).length;
             const label = "mb-1.5 block text-xs font-medium text-muted-foreground";
             const input = "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
-            const canSubmit = !converting && !!unitKind && Number(villaRate) > 0 && (!many || conversionConfirmed) && missing === 0
+            const canSubmit = !converting && !!unitKind && (!many || conversionConfirmed) && missing === 0
               && (separate || (!!unitName.trim() && !!unitType && Number(builtUpArea) > 0));
             return (
               <>
