@@ -75,6 +75,7 @@ import {
   printMaterialRequest,
   downloadMaterialRequestPdf,
 } from "@/utils/materialRequestDocument";
+import { printPurchaseOrder, downloadPurchaseOrderPdf } from "@/utils/purchaseOrderDocument";
 
 // ─── Approval chain types — matches GET /api/approval-workflows/trail ────────
 
@@ -554,6 +555,9 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     );
   };
   const useMrDocument = item.Module === "material-requests" && !!detail;
+  // Purchase Orders likewise use their own letterhead document once the full
+  // record (with LineItems) has loaded.
+  const usePoDocument = item.Module === "purchase-orders" && !!detail;
 
   const docActions = (
     <div className="flex items-center gap-1.5 shrink-0">
@@ -561,6 +565,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         onClick={async () => {
           if (useMrDocument) {
             printMaterialRequest(await mrDocument());
+            return;
+          }
+          if (usePoDocument) {
+            await printPurchaseOrder({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status });
             return;
           }
           printMasterPreview({
@@ -580,6 +588,12 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         onClick={() => {
           const toastId = toast.loading("Generating PDF...");
           const filename = `${(item.Reference || item.RecordId || "document").replace(/[^\w-]+/g, "_")}.pdf`;
+          if (usePoDocument) {
+            downloadPurchaseOrderPdf({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status }, filename)
+              .then(() => toast.success("PDF downloaded", { id: toastId }))
+              .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+            return;
+          }
           if (useMrDocument) {
             mrDocument()
               .then((doc) => downloadMaterialRequestPdf(doc, filename))
