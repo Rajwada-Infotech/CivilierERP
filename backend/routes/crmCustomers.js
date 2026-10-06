@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -239,7 +239,7 @@ router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) =
         FROM dbo.CrmPaymentMilestone m
         JOIN dbo.CrmBooking b ON b.Id = m.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE a.CustomerId = @id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+        WHERE a.CustomerId = @id AND b.IsActive = 1 AND b.Status NOT IN ${DEAD_BOOKING_SQL}
       `),
     ]);
     if (!custRes.recordset.length) return res.status(404).json({ error: "Customer not found" });
