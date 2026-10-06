@@ -2,6 +2,9 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a cancellation belongs to its booking's project.
+const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmCancellation c JOIN dbo.CrmBooking b ON b.Id = c.BookingId WHERE c.Id = @id"));
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -181,6 +184,7 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("c.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
@@ -244,6 +248,8 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    const villaOnLand = await require("../services/villaLand").villaBookedOnLandOf(pool, bookingId);
+    if (villaOnLand) return res.status(409).json({ error: `The villa built on this land is booked (${villaOnLand}). Cancel the villa booking first — the land can't be cancelled from under it.` });
 
     // Explicit duplicate guard — clearer error than relying on a DB UNIQUE catch.
     const existingCancel = await pool.request().input("bid", sql.Int, bookingId)
@@ -263,7 +269,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
       .query(`
         SELECT 
           (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid) +
-          (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS TotalPaid
+          (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid AND ISNULL(Status,'') <> 'Held') AS TotalPaid
       `);
     const totalPaid = paidRes.recordset[0].TotalPaid || 0;
 
@@ -419,6 +425,9 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       .query("SELECT BookingId, CancellationNo, AmountPaidTillDate, DeductionPercent, Notes FROM dbo.CrmCancellation WHERE Id = @id");
     if (!before.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
     const { BookingId: bookingId, CancellationNo: cancellationNo, AmountPaidTillDate: staleAmountPaid, DeductionPercent: deductionPct, Notes: existingNotes } = before.recordset[0];
+    // Re-checked at approval: the villa may have been booked after the request was raised.
+    const villaOnLand = await require("../services/villaLand").villaBookedOnLandOf(pool, bookingId);
+    if (villaOnLand) return res.status(409).json({ error: `The villa built on this land is booked (${villaOnLand}). Cancel the villa booking first — the land can't be cancelled from under it.` });
 
     const freshPaidRes = await pool.request().input("bid", sql.Int, bookingId)
       .query(`
@@ -444,7 +453,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     // run on pool (not on a tx object) BEFORE we open our own transaction.
     // It enforces role-based access and status-machine guards; if it rejects,
     // we bail before touching any other table.
-    const result = await approvalTransition("crm-cancellations", id, CrmStatus.APPROVED, userEmail, req.user?.role);
+    const result = await approvalTransition("crm-cancellations", id, CrmStatus.APPROVED, userEmail, req.user?.role, null, req.user?.userId ?? null);
 
     // Multi-level approval workflows: approvalTransition returns newStatus
     // 'Pending' (not 'Approved') until the FINAL level signs off. The whole

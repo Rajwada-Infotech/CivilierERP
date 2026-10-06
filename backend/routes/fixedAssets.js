@@ -24,7 +24,7 @@ async function loadAssetForDepreciation(pool, id) {
   const r = await pool.request().input("AssetId", sql.Int, id).query(`
     SELECT AssetId, AssetCode, FAItemCode, AssetName, CompanyId, ProjectId,
            PurchaseCost, PurchaseDate, ActivationDate, FinYear,
-           DepreciationType, DepreciationRate, AssetStatus, Status
+           DepreciationType, DepreciationRate, AssetStatus, Status, TransferredAt
     FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId
   `);
   return r.recordset[0] || null;
@@ -345,10 +345,15 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
     // A batch row (no AssetCode) is FA Inventory bookkeeping, not a Fixed
     // Asset — it must never be editable through this endpoint.
     const guard = await pool.request().input("AssetId", sql.Int, id).query(
-      `SELECT AssetCode FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`,
+      `SELECT AssetCode, AssetStatus FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`,
     );
     if (!guard.recordset.length) return res.status(404).json({ error: "Not found" });
     if (!guard.recordset[0].AssetCode) return res.status(404).json({ error: "Not found" });
+    // Transferred to another company through an Inter-Company Transfer: this
+    // record is history only — the asset lives on under a new FA Code there.
+    if (guard.recordset[0].AssetStatus === "Transferred") {
+      return res.status(409).json({ error: "This asset was transferred to another company — its record is read-only history." });
+    }
 
     const {
       docDate, companyId, projectId, finYear,
@@ -469,12 +474,16 @@ router.delete("/:id", requirePageRight("fixed-asset-record", "delete"), async (r
     await tx.begin();
     try {
       const assetRes = await tx.request().input("AssetId", sql.Int, id).query(`
-        SELECT AssetId, Status, AssetCode
+        SELECT AssetId, Status, AssetCode, AssetStatus
         FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK)
         WHERE AssetId = @AssetId
       `);
       const asset = assetRes.recordset[0];
       if (!asset) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+      if (asset.AssetStatus === "Transferred") {
+        await tx.rollback();
+        return res.status(409).json({ error: "This asset was transferred to another company — its record is kept as history. Delete the Inter-Company Transfer to undo the move." });
+      }
       // A batch row (no AssetCode) is FA Inventory bookkeeping, not a Fixed
       // Asset — this endpoint only deletes real records; use the "Delete &
       // Reverse GRN" reversal flow (or Inventory Import's own reverse) for

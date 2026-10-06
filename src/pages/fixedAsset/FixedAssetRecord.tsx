@@ -51,6 +51,7 @@ const STATUS_COLORS: Record<string, string> = {
   Sold:                "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   Scrapped:            "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
   "Under Maintenance": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  Transferred:         "bg-slate-200 text-slate-700 dark:bg-slate-700/40 dark:text-slate-300",
 };
 
 function ensureArray<T>(v: unknown): T[] {
@@ -959,7 +960,7 @@ export default function FixedAssetRecord() {
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
               <ArrowLeft size={13} /> Back
             </button>
-            {rights.canEdit && (
+            {rights.canEdit && d.AssetStatus !== "Transferred" && (
               <button onClick={() => goToEdit(d as unknown as FixedAssetListItem)}
                 className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
                 <Pencil size={13} /> Edit
@@ -1087,6 +1088,16 @@ export default function FixedAssetRecord() {
           )}
 
           {/* depreciation posting */}
+          {d.AssetStatus === "Transferred" && (
+            <div className="rounded-xl border border-slate-400/40 bg-slate-500/10 px-4 py-3 text-sm text-slate-700 dark:text-slate-300">
+              <p className="font-semibold">Transferred to another company — Not Available</p>
+              <p className="text-xs mt-0.5 opacity-80">
+                This asset left through an Inter-Company Transfer
+                {d.TransferredAt ? ` on ${new Date(d.TransferredAt).toLocaleDateString("en-IN")}` : ""}. No further depreciation or posting is
+                made against this FA Code; the record is kept as history only. It is depreciated under its new FA Code in the receiving company.
+              </p>
+            </div>
+          )}
           <DepreciationPostingCard assetId={d.AssetId} glassSection={glassSection} />
 
           {/* sale info */}
@@ -1572,7 +1583,7 @@ export default function FixedAssetRecord() {
               <label className={labelCls}>Status</label>
               <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={inputCls}>
                 <option value="">All Status</option>
-                {ASSET_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                {[...ASSET_STATUS_OPTIONS, "Transferred"].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
             <div>
@@ -1667,13 +1678,13 @@ export default function FixedAssetRecord() {
                           className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="View">
                           <Eye size={13} />
                         </button>
-                        {rights.canEdit && (
+                        {rights.canEdit && a.AssetStatus !== "Transferred" && (
                           <button onClick={() => goToEdit(a)}
                             className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="Edit">
                             <Pencil size={13} />
                           </button>
                         )}
-                        {rights.canDelete && (
+                        {rights.canDelete && a.AssetStatus !== "Transferred" && (
                           <button onClick={() => setDeleteId(a.AssetId)}
                             className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500" title="Delete">
                             <Trash2 size={13} />

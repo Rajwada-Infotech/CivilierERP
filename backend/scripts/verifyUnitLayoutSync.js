@@ -113,6 +113,24 @@ function check(name, cond, extra) {
     const empty = await L.resolveUnitTypeInput(tx, { UnitType: "" });
     check("empty type -> nulls", empty.layoutTypeId === null && empty.unitType === null);
 
+    // Sections 3-7 run on two layouts built here (rolled back with the rest),
+    // so the checks never depend on how this database's real 1 BHK / 2 BHK
+    // happen to be composed. big has what each check needs: 2 kitchens, a
+    // Master Bedroom and a Balcony that small lacks, 2 bathrooms -> 1.
+    const makeLayout = async (key, label, rooms) => {
+      const lt = (await q(`INSERT INTO dbo.RoomLayoutType (TypeKey, Label, IsSystem, SortOrder) OUTPUT INSERTED.Id VALUES (@k, @l, 0, 997)`,
+        { k: [sql.NVarChar(45), key], l: [sql.NVarChar(50), label] }))[0].Id;
+      const cfg = (await q(`INSERT INTO dbo.UnitRoomConfig (BhkType, LayoutTypeId, IsActive) OUTPUT INSERTED.Id VALUES (@k, @lt, 1)`,
+        { k: [sql.NVarChar(45), key], lt: [sql.Int, lt] }))[0].Id;
+      for (const [cat, qty] of Object.entries(rooms)) {
+        await q(`INSERT INTO dbo.RoomComposition (UnitRoomConfigId, RoomCategoryId, Quantity)
+                 SELECT @c, Id, @n FROM dbo.RoomCategoryMaster WHERE CategoryName = @cat`,
+          { c: [sql.Int, cfg], n: [sql.Int, qty], cat: [sql.NVarChar(100), cat] });
+      }
+      return (await L.listLayoutTypes(tx)).find((t) => t.id === lt);
+    };
+    const big = await makeLayout("__VERIFYBIG__", "__VERIFY BIG__", { KITCHEN: 2, HALL_ROOM: 1, BATHROOM: 2, BEDROOM: 2, MASTER_BEDROOM: 1, BALCONY: 1 });
+    const small = await makeLayout("__VERIFYSMALL__", "__VERIFY SMALL__", { KITCHEN: 1, HALL_ROOM: 1, BATHROOM: 1, BEDROOM: 1 });
     // ── 3. New unit gets its rooms ──────────────────────────────────────
     console.log("\n[3] New unit gets its rooms");
     const blk = (await q("SELECT TOP 1 Id, ProjectId FROM dbo.BlockMaster WHERE IsActive = 1 ORDER BY Id DESC"))[0];
@@ -122,11 +140,11 @@ function check(name, cond, extra) {
       p: [sql.Int, blk.ProjectId], b: [sql.Int, blk.Id], n: [sql.NVarChar(100), name],
       f: [sql.Int, floorNo], ut: [sql.NVarChar(50), unitType], lt: [sql.Int, layoutTypeId],
     }))[0].Id;
-    const unitId = await newUnit("__VERIFY_477_A__", 3, t2.label, t2.id);
+    const unitId = await newUnit("__VERIFY_477_A__", 3, big.label, big.id);
     let s = await L.syncUnitRooms(tx, unitId, {});
     let names = await activeNames(unitId);
     console.log(`   rooms: ${names.join(", ")}`);
-    check(`created ${t2.roomCount} rooms = 2BHK composition`, s.created === t2.roomCount && names.length === t2.roomCount, s);
+    check(`created ${big.roomCount} rooms = big layout composition`, s.created === big.roomCount && names.length === big.roomCount, s);
     check("rooms carry their category", (await roomsOf(unitId)).every((r) => r.RoomCategoryId != null));
     check("floor label '3' on every room", (await q("SELECT DISTINCT Floor FROM dbo.RoomMaster WHERE UnitId = @u", { u: [sql.Int, unitId] })).map((r) => r.Floor).join() === "3");
     s = await L.syncUnitRooms(tx, unitId, {});
@@ -135,7 +153,7 @@ function check(name, cond, extra) {
     // ── 4. Composition edit, add-only propagation ───────────────────────
     console.log("\n[4] Composition edited (Bedroom +1), add-only");
     const bedroomCat = (await q("SELECT Id FROM dbo.RoomCategoryMaster WHERE CategoryName = 'BEDROOM'"))[0].Id;
-    const cfg2 = (await q("SELECT Id FROM dbo.UnitRoomConfig WHERE LayoutTypeId = @lt", { lt: [sql.Int, t2.id] }))[0].Id;
+    const cfg2 = (await q("SELECT Id FROM dbo.UnitRoomConfig WHERE LayoutTypeId = @lt", { lt: [sql.Int, big.id] }))[0].Id;
     const bedQty = (await q("SELECT Quantity FROM dbo.RoomComposition WHERE UnitRoomConfigId = @c AND RoomCategoryId = @cat",
       { c: [sql.Int, cfg2], cat: [sql.Int, bedroomCat] }))[0].Quantity;
     const firstBedroom = (await roomsOf(unitId)).find((r) => r.RoomCategoryId === bedroomCat);
@@ -171,14 +189,14 @@ function check(name, cond, extra) {
     // A legacy room with NO category but a category's name must be adopted,
     // not duplicated (found on dev: an old uncategorized "Bedroom" with a
     // blueprint got a second "Bedroom" next to it).
-    const legacyUnit = await newUnit("__VERIFY_477_LEGACY__", 2, t2.label, t2.id);
+    const legacyUnit = await newUnit("__VERIFY_477_LEGACY__", 2, big.label, big.id);
     await q(`INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, RoomCategoryId, Floor, IsActive, CreatedAt, BlueprintFileData)
              VALUES (@p, @b, @u, 'Balcony', NULL, '2', 1, SYSDATETIME(), 'x')`,
       { p: [sql.Int, blk.ProjectId], b: [sql.Int, blk.Id], u: [sql.Int, legacyUnit] });
     s = await L.syncUnitRooms(tx, legacyUnit, {});
     const legacyRooms = (await roomsOf(legacyUnit)).filter((r) => r.IsActive);
     check("uncategorized legacy 'Balcony' adopted (categorized), no duplicate built",
-      s.categorized === 1 && legacyRooms.filter((r) => r.RoomName === "Balcony").length === 1 && legacyRooms.length === t2.roomCount, { s, n: legacyRooms.length });
+      s.categorized === 1 && legacyRooms.filter((r) => r.RoomName === "Balcony").length === 1 && legacyRooms.length === big.roomCount, { s, n: legacyRooms.length });
     const pooja = await q(`INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, RoomCategoryId, Floor, IsActive, CreatedAt)
              OUTPUT INSERTED.Id VALUES (@p, @b, @u, 'Pooja Room', NULL, '2', 1, SYSDATETIME())`,
       { p: [sql.Int, blk.ProjectId], b: [sql.Int, blk.Id], u: [sql.Int, legacyUnit] });
@@ -187,13 +205,13 @@ function check(name, cond, extra) {
       && (await q("SELECT RoomCategoryId FROM dbo.RoomMaster WHERE Id = @i", { i: [sql.Int, pooja[0].Id] }))[0].RoomCategoryId === null, s);
 
     // ── 6. Type change with work on some rooms ──────────────────────────
-    console.log("\n[6] Type change 2BHK -> 1BHK; 'Kitchen 2' + 'Master Bedroom' have blueprints");
+    console.log("\n[6] Type change big -> small layout; 'Kitchen 2' + 'Master Bedroom' have blueprints");
     const pre = await roomsOf(unitId);
     const kitchen1 = pre.find((r) => r.RoomName === "Kitchen 1");
     const kitchen2 = pre.find((r) => r.RoomName === "Kitchen 2");
     const master = pre.find((r) => r.RoomName === "Master Bedroom");
     await q("UPDATE dbo.RoomMaster SET BlueprintFileData = 'x' WHERE Id IN (@a, @b)", { a: [sql.Int, kitchen2.Id], b: [sql.Int, master.Id] });
-    await q("UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @ut WHERE Id = @u", { lt: [sql.Int, t1.id], ut: [sql.NVarChar(50), t1.label], u: [sql.Int, unitId] });
+    await q("UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @ut WHERE Id = @u", { lt: [sql.Int, small.id], ut: [sql.NVarChar(50), small.label], u: [sql.Int, unitId] });
     s = await L.syncUnitRooms(tx, unitId, { removeUnused: true });
     names = await activeNames(unitId);
     const post = await roomsOf(unitId);
@@ -201,15 +219,15 @@ function check(name, cond, extra) {
     check("Kitchen x2 -> x1: clean one retired, the one with work survives",
       !post.find((r) => r.Id === kitchen1.Id).IsActive && post.find((r) => r.Id === kitchen2.Id).IsActive);
     check("surviving kitchen renamed 'Kitchen'", post.find((r) => r.Id === kitchen2.Id).RoomName === "Kitchen");
-    check("'Master Bedroom' (not in 1BHK, has work) kept + reported", s.keptWithWork.join() === "Master Bedroom" && names.includes("Master Bedroom"), s);
+    check("'Master Bedroom' (not in the small layout, has work) kept + reported", s.keptWithWork.join() === "Master Bedroom" && names.includes("Master Bedroom"), s);
     check("hand-renamed 'Living Area' kept its name", names.includes("Living Area"));
     check("single 'Bathroom' left", names.filter((n) => n.startsWith("Bathroom")).join() === "Bathroom", names);
     check("retired rooms are soft-deactivated", post.filter((r) => !r.IsActive).length === s.deactivated && s.deactivated > 0);
 
     // ── 7. Back again: reactivate, don't duplicate ──────────────────────
-    console.log("\n[7] Type change back 1BHK -> 2BHK");
+    console.log("\n[7] Type change back small -> big layout");
     const rowsBefore = (await roomsOf(unitId)).length;
-    await q("UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @ut WHERE Id = @u", { lt: [sql.Int, t2.id], ut: [sql.NVarChar(50), t2.label], u: [sql.Int, unitId] });
+    await q("UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @ut WHERE Id = @u", { lt: [sql.Int, big.id], ut: [sql.NVarChar(50), big.label], u: [sql.Int, unitId] });
     s = await L.syncUnitRooms(tx, unitId, { removeUnused: true });
     check("reactivated, no duplicates inserted", s.reactivated > 0 && s.created === 0 && (await roomsOf(unitId)).length === rowsBefore, s);
 
@@ -395,7 +413,7 @@ function check(name, cond, extra) {
     const longCat = (await q("INSERT INTO dbo.RoomCategoryMaster (CategoryName, Alias, IsActive, SortOrder) OUTPUT INSERTED.Id VALUES ('__VERIFY_LONG__', @a, 1, 999)",
       { a: [sql.NVarChar(150), longAlias] }))[0].Id;
     await q("INSERT INTO dbo.RoomComposition (UnitRoomConfigId, RoomCategoryId, Quantity) VALUES (@c, @cat, 10)", { c: [sql.Int, cfg2], cat: [sql.Int, longCat] });
-    const longUnit = await newUnit("__VERIFY_477_C__", 1, t2.label, t2.id);
+    const longUnit = await newUnit("__VERIFY_477_C__", 1, big.label, big.id);
     s = await L.syncUnitRooms(tx, longUnit, {});
     check("150-char alias x10 ('… 10') fits RoomName", (await activeNames(longUnit)).includes(`${longAlias} 10`), s);
 

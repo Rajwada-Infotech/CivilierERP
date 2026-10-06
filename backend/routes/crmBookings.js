@@ -3,6 +3,10 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
+// Project access (dbo.UserProjectAccess / RoleProjectAccess): a restricted user
+// gets 403 on any booking outside their projects. Lists filter the same way.
+const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const { triggerBookingConfirmed } = require("../services/communicationTriggers");
 const authMiddleware = require("../middleware/auth");
@@ -131,6 +135,14 @@ const BOOKING_SELECT = `
     b.AreaSqFt,
     b.CarpetAreaSqFt, b.BuiltUpAreaSqFt, b.SuperBuiltUpAreaSqFt, b.OpenTerraceAreaSqFt,
     b.RatePerSqFt, b.TotalValue, b.BookingAmount, b.TokenType, b.TokenValue,
+    -- What approvers need to judge the price: the unit's list rate, how far
+    -- the offered rate is below it, and whether a typed total departs from
+    -- rate x area (a lump sum that no longer matches the rate shown).
+    um.RatePerSqFt AS ListRatePerSqFt,
+    CASE WHEN um.RatePerSqFt > 0 AND b.RatePerSqFt IS NOT NULL
+         THEN CAST(ROUND((um.RatePerSqFt - b.RatePerSqFt) * 100.0 / um.RatePerSqFt, 2) AS DECIMAL(9,2)) END AS DiscountPercent,
+    CAST(CASE WHEN b.RatePerSqFt > 0 AND b.AreaSqFt > 0
+              AND ABS(ISNULL(b.TotalValue, 0) - ROUND(b.AreaSqFt * b.RatePerSqFt, 0)) > 1 THEN 1 ELSE 0 END AS BIT) AS TotalDiffersFromRate,
     b.PaymentPlanId, b.BookingDate, b.HsnCode,
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
     b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
@@ -260,6 +272,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
     const req0 = pool.request();
     const showDeleted = deleted === "1" || deleted === "true";
     const conds = [showDeleted ? "b.IsActive = 0" : "b.IsActive = 1"];
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (status) {
       req0.input("st", sql.NVarChar(30), status);
       conds.push("b.Status = @st");
@@ -682,8 +695,10 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     }
     try {
       await require("../services/villaLand").assertVillaBuyerOwnsLand(pool, [newUnitId], ctx.CustomerId);
+      await require("../services/crmGst").assertCommercialGstReady(pool, [newUnitId]);
     } catch (e) {
       if (e.status) return res.status(e.status).json({ error: e.message });
+      if (e instanceof require("../services/crmGst").GstSetupError) return res.status(400).json({ error: e.message });
       throw e;
     }
     // Priced from the new unit's saleable area — without one the booking
@@ -1413,14 +1428,11 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       UPDATE dbo.ReceivedPayment SET CrmBookingId = NULL, CrmMilestoneId = NULL
       WHERE (CrmBookingId = @bid OR CrmMilestoneId IN (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid))
         AND ISNULL(RPStatus, '') = 'Rejected';
-
-      DELETE FROM dbo.CrmWelcomeCallBankPreference WHERE BookingId = @bid;
-      DELETE FROM dbo.CrmWelcomeChecklistItem WHERE BookingId = @bid;
-      DELETE FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid;
-      DELETE FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid AND Status IN ('Rejected', 'Cancelled');
-      DELETE FROM dbo.CrmBookingAttachment WHERE BookingId = @bid;
-      DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid;
     `);
+    // The deleted booking keeps its own history: payment schedule, welcome
+    // call, attachments and amendment requests stay on the (inactive) booking
+    // — CRM records are never hard-deleted. Every screen reads live bookings
+    // only (IsActive = 1), and a re-booking is a new booking with its own rows.
 
     // Void any pending brokerage tranches — orphaned Pending tranches would
     // inflate the brokerage liability reports and confuse clawback tracking
@@ -1488,162 +1500,13 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
   }
 });
 
-// DELETE /:id/permanent - hard delete from the soft-deleted (cancelled pool)
-// booking section. Only Agreements, Sale Deeds, and actual monetary records
-// are protected — if those exist the delete is permanently blocked because
-// they are the legal/financial audit trail. Operational lifecycle records
-// (welcome calls, handovers, NOC, service tickets, etc.) are deleted with the
-// booking row since they have no standalone legal standing.
-router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, res) => {
-  const id = parseId(req.params.id);
-  if (id === null) return res.status(400).json({ error: "Invalid id" });
-  try {
-    const pool = getPool();
-    const rowRes = await pool.request().input("id", sql.Int, id).query(`
-      SELECT Id, BookingNo, ApplicationId, Status, IsActive, WorkflowStage,
-             ReadyForApprovalAt, MarketingHeadApprovedAt, DirectorApprovedAt, ConfirmedAt
-      FROM dbo.CrmBooking
-      WHERE Id = @id
-    `);
-    const booking = rowRes.recordset[0];
-    if (!booking) return res.status(404).json({ error: "Booking not found" });
-    if (booking.IsActive) return res.status(400).json({ error: "Only soft-deleted bookings can be permanently deleted" });
-
-    const isCancelled = booking.Status === "Cancelled";
-    const progressedReasons = [];
-    if (!isCancelled) {
-      // For non-cancelled bookings, workflow progress guards still apply.
-      if (booking.Status === CrmStatus.APPROVED) progressedReasons.push("booking is fully approved");
-      if (booking.WorkflowStage && booking.WorkflowStage !== "Review") progressedReasons.push(`workflow is at ${booking.WorkflowStage}`);
-      if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
-      if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
-    }
-
-    // Only Agreements, Sale Deeds, and monetary footprints block permanent
-    // deletion — they are the legal/financial audit trail and can never be
-    // removed. Operational records (handover, NOC, welcome calls, etc.) are
-    // deleted below as part of the transaction.
-    const protectedRes = await pool.request().input("bid", sql.Int, id).query(`
-      SELECT
-        (SELECT COUNT(*) FROM dbo.CrmAgreement WHERE BookingId = @bid) AS Agreements,
-        (SELECT COUNT(*) FROM dbo.CrmSalesDeed WHERE BookingId = @bid) AS SalesDeeds,
-        (SELECT COUNT(*) FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status NOT IN ('Void','Rejected')) AS Invoices,
-        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
-        (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
-        (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r
-          JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
-        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid
-          AND (AmountPaid > 0 OR Status IN ('Paid', 'Waived'))) AS PaidMilestones,
-        (SELECT COUNT(*) FROM dbo.ReceivedPayment rp
-          WHERE (rp.CrmBookingId = @bid OR rp.CrmMilestoneId IN
-            (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid))
-            AND ISNULL(rp.RPStatus,'') <> 'Rejected') AS ReceivedPayments,
-        (SELECT COUNT(*) FROM dbo.CrmLoanDetail WHERE BookingId = @bid
-          AND SanctionStatus NOT IN ('NotApplied','Rejected')) AS ActiveLoans,
-        -- These 8 tables all have a NOT NULL FK on BookingId (confirmed via
-        -- sys.foreign_keys) and were missing from this check entirely — a
-        -- cancelled booking that had picked up even one of these before
-        -- cancellation hit a raw, unhandled SQL FK-constraint error on
-        -- permanent delete instead of this route's own clean "protected
-        -- records" message. None of the columns can be NULLed-out the way
-        -- CrmUnitChangeLog.BookingId is (that one was deliberately made
-        -- nullable for this exact purpose) — so, like Agreements/Sale
-        -- Deeds/monetary records above, these are genuine legal/financial
-        -- documents (AFS stamp-duty payment & registry, allotment letter,
-        -- mutation, inter-booking fund transfer, utility billing) and are
-        -- protected rather than silently deleted.
-        (SELECT COUNT(*) FROM dbo.CrmAfsQueryPayment WHERE BookingId = @bid) AS AfsQueryPayments,
-        (SELECT COUNT(*) FROM dbo.CrmAfsRegistry WHERE BookingId = @bid) AS AfsRegistryEntries,
-        (SELECT COUNT(*) FROM dbo.CrmAllotmentLetter WHERE BookingId = @bid) AS AllotmentLetters,
-        (SELECT COUNT(*) FROM dbo.CrmMutation WHERE BookingId = @bid) AS Mutations,
-        (SELECT COUNT(*) FROM dbo.CrmRebookingTransfer WHERE ToBookingId = @bid) AS RebookingTransfers,
-        (SELECT COUNT(*) FROM dbo.ElectricityBill WHERE BookingId = @bid) AS ElectricityBills,
-        (SELECT COUNT(*) FROM dbo.MaintenanceBill WHERE BookingId = @bid) AS MaintenanceBills,
-        (SELECT COUNT(*) FROM dbo.MaintenanceCustomerCharge WHERE BookingId = @bid) AS MaintenanceCustomerCharges,
-        (SELECT COUNT(*) FROM dbo.MeterReadingMaster WHERE BookingId = @bid) AS MeterReadings
-    `);
-    const p = protectedRes.recordset[0] || {};
-    for (const [label, count] of Object.entries(p)) {
-      if (Number(count) > 0) progressedReasons.push(label);
-    }
-    if (progressedReasons.length) {
-      return res.status(400).json({
-        error: `Cannot permanently delete booking ${booking.BookingNo} — it has protected records that cannot be removed: ${progressedReasons.join(", ")}. Agreements, Sale Deeds, and monetary records are permanent audit trail.`,
-      });
-    }
-
-    const tx = pool.transaction();
-    await tx.begin();
-    try {
-      // Detach shared application-level records (bank details, docs, parking,
-      // co-applicants, extra charges) back to the application rather than
-      // deleting them — they belong to the application, not the booking.
-      await tx.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
-        UPDATE dbo.CrmCustomerBankDetail SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
-        UPDATE dbo.CrmBookingDocument SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
-        UPDATE dbo.CrmParkingAllotment SET BookingId = NULL, IsActive = 0 WHERE BookingId = @bid AND ApplicationId = @aid;
-        UPDATE dbo.CrmCoApplicant SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
-        UPDATE dbo.CrmExtraCharge SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
-      `);
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingAttachment WHERE BookingId = @bid");
-
-      // Operational lifecycle records — no legal standing; deleted with the booking.
-      // Snag items must precede handover rows (FK dependency).
-      await tx.request().input("bid", sql.Int, id).query(
-        "DELETE FROM dbo.CrmSnagItem WHERE HandoverId IN (SELECT Id FROM dbo.CrmHandover WHERE BookingId = @bid)"
-      );
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmHandover WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmNoc WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPrePossession WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPossessionNotice WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmServiceTicket WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmQueryPayment WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmRegistry WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmLegalMilestone WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCallBankPreference WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeChecklistItem WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmWelcomeCall WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingAmendmentRequest WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmCancellation WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("UPDATE dbo.CrmCommunicationLog SET BookingId = NULL WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("UPDATE dbo.SaLead SET CrmBookingId = NULL WHERE CrmBookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query(`
-        UPDATE dbo.ReceivedPayment SET CrmBookingId = NULL, CrmMilestoneId = NULL
-        WHERE CrmBookingId = @bid OR CrmMilestoneId IN (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid)
-      `);
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-      // MCA FY2024 mandate: audit trail rows must be tamper-proof and cannot be
-      // deleted even by admins. Orphaned rows (BookingId → deleted booking) are
-      // intentional — they are the evidence that the booking once existed.
-      await tx.request().input("bid", sql.Int, id).query(
-        // CrmUnitChangeLog has a FK; NULL-out instead of delete so the history
-        // survives (migration 367 made BookingId nullable for this purpose).
-        "UPDATE dbo.CrmUnitChangeLog SET BookingId = NULL WHERE BookingId = @bid"
-      );
-      // CrmBookingStageLog, ApprovalAuditLog, and CrmAuditLog have no FK
-      // constraints — leave them entirely; they become orphaned audit records.
-      // CrmBrokerageMaster rows must be removed before the parent CrmBooking
-      // row to avoid FK constraint violations. At this point the booking is
-      // already soft-deleted and its Pending tranches were voided at that
-      // time — any remaining rows here are Voided/Clawback records.
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid");
-      // These allocation tables deliberately retain their own audit status on
-      // soft deletion, so they must be removed before a permanent header delete.
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingUnit WHERE BookingId = @bid");
-      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBooking WHERE Id = @bid");
-      await tx.commit();
-    } catch (txErr) {
-      await tx.rollback().catch(() => {});
-      throw txErr;
-    }
-
-    res.json({ success: true, message: `Booking ${booking.BookingNo} permanently deleted` });
-  } catch (e) {
-    console.error("[crm-bookings] permanent DELETE error:", e.message);
-    res.status(500).json({ error: "An internal error occurred. Please try again later." });
-  }
+// DELETE /:id/permanent — retired. CRM records are never hard-deleted: a
+// booking, its cancellation request and its handover history are the audit
+// trail of a sale, even a cancelled one. Cancel or soft-delete instead
+// (DELETE /:id), which keeps every row. Answered explicitly so an old client
+// gets a clear reason rather than a 404.
+router.delete("/:id/permanent", allowRoles("admin", "super_admin"), (_req, res) => {
+  res.status(410).json({ error: "Permanent deletion of bookings is disabled — CRM records are kept for the audit trail. Cancel or delete the booking instead; it stays in the deleted list." });
 });
 
 // GET /:id/loan — home loan / bank coordination detail for a booking.

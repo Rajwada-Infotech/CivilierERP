@@ -32,6 +32,12 @@ const { releaseBookingInventoryLines } = require("../services/crmWorkflowGuards"
 const { getNextDocNumber } = require("../services/docNumber");
 const { resolveResaleFeeGst, GstSetupError } = require("../services/crmGst");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+// A resale is for a plot or a unit; its project comes from either, else the seller's booking.
+{ const { crmProjectGuards } = require("../services/projectScope"); crmProjectGuards(router, `
+  SELECT COALESCE(p.ProjectId, u.ProjectId, b.ProjectId) AS ProjectId FROM dbo.CrmUnitResale r
+  LEFT JOIN dbo.PlotMaster p ON p.Id = r.PlotId LEFT JOIN dbo.UnitMaster u ON u.Id = r.UnitId
+  LEFT JOIN dbo.CrmBooking b ON b.Id = r.FromBookingId WHERE r.Id = @id`); }
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -74,6 +80,9 @@ router.get("/", requirePageRight("crm-resales", "view"), async (req, res) => {
     const r0 = pool.request();
     const conds = ["r.IsActive = 1"];
     if (req.query.plotId) { r0.input("pid", sql.Int, parseInt(req.query.plotId, 10)); conds.push("r.PlotId = @pid"); }
+    // A resale's project: its plot's, else its unit's, else the seller's booking's.
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope,
+      "COALESCE((SELECT ProjectId FROM dbo.PlotMaster WHERE Id = r.PlotId), (SELECT ProjectId FROM dbo.UnitMaster WHERE Id = r.UnitId), (SELECT ProjectId FROM dbo.CrmBooking WHERE Id = r.FromBookingId))", "").trim());
     if (req.query.status) { r0.input("st", sql.NVarChar(30), req.query.status); conds.push("r.Status = @st"); }
     const result = await r0.query(`${SELECT} WHERE ${conds.join(" AND ")} ORDER BY r.CreatedAt DESC`);
     res.json(result.recordset);

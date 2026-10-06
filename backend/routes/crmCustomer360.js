@@ -1,6 +1,8 @@
 const express = require("express");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a customer opens only if one of their applications is in the user's projects.
+router.param("id", require("../services/projectScope").crmCustomerGuard);
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -25,6 +27,8 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = ["c.IsActive = 1"];
+    // A restricted user sees customers with an application in their projects.
+    if (req.projectScope) conds.push(`EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")})`);
     if (search) {
       req0.input("srch", sql.NVarChar(200), `%${search}%`);
       conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch)");

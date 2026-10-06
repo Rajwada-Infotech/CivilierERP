@@ -2,6 +2,16 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on welcome calls outside their projects.
+// On /:bookingId/bank-preferences/:id the :id is a bank preference, already
+// covered by its :bookingId guard and matched to that booking — so the welcome
+// call lookup applies to /:id routes only.
+{
+  const { crmProjectGuards, crmViaBookingSql, projectParamGuard } = require("../services/projectScope");
+  crmProjectGuards(router);
+  const guardCall = projectParamGuard(crmViaBookingSql("CrmWelcomeCall"));
+  router.param("id", (req, res, next, value) => (req.path.includes("/bank-preferences/") ? next() : guardCall(req, res, next, value)));
+}
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");

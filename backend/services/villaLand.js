@@ -77,4 +77,23 @@ async function assertVillaBuyerOwnsLand(poolOrTx, unitIds, customerId) {
   }
 }
 
-module.exports = { landPositionOfUnits, assertVillaBuyerOwnsLand, VillaLandError };
+/**
+ * A live villa booking standing on land this booking holds. Cancelling the
+ * land under it would leave the villa contract with someone who no longer
+ * owns the plot, so a land cancellation must wait until the villa booking is
+ * cancelled first (the same rule a resale applies, crmResales.js).
+ * @returns {Promise<string|null>} the villa's BookingNo, or null
+ */
+async function villaBookedOnLandOf(poolOrTx, bookingId) {
+  const r = await poolOrTx.request().input("b", sql.Int, bookingId).query(`
+    SELECT TOP 1 vb.BookingNo
+    FROM dbo.CrmBookingPlot bp
+    JOIN dbo.PlotMaster p ON p.Id = bp.PlotId AND p.ConvertedUnitId IS NOT NULL
+    JOIN dbo.CrmBooking vb ON vb.UnitId = p.ConvertedUnitId
+    WHERE bp.BookingId = @b AND bp.Status = N'Active'
+      AND vb.Id <> @b AND vb.IsActive = 1
+      AND vb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')`);
+  return r.recordset[0]?.BookingNo || null;
+}
+
+module.exports = { landPositionOfUnits, assertVillaBuyerOwnsLand, villaBookedOnLandOf, VillaLandError };

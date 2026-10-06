@@ -1,5 +1,11 @@
 const express = require("express");
 const router = express.Router();
+// Any saved chain change can alter the step list new villas copy
+// (services/autoDprChains.js caches it), so a successful write clears it.
+router.use((req, res, next) => {
+  if (req.method !== "GET") res.on("finish", () => { if (res.statusCode < 300) require("../services/autoDprChains").clearTemplateCache(); });
+  next();
+});
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
@@ -29,6 +35,11 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 // already stored that way — 0 -> "G", same convention roomMaster.js and
 // RoomMaster.tsx's own floorLabel() already use.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// The plot label a floorless unit is placed by — same string as
+// services/unitLayout.js chainFloorLabel builds (plot names joined by '+').
+const PLOT_LABEL_SQL = `(SELECT STRING_AGG(p.PlotName, '+') WITHIN GROUP (ORDER BY p.PlotName)
+   FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)`;
 
 // ── GET /scope-options?level=tower|floor|flat|room&projectId=&towerId=&floor=&flatId= ──
 router.get("/scope-options", authMiddleware, async (req, res) => {
@@ -65,12 +76,21 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
         WHERE BlockId = @TowerId AND IsActive = 1 AND FloorNo IS NOT NULL
         ORDER BY FloorNo
       `);
-      return res.json(
-        r.recordset.map(({ FloorNo }) => {
+      // A villa in a plotted block has no floor: it is listed under the
+      // plot(s) it stands on — the same label its chains carry
+      // (services/unitLayout.js chainFloorLabel).
+      const villas = await pool.request().input("TowerId", sql.Int, towerId).query(`
+        SELECT DISTINCT ${PLOT_LABEL_SQL} AS Label
+        FROM dbo.UnitMaster u
+        WHERE u.BlockId = @TowerId AND u.IsActive = 1 AND u.FloorNo IS NULL`);
+      return res.json([
+        ...r.recordset.map(({ FloorNo }) => {
           const label = FloorNo === 0 ? "G" : String(FloorNo);
           return { id: label, label };
         }),
-      );
+        ...villas.recordset.filter((v) => v.Label).sort((a, b) => a.Label.localeCompare(b.Label, undefined, { numeric: true }))
+          .map((v) => ({ id: v.Label, label: v.Label })),
+      ]);
     }
 
     if (level === "flat") {
@@ -78,8 +98,15 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
       // "G" -> 0, otherwise the numeric floor — same convention floor
       // options above (and roomMaster.js/RoomMaster.tsx's own floorLabel())
       // already use.
-      const floorNo = floor === "G" ? 0 : parseInt(floor, 10);
-      if (!Number.isFinite(floorNo)) return res.status(400).json({ error: "Invalid floor" });
+      const floorNo = floor === "G" ? 0 : /^-?\d+$/.test(floor) ? parseInt(floor, 10) : NaN;
+      if (!Number.isFinite(floorNo)) {
+        // Not a floor number: a plot label — the floorless villa(s) on it.
+        const v = await pool.request().input("TowerId", sql.Int, towerId).input("Label", sql.NVarChar(200), floor).query(`
+          SELECT u.Id AS id, u.UnitName AS label FROM dbo.UnitMaster u
+          WHERE u.BlockId = @TowerId AND u.IsActive = 1 AND u.FloorNo IS NULL AND ${PLOT_LABEL_SQL} = @Label
+          ORDER BY u.UnitName`);
+        return res.json(v.recordset);
+      }
       const r = await pool.request().input("TowerId", sql.Int, towerId).input("FloorNo", sql.Int, floorNo).query(`
         SELECT Id AS id, UnitName AS label
         FROM dbo.UnitMaster
@@ -105,7 +132,9 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
         FROM dbo.RoomMaster rm
         LEFT JOIN dbo.DependencyMaster dm
           ON dm.RoomId = rm.Id ${excludeId ? "AND dm.Id <> @ExcludeId" : ""}
-        WHERE rm.UnitId = @FlatId AND rm.Floor = @Floor AND rm.IsActive = 1
+        WHERE rm.UnitId = @FlatId AND rm.IsActive = 1
+          -- a villa's rooms carry no floor; its "floor" here is its plot label
+          AND (rm.Floor = @Floor OR (rm.Floor IS NULL AND EXISTS (SELECT 1 FROM dbo.UnitMaster u WHERE u.Id = rm.UnitId AND u.FloorNo IS NULL)))
         ORDER BY rm.RoomName
       `);
       return res.json(r.recordset);
@@ -138,7 +167,7 @@ router.get("/", authMiddleware, async (req, res) => {
         -- Built server-side so the list row is ready to render as-is —
         -- the client shouldn't have to join 4 names together itself.
         CONCAT(
-          ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
+          ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > Plot ' END, dm.Floor,
           ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
         ) AS scopePath
       FROM dbo.DependencyMaster dm

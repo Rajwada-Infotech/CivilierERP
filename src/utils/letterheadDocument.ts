@@ -106,7 +106,7 @@ export async function loadCompanyLetterhead(
   }
 }
 
-const cellText = (v: string | number | null | undefined) =>
+export const cellText = (v: string | number | null | undefined) =>
   v === null || v === undefined || v === "" ? "—" : String(v);
 
 // ─── Print (HTML) ────────────────────────────────────────────────────────────
@@ -255,13 +255,13 @@ export function printLetterhead(d: LetterheadDoc) {
 
 // ─── PDF (jsPDF) ─────────────────────────────────────────────────────────────
 
-const rgb = (hex: string): [number, number, number] => [
+export const rgb = (hex: string): [number, number, number] => [
   parseInt(hex.slice(1, 3), 16),
   parseInt(hex.slice(3, 5), 16),
   parseInt(hex.slice(5, 7), 16),
 ];
 
-const latin = (v: unknown) =>
+export const latin = (v: unknown) =>
   String(v ?? "")
     .replace(/₹/g, "Rs. ")
     .replace(/[‘’]/g, "'")
@@ -269,7 +269,7 @@ const latin = (v: unknown) =>
     .replace(/[–—]/g, "-")
     .replace(/[^\x00-\xFF]/g, "");
 
-async function toDataUrl(src?: string | null): Promise<string | null> {
+export async function toDataUrl(src?: string | null): Promise<string | null> {
   if (!src) return null;
   if (src.startsWith("data:image/")) return src;
   try {

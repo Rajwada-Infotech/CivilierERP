@@ -46,7 +46,7 @@ router.get("/assets", requirePageRight(PAGE, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
-    const where = ["fa.Status <> 'Deleted'", "fa.FAItemCode IS NOT NULL", "fa.AssetCode IS NOT NULL"];
+    const where = ["fa.Status <> 'Deleted'", "fa.FAItemCode IS NOT NULL", "fa.AssetCode IS NOT NULL", "fa.AssetStatus <> 'Transferred'"];
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
     const result = await request.query(`
@@ -207,7 +207,7 @@ router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
     const pool = getPool();
     const faRes = await pool.request().input("AssetId", sql.Int, assetIdVal).query(`
       SELECT AssetId, FAItemCode, AssetName, CompanyId, ProjectId, FinYear
-      FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId AND Status <> 'Deleted' AND AssetCode IS NOT NULL
+      FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId AND Status <> 'Deleted' AND AssetCode IS NOT NULL AND AssetStatus <> 'Transferred'
     `);
     const fa = faRes.recordset[0];
     if (!fa) return res.status(400).json({ error: "This FA Item Code is not a valid Fixed Asset Record" });
