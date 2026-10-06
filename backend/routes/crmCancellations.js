@@ -269,7 +269,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
       .query(`
         SELECT 
           (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid) +
-          (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS TotalPaid
+          (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid AND ISNULL(Status,'') <> 'Held') AS TotalPaid
       `);
     const totalPaid = paidRes.recordset[0].TotalPaid || 0;
 
