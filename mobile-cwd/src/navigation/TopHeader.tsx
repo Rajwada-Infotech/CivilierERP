@@ -41,16 +41,16 @@ export function TopHeader(_props: NativeStackHeaderProps) {
           <AnimatedLogo iconSize={28} />
         </View>
 
-        <View className="flex-row items-center gap-3">
-          <Pressable onPress={() => navigate("Notifications")} style={{ padding: 2 }}>
+        <View className="flex-row items-center gap-2.5">
+          <Pressable onPress={() => navigate("Notifications")} style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.muted }}>
             <View>
-              <Bell size={20} color={colors.foreground} />
+              <Bell size={15} color={colors.mutedForeground} />
               {alertCount > 0 && (
                 <View
                   style={{
                     position: "absolute",
-                    top: -3,
-                    right: -4,
+                    top: -6,
+                    right: -7,
                     minWidth: 15,
                     height: 15,
                     borderRadius: 8,
@@ -72,7 +72,7 @@ export function TopHeader(_props: NativeStackHeaderProps) {
 
           <Pressable onPress={() => navigate("Profile")}>
             <View className="w-8 h-8 rounded-full items-center justify-center" style={{ backgroundColor: ACCENT }}>
-              <Text style={{ color: "#1a1a1a", fontSize: 11, fontFamily: fonts.heading.bold }}>
+              <Text style={{ color: "#fff", fontSize: 11, fontFamily: fonts.heading.bold }}>
                 {initialsOf(currentUser?.name)}
               </Text>
             </View>

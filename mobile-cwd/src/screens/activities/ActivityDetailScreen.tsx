@@ -2,34 +2,42 @@
 // Poor last time blinks until it's redone), and the actions on it — add a remark (several a day are
 // fine, each is its own entry), hold / resume, move the progress bar forward, and — for a Completed
 // activity — Quality Check each checkpoint and pass it or send it back for rework.
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
-import { useRoute, type RouteProp } from "@react-navigation/native";
+import { useState } from "react";
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Circle, PauseCircle, PlayCircle, Save } from "lucide-react-native";
+import { ChevronRight, PauseCircle, PlayCircle, Save, ShieldCheck } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { StatusPill, displayStatus } from "@/components/StatusPill";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
-  getActivityAssignments,
+  getActivityAssignment,
   getProgressLog,
   getRungDetail,
-  submitQcDecision,
   timelineMessage,
   updateAssignment,
-  type QcRating,
-  type RungCheckpoint,
 } from "@/api/cwdApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
+import { PhotosTab } from "./tabs/PhotosTab";
+import { AttendanceTab } from "./tabs/AttendanceTab";
+import { CheckpointsTab } from "./tabs/CheckpointsTab";
+import { DailyLogTab } from "./tabs/DailyLogTab";
+import { CommentsTab } from "./tabs/CommentsTab";
+import { HistoryTab } from "./tabs/HistoryTab";
 
-const ACCENT = "#0891b2";
-const RATINGS: { key: QcRating; label: string; color: string }[] = [
-  { key: "POOR", label: "Poor", color: "#ef4444" },
-  { key: "GOOD", label: "Good", color: "#10b981" },
-  { key: "EXCELLENT", label: "Excellent", color: "#14b8a6" },
+type Tab = "overview" | "photos" | "attendance" | "checkpoints" | "daily-log" | "comments" | "history";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "photos", label: "Photos" },
+  { id: "attendance", label: "Attendance" },
+  { id: "checkpoints", label: "Checkpoints" },
+  { id: "daily-log", label: "Daily Log" },
+  { id: "comments", label: "Comments" },
+  { id: "history", label: "History" },
 ];
 
+const ACCENT = "#0891b2";
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={{ marginBottom: 18 }}>
@@ -43,39 +51,22 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const card = { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14 } as const;
 
-// A checkpoint to redo blinks (opacity pulse) until it is ticked again.
-function Blink({ on, children }: { on: boolean; children: React.ReactNode }) {
-  const v = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    if (!on) {
-      v.setValue(1);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([Animated.timing(v, { toValue: 0.35, duration: 550, useNativeDriver: true }), Animated.timing(v, { toValue: 1, duration: 550, useNativeDriver: true })]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [on, v]);
-  return <Animated.View style={{ opacity: v }}>{children}</Animated.View>;
-}
-
 export default function ActivityDetailScreen() {
   const { rungId } = useRoute<RouteProp<MainStackParamList, "ActivityDetail">>().params;
   const qc = useQueryClient();
+  const navigation = useNavigation<{ navigate: (name: string, params?: object) => void }>();
   const editRights = usePageRights("civilworkdpr-activity-reporting");
   const qcRights = usePageRights("civilworkdpr-quality-check");
 
-  const listQ = useQuery({ queryKey: ["cwd-activities"], queryFn: () => getActivityAssignments(), staleTime: 60_000 });
+  const rowQ = useQuery({ queryKey: ["cwd-row", rungId], queryFn: () => getActivityAssignment(rungId) });
   const detailQ = useQuery({ queryKey: ["cwd-detail", rungId], queryFn: () => getRungDetail(rungId) });
   const logQ = useQuery({ queryKey: ["cwd-log", rungId], queryFn: () => getProgressLog(rungId) });
-  const row = listQ.data?.find((a) => a.rungId === rungId);
+  const row = rowQ.data ?? undefined;
   const a = detailQ.data?.assignment;
 
+  const [tab, setTab] = useState<Tab>("overview");
   const [remark, setRemark] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
-  const [ratings, setRatings] = useState<Record<number, QcRating>>({});
-  const [qcRemark, setQcRemark] = useState("");
 
   const saved = row?.progressPercent ?? 0;
   const shownProgress = progress ?? saved;
@@ -84,7 +75,12 @@ export default function ActivityDetailScreen() {
   const hint = row ? timelineMessage(row) : null;
 
   const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["cwd-room"] });
+    qc.invalidateQueries({ queryKey: ["cwd-daily-log", rungId] });
+    qc.invalidateQueries({ queryKey: ["cwd-scope-summary"] });
     qc.invalidateQueries({ queryKey: ["cwd-activities"] });
+    qc.invalidateQueries({ queryKey: ["cwd-alerts"] });
+    qc.invalidateQueries({ queryKey: ["cwd-row", rungId] });
     qc.invalidateQueries({ queryKey: ["cwd-detail", rungId] });
     qc.invalidateQueries({ queryKey: ["cwd-log", rungId] });
     qc.invalidateQueries({ queryKey: ["cwd-dashboard"] });
@@ -107,20 +103,8 @@ export default function ActivityDetailScreen() {
     onSuccess: () => { setProgress(null); refresh(); },
     onError,
   });
-  const decide = useMutation({
-    mutationFn: (decision: "APPROVED" | "REWORK") =>
-      submitQcDecision(rungId, {
-        decision,
-        remarks: qcRemark.trim() || undefined,
-        checks: (a?.checkpoints ?? []).filter((c) => c.id != null && ratings[c.id!]).map((c) => ({ checkpointId: c.id!, rating: ratings[c.id!] })),
-      }),
-    onSuccess: () => { setRatings({}); setQcRemark(""); refresh(); },
-    onError,
-  });
 
-  const unrated = useMemo(() => (a?.checkpoints ?? []).filter((c) => c.id != null && !ratings[c.id!]).length, [a, ratings]);
-
-  if (detailQ.isLoading || listQ.isLoading) {
+  if (detailQ.isLoading || rowQ.isLoading) {
     return <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}><ActivityIndicator color={colors.mutedForeground} /></View>;
   }
   if (detailQ.error || !a) {
@@ -152,6 +136,27 @@ export default function ActivityDetailScreen() {
         {(row?.attemptNo ?? 1) > 1 && <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: "#d946ef", marginTop: 6 }}>Attempt {row?.attemptNo} — rework</Text>}
       </View>
 
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16, marginHorizontal: -16 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
+        {TABS.map((x) => {
+          const on = tab === x.id;
+          return (
+            <TouchableOpacity key={x.id} activeOpacity={0.7} onPress={() => setTab(x.id)} style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: on ? ACCENT : colors.border, backgroundColor: on ? `${ACCENT}22` : "transparent" }}>
+              <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: on ? ACCENT : colors.mutedForeground }}>{x.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {tab === "photos" && <PhotosTab rungId={rungId} canAdd={canWork || canQc} />}
+      {tab === "attendance" && <AttendanceTab rungId={rungId} canEdit={canWork} />}
+      {tab === "checkpoints" && <CheckpointsTab rungId={rungId} canEdit={canWork} onChanged={refresh} />}
+      {tab === "daily-log" && <DailyLogTab rungId={rungId} canEdit={canWork} />}
+      {tab === "comments" && <CommentsTab rungId={rungId} />}
+      {tab === "history" && <HistoryTab rungId={rungId} />}
+
+      {tab === "overview" && (
+        <>
+
       <Section title="Allocation">
         <View style={{ ...card, gap: 8 }}>
           {[
@@ -181,47 +186,13 @@ export default function ActivityDetailScreen() {
         </View>
       </Section>
 
-      <Section title={`Checkpoints (${a.checkpoints.length})`}>
-        <View style={{ ...card, gap: 10 }}>
-          {a.checkpoints.length === 0 && <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>None tagged to this activity.</Text>}
-          {a.checkpoints.map((c: RungCheckpoint) => (
-            <Blink key={c.id ?? c.fieldName} on={!!c.needsRework}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, ...(c.needsRework ? { borderWidth: 1, borderColor: "#f59e0b", backgroundColor: "#f59e0b18", borderRadius: 10, padding: 8 } : {}) }}>
-                {c.isChecked ? <CheckCircle2 size={16} color="#10b981" /> : <Circle size={16} color={colors.mutedForeground} />}
-                <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.body.medium, color: colors.foreground }}>{c.fieldName}</Text>
-                {c.needsRework && <Text style={{ fontSize: 10, fontFamily: fonts.heading.bold, color: "#f59e0b" }}>REDO — RATED POOR</Text>}
-              </View>
-              {canQc && c.id != null && (
-                <View style={{ flexDirection: "row", gap: 6, marginTop: 6, marginLeft: 24 }}>
-                  {RATINGS.map((r) => {
-                    const on = ratings[c.id!] === r.key;
-                    return (
-                      <Pressable key={r.key} onPress={() => setRatings((p) => ({ ...p, [c.id!]: r.key }))} style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: on ? r.color : colors.border, backgroundColor: on ? `${r.color}25` : "transparent" }}>
-                        <Text style={{ fontSize: 11, fontFamily: fonts.heading.semibold, color: on ? r.color : colors.mutedForeground }}>{r.label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </Blink>
-          ))}
-        </View>
-      </Section>
-
       {canQc && (
         <Section title="Quality Check">
-          <View style={{ ...card, gap: 10 }}>
-            <TextInput value={qcRemark} onChangeText={setQcRemark} placeholder="Remark (required to send back for rework)" placeholderTextColor={`${colors.mutedForeground}99`} multiline style={{ color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, minHeight: 44 }} />
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <Pressable disabled={decide.isPending || unrated > 0} onPress={() => decide.mutate("APPROVED")} style={{ flex: 1, alignItems: "center", paddingVertical: 11, borderRadius: 12, backgroundColor: "#10b981", opacity: unrated > 0 || decide.isPending ? 0.4 : 1 }}>
-                <Text style={{ fontFamily: fonts.heading.bold, color: "#04130d", fontSize: 12 }}>Pass</Text>
-              </Pressable>
-              <Pressable disabled={decide.isPending || unrated > 0 || qcRemark.trim().length < 3} onPress={() => decide.mutate("REWORK")} style={{ flex: 1, alignItems: "center", paddingVertical: 11, borderRadius: 12, backgroundColor: "#d946ef", opacity: unrated > 0 || qcRemark.trim().length < 3 || decide.isPending ? 0.4 : 1 }}>
-                <Text style={{ fontFamily: fonts.heading.bold, color: "#1a0420", fontSize: 12 }}>Send back</Text>
-              </Pressable>
-            </View>
-            {unrated > 0 && <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>Rate every checkpoint first ({unrated} left).</Text>}
-          </View>
+          <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate("QcInspect", { rungId })} style={{ ...card, flexDirection: "row", alignItems: "center", gap: 10, borderColor: `${ACCENT}66` }}>
+            <ShieldCheck size={18} color={ACCENT} />
+            <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>Inspect this activity</Text>
+            <ChevronRight size={16} color={colors.mutedForeground} />
+          </TouchableOpacity>
         </Section>
       )}
 
@@ -288,6 +259,8 @@ export default function ActivityDetailScreen() {
           ))}
         </View>
       </Section>
+        </>
+      )}
     </ScrollView>
   );
 }
