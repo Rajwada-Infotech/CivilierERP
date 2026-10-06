@@ -244,6 +244,8 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    const villaOnLand = await require("../services/villaLand").villaBookedOnLandOf(pool, bookingId);
+    if (villaOnLand) return res.status(409).json({ error: `The villa built on this land is booked (${villaOnLand}). Cancel the villa booking first — the land can't be cancelled from under it.` });
 
     // Explicit duplicate guard — clearer error than relying on a DB UNIQUE catch.
     const existingCancel = await pool.request().input("bid", sql.Int, bookingId)
@@ -419,6 +421,9 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       .query("SELECT BookingId, CancellationNo, AmountPaidTillDate, DeductionPercent, Notes FROM dbo.CrmCancellation WHERE Id = @id");
     if (!before.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
     const { BookingId: bookingId, CancellationNo: cancellationNo, AmountPaidTillDate: staleAmountPaid, DeductionPercent: deductionPct, Notes: existingNotes } = before.recordset[0];
+    // Re-checked at approval: the villa may have been booked after the request was raised.
+    const villaOnLand = await require("../services/villaLand").villaBookedOnLandOf(pool, bookingId);
+    if (villaOnLand) return res.status(409).json({ error: `The villa built on this land is booked (${villaOnLand}). Cancel the villa booking first — the land can't be cancelled from under it.` });
 
     const freshPaidRes = await pool.request().input("bid", sql.Int, bookingId)
       .query(`

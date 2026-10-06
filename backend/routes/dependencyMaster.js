@@ -1,5 +1,11 @@
 const express = require("express");
 const router = express.Router();
+// Any saved chain change can alter the step list new villas copy
+// (services/autoDprChains.js caches it), so a successful write clears it.
+router.use((req, res, next) => {
+  if (req.method !== "GET") res.on("finish", () => { if (res.statusCode < 300) require("../services/autoDprChains").clearTemplateCache(); });
+  next();
+});
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
@@ -161,7 +167,7 @@ router.get("/", authMiddleware, async (req, res) => {
         -- Built server-side so the list row is ready to render as-is —
         -- the client shouldn't have to join 4 names together itself.
         CONCAT(
-          ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
+          ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > Plot ' END, dm.Floor,
           ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
         ) AS scopePath
       FROM dbo.DependencyMaster dm

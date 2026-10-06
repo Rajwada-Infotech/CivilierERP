@@ -9,6 +9,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { isValidShortCode, ensureProjectShortCode } = require("../services/projectShortCode");
+const { logAudit } = require("../utils/auditLog");
 const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers, getUnitLockReason } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
@@ -2415,7 +2416,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
       const dpr = await require("../services/autoDprChains").createChainsForUnit(tx, unitId, req.user?.email || req.user?.name || null);
       await tx.commit();
       await bumpCacheVersion("unit-master");
-      res.status(201).json({ success: true, UnitId: unitId, PlotIds: plotIds, DprChainsCreated: dpr.created, DprRoomsWithoutTemplate: dpr.skipped });
+      await bumpFlatMasterCaches(); // Room Master lists the villa at once, not after its cache expires
+      await logAudit({ module: "PlotConversion", recordId: unitId, recordNo: villaName, action: "Converted",
+        changedBy: req.user?.userId ?? null,
+        notes: `Plots ${plotIds.join(", ")} -> villa ${villaName}; ${dpr.created} DPR chain(s)${dpr.skipped.length ? `; no steps yet for ${dpr.skipped.join(", ")}` : ""}` }).catch(() => {});
+      res.status(201).json({ success: true, UnitId: unitId, UnitName: villaName, PlotIds: plotIds, DprChainsCreated: dpr.created, DprRoomsWithoutTemplate: dpr.skipped });
     } catch (e) { await tx.rollback(); throw e; }
   } catch (e) {
     if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
@@ -2453,7 +2458,15 @@ router.post("/plots/unconvert", requirePageRight("crm-auto-project-setup", "dele
       await tx.rollback();
       return res.status(409).json({ error: `Work has started on this villa (${work.Steps} step(s) allocated or progressed, ${work.Labour} labour entr(ies), ${work.Drawings} drawing note(s)) — it can't be undone` });
     }
-    await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
+    const villaName = (await q("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @u")).recordset[0]?.UnitName || `Unit #${unitId}`;
+    // The (untouched) steps are cancelled the way a manual cancel records it,
+    // so a retired chain never shows as live Pending work.
+    await q(`UPDATE a SET PreCancelStatus = a.Status, Status = N'CANCELLED', UpdatedAt = SYSDATETIME()
+             FROM dbo.DependencyActivityAssignment a
+             JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
+             JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
+             WHERE d.FlatId = @u AND a.Status IN (N'PENDING', N'IN_PROGRESS')`);
+    const retired = await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
     await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1");
     // Renamed as it retires: UnitMaster's name index also counts inactive rows,
     // so keeping the name would stop this plot ever being converted again.
@@ -2461,6 +2474,10 @@ router.post("/plots/unconvert", requirePageRight("crm-auto-project-setup", "dele
     await q("UPDATE dbo.PlotMaster SET ConvertedUnitId = NULL, ConvertedAt = NULL, UpdatedAt = SYSDATETIME() WHERE ConvertedUnitId = @u");
     await tx.commit();
     await bumpCacheVersion("unit-master");
+    await bumpFlatMasterCaches();
+    await logAudit({ module: "PlotConversion", recordId: unitId, recordNo: villaName, action: "ConversionUndone",
+      changedBy: req.user?.userId ?? null,
+      notes: `Villa ${villaName} retired; ${retired.rowsAffected[0]} DPR chain(s) retired; plots ${plots.map((p) => p.PlotName).join(", ")} freed` }).catch(() => {});
     res.json({ success: true, PlotIds: plots.map((p) => p.Id), message: `Conversion undone — ${plots.map((p) => p.PlotName).join(", ")} can be converted again` });
   } catch (e) {
     try { await tx.rollback(); } catch (_) { /* already rolled back */ }
