@@ -48,12 +48,16 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
   const [saving, setSaving] = useState(false);
   const [assignTo, setAssignTo] = useState("");
 
+  // Pick the starting project once, when the dialog opens. The parent rebuilds
+  // `projects` on every render (and refetches in the background), so reacting
+  // to it here wiped the user's choice moments after they made it.
   useEffect(() => {
     if (!open) return;
     const start = selectedProjectId ?? initialProjectId ?? (projects.length === 1 ? projects[0].ProjectId : null);
     setProjectId(start != null ? String(start) : "");
     setDraft({}); setAssignTo("");
-  }, [open, selectedProjectId, initialProjectId, projects]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const { data: types = [] } = useQuery({
     queryKey: [...villaTypesKey(projectId), "all"], queryFn: () => fetchVillaTypes(projectId, true), enabled: open && !!projectId,
