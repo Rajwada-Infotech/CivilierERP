@@ -108,7 +108,7 @@ export function LedgerHeadPicker({
                       onChange(o.id);
                       setOpen(false);
                     }}
-                    className="text-xs text-foreground data-[selected=true]:bg-neutral-900 data-[selected=true]:text-neutral-50"
+                    className="text-xs text-foreground data-[selected=true]:bg-primary/10 data-[selected=true]:text-foreground"
                   >
                     <Check size={12} className={cn("mr-2 shrink-0", o.id === value ? "opacity-100" : "opacity-0")} />
                     <span className="truncate text-foreground">{o.label}</span>

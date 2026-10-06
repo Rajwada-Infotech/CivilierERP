@@ -443,7 +443,7 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
         WHERE b.IsActive = 1
-          AND b.Status NOT IN ('Cancelled', 'Rejected')
+          AND b.Status NOT IN ('Cancelled', 'Rejected', 'Transferred')
           AND m.Status NOT IN ('Waived')
           ${view !== "all" ? "AND (m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0" : ""}
           AND (@st IS NULL OR m.DemandStatus = @st)
@@ -1040,7 +1040,7 @@ router.post("/escalate-overdue", requirePageRight("crm-payments", "edit"), async
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
-        AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+        AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred')
     `);
 
     const { normalizeRole } = require("../middleware/role");

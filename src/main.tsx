@@ -172,6 +172,33 @@ const NOWRAP_PATTERNS = [
 ];
 const isShortValue = (t: string) =>
   t.length > 0 && t.length <= 32 && (!/\s/.test(t) || NOWRAP_PATTERNS.some((re) => re.test(t)));
+// Phone card view for hand-built tables: every body cell gets its column's
+// header as data-label, and the table gets .auto-cards; on phones (<768px)
+// index.css turns each row into a card (first column = title, other values
+// labelled, actions in the footer). DataTable has its own cards already.
+function markCardTables() {
+  document.querySelectorAll<HTMLTableElement>("main table, [role=dialog] table").forEach((table) => {
+    if (!table.tHead || table.closest(".md\\:block")) { table.classList.remove("auto-cards"); return; }
+    const { placed, ncols } = placeCells(table);
+    if (ncols < 3) { table.classList.remove("auto-cards"); return; }
+    const labels: string[] = [];
+    placed.forEach((p) => {
+      if (p.inHead && p.start === p.end) labels[p.start] = (p.cell.textContent || "").replace(/\s+/g, " ").trim();
+    });
+    placed.forEach((p) => {
+      if (p.inHead) return;
+      if (p.start !== p.end) { p.cell.removeAttribute("data-label"); return; }
+      const label = labels[p.start] || "";
+      if (p.cell.getAttribute("data-label") !== label) p.cell.setAttribute("data-label", label);
+      // Blank / dash-only values are hidden in the compact phone cards.
+      const txt = (p.cell.textContent || "").replace(/\s+/g, "").trim();
+      const empty = (!txt || /^[-–—]+$/.test(txt)) && !p.cell.querySelector("button, a, input, select, img, svg");
+      p.cell.toggleAttribute("data-empty", empty);
+    });
+    table.classList.add("auto-cards");
+  });
+}
+
 function markNowrapCells() {
   document.querySelectorAll<HTMLTableCellElement>("main table td, [role=dialog] table td").forEach((td) => {
     if (td.hasAttribute("colspan")) return;
@@ -196,6 +223,7 @@ new MutationObserver(() => {
     markRows();
     markStickyActions();
     markNowrapCells();
+    markCardTables();
   });
 }).observe(document.documentElement, { childList: true, subtree: true });
 

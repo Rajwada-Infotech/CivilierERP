@@ -1,5 +1,5 @@
 import React from "react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Search,
   Edit2,
@@ -12,6 +12,8 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
+  ChevronLeft,
+  ChevronRight,
   CalendarDays,
   RotateCcw,
 } from "lucide-react";
@@ -303,6 +305,33 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(!collapsibleAddForm);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+
+  // Long forms (3+ sections) show one section at a time behind tabs, so the
+  // user isn't scrolling one very long page. Values in every section are
+  // kept while switching; saving is unchanged.
+  const sectionGroups = useMemo(() => {
+    const groups: { key: string; label: string; fields: string[] }[] = [];
+    let cur = { key: "__general", label: "General", fields: [] as string[] };
+    fields.forEach((f) => {
+      if (f.type === "section") {
+        if (cur.fields.length) groups.push(cur);
+        cur = { key: f.name, label: f.label || f.name, fields: [] };
+      } else {
+        cur.fields.push(f.name);
+      }
+    });
+    if (cur.fields.length) groups.push(cur);
+    return groups;
+  }, [fields]);
+  const tabbed = sectionGroups.length >= 3;
+  const sectionOf = useMemo(() => {
+    const m: Record<string, string> = {};
+    sectionGroups.forEach((g) => g.fields.forEach((n) => { m[n] = g.key; }));
+    return m;
+  }, [sectionGroups]);
+  const [activeSection, setActiveSection] = useState<string | null>(null);
+  const currentSection = tabbed ? (sectionGroups.find((g) => g.key === activeSection) ?? sectionGroups[0]) : null;
+  const currentSectionIdx = currentSection ? sectionGroups.indexOf(currentSection) : -1;
   const [search, setSearch] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -423,12 +452,19 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: false }));
   };
 
+  useEffect(() => { setActiveSection(null); }, [formOpen, editingId]);
+
   const validate = () => {
     const errs: Record<string, boolean> = {};
     fields.forEach((f) => {
       if (f.required && !isFieldFilled(f, form[f.name])) errs[f.name] = true;
     });
     setErrors(errs);
+    // Jump to the first section that has a missing required field.
+    if (tabbed) {
+      const first = sectionGroups.find((g) => g.fields.some((n) => errs[n]));
+      if (first) setActiveSection(first.key);
+    }
     return Object.keys(errs).length === 0;
   };
 
@@ -645,9 +681,13 @@ export const MasterPage: React.FC<MasterPageProps> = ({
           {collapsibleAddForm && editingId === null && (
             <button
               onClick={() => setFormOpen((v) => !v)}
-              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm transition-opacity"
+              className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-colors ${
+                formOpen
+                  ? "border border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                  : "gradient-accent text-white shadow-sm"
+              }`}
             >
-              <Plus size={12} />
+              {formOpen ? <X size={12} /> : <Plus size={12} />}
               {formOpen ? "Close" : "New Entry"}
             </button>
           )}
@@ -655,14 +695,47 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
         {(formOpen || editingId !== null) && (<>
         <div className="p-5">
-          <div className={`grid grid-cols-1 gap-4 ${gridCols === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+          {tabbed && currentSection && (
+            <div className="-mx-1 mb-4 flex gap-1 overflow-x-auto thin-scroll pb-1" role="tablist">
+              {sectionGroups.map((g, i) => {
+                const active = g.key === currentSection.key;
+                // Dot = this section still has an empty required field (Save
+                // stays disabled until they're filled), or a failed validation.
+                const hasError = g.fields.some((n) => {
+                  if (errors[n]) return true;
+                  const f = fields.find((x) => x.name === n);
+                  return !!f?.required && !isFieldFilled(f, form[n]);
+                });
+                return (
+                  <button
+                    key={g.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveSection(g.key)}
+                    className={`relative shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border transition-colors ${
+                      active
+                        ? "gradient-accent text-white border-transparent shadow-sm"
+                        : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <span className={`w-4 h-4 rounded-full text-[0.625rem] flex items-center justify-center ${active ? "bg-white/25" : "bg-muted"}`}>{i + 1}</span>
+                    {g.label}
+                    {hasError && <span className="w-1.5 h-1.5 rounded-full bg-destructive" aria-label="has missing fields" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className={`grid ${tabbed ? "grid-cols-2 mp-tabbed" : "grid-cols-1"} gap-x-3 sm:gap-x-4 gap-y-3.5 ${gridCols === 3 ? "md:grid-cols-2 xl:grid-cols-3" : "md:grid-cols-2"}`}>
             {fields.map((field) => {
+              if (tabbed && currentSection && (field.type === "section" || sectionOf[field.name] !== currentSection.key)) return null;
               const isFullWidth =
                 field.fullWidth || field.type === "textarea" || field.type === "section";
               return (
                 <div
                   key={field.name}
-                  className={isFullWidth ? (gridCols === 3 ? "md:col-span-3" : "md:col-span-2") : ""}
+                  className={isFullWidth ? (gridCols === 3 ? `${tabbed ? "col-span-2 " : ""}md:col-span-2 xl:col-span-3` : `${tabbed ? "col-span-2 " : ""}md:col-span-2`) : "min-w-0"}
                 >
                   {field.type !== "toggle" && field.type !== "section" && field.label && (
                     <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
@@ -674,8 +747,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   )}
 
                   {field.type === "section" ? (
-                    <div className={fields[0] === field ? "" : "pt-1 -mb-1"}>
-                      <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-foreground/80 pb-1.5 border-b border-border/70">
+                    <div className={fields[0] === field ? "" : "pt-3 -mb-1"}>
+                      <p className="flex items-center gap-2 text-xs uppercase tracking-widest font-heading font-semibold text-foreground pb-2 border-b border-border/70">
+                        <span className="w-1 h-3.5 rounded-full gradient-accent" aria-hidden="true" />
                         {field.label}
                       </p>
                     </div>
@@ -835,6 +909,32 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               );
             })}
           </div>
+
+          {tabbed && currentSection && (
+            <div className="flex items-center justify-between gap-2 mt-5 pt-3 border-t border-border/60">
+              <button
+                type="button"
+                disabled={currentSectionIdx <= 0}
+                onClick={() => setActiveSection(sectionGroups[currentSectionIdx - 1]?.key ?? null)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={13} /> Previous
+              </button>
+              <span className="text-[0.6875rem] text-muted-foreground">
+                Section {currentSectionIdx + 1} of {sectionGroups.length}
+              </span>
+              <button
+                type="button"
+                disabled={currentSectionIdx >= sectionGroups.length - 1}
+                onClick={() => setActiveSection(sectionGroups[currentSectionIdx + 1]?.key ?? null)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span className="hidden sm:inline">Next{sectionGroups[currentSectionIdx + 1] ? `: ${sectionGroups[currentSectionIdx + 1].label}` : ""}</span>
+                <span className="sm:hidden">Next</span>
+                <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
 
         </div>
 

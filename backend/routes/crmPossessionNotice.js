@@ -44,7 +44,7 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
         SELECT TOP 1 UnitNo FROM dbo.vw_CrmBookingDisplay WHERE BookingId = b.Id
       ) bv
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled', 'Rejected')
+        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Transferred')
         AND EXISTS (
           SELECT 1 FROM dbo.CrmPrePossession pp
           WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'

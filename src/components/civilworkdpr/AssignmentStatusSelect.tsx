@@ -23,7 +23,10 @@ export function AssignmentStatusSelect({ rungId, status }: { rungId: number; sta
     onError: (err: any) => toast.error(err?.message || "Failed to update status."),
   });
   const meta = ASSIGNMENT_STATUS_META[status];
-  const options = allowedNextStatuses(status);
+  // The current status must be one of the <option>s, otherwise the browser shows the first
+  // option instead (an Allocated activity would read "In Progress" before any work is reported).
+  const next = allowedNextStatuses(status);
+  const options = next.includes(status) ? next : [status, ...next];
 
   // Nothing to toggle to — Completed/Approved/Cancelled are no longer
   // manually reachable from here (Completed comes from the progress bar,

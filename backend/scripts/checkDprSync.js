@@ -327,9 +327,14 @@ async function checkWorkflow() {
   await check(sec, "Chain's Room/Flat/Tower/Floor/Project don't line up", [["DependencyMaster"]],
     `SELECT d.Id, d.Alias, d.TowerId, d.Floor, d.FlatId, d.RoomId FROM dbo.DependencyMaster d
      LEFT JOIN dbo.RoomMaster r ON r.Id = d.RoomId LEFT JOIN dbo.UnitMaster u ON u.Id = d.FlatId LEFT JOIN dbo.BlockMaster b ON b.Id = d.TowerId
-     WHERE ((d.RoomId IS NOT NULL AND (r.UnitId <> d.FlatId OR ISNULL(r.Floor,'~') <> ISNULL(d.Floor,'~')))
+     WHERE ((d.RoomId IS NOT NULL AND (r.UnitId <> d.FlatId OR (ISNULL(r.Floor,'~') <> ISNULL(d.Floor,'~')
+        -- a floorless villa's chain is placed by its plot(s) (unitLayout.chainFloorLabel)
+        AND NOT (r.Floor IS NULL AND d.Floor = (SELECT STRING_AGG(p.PlotName, '+') WITHIN GROUP (ORDER BY p.PlotName)
+                                                  FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = d.FlatId AND p.IsActive = 1)))))
         OR (d.FlatId IS NOT NULL AND (u.BlockId <> d.TowerId OR u.ProjectId <> d.ProjectId))
         OR (d.TowerId IS NOT NULL AND b.ProjectId <> d.ProjectId)) ${projectFilter("d.ProjectId")}`);
+  await check(sec, "Chain whose Floor was saved as the text 'null' (floorless unit)", [["DependencyMaster"]],
+    `SELECT d.Id, d.Alias, d.FlatId FROM dbo.DependencyMaster d WHERE d.Floor IN (N'null', N'undefined', N'') ${projectFilter("d.ProjectId")}`);
   await check(sec, "Active chain on an inactive room / flat / tower", [["DependencyMaster"]],
     `SELECT d.Id, d.Alias, r.IsActive AS RoomActive, u.IsActive AS FlatActive, b.IsActive AS TowerActive FROM dbo.DependencyMaster d
      LEFT JOIN dbo.RoomMaster r ON r.Id = d.RoomId LEFT JOIN dbo.UnitMaster u ON u.Id = d.FlatId LEFT JOIN dbo.BlockMaster b ON b.Id = d.TowerId

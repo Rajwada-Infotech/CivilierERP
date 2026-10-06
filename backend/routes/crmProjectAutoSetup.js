@@ -1404,7 +1404,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
             FROM dbo.CrmUnitPaymentPlan upp
             WHERE upp.UnitId = u.Id AND upp.IsActive = 1
           ) tags
-          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred')
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
           LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
           WHERE u.BlockId = @bid AND u.FloorNo IS NULL AND u.IsActive = 1
@@ -1423,7 +1423,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
             FROM dbo.CrmUnitPaymentPlan upp
             WHERE upp.UnitId = u.Id AND upp.IsActive = 1
           ) tags
-          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred')
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
           LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
           WHERE u.BlockId = @bid AND u.FloorNo = @fno AND u.IsActive = 1
@@ -2186,7 +2186,7 @@ router.get("/blocks/:blockId/plots", requirePageRight("crm-auto-project-setup", 
         (SELECT TOP 1 b.BookingNo FROM dbo.CrmBooking b
            JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id
            WHERE bp.PlotId = p.Id AND b.IsActive = 1
-             AND b.Status NOT IN ('Cancelled', 'Draft')) AS LockBookingNo,
+             AND b.Status NOT IN ('Cancelled', 'Draft', 'Transferred')) AS LockBookingNo,
         (SELECT TOP 1 CAST(h.Id AS NVARCHAR) FROM dbo.CrmInventoryHold h
            WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id AND h.Status = N'Active'
              AND h.HoldUntil > SYSDATETIME()) AS LockHoldId,
@@ -2296,7 +2296,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
                   JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
                   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
                  WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
-                   AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')) AS OwnerCustomerId
+                   AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')) AS OwnerCustomerId
         FROM dbo.PlotMaster p WITH (UPDLOCK, HOLDLOCK)
         WHERE p.Id IN (${plotIds.join(",")})
           AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
@@ -2308,7 +2308,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
               -- An application that already became a booking is ownership,
               -- not an open claim.
               AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking ab WHERE ab.ApplicationId = a.Id AND ab.IsActive = 1
-                                AND ab.Status NOT IN (N'Cancelled', N'Rejected', N'Expired'))
+                                AND ab.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred'))
           )
           AND NOT EXISTS (
             SELECT 1 FROM dbo.CrmInventoryHold h

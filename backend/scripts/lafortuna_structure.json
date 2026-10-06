@@ -1,0 +1,132 @@
+{
+ "source": "La Fortuna availability list",
+ "projects": [
+  {
+   "name": "LA FORTUNA",
+   "blocks": [
+    {
+     "name": "1",
+     "floors": {
+      "1": [
+       {
+        "flat": "A",
+        "bhk": 2
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       }
+      ],
+      "2": [
+       {
+        "flat": "A",
+        "bhk": 2
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       }
+      ],
+      "3": [
+       {
+        "flat": "A",
+        "bhk": 2
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       }
+      ],
+      "4": [
+       {
+        "flat": "A",
+        "bhk": 2
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       }
+      ]
+     }
+    },
+    {
+     "name": "2",
+     "floors": {
+      "1": [
+       {
+        "flat": "A",
+        "bhk": 2
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 2
+       }
+      ],
+      "2": [
+       {
+        "flat": "A",
+        "bhk": 2
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 2
+       }
+      ],
+      "3": [
+       {
+        "flat": "A",
+        "bhk": 2
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 2
+       }
+      ],
+      "4": [
+       {
+        "flat": "A",
+        "bhk": 2
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 2
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

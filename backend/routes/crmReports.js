@@ -174,7 +174,7 @@ router.get("/overdue-payments", requirePageRight("crm-payments", "view"), async 
       WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Transferred')
         ${cpb.clauses.length ? "AND " + cpb.clauses.join(" AND ") : ""}
       ORDER BY m.DueDate ASC
     `);
@@ -625,7 +625,7 @@ router.get("/aging-analysis", requirePageRight("crm-payments", "view"), async (r
       WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Transferred')
         ${cpb.clauses.length ? "AND " + cpb.clauses.join(" AND ") : ""}
       ORDER BY DaysOverdue DESC
     `);
@@ -655,7 +655,7 @@ router.get("/inventory-status", requirePageRight("crm-bookings", "view"), async 
         SUM(CASE WHEN bk.Id IS NULL THEN 1 ELSE 0 END) AS AvailableUnits
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise ep ON ep.id = u.ProjectId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')
+      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Transferred')
       WHERE ${conds.join(" AND ")}
       GROUP BY ep.name, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind))
       ORDER BY ep.name, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind))

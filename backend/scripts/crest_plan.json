@@ -1,0 +1,250 @@
+{
+ "project": "Crest",
+ "areaColumn": "BuiltUpAreaSqFt",
+ "blocks": [
+  {
+   "name": "1",
+   "floors": [
+    1,
+    1
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1085,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1085
+     },
+     "facing": "S"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1105,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1105
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 950,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 950
+     },
+     "facing": "E"
+    },
+    "D": {
+     "type": "2 BHK",
+     "area": 960,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 960
+     },
+     "facing": "E"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1140,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1140
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "3 BHK",
+     "area": 1170,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1170
+     },
+     "facing": "NW"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1075,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1075
+     },
+     "facing": "W"
+    }
+   }
+  },
+  {
+   "name": "1",
+   "floors": [
+    2,
+    2
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1085,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1085
+     },
+     "facing": "S"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1105,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1105
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 950,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 950
+     },
+     "facing": "E"
+    },
+    "D": {
+     "type": "2 BHK",
+     "area": 960,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 960
+     },
+     "facing": "E"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1140,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1140
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "3 BHK",
+     "area": 1170,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1170
+     },
+     "facing": "NW"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1075,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1075
+     },
+     "facing": "W"
+    }
+   }
+  },
+  {
+   "name": "1",
+   "floors": [
+    3,
+    3
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1085,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1085
+     },
+     "facing": "S"
+    },
+    "B": {
+     "type": "3 BHK",
+     "area": 1105,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1105
+     },
+     "facing": "S"
+    },
+    "C": {
+     "type": "2 BHK",
+     "area": 950,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 950
+     },
+     "facing": "E"
+    },
+    "D": {
+     "type": "2 BHK",
+     "area": 960,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 960
+     },
+     "facing": "E"
+    },
+    "E": {
+     "type": "3 BHK",
+     "area": 1140,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1140
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "3 BHK",
+     "area": 1170,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1170
+     },
+     "facing": "NW"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1075,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1075
+     },
+     "facing": "W"
+    }
+   }
+  },
+  {
+   "name": "1",
+   "floors": [
+    4,
+    4
+   ],
+   "flats": {
+    "A": {
+     "type": "3 BHK",
+     "area": 1085,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1085
+     },
+     "facing": "S"
+    },
+    "H": {
+     "type": "3 BHK",
+     "area": 1105,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1105
+     },
+     "facing": "S"
+    },
+    "I": {
+     "type": "3 BHK",
+     "area": 1465,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1465
+     },
+     "facing": "NE"
+    },
+    "F": {
+     "type": "3 BHK",
+     "area": 1170,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1170
+     },
+     "facing": "NW"
+    },
+    "G": {
+     "type": "2 BHK",
+     "area": 1075,
+     "areas": {
+      "SuperBuiltUpAreaSqFt": 1075
+     },
+     "facing": "W"
+    }
+   }
+  }
+ ]
+}

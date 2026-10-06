@@ -1,0 +1,769 @@
+{
+ "source": "Springfield availability list",
+ "projects": [
+  {
+   "name": "Springfield",
+   "blocks": [
+    {
+     "name": "A",
+     "floors": {
+      "1": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "2": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "3": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "4": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "5": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "6": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "7": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "8": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "9": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "10": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "11": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "12": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 2
+       },
+       {
+        "flat": "C",
+        "bhk": 2
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ]
+     }
+    },
+    {
+     "name": "B",
+     "floors": {
+      "1": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "2": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "3": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "4": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "5": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "6": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "7": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "8": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "9": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "10": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ],
+      "11": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       },
+       {
+        "flat": "E",
+        "bhk": 3
+       },
+       {
+        "flat": "F",
+        "bhk": 2
+       },
+       {
+        "flat": "G",
+        "bhk": 2
+       }
+      ]
+     }
+    },
+    {
+     "name": "C",
+     "floors": {
+      "1": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "2": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "3": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "4": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "5": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "6": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "7": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "8": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "9": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "10": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ],
+      "11": [
+       {
+        "flat": "A",
+        "bhk": 3
+       },
+       {
+        "flat": "B",
+        "bhk": 3
+       },
+       {
+        "flat": "C",
+        "bhk": 3
+       },
+       {
+        "flat": "D",
+        "bhk": 3
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

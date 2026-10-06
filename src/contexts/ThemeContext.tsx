@@ -6,10 +6,32 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
-export type Theme = "dark" | "light" | "midnight" | "root" | "glass" | "bw";
+export type Theme =
+  | "dark"
+  | "light"
+  | "midnight"
+  | "root"
+  | "glass"
+  | "bw"
+  | "cyberpunk";
 
-const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw"];
+const themes: Theme[] = [
+  "dark",
+  "light",
+  "midnight",
+  "root",
+  "glass",
+  "bw",
+  "cyberpunk",
+];
+
+/** Themes offered (and applied) only to super admins. */
+export const SUPER_ADMIN_ONLY_THEMES: readonly Theme[] = ["cyberpunk"];
+
+export const isThemeAllowed = (t: Theme, isSuperAdmin: boolean): boolean =>
+  isSuperAdmin || !SUPER_ADMIN_ONLY_THEMES.includes(t);
 
 /**
  * Themes whose surface is light (white/near-white background). Components that
@@ -17,7 +39,7 @@ const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw"];
  * instead of `theme === "light"` so the BW theme (light background, black
  * accents) is treated correctly.
  */
-export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw";
+export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw" || t === "glass";
 
 /**
  * Fixed 3-tone chart palette for the BW theme: maroon / green / orange.
@@ -42,8 +64,9 @@ export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
   light: { bg: "#a78bfa", label: "Light" },
   midnight: { bg: "#2dd4bf", label: "Midnight" },
   root: { bg: "#f0a500", label: "Root" },
-  glass: { bg: "#a5b4fc", label: "Glass" },
+  glass: { bg: "#f3e6cf", label: "Glass" },
   bw: { bg: "#111111", label: "BW" },
+  cyberpunk: { bg: "#00f0ff", label: "Cyberpunk" },
 };
 
 interface ThemeContextType {
@@ -52,6 +75,15 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType | null>(null);
+
+/** The theme picker's entries for the signed-in user (restricted themes only for super admins). */
+export const useThemeOptions = (): [Theme, { bg: string; label: string }][] => {
+  const { currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === "super_admin";
+  return (
+    Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]
+  ).filter(([t]) => isThemeAllowed(t, isSuperAdmin));
+};
 
 export const useTheme = () => {
   const ctx = useContext(ThemeContext);
@@ -76,19 +108,33 @@ function applyTheme(theme: Theme) {
 }
 
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
-  const [theme, setThemeState] = useState<Theme>(() => {
+  const { currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === "super_admin";
+
+  const [chosen, setChosen] = useState<Theme>(() => {
     const initial = getInitialTheme();
     // Apply synchronously before first paint to avoid flash
-    applyTheme(initial);
+    applyTheme(isThemeAllowed(initial, isSuperAdmin) ? initial : "dark");
     return initial;
   });
 
+  // A restricted theme that's stored for someone who may not use it (a different
+  // role signed in on this browser, or logged out) renders as the default. The
+  // stored choice is kept, so the super admin gets it back on their next sign-in.
+  const theme: Theme = isThemeAllowed(chosen, isSuperAdmin) ? chosen : "dark";
+
   useEffect(() => {
     applyTheme(theme);
-    localStorage.setItem("civilier-theme", theme);
   }, [theme]);
 
-  const setTheme = useCallback((t: Theme) => setThemeState(t), []);
+  const setTheme = useCallback(
+    (t: Theme) => {
+      if (!isThemeAllowed(t, isSuperAdmin)) return;
+      setChosen(t);
+      localStorage.setItem("civilier-theme", t);
+    },
+    [isSuperAdmin],
+  );
 
   const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
 

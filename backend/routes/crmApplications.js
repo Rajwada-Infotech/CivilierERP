@@ -137,7 +137,7 @@ const APP_SELECT = `
     -- whatever its Status happens to read.
     CASE
       WHEN a.Status NOT IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}', 'Expired') AND bk.Id IS NULL AND a.PreferredUnitId IS NOT NULL AND (
-        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') AND ob.ApplicationId <> a.Id)
+        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred') AND ob.ApplicationId <> a.Id)
         OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold oh WHERE oh.EntityType = 'Unit' AND oh.EntityId = a.PreferredUnitId AND oh.Status = '${CrmStatus.ACTIVE}' AND oh.HoldUntil >= SYSDATETIME() AND oh.ApplicationId <> a.Id)
       ) THEN 1 ELSE 0
     END AS UnitUnavailableForBooking
@@ -161,7 +161,7 @@ const APP_SELECT = `
     SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
     FROM dbo.CrmBooking
     WHERE ApplicationId = a.Id
-    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 0 ELSE 1 END, CreatedAt DESC
+    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred') THEN 0 ELSE 1 END, CreatedAt DESC
   ) bk
 `;
 

@@ -122,7 +122,7 @@ function FAItemCodeCombobox({
                   {assets.map((a) => (
                     <CommandItem key={a.AssetId} value={`${a.FAItemCode} ${a.AssetName}`}
                       onSelect={() => { onSelect(a); setOpen(false); }}
-                      className="data-[selected=true]:bg-neutral-900 data-[selected=true]:text-neutral-50">
+                      className="data-[selected=true]:bg-primary/10 data-[selected=true]:text-foreground">
                       <Check className={cn("mr-2 h-4 w-4", String(a.AssetId) === value ? "opacity-100" : "opacity-0")} />
                       <span className="flex flex-col min-w-0">
                         <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{a.FAItemCode}</span>
