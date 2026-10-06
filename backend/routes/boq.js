@@ -115,6 +115,8 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
     await transaction
       .request()
       .input("BoqID", sqlRef.Int, boqID)
+      .input("ActivityId", sqlRef.NVarChar(100), it.activityId || null)
+      .input("ActivityName", sqlRef.NVarChar(255), it.activityName ? String(it.activityName).substring(0, 255) : null)
       .input("ItemId", sqlRef.NVarChar(100), it.itemId || null)
       .input("ItemName", sqlRef.NVarChar(255), itemName)
       .input("ItemCode", sqlRef.NVarChar(50), it.itemCode || null)
@@ -127,10 +129,10 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
       .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqItems
-          (BoqID, ItemId, ItemName, ItemCode, Description,
+          (BoqID, ActivityId, ActivityName, ItemId, ItemName, ItemCode, Description,
            Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
         VALUES
-          (@BoqID, @ItemId, @ItemName, @ItemCode, @Description,
+          (@BoqID, @ActivityId, @ActivityName, @ItemId, @ItemName, @ItemCode, @Description,
            @Quantity, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
       `);
   }

@@ -54,6 +54,9 @@ import { DateInput } from "@/components/ui/date-input";
 interface BoqItem {
   Id?: number;
   _key: string;
+  /** The BOQ Activity (Activity Master id) this item is required for; "" = none. */
+  activityId: string;
+  activityName: string;
   itemId: string;
   itemName: string;
   itemCode: string;
@@ -183,6 +186,8 @@ const calcAmount = (qty: string, rate: string) =>
 
 const blankItem = (): BoqItem => ({
   _key: uid(),
+  activityId: "",
+  activityName: "",
   itemId: "",
   itemName: "",
   itemCode: "",
@@ -210,6 +215,8 @@ const blankActivity = (): BoqActivity => ({
 const rowToItem = (r: any): BoqItem => ({
   Id: r.Id,
   _key: uid(),
+  activityId: r.ActivityId ?? "",
+  activityName: r.ActivityName ?? "",
   itemId: r.ItemId ?? "",
   itemName: r.ItemName ?? "",
   itemCode: r.ItemCode ?? "",
@@ -249,7 +256,13 @@ const buildPayload = (
   DocTypeId: form.DocTypeId ? Number(form.DocTypeId) : null,
   finYear: form.FinYear || undefined,
   Status: form.Status,
-  BoqItems: items.map((it) => ({
+  BoqItems: items.map((it) => {
+    const act = it.activityId
+      ? activities.find((a) => a.activityId === it.activityId)
+      : undefined;
+    return {
+    activityId: act ? act.activityId : null,
+    activityName: act ? act.activityName : null,
     itemId: it.itemId,
     itemName: it.itemName,
     itemCode: it.itemCode,
@@ -260,7 +273,8 @@ const buildPayload = (
     rate: it.rate,
     tax: it.tax,
     amount: it.amount,
-  })),
+    };
+  }),
   BoqActivities: activities.map((ac) => ({
     activityId: ac.activityId,
     activityName: ac.activityName,
@@ -326,6 +340,8 @@ interface LineEditorProps {
   uoms: UomOption[];
   itemOptions?: ItemOption[];
   activityOptions?: ActivityOption[];
+  /** Item mode: the activities already added to this BOQ, offered in the "Activity" column. */
+  boqActivities?: BoqActivity[];
   itemsTotal?: number;
   activitiesTotal?: number;
   onChange: (rows: any[]) => void;
@@ -342,6 +358,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
   uoms,
   itemOptions = [],
   activityOptions = [],
+  boqActivities = [],
   itemsTotal = 0,
   activitiesTotal = 0,
   onChange,
@@ -476,6 +493,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
           <colgroup>
             <col style={{ width: 36 }} />
             <col style={{ width: 180 }} />
+            {isItem && <col style={{ width: 170 }} />}
             <col style={{ width: 80 }} />
             <col style={{ width: 120 }} />
             <col style={{ width: 72 }} />
@@ -497,6 +515,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
               {[
                 "#",
                 isItem ? "Item" : "Activity",
+                ...(isItem ? ["For Activity"] : []),
                 "Code",
                 "Spec / Notes",
                 "Qty",
@@ -505,7 +524,9 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 "Tax %",
                 "Amount (₹)",
                 "Tax Amt (₹)",
-              ].map((h, i) => (
+              ].map((h, i0) => {
+                const i = isItem && i0 > 2 ? i0 - 1 : i0;
+                return (
                 <th
                   key={h}
                   style={{
@@ -525,7 +546,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 >
                   {h}
                 </th>
-              ))}
+                );
+              })}
               {!readOnly && <th style={{ borderRight: "none", padding: 0 }} />}
             </tr>
           </thead>
@@ -534,7 +556,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
             {(rows as any[]).length === 0 ? (
               <tr>
                 <td
-                  colSpan={readOnly ? 10 : 11}
+                  colSpan={(readOnly ? 10 : 11) + (isItem ? 1 : 0)}
                   style={{
                     textAlign: "center",
                     padding: 32,
@@ -678,6 +700,60 @@ const LineEditor: React.FC<LineEditorProps> = ({
                         </Select>
                       )}
                     </td>
+
+                    {/* For Activity (items only) */}
+                    {isItem && (
+                      <td
+                        style={{
+                          borderRight: "1px solid hsl(var(--border))",
+                          padding: "4px 6px",
+                        }}
+                      >
+                        {readOnly ? (
+                          <span style={{ fontSize: 12 }}>
+                            {row.activityName || "—"}
+                          </span>
+                        ) : (
+                          <Select
+                            value={row.activityId ? String(row.activityId) : "__none"}
+                            onValueChange={(val) => {
+                              const sel = boqActivities.find((a) => a.activityId === val);
+                              onChange(
+                                (rows as any[]).map((r, i) =>
+                                  i !== idx
+                                    ? r
+                                    : {
+                                        ...r,
+                                        activityId: sel ? sel.activityId : "",
+                                        activityName: sel ? sel.activityName : "",
+                                      },
+                                ),
+                              );
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                              <SelectValue placeholder="— None —" />
+                            </SelectTrigger>
+                            <SelectContent className="z-[300] max-h-60">
+                              <SelectItem value="__none" className="text-xs">
+                                — None —
+                              </SelectItem>
+                              {boqActivities
+                                .filter(
+                                  (a, k, arr) =>
+                                    a.activityId &&
+                                    arr.findIndex((b) => b.activityId === a.activityId) === k,
+                                )
+                                .map((a) => (
+                                  <SelectItem key={a.activityId} value={a.activityId} className="text-xs">
+                                    {a.activityName}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </td>
+                    )}
 
                     {/* Code */}
                     <td
@@ -1023,7 +1099,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 }}
               >
                 <td
-                  colSpan={readOnly ? 9 : 10}
+                  colSpan={(readOnly ? 9 : 10) + (isItem ? 1 : 0)}
                   style={{
                     textAlign: "right",
                     padding: "6px 10px",
@@ -1266,10 +1342,13 @@ const FormModal: React.FC<FormModalProps> = ({
 
       setItems((prev) => {
         const existingIds = new Set(prev.map((it) => it.itemId));
+        const actName = activityOptions.find((o) => o.id === activityId)?.name ?? "";
         const newRows = linkedList
           .filter((li) => !existingIds.has(li.itemId))
           .map((li) => ({
             _key: uid(),
+            activityId,
+            activityName: actName,
             itemId: li.itemId,
             itemName: li.itemName,
             itemCode: li.itemCode || "",
@@ -1703,6 +1782,7 @@ const FormModal: React.FC<FormModalProps> = ({
               uoms={uoms}
               itemOptions={itemOptions}
               activityOptions={activityOptions}
+              boqActivities={activities}
               itemsTotal={itemsTotal}
               activitiesTotal={activitiesTotal}
               onChange={
