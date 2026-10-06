@@ -2254,10 +2254,13 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   }
   // The villa's own construction rate. Never the plot's land rate: the plot's
   // owner has already paid for the land, and a villa priced at the land rate
-  // would charge them for it again.
-  const villaRate = Number(req.body?.RatePerSqFt);
-  if (!Number.isFinite(villaRate) || villaRate <= 0) {
-    return res.status(400).json({ error: "Enter the villa's construction rate per sq ft — the plot's land rate is not used for the villa." });
+  // would charge them for it again. Rate is optional — null when not provided.
+  const villaRateRaw = req.body?.RatePerSqFt;
+  const villaRate = villaRateRaw == null || villaRateRaw === "" || villaRateRaw === 0 || villaRateRaw === "0"
+    ? null
+    : Number(villaRateRaw);
+  if (villaRate !== null && (!Number.isFinite(villaRate) || villaRate < 0)) {
+    return res.status(400).json({ error: "Construction rate must be a positive number." });
   }
   // A villa's built-up area is its own (per villa design), never the land
   // area. Super built-up is optional; when given it is the saleable area, as
