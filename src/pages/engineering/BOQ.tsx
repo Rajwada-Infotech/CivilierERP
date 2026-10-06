@@ -258,7 +258,9 @@ const rowToItem = (r: any): BoqItem => ({
 const rowToActivity = (r: any): BoqActivity => ({
   Id: r.Id,
   _key: uid(),
-  area: r.Area != null ? String(r.Area) : "",
+  // Total Qty is gone from activities — the area is the quantity. Older rows that
+  // only had a Qty keep their amount by showing that Qty as the area.
+  area: r.Area != null ? String(r.Area) : r.Quantity ? String(r.Quantity) : "",
   groupId: r.GroupId ?? "",
   groupName: r.GroupName ?? "",
   activityId: r.ActivityId ?? "",
@@ -419,7 +421,9 @@ const LineEditor: React.FC<LineEditorProps> = ({
     const next = (rows as any[]).map((r, i) => {
       if (i !== idx) return r;
       const updated = { ...r, [field]: val };
-      if (field === "quantity" || field === "rate") {
+      // Activities have no separate Qty: Amount = Total Area x Total Rate.
+      if (!isItem && field === "area") updated.quantity = val;
+      if (field === "quantity" || field === "rate" || (!isItem && field === "area")) {
         updated.amount = calcAmount(updated.quantity, updated.rate);
       }
       return updated;
@@ -441,7 +445,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
   // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
   // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
   // Activities also get a leading "Activity Group" column.
-  const colCount = (isItem ? 12 : 13) + (readOnly ? 0 : 1);
+  const colCount = 12 + (readOnly ? 0 : 1);
 
   return (
     <div
@@ -548,7 +552,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
             {isItem && <col style={{ width: 170 }} />}
             <col style={{ width: 80 }} />
             <col style={{ width: 120 }} />
-            <col style={{ width: 72 }} />
+            {isItem && <col style={{ width: 72 }} />}
             <col style={{ width: isItem ? 130 : 84 }} />
             <col style={{ width: 96 }} />
             <col style={{ width: 96 }} />
@@ -574,7 +578,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                   ...(isItem ? [["For Activity", "left"]] : []),
                   ["Code", "left"],
                   ["Spec / Notes", "left"],
-                  [isItem ? "Item Qty" : "Total Qty", "right"],
+                  ...(isItem ? [["Item Qty", "right"]] : []),
                   [isItem ? "Per Unit Qty" : "Total Area", "right"],
                   ["UOM", "left"],
                   [isItem ? "Rate (₹)" : "Total Rate (₹)", "right"],
@@ -944,7 +948,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       )}
                     </td>
 
-                    {/* Qty */}
+                    {/* Qty (items only — an activity is sized by its Total Area) */}
+                    {isItem && (
                     <td
                       style={{
                         borderRight: "1px solid hsl(var(--border))",
@@ -988,6 +993,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       )}
                     </td>
 
+                    )}
+
                     {/* Per Unit Qty (items) / Total Area (activities) */}
                     <td
                       style={{
@@ -1009,7 +1016,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                                 title={
                                   !act
                                     ? "Pick the activity this item is for"
-                                    : "Enter the activity's Total Area or Total Qty and this item's quantity"
+                                    : "Enter the activity's Total Area and this item's quantity"
                                 }
                                 style={{ color: "hsl(var(--muted-foreground))" }}
                               >
