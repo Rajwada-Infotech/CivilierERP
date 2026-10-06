@@ -73,6 +73,7 @@ import {
 import { AddWorkerDialog, inputCls, STATUS_LABEL, STATUS_CLS, todayIso } from "@/pages/civilworkdpr/WorkerAttendance";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
@@ -762,6 +763,8 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
                 onClick={() => toggleCheckpoint(i)}
                 disabled={saving === i}
                 className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors disabled:opacity-50 ${
+                  cp.needsRework ? "cp-rework-blink " : ""
+                }${
                   cp.isChecked
                     ? "bg-emerald-500 border-emerald-500 text-white"
                     : gate.locked
@@ -779,6 +782,11 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
             <div className="flex-1 min-w-0 pb-3 pt-0.5">
               <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
                 {cp.fieldName}
+                {cp.needsRework && (
+                  <span className="cp-rework-blink inline-flex items-center gap-1 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/15 border border-amber-500/40 px-1.5 py-0.5 rounded-full">
+                    <RotateCcw size={9} /> Redo — rated Poor
+                  </span>
+                )}
                 {cp.isDaily && (
                   <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
                     <CalendarDays size={9} /> Daily
@@ -877,7 +885,10 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
           })()}
         </Field>
         <Field label="End Date">{row.endDate ? new Date(row.endDate).toLocaleDateString("en-IN") : "—"}</Field>
-        <Field label="Days">{row.days ?? "—"}</Field>
+        <Field label="Days">
+          {row.days ?? "—"}
+          <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} className="mt-1" />
+        </Field>
         <Field label="Labour Source"><SourceValue source={row.labourSource} name={row.labourSourceName} /></Field>
         <Field label="Material Source"><SourceValue source={row.materialSource} name={row.materialSourceName} /></Field>
       </div>
@@ -1569,7 +1580,7 @@ export default function ActivityDetailModal({
               <QcBadge qcStatus={row.qcStatus} />
               <AttemptBadge attemptNo={row.attemptNo} />
               {canRestore && <RestoreCancelledButton row={row} onClose={onClose} />}
-              <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
+              <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
               <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
                 <X size={18} />
               </button>

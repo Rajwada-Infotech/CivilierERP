@@ -29,7 +29,6 @@ import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
-
 const API = "/api/crm/sales-deed";
 const USERS_API = "/api/users"; 
 
@@ -1226,16 +1225,6 @@ const CrmSalesDeed: React.FC = () => {
     setSp((p) => { p.set("deedId", String(id)); return p; }, { replace: true });
     setActiveTab('Timeline');
   };
-
-  // Open the first record by default instead of an empty "select one" panel;
-  // the user can still pick any other row. Deep links (?deedId= / ?bookingId=)
-  // keep priority.
-  useEffect(() => {
-    if (detailId != null || sp.get("deedId") || sp.get("bookingId")) return;
-    const first = (deeds as any[])[0];
-    if (first) selectDetail(first.Id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deeds, detailId]);
 
   const saveFields = async (fields: Record<string, any>) => {
     if (detailId == null) return;

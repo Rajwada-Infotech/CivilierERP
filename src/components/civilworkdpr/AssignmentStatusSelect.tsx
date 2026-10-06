@@ -11,7 +11,18 @@ import {
 // "Saved Flow" list — a rung's status is editable from wherever it's
 // visible, not just from Reporting, so this always invalidates both pages'
 // query keys regardless of which one it was clicked from.
-export function AssignmentStatusSelect({ rungId, status }: { rungId: number; status: AssignmentStatus }) {
+// An In Progress activity that was put back after a hold reads "Resumed" (still In Progress underneath).
+const RESUMED_META = { label: "Resumed", className: "bg-teal-500/10 text-teal-600 dark:text-teal-400" };
+
+export function AssignmentStatusSelect({
+  rungId,
+  status,
+  resumed = false,
+}: {
+  rungId: number;
+  status: AssignmentStatus;
+  resumed?: boolean;
+}) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationFn: (next: AssignmentStatus) => updateAssignmentStatus(rungId, next),
@@ -22,7 +33,9 @@ export function AssignmentStatusSelect({ rungId, status }: { rungId: number; sta
     },
     onError: (err: any) => toast.error(err?.message || "Failed to update status."),
   });
-  const meta = ASSIGNMENT_STATUS_META[status];
+  const showResumed = resumed && status === "IN_PROGRESS";
+  const meta = showResumed ? RESUMED_META : ASSIGNMENT_STATUS_META[status];
+  const labelFor = (s: AssignmentStatus) => (s === "IN_PROGRESS" && showResumed ? RESUMED_META.label : ASSIGNMENT_STATUS_META[s].label);
   // The current status must be one of the <option>s, otherwise the browser shows the first
   // option instead (an Allocated activity would read "In Progress" before any work is reported).
   const next = allowedNextStatuses(status);
@@ -51,7 +64,7 @@ export function AssignmentStatusSelect({ rungId, status }: { rungId: number; sta
     >
       {options.map((s) => (
         <option key={s} value={s}>
-          {ASSIGNMENT_STATUS_META[s].label}
+          {labelFor(s)}
         </option>
       ))}
     </select>
