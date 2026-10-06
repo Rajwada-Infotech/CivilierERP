@@ -178,7 +178,8 @@ export function printLetterhead(d: LetterheadDoc) {
   .orange { position: absolute; left: 0; bottom: 0; width: 100%; height: 36mm; background: ${ORANGE}; }
   .main { margin-left: 74mm; padding: 16mm 14mm 14mm 0; min-height: 297mm; display: flex; flex-direction: column; }
   .top { display: flex; justify-content: space-between; gap: 8mm; margin-bottom: 12mm; }
-  .to { max-width: 68mm; }
+  .to { flex: 1 1 0; min-width: 0; max-width: 68mm; }
+  .title { flex: none; }
   .to .blk { margin-bottom: 3mm; }
   .to small { display: block; font-size: 10.5px; color: #4b5563; line-height: 1.45; }
   .to small.lbl { font-size: 10px; margin-bottom: .5mm; }
@@ -373,7 +374,12 @@ export async function downloadLetterheadPdf(d: LetterheadDoc, filename: string) 
 
   // ── header: "to" blocks (left) + title block (right)
   let hy = 22;
-  const toW = 68;
+  // The title sits top-right in 20pt bold; the "to" column gets whatever width
+  // is left beside it so a long title ("Goods Receipt Note") can't run into it.
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(20);
+  const titleW = doc.getTextWidth(latin(d.title));
+  const toW = Math.max(38, Math.min(68, RIGHT - LEFT - titleW - 6));
   for (const b of d.toBlocks) {
     color("#4b5563");
     doc.setFont(FONT, "normal");

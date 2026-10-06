@@ -76,6 +76,7 @@ import {
   downloadMaterialRequestPdf,
 } from "@/utils/materialRequestDocument";
 import { printPurchaseOrder, downloadPurchaseOrderPdf } from "@/utils/purchaseOrderDocument";
+import { printGrn, downloadGrnPdf } from "@/utils/grnDocument";
 
 // ─── Approval chain types — matches GET /api/approval-workflows/trail ────────
 
@@ -558,6 +559,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   // Purchase Orders likewise use their own letterhead document once the full
   // record (with LineItems) has loaded.
   const usePoDocument = item.Module === "purchase-orders" && !!detail;
+  const useGrnDocument = item.Module === "goods-receipt" && !!detail;
 
   const docActions = (
     <div className="flex items-center gap-1.5 shrink-0">
@@ -565,6 +567,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         onClick={async () => {
           if (useMrDocument) {
             printMaterialRequest(await mrDocument());
+            return;
+          }
+          if (useGrnDocument) {
+            await printGrn({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status });
             return;
           }
           if (usePoDocument) {
@@ -588,6 +594,12 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         onClick={() => {
           const toastId = toast.loading("Generating PDF...");
           const filename = `${(item.Reference || item.RecordId || "document").replace(/[^\w-]+/g, "_")}.pdf`;
+          if (useGrnDocument) {
+            downloadGrnPdf({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status }, filename)
+              .then(() => toast.success("PDF downloaded", { id: toastId }))
+              .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+            return;
+          }
           if (usePoDocument) {
             downloadPurchaseOrderPdf({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status }, filename)
               .then(() => toast.success("PDF downloaded", { id: toastId }))

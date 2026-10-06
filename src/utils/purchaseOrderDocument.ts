@@ -110,8 +110,9 @@ export function buildPurchaseOrderLetterhead(po: any, company: LetterheadCompany
   };
 }
 
-/** Fetches the company + supplier letterhead details a PO needs. */
-async function loadContext(po: any): Promise<{ company: LetterheadCompany; supplier: POSupplier }> {
+/** Fetches the company + supplier letterhead details a document record needs
+ *  (also used by the GRN document, whose record carries the same ids). */
+export async function loadLetterheadContext(po: any): Promise<{ company: LetterheadCompany; supplier: POSupplier }> {
   const companyId = po.CompanyID ?? po.CompanyId ?? po.companyId;
   const supplierId = po.SupplierID ?? po.SupplierId ?? po.supplierId;
   const [company, supplier] = await Promise.all([
@@ -133,11 +134,11 @@ async function loadContext(po: any): Promise<{ company: LetterheadCompany; suppl
 }
 
 export async function printPurchaseOrder(po: any) {
-  const { company, supplier } = await loadContext(po);
+  const { company, supplier } = await loadLetterheadContext(po);
   printLetterhead(buildPurchaseOrderLetterhead(po, company, supplier));
 }
 
 export async function downloadPurchaseOrderPdf(po: any, filename: string) {
-  const { company, supplier } = await loadContext(po);
+  const { company, supplier } = await loadLetterheadContext(po);
   await downloadLetterheadPdf(buildPurchaseOrderLetterhead(po, company, supplier), filename);
 }
