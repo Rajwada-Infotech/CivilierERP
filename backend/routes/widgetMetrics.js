@@ -320,4 +320,3 @@ router.get("/:key", async (req, res) => {
 });
 
 module.exports = router;
-module.exports.CATALOG = CATALOG;

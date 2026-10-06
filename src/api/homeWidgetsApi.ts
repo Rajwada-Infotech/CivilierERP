@@ -1,5 +1,4 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import type { WidgetMetricDef } from "@/api/widgetsApi";
 
 export interface RankedModule {
   module: string;
@@ -8,16 +7,15 @@ export interface RankedModule {
   score: number;
 }
 
-export interface HomeWidgetsResponse {
+export interface ModuleRanking {
   personalized: boolean;
   modules: RankedModule[];
-  widgets: WidgetMetricDef[];
 }
 
-export async function getHomeWidgets(modules: string[]): Promise<HomeWidgetsResponse> {
+export async function getModuleRanking(modules: string[]): Promise<ModuleRanking> {
   const qs = new URLSearchParams({ modules: modules.join(",") });
-  const res = await fetchWithAuth(`/api/home/widgets?${qs.toString()}`);
-  if (!res.ok) throw new Error("Failed to load your widgets");
+  const res = await fetchWithAuth(`/api/home/module-ranking?${qs.toString()}`);
+  if (!res.ok) throw new Error("Failed to load module ranking");
   return res.json();
 }
 

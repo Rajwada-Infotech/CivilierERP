@@ -6,11 +6,12 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
-const { MODULES, rankModules, pickWidgets } = require("../services/moduleUsage");
+const { MODULES, rankAllowed } = require("../services/moduleUsage");
 
-// ── Personalised widgets ─────────────────────────────────────────────────────
-// POST /usage records that the caller just worked in a module; GET /widgets
-// returns the metric widgets for the modules they use most and most recently.
+// ── Personalised Home ────────────────────────────────────────────────────────
+// POST /usage records that the caller just worked in a module; GET
+// /module-ranking orders their accessible modules by how much and how recently
+// they work in them, which the Home page uses to decide which tiles lead.
 // Not cached: the answer is per user.
 router.post("/usage", async (req, res) => {
   const userId = parseInt(req.user?.userId ?? req.user?.id, 10);
@@ -36,7 +37,7 @@ router.post("/usage", async (req, res) => {
   }
 });
 
-router.get("/widgets", async (req, res) => {
+router.get("/module-ranking", async (req, res) => {
   const userId = parseInt(req.user?.userId ?? req.user?.id, 10);
   if (!Number.isFinite(userId)) return res.status(401).json({ error: "Not authenticated" });
   const allowedModules = req.query.modules
@@ -48,11 +49,10 @@ router.get("/widgets", async (req, res) => {
       SELECT Module AS module, VisitCount AS visitCount, LastVisitedAt AS lastVisitedAt
       FROM dbo.UserModuleUsage WHERE UserId = @userId
     `);
-    const { CATALOG } = require("./widgetMetrics");
-    res.json(pickWidgets(CATALOG, rankModules(r.recordset), allowedModules));
+    res.json(rankAllowed(r.recordset, allowedModules));
   } catch (err) {
-    console.error("[homeActivity] GET /widgets:", err.message);
-    res.status(500).json({ error: "Failed to load widgets" });
+    console.error("[homeActivity] GET /module-ranking:", err.message);
+    res.status(500).json({ error: "Failed to load module ranking" });
   }
 });
 

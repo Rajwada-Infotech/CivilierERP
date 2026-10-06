@@ -1,9 +1,10 @@
 process.env.NODE_ENV = "test";
 
 /**
- * Home personalised widgets: POST /usage records a module visit, GET /widgets
- * returns the catalog widgets for the modules the user works in. The DB pool
- * is faked; the MERGE itself is exercised on the live server.
+ * Home personalisation: POST /usage records a module visit, GET
+ * /module-ranking orders the user's accessible modules by how much they work
+ * in them. The DB pool is faked; the MERGE itself is exercised on the live
+ * server.
  */
 
 const express = require("express");
@@ -46,31 +47,30 @@ beforeEach(() => {
 
 describe("POST /api/home/usage", () => {
   test("records a visit to a known module", async () => {
-    const res = await request(app).post("/api/home/usage").send({ module: "Finance" });
+    const res = await request(app).post("/api/home/usage").send({ module: "finance" });
     expect(res.status).toBe(200);
     expect(mockQueries.some((q) => /MERGE dbo\.UserModuleUsage/.test(q))).toBe(true);
   });
 
-  test("rejects a module that has no widgets", async () => {
-    const res = await request(app).post("/api/home/usage").send({ module: "Admin" });
+  test("rejects an unknown module", async () => {
+    const res = await request(app).post("/api/home/usage").send({ module: "admin" });
     expect(res.status).toBe(400);
     expect(mockQueries).toHaveLength(0);
   });
 });
 
-describe("GET /api/home/widgets", () => {
-  test("returns the widgets of the module the user works in", async () => {
-    mockUsageRows = [{ module: "Material", visitCount: 12, lastVisitedAt: new Date().toISOString() }];
-    const res = await request(app).get("/api/home/widgets").query({ modules: "Finance,Material" });
+describe("GET /api/home/module-ranking", () => {
+  test("puts the module the user works in first", async () => {
+    mockUsageRows = [{ module: "material", visitCount: 12, lastVisitedAt: new Date().toISOString() }];
+    const res = await request(app).get("/api/home/module-ranking").query({ modules: "finance,material" });
     expect(res.status).toBe(200);
     expect(res.body.personalized).toBe(true);
-    expect(res.body.widgets.length).toBeGreaterThan(0);
-    expect(res.body.widgets.every((w) => w.module === "Material")).toBe(true);
+    expect(res.body.modules[0].module).toBe("material");
   });
 
-  test("never offers a module the caller did not list as accessible", async () => {
-    mockUsageRows = [{ module: "Finance", visitCount: 50, lastVisitedAt: new Date().toISOString() }];
-    const res = await request(app).get("/api/home/widgets").query({ modules: "CRM" });
-    expect(res.body.widgets.every((w) => w.module === "CRM")).toBe(true);
+  test("only ranks modules the caller listed as accessible", async () => {
+    mockUsageRows = [{ module: "finance", visitCount: 50, lastVisitedAt: new Date().toISOString() }];
+    const res = await request(app).get("/api/home/module-ranking").query({ modules: "crm" });
+    expect(res.body.modules.map((m) => m.module)).toEqual(["crm"]);
   });
 });

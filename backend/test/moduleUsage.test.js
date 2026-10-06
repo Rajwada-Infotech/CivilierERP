@@ -1,20 +1,9 @@
 process.env.NODE_ENV = "test";
 
-const { scoreModule, rankModules, pickWidgets } = require("../services/moduleUsage");
+const { MODULES, scoreModule, rankModules, rankAllowed } = require("../services/moduleUsage");
 
 const NOW = new Date("2026-10-06T00:00:00Z");
 const daysAgo = (d) => new Date(NOW.getTime() - d * 86400000).toISOString();
-
-const CATALOG = [
-  { key: "f-stat", module: "Finance", type: "stat" },
-  { key: "f-ts", module: "Finance", type: "timeseries" },
-  { key: "f-bd", module: "Finance", type: "breakdown" },
-  { key: "f-ts2", module: "Finance", type: "timeseries" },
-  { key: "m-bd", module: "Material", type: "breakdown" },
-  { key: "m-stat", module: "Material", type: "stat" },
-  { key: "e-stat", module: "Engineering", type: "stat" },
-  { key: "c-stat", module: "CRM", type: "stat" },
-];
 
 describe("moduleUsage", () => {
   test("a module with no visits scores zero", () => {
@@ -28,40 +17,35 @@ describe("moduleUsage", () => {
 
   test("a recent light module can outrank an old heavy one", () => {
     const rows = [
-      { module: "Finance", visitCount: 40, lastVisitedAt: daysAgo(90) },
-      { module: "Material", visitCount: 6, lastVisitedAt: daysAgo(0) },
+      { module: "finance", visitCount: 40, lastVisitedAt: daysAgo(90) },
+      { module: "material", visitCount: 6, lastVisitedAt: daysAgo(0) },
     ];
-    expect(rankModules(rows, NOW)[0].module).toBe("Material");
+    expect(rankModules(rows, NOW)[0].module).toBe("material");
   });
 
-  test("ranking lists every module, unused ones last in default order", () => {
-    const ranking = rankModules([{ module: "CRM", visitCount: 3, lastVisitedAt: daysAgo(1) }], NOW);
-    expect(ranking.map((m) => m.module)).toEqual(["CRM", "Finance", "Material", "Engineering"]);
+  test("ranking lists every module, unused ones after the used, in default order", () => {
+    const ranking = rankModules([{ module: "crm", visitCount: 3, lastVisitedAt: daysAgo(1) }], NOW);
+    expect(ranking).toHaveLength(MODULES.length);
+    expect(ranking.map((m) => m.module).slice(0, 3)).toEqual(["crm", "finance", "material"]);
   });
 
-  test("personalised picks fill quotas by rank, stat first, and skip unused modules", () => {
-    const ranking = rankModules(
-      [
-        { module: "Finance", visitCount: 30, lastVisitedAt: daysAgo(0) },
-        { module: "Material", visitCount: 5, lastVisitedAt: daysAgo(2) },
-      ],
-      NOW,
-    );
-    const out = pickWidgets(CATALOG, ranking, null);
+  test("rankAllowed hides modules the user cannot open", () => {
+    const rows = [{ module: "finance", visitCount: 50, lastVisitedAt: daysAgo(0) }];
+    const out = rankAllowed(rows, ["material", "crm"], NOW);
+    expect(out.modules.map((m) => m.module)).toEqual(["material", "crm"]);
+    expect(out.personalized).toBe(false);
+  });
+
+  test("rankAllowed is personalised once the user has history in an allowed module", () => {
+    const rows = [{ module: "crm", visitCount: 4, lastVisitedAt: daysAgo(2) }];
+    const out = rankAllowed(rows, ["material", "crm"], NOW);
     expect(out.personalized).toBe(true);
-    expect(out.widgets.map((w) => w.key)).toEqual(["f-stat", "f-ts", "f-ts2", "m-stat", "m-bd"]);
+    expect(out.modules[0].module).toBe("crm");
   });
 
-  test("modules the user cannot open are never offered", () => {
-    const ranking = rankModules([{ module: "Finance", visitCount: 30, lastVisitedAt: daysAgo(0) }], NOW);
-    const out = pickWidgets(CATALOG, ranking, ["Material", "CRM"]);
+  test("a new user gets the allowed modules in default order", () => {
+    const out = rankAllowed([], ["crm", "material"], NOW);
     expect(out.personalized).toBe(false);
-    expect(out.widgets.every((w) => w.module !== "Finance")).toBe(true);
-  });
-
-  test("a new user with no history gets the allowed modules in default order", () => {
-    const out = pickWidgets(CATALOG, rankModules([], NOW), ["Material", "Engineering"]);
-    expect(out.personalized).toBe(false);
-    expect(out.widgets.map((w) => w.module)).toEqual(["Material", "Material", "Engineering"]);
+    expect(out.modules.map((m) => m.module)).toEqual(["material", "crm"]);
   });
 });

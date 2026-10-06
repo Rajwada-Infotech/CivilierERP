@@ -1,12 +1,20 @@
 "use strict";
 
-// Modules that have widgets in the metrics catalog, in default display order.
-const MODULES = ["Finance", "Material", "Engineering", "CRM"];
+// The modules the Home page has tiles for. Ids match Home's own module access
+// keys, in default display order.
+const MODULES = [
+  "finance",
+  "material",
+  "engineering",
+  "followup",
+  "ticket",
+  "sales",
+  "salesAutomation",
+  "civilworkdpr",
+  "crm",
+  "fixedasset",
+];
 
-// How many widgets each ranked module contributes: the module worked in most
-// gets the most room.
-const QUOTAS = [3, 2, 1, 1];
-const TYPE_ORDER = { stat: 0, timeseries: 1, breakdown: 2 };
 const RECENCY_HALF_LIFE_DAYS = 7;
 
 // Frequency grows with log(visits) so one heavy day can't bury everything
@@ -34,24 +42,12 @@ function rankModules(rows, now = new Date()) {
   }).sort((a, b) => b.score - a.score || a.order - b.order);
 }
 
-// Picks the widgets to show. `allowedModules` limits it to modules the user
-// can open. With any usage history only used modules contribute; with none
-// (a new user) the allowed modules are offered in default order instead.
-function pickWidgets(catalog, ranking, allowedModules) {
+// The ranking limited to modules the user can open (null = all). `personalized`
+// is false for someone with no history yet, whose order is just the default.
+function rankAllowed(rows, allowedModules, now = new Date()) {
   const allowed = allowedModules ? new Set(allowedModules) : null;
-  const eligible = ranking.filter((m) => !allowed || allowed.has(m.module));
-  const personalized = eligible.some((m) => m.score > 0);
-  const chosen = personalized ? eligible.filter((m) => m.score > 0) : eligible;
-
-  const widgets = [];
-  chosen.forEach((m, i) => {
-    const quota = QUOTAS[i] ?? 1;
-    const inModule = catalog
-      .filter((w) => w.module === m.module)
-      .sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9));
-    widgets.push(...inModule.slice(0, quota));
-  });
-  return { personalized, modules: chosen, widgets };
+  const modules = rankModules(rows, now).filter((m) => !allowed || allowed.has(m.module));
+  return { personalized: modules.some((m) => m.score > 0), modules };
 }
 
-module.exports = { MODULES, QUOTAS, scoreModule, rankModules, pickWidgets };
+module.exports = { MODULES, scoreModule, rankModules, rankAllowed };
