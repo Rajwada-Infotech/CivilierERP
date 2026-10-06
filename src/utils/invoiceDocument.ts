@@ -8,12 +8,11 @@
 // reviewer sees on screen.
 import {
   fmtDocDate,
-  printLetterhead,
-  downloadLetterheadPdf,
   type LetterheadDoc,
   type LetterheadCompany,
   type LetterheadRow,
 } from "@/utils/letterheadDocument";
+import { printInvoiceStyle, downloadInvoiceStylePdf } from "@/utils/invoiceStyleDocument";
 import { loadLetterheadContext } from "@/utils/purchaseOrderDocument";
 
 export interface InvoiceItemRow {
@@ -94,7 +93,6 @@ export function buildInvoiceLetterhead(
       ...(source || rec.docTypeName
         ? [{ label: "Source Document :", lines: [source || "—", rec.docTypeName || rec.materialCategory || ""] }]
         : []),
-      ...(rec.dueDate ? [{ label: "Due Date :", lines: [fmtDocDate(rec.dueDate)] }] : []),
     ],
     columns: [
       { header: "Item Description" },
@@ -133,6 +131,8 @@ export function buildInvoiceLetterhead(
   };
 }
 
+const dueMeta = (rec: any) => (rec.dueDate ? [{ label: "Due Date", value: fmtDocDate(rec.dueDate) }] : []);
+
 async function context(rec: any) {
   return loadLetterheadContext({
     CompanyID: rec.companyId,
@@ -143,13 +143,14 @@ async function context(rec: any) {
 
 export async function printInvoice(rec: any, fig: InvoiceFigures) {
   const { company, supplier } = await context(rec);
-  printLetterhead(buildInvoiceLetterhead(rec, fig, company, supplier));
+  printInvoiceStyle(buildInvoiceLetterhead(rec, fig, company, supplier), dueMeta(rec));
 }
 
 export async function downloadInvoicePdf(rec: any, fig: InvoiceFigures, filename?: string) {
   const { company, supplier } = await context(rec);
-  await downloadLetterheadPdf(
+  await downloadInvoiceStylePdf(
     buildInvoiceLetterhead(rec, fig, company, supplier),
     filename ?? `${String(rec.bookingReference || "invoice").replace(/[^\w-]+/g, "_")}.pdf`,
+    dueMeta(rec),
   );
 }
