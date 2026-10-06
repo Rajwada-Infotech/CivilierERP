@@ -297,7 +297,6 @@ const CrmPlotMaster: React.FC = () => {
   const separate = conversionMode === "each" && selectedPlots.length > 1;
   const convertEach = async () => {
     if (!unitKind) { toast.error("Select the constructed asset kind"); return; }
-    if (!(Number(villaRate) > 0)) { toast.error("Enter the villa's construction rate per sq ft"); return; }
     const typesById = new Map(conversionVillaTypes.map((t) => [t.Id, t]));
     const jobs = selectedPlots.map((plot) => {
       const own = plot.PlannedVillaTypeId != null ? typesById.get(plot.PlannedVillaTypeId) : undefined;
@@ -329,7 +328,7 @@ const CrmPlotMaster: React.FC = () => {
       try {
         const response = await fetchWithAuth(`${SETUP_API}/plots/convert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(job.body) });
         const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || "Could not convert");
+        if (!response.ok) throw new Error(body.error || body.message || "Could not convert");
         done++;
         dprChains += Number(body.DprChainsCreated) || 0;
         (body.DprRoomsWithoutTemplate || []).forEach((room: string) => noSteps.add(room.replace(/\s*\d+$/, "")));
@@ -352,7 +351,7 @@ const CrmPlotMaster: React.FC = () => {
     try {
       const response = await fetchWithAuth(`${SETUP_API}/plots/unconvert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ UnitId: plot.ConvertedUnitId }) });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || "Could not undo the conversion");
+      if (!response.ok) throw new Error(body.error || body.message || "Could not undo the conversion");
       toast.success(body.message || "Conversion undone");
       setDetailOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
@@ -363,7 +362,6 @@ const CrmPlotMaster: React.FC = () => {
     if (selectedPlots.length > 1 && !conversionConfirmed) { toast.error("Tick the confirmation under the preview first"); return; }
     if (separate) { await convertEach(); return; }
     if (!unitName.trim() || !unitType || !unitKind) { toast.error("Select the constructed unit name, type, and kind"); return; }
-    if (!(Number(villaRate) > 0)) { toast.error("Enter the villa's construction rate per sq ft"); return; }
     if (!(Number(builtUpArea) > 0)) { toast.error("Enter the villa's built-up area"); return; }
     setConverting(true);
     try {
@@ -375,7 +373,7 @@ const CrmPlotMaster: React.FC = () => {
         }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || "Could not convert plots");
+      if (!response.ok) throw new Error(body.error || body.message || "Could not convert plots");
       toast.success(`${selectedPlots.length} plot${selectedPlots.length === 1 ? "" : "s"} converted to ${unitName.trim()} in Unit Master — ${Number(body.DprChainsCreated) || 0} DPR room chains set up`);
       if (body.DprRoomsWithoutTemplate?.length) toast.warning(`No DPR steps exist yet for: ${body.DprRoomsWithoutTemplate.join(", ")}. Set up one chain for each in Dependency Master.`, { duration: 12000 });
       setSelectedIds([]); setConvertOpen(false);
@@ -752,7 +750,7 @@ const CrmPlotMaster: React.FC = () => {
                           <Select value={unitType || undefined} onValueChange={setUnitType}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a layout" /></SelectTrigger><SelectContent>{unitTypeOptionsForConversion.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
                         <div><label className={label}>Asset kind</label>
                           <Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div>
-                        <div className="sm:col-span-2"><label className={label}>Construction rate</label>
+                        <div className="sm:col-span-2"><label className={label}>Construction rate <span className="font-normal opacity-70">· Optional</span></label>
                           <div className="relative"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₹</span>
                             <input type="number" min="0" value={villaRate} onChange={(event) => setVillaRate(event.target.value)} placeholder="0" className={`${input} pl-7 pr-16 tabular-nums`} />
                             <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">per sq ft</span></div></div>

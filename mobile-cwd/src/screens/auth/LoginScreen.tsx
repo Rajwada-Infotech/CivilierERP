@@ -1,9 +1,10 @@
-// RN login card for the Civil Work DPR app. Ported from mobile-Fixed-Asset's
-// LoginScreen — same Animated API + expo-linear-gradient, rebranded from
-// the FA amber accent to the Maintenance lime-green accent.
+// Civil Work DPR login — the same design as the Finance & Material app's login (dot grid, scan line,
+// drifting particles, glow blobs, blueprint-corner card, floating-label inputs), re-coloured to this
+// app's cyan accent. Built with RN's Animated API + expo-linear-gradient + react-native-svg.
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
+  Dimensions,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,24 +15,57 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Eye, EyeOff, AlertCircle } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import { AnimatedInput } from "@/components/AnimatedInput";
-import { ShimmerButton } from "@/components/ShimmerButton";
-import { GradientText } from "@/components/GradientText";
+import { useTypewriter } from "@/hooks/useTypewriter";
+import { FloatingLabelInput } from "@/components/FloatingLabelInput";
 import { LogoRing } from "@/components/LogoRing";
-import { WelcomeOverlay } from "@/components/WelcomeOverlay";
+import { GradientText } from "@/components/GradientText";
+import { DotGrid } from "@/components/DotGrid";
+import { ScanLine } from "@/components/ScanLine";
+import { FloatingParticles } from "@/components/FloatingParticles";
+import { PasswordStrength } from "@/components/PasswordStrength";
 import { fonts } from "@/theme/fonts";
 
-const NAV_HOLD_MS = 1800;
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-function CornerAccents() {
-  const corner = "absolute w-5 h-5";
-  const color = "rgba(101,163,13,0.4)";
+function GlowBlob({ style, colors }: { style: object; colors: [string, string] }) {
+  return (
+    <View pointerEvents="none" style={[{ position: "absolute", borderRadius: 999, overflow: "hidden" }, style]}>
+      <LinearGradient colors={colors} style={{ flex: 1 }} />
+    </View>
+  );
+}
+
+function ShakeOnError({ trigger, children }: { trigger: unknown; children: React.ReactNode }) {
+  const shake = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!trigger) return;
+    shake.setValue(0);
+    Animated.sequence([
+      Animated.timing(shake, { toValue: 1, duration: 60, useNativeDriver: true }),
+      Animated.timing(shake, { toValue: -1, duration: 60, useNativeDriver: true }),
+      Animated.timing(shake, { toValue: 0.6, duration: 60, useNativeDriver: true }),
+      Animated.timing(shake, { toValue: 0, duration: 60, useNativeDriver: true }),
+    ]).start();
+  }, [trigger, shake]);
+
+  return (
+    <Animated.View
+      style={{ transform: [{ translateX: shake.interpolate({ inputRange: [-1, 1], outputRange: [-6, 6] }) }] }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+function BlueprintCorners() {
+  const corner = "absolute w-5 h-5 border-cyan-300/60";
   return (
     <>
-      <View className={`${corner} top-0 left-0 border-t-2 border-l-2 rounded-tl-2xl`} style={{ borderColor: color }} />
-      <View className={`${corner} top-0 right-0 border-t-2 border-r-2 rounded-tr-2xl`} style={{ borderColor: color }} />
-      <View className={`${corner} bottom-0 left-0 border-b-2 border-l-2 rounded-bl-2xl`} style={{ borderColor: color }} />
-      <View className={`${corner} bottom-0 right-0 border-b-2 border-r-2 rounded-br-2xl`} style={{ borderColor: color }} />
+      <View className={`${corner} top-0 left-0 border-t-2 border-l-2 rounded-tl-2xl`} />
+      <View className={`${corner} top-0 right-0 border-t-2 border-r-2 rounded-tr-2xl`} />
+      <View className={`${corner} bottom-0 left-0 border-b-2 border-l-2 rounded-bl-2xl`} />
+      <View className={`${corner} bottom-0 right-0 border-b-2 border-r-2 rounded-br-2xl`} />
     </>
   );
 }
@@ -43,39 +77,47 @@ export default function LoginScreen() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loginSuccess, setLoginSuccess] = useState(false);
-  const [loginName, setLoginName] = useState("");
+  const [errorTick, setErrorTick] = useState(0);
+
+  const tagline = useTypewriter(
+    ["Daily Progress, Straight From Site", "Allocate. Report. Quality Check.", "One Platform. Total Control."],
+    60,
+    2400,
+  );
 
   const cardFade = useRef(new Animated.Value(0)).current;
-  const cardY = useRef(new Animated.Value(24)).current;
   useEffect(() => {
     Animated.timing(cardFade, { toValue: 1, duration: 500, useNativeDriver: true }).start();
-    Animated.timing(cardY, { toValue: 0, duration: 500, useNativeDriver: true }).start();
-  }, [cardFade, cardY]);
+  }, [cardFade]);
 
   const onSubmit = async () => {
     if (loading) return;
     setError(null);
     setLoading(true);
     try {
-      await login(email.trim(), password, (user) => {
-        setLoginName(user.name || "");
-        setLoginSuccess(true);
-      }, NAV_HOLD_MS);
+      await login(email.trim(), password);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid email or password.");
+      setErrorTick((t) => t + 1);
+    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View className="flex-1">
-      <LinearGradient
-        colors={["#fefce8", "#fef9c3", "#ffffff", "#fffdf5"]}
-        locations={[0, 0.3, 0.65, 1]}
-        start={{ x: 0.1, y: 0 }}
-        end={{ x: 0.9, y: 1 }}
-        style={{ position: "absolute", inset: 0 }}
+    <View className="flex-1" style={{ backgroundColor: "#06141a" }}>
+      {/* Background layers — dot grid, scan line, particles, blobs (matches
+          the web login's mobile breakpoint: crane + hero copy stay hidden) */}
+      <DotGrid width={SCREEN_W} height={SCREEN_H} />
+      <ScanLine height={SCREEN_H} />
+      <FloatingParticles />
+      <GlowBlob
+        style={{ top: -SCREEN_H * 0.06, left: -SCREEN_W * 0.2, width: SCREEN_W * 0.7, height: SCREEN_W * 0.7 }}
+        colors={["rgba(8,145,178,0.28)", "rgba(8,145,178,0)"]}
+      />
+      <GlowBlob
+        style={{ bottom: -SCREEN_H * 0.06, right: -SCREEN_W * 0.2, width: SCREEN_W * 0.7, height: SCREEN_W * 0.7 }}
+        colors={["rgba(14,165,233,0.22)", "rgba(14,165,233,0)"]}
       />
 
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
@@ -83,42 +125,45 @@ export default function LoginScreen() {
           contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 20 }}
           keyboardShouldPersistTaps="handled"
         >
-          <Animated.View style={{ opacity: cardFade, transform: [{ translateY: cardY }] }}>
+          <Animated.View
+            style={{
+              opacity: cardFade,
+              transform: [{ translateY: cardFade.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+            }}
+          >
             <View
               className="rounded-3xl p-6 overflow-hidden"
-              style={{
-                backgroundColor: "rgba(255,255,255,0.92)",
-                borderWidth: 1,
-                borderColor: "rgba(202,138,4,0.12)",
-                shadowColor: "#ca8a04",
-                shadowOpacity: 0.1,
-                shadowRadius: 24,
-                shadowOffset: { width: 0, height: 10 },
-                elevation: 6,
-              }}
+              style={{ backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(103,232,249,0.18)" }}
             >
-              <CornerAccents />
+              <BlueprintCorners />
 
-              <View className="items-center mb-6">
-                <LogoRing size={64} />
+              {/* Header */}
+              <View className="items-center mb-7">
+                <LogoRing size={80} />
                 <View className="mt-3">
-                  <GradientText
-                    style={{ fontSize: 24, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}
-                    colors={["#365314", "#0891b2", "#67e8f9"]}
-                  >
-                    Civil Work DPR
+                  <GradientText style={{ fontSize: 30, fontFamily: fonts.heading.bold, letterSpacing: -0.5 }}>
+                    CivilierERP
                   </GradientText>
                 </View>
-                <Text style={{ color: "#94a3b8", fontSize: 12, fontFamily: fonts.body.regular, marginTop: 6 }}>
-                  Sign in to the CivilierERP Civil Work DPR module
+                <Text
+                  className="text-[10px] uppercase mt-1.5"
+                  style={{ color: "rgba(103,232,249,0.85)", letterSpacing: 2.2, fontFamily: fonts.heading.bold }}
+                >
+                  Civil Work DPR
                 </Text>
+                <View className="flex-row items-center gap-1.5 mt-2">
+                  <View className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "#67e8f9" }} />
+                  <Text className="text-xs" style={{ color: "rgba(255,255,255,0.4)", fontFamily: fonts.body.medium }}>
+                    {tagline}
+                  </Text>
+                </View>
               </View>
 
+              {/* Form */}
               <View className="gap-4">
-                <AnimatedInput
+                <FloatingLabelInput
                   label="Email Address"
                   value={email}
-                  placeholder="name@company.com"
                   onChangeText={(t) => {
                     setEmail(t);
                     setError(null);
@@ -129,61 +174,73 @@ export default function LoginScreen() {
                   textContentType="emailAddress"
                 />
 
-                <AnimatedInput
-                  label="Password"
-                  value={password}
-                  placeholder="••••••••"
-                  onChangeText={(t) => {
-                    setPassword(t);
-                    setError(null);
-                  }}
-                  secureTextEntry={!showPass}
-                  textContentType="password"
-                  rightElement={
-                    <Pressable onPress={() => setShowPass((v) => !v)} hitSlop={10} className="pr-3">
-                      {showPass ? <EyeOff size={16} color="#94a3b8" /> : <Eye size={16} color="#94a3b8" />}
-                    </Pressable>
-                  }
-                />
+                <View>
+                  <FloatingLabelInput
+                    label="Password"
+                    value={password}
+                    onChangeText={(t) => {
+                      setPassword(t);
+                      setError(null);
+                    }}
+                    secureTextEntry={!showPass}
+                    textContentType="password"
+                    rightElement={
+                      <Pressable onPress={() => setShowPass((v) => !v)} hitSlop={10} className="pr-2">
+                        {showPass ? (
+                          <EyeOff size={17} color="rgba(255,255,255,0.4)" />
+                        ) : (
+                          <Eye size={17} color="rgba(255,255,255,0.4)" />
+                        )}
+                      </Pressable>
+                    }
+                  />
+                  <PasswordStrength password={password} />
+                </View>
 
                 {error && (
-                  <View
-                    className="flex-row items-center gap-2 px-4 py-2.5 rounded-xl"
-                    style={{ backgroundColor: "rgba(254,226,226,0.8)", borderWidth: 1, borderColor: "rgba(252,165,165,0.5)" }}
-                  >
-                    <AlertCircle size={14} color="#dc2626" />
-                    <Text className="text-sm flex-1" style={{ color: "#dc2626", fontFamily: fonts.body.medium }}>
-                      {error}
-                    </Text>
-                  </View>
+                  <ShakeOnError trigger={errorTick}>
+                    <View
+                      className="flex-row items-center gap-2 px-4 py-2.5 rounded-xl"
+                      style={{ backgroundColor: "rgba(239,68,68,0.12)", borderWidth: 1, borderColor: "rgba(239,68,68,0.25)" }}
+                    >
+                      <AlertCircle size={14} color="#fca5a5" />
+                      <Text className="text-sm flex-1" style={{ color: "#fca5a5", fontFamily: fonts.body.medium }}>
+                        {error}
+                      </Text>
+                    </View>
+                  </ShakeOnError>
                 )}
 
-                <ShimmerButton onPress={onSubmit} disabled={loading || !email || !password || loginSuccess}>
-                  {loading ? (
-                    <>
-                      <Animated.View
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: 8,
-                          borderWidth: 2,
-                          borderColor: "rgba(255,255,255,0.3)",
-                          borderTopColor: "#fff",
-                        }}
-                      />
-                      <Text style={{ color: "#fff", fontSize: 14, fontFamily: fonts.body.semibold }}>Signing in…</Text>
-                    </>
-                  ) : (
-                    <Text style={{ color: "#fff", fontSize: 14, fontFamily: fonts.body.semibold }}>Sign In →</Text>
-                  )}
-                </ShimmerButton>
+                <Pressable
+                  onPress={onSubmit}
+                  disabled={loading || !email || !password}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.9 : 1 })}
+                >
+                  <LinearGradient
+                    colors={loading || !email || !password ? ["#0e7490", "#164e63"] : ["#0891b2", "#0e7490"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={{
+                      borderRadius: 12,
+                      paddingVertical: 14,
+                      alignItems: "center",
+                      opacity: loading || !email || !password ? 0.6 : 1,
+                    }}
+                  >
+                    <Text className="text-white text-sm" style={{ fontFamily: fonts.body.semibold }}>
+                      {loading ? "Signing in…" : "Sign In"}
+                    </Text>
+                  </LinearGradient>
+                </Pressable>
               </View>
+
+              <Text className="text-center text-[10px] mt-5" style={{ color: "rgba(255,255,255,0.2)", fontFamily: fonts.body.regular }}>
+                Secure access · Role-based permissions
+              </Text>
             </View>
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      {loginSuccess && <WelcomeOverlay name={loginName} durationMs={NAV_HOLD_MS} />}
     </View>
   );
 }

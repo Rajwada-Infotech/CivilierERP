@@ -4,12 +4,14 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, Text, TextInput, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import { Search, X } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { StatusPill, displayStatus, STATUS_COLOR, STATUS_LABEL } from "@/components/StatusPill";
-import { getActivityAssignments, type ActivityAssignment } from "@/api/cwdApi";
+import { getActivityAssignments, timelineMessage, type ActivityAssignment } from "@/api/cwdApi";
 import { usePageRights } from "@/hooks/usePageRights";
+import type { MainStackParamList } from "@/navigation/MainStack";
 
 const ACCENT = "#0891b2";
 const FILTERS = ["ALL", "IN_PROGRESS", "HOLD", "REWORK", "COMPLETED", "ALLOCATED", "APPROVED"] as const;
@@ -17,11 +19,12 @@ const FILTERS = ["ALL", "IN_PROGRESS", "HOLD", "REWORK", "COMPLETED", "ALLOCATED
 const fmtDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—";
 
-function Row({ a }: { a: ActivityAssignment }) {
+function Row({ a, onPress }: { a: ActivityAssignment; onPress: () => void }) {
   const shown = displayStatus(a.status, a.resumedAt);
   const pct = Math.max(0, Math.min(100, a.progressPercent ?? 0));
+  const hint = timelineMessage(a);
   return (
-    <View style={{ backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10 }}>
+    <Pressable onPress={onPress} style={{ backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }} numberOfLines={2}>
           {a.sequenceNo != null ? `${a.sequenceNo}. ` : ""}{a.activityName ?? "Activity"}
@@ -44,14 +47,18 @@ function Row({ a }: { a: ActivityAssignment }) {
           {pct}% · {fmtDate(a.startDate)} → {fmtDate(a.endDate)}
         </Text>
       </View>
-    </View>
+      {!!hint && <Text style={{ fontSize: 10.5, fontFamily: fonts.body.medium, color: ACCENT, marginTop: 6 }}>{hint}</Text>}
+    </Pressable>
   );
 }
 
 export default function ActivitiesScreen() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("ALL");
+  const navigation = useNavigation<{ navigate: (name: string, params?: object) => void }>();
+  const route = useRoute<RouteProp<MainStackParamList, "Activities">>();
+  const initial = route.params?.filter as (typeof FILTERS)[number] | undefined;
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]>(initial && FILTERS.includes(initial) ? initial : "ALL");
   const [refreshing, setRefreshing] = useState(false);
   const q = useQuery({ queryKey: ["cwd-activities"], queryFn: () => getActivityAssignments(), staleTime: 60_000, enabled: rights.canView });
 
@@ -126,7 +133,7 @@ export default function ActivitiesScreen() {
         <FlatList
           data={rows}
           keyExtractor={(a) => String(a.assignmentId)}
-          renderItem={({ item }) => <Row a={item} />}
+          renderItem={({ item }) => <Row a={item} onPress={() => navigation.navigate("ActivityDetail", { rungId: item.rungId })} />}
           contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: 96 }}
           refreshControl={
             <RefreshControl

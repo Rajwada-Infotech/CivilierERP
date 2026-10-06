@@ -6,6 +6,55 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
+const { MODULES, rankAllowed } = require("../services/moduleUsage");
+
+// ── Personalised Home ────────────────────────────────────────────────────────
+// POST /usage records that the caller just worked in a module; GET
+// /module-ranking orders their accessible modules by how much and how recently
+// they work in them, which the Home page uses to decide which tiles lead.
+// Not cached: the answer is per user.
+router.post("/usage", async (req, res) => {
+  const userId = parseInt(req.user?.userId ?? req.user?.id, 10);
+  const module = String(req.body?.module || "");
+  if (!Number.isFinite(userId)) return res.status(401).json({ error: "Not authenticated" });
+  if (!MODULES.includes(module)) return res.status(400).json({ error: "Unknown module" });
+  try {
+    const pool = getPool();
+    await pool.request()
+      .input("userId", sql.Int, userId)
+      .input("module", sql.NVarChar(40), module)
+      .query(`
+        MERGE dbo.UserModuleUsage AS t
+        USING (SELECT @userId AS UserId, @module AS Module) AS s
+          ON t.UserId = s.UserId AND t.Module = s.Module
+        WHEN MATCHED THEN UPDATE SET VisitCount = t.VisitCount + 1, LastVisitedAt = SYSUTCDATETIME()
+        WHEN NOT MATCHED THEN INSERT (UserId, Module, VisitCount, LastVisitedAt) VALUES (s.UserId, s.Module, 1, SYSUTCDATETIME());
+      `);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[homeActivity] POST /usage:", err.message);
+    res.status(500).json({ error: "Failed to record usage" });
+  }
+});
+
+router.get("/module-ranking", async (req, res) => {
+  const userId = parseInt(req.user?.userId ?? req.user?.id, 10);
+  if (!Number.isFinite(userId)) return res.status(401).json({ error: "Not authenticated" });
+  const allowedModules = req.query.modules
+    ? String(req.query.modules).split(",").map((m) => m.trim()).filter((m) => MODULES.includes(m))
+    : null;
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("userId", sql.Int, userId).query(`
+      SELECT Module AS module, VisitCount AS visitCount, LastVisitedAt AS lastVisitedAt
+      FROM dbo.UserModuleUsage WHERE UserId = @userId
+    `);
+    res.json(rankAllowed(r.recordset, allowedModules));
+  } catch (err) {
+    console.error("[homeActivity] GET /module-ranking:", err.message);
+    res.status(500).json({ error: "Failed to load module ranking" });
+  }
+});
 
 // ── Lightweight sales summary for Home dashboard ─────────────────────────────
 // Returns only SQL-aggregated scalars — no row transfer — so the home page

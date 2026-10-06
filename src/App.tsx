@@ -43,6 +43,7 @@ import { ActivityBrowserProvider } from "./contexts/ActivityBrowserContext";
 
 // Query Client
 import { queryClient } from "./lib/queryClient";
+import { useModuleUsageTracker } from "./hooks/useModuleUsageTracker";
 
 // ─── Page Skeleton (inline route-transition loader) ───────────────────────────
 function PageSkeleton() {
@@ -537,6 +538,7 @@ function RequireRole({
 
 // ─── Admin Protected Route ────────────────────────────────────────────────────
 function ProtectedProviders({ children }: { children: React.ReactNode }) {
+  useModuleUsageTracker();
   return (
     <FinYearProvider>
       <HsnProvider>

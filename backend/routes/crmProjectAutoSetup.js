@@ -15,6 +15,8 @@ const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
 const { getEffectiveType } = require("../services/projectType");
 
+const PLOT_CONVERSION_TIMEOUT_MS = 120000;
+
 // Mirrors unitMaster.js's syncUnitPaymentPlanTags — deactivate all, then
 // upsert each valid plan ID back in. Called after generating each unit so
 // the block's payment plans propagate down to every generated unit.
@@ -2238,6 +2240,7 @@ router.delete("/plots/:id", requirePageRight("crm-auto-project-setup", "delete")
 // Convert one or more adjacent plots into one constructed asset. The source
 // plots remain in PlotMaster for land-sale history; UnitMaster begins here.
 router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
+  res.setTimeout(PLOT_CONVERSION_TIMEOUT_MS);
   const plotIds = Array.isArray(req.body?.PlotIds) ? req.body.PlotIds.map(Number).filter(Number.isInteger) : [];
   const unitName = String(req.body?.UnitName || "").trim();
   const unitType = String(req.body?.UnitType || "").trim();
@@ -2251,10 +2254,13 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   }
   // The villa's own construction rate. Never the plot's land rate: the plot's
   // owner has already paid for the land, and a villa priced at the land rate
-  // would charge them for it again.
-  const villaRate = Number(req.body?.RatePerSqFt);
-  if (!Number.isFinite(villaRate) || villaRate <= 0) {
-    return res.status(400).json({ error: "Enter the villa's construction rate per sq ft — the plot's land rate is not used for the villa." });
+  // would charge them for it again. Rate is optional — null when not provided.
+  const villaRateRaw = req.body?.RatePerSqFt;
+  const villaRate = villaRateRaw == null || villaRateRaw === "" || villaRateRaw === 0 || villaRateRaw === "0"
+    ? null
+    : Number(villaRateRaw);
+  if (villaRate !== null && (!Number.isFinite(villaRate) || villaRate < 0)) {
+    return res.status(400).json({ error: "Construction rate must be a positive number." });
   }
   // A villa's built-up area is its own (per villa design), never the land
   // area. Super built-up is optional; when given it is the saleable area, as
