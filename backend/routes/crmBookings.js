@@ -135,6 +135,14 @@ const BOOKING_SELECT = `
     b.AreaSqFt,
     b.CarpetAreaSqFt, b.BuiltUpAreaSqFt, b.SuperBuiltUpAreaSqFt, b.OpenTerraceAreaSqFt,
     b.RatePerSqFt, b.TotalValue, b.BookingAmount, b.TokenType, b.TokenValue,
+    -- What approvers need to judge the price: the unit's list rate, how far
+    -- the offered rate is below it, and whether a typed total departs from
+    -- rate x area (a lump sum that no longer matches the rate shown).
+    um.RatePerSqFt AS ListRatePerSqFt,
+    CASE WHEN um.RatePerSqFt > 0 AND b.RatePerSqFt IS NOT NULL
+         THEN CAST(ROUND((um.RatePerSqFt - b.RatePerSqFt) * 100.0 / um.RatePerSqFt, 2) AS DECIMAL(9,2)) END AS DiscountPercent,
+    CAST(CASE WHEN b.RatePerSqFt > 0 AND b.AreaSqFt > 0
+              AND ABS(ISNULL(b.TotalValue, 0) - ROUND(b.AreaSqFt * b.RatePerSqFt, 0)) > 1 THEN 1 ELSE 0 END AS BIT) AS TotalDiffersFromRate,
     b.PaymentPlanId, b.BookingDate, b.HsnCode,
     b.PaymentMode, b.AssignedTo, b.Status, b.Notes, b.IsActive,
     b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,

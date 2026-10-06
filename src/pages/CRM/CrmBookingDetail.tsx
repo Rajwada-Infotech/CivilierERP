@@ -1540,7 +1540,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <span className="text-muted-foreground block">Inclusive Rate</span>
                     <span className="font-medium">{booking.RatePerSqFt != null ? `₹${Number(booking.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span>
                   </div>
+                  {/* What an approver needs to judge the price: the unit's list
+                      rate, how far below it this offer is, and whether a typed
+                      total has drifted from rate x area. */}
+                  {booking.ListRatePerSqFt != null && (
+                    <div>
+                      <span className="text-muted-foreground block">List Rate</span>
+                      <span className="font-medium">₹{Number(booking.ListRatePerSqFt).toLocaleString("en-IN")}/sqft</span>
+                      {booking.DiscountPercent != null && Number(booking.DiscountPercent) !== 0 && (
+                        <span className={`ml-1.5 text-[0.6875rem] font-semibold ${Number(booking.DiscountPercent) > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                          {Number(booking.DiscountPercent) > 0 ? `${Number(booking.DiscountPercent)}% below list` : `${Math.abs(Number(booking.DiscountPercent))}% above list`}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
+                )}
+                {!isPlotSale && booking.TotalValue != null && booking.TotalDiffersFromRate && (
+                  <p className="text-[0.6875rem] text-amber-700 dark:text-amber-400">
+                    The total value (₹{Number(booking.TotalValue).toLocaleString("en-IN")}) was typed in and doesn't match rate × area
+                    {booking.AreaSqFt && booking.RatePerSqFt ? ` (₹${Math.round(Number(booking.AreaSqFt) * Number(booking.RatePerSqFt)).toLocaleString("en-IN")})` : ""}.
+                  </p>
                 )}
 
                 {/* GST is fixed, HSN-Master-driven — never a per-booking
