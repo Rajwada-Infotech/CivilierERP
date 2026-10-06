@@ -422,7 +422,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
             padding: 3,
           }}
         >
-          {(["items", "activities"] as const).map((t) => {
+          {(["activities", "items"] as const).map((t) => {
             const active = (t === "items") === isItem;
             return (
               <button
@@ -1316,7 +1316,7 @@ const FormModal: React.FC<FormModalProps> = ({
   const [activities, setActivities] = useState<BoqActivity[]>(
     (record?.BoqActivities ?? []).map(rowToActivity),
   );
-  const [lineTab, setLineTab] = useState<"items" | "activities">("items");
+  const [lineTab, setLineTab] = useState<"items" | "activities">("activities");
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -1825,7 +1825,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
   canPrint,
   canEdit,
 }) => {
-  const [lineTab, setLineTab] = useState<"items" | "activities">("items");
+  const [lineTab, setLineTab] = useState<"items" | "activities">("activities");
   const [acting, setActing] = useState(false);
 
   const doDelete = async () => {
