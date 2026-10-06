@@ -38,7 +38,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 
 // The plot label a floorless unit is placed by — same string as
 // services/unitLayout.js chainFloorLabel builds (plot names joined by '+').
-const PLOT_LABEL_SQL = `(SELECT STRING_AGG(p.PlotName, '+') WITHIN GROUP (ORDER BY p.PlotName)
+const PLOT_LABEL_SQL = `(SELECT N'Plot ' + STRING_AGG(p.PlotName, '+') WITHIN GROUP (ORDER BY p.PlotName)
    FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)`;
 
 // ── GET /scope-options?level=tower|floor|flat|room&projectId=&towerId=&floor=&flatId= ──
@@ -167,7 +167,7 @@ router.get("/", authMiddleware, async (req, res) => {
         -- Built server-side so the list row is ready to render as-is —
         -- the client shouldn't have to join 4 names together itself.
         CONCAT(
-          ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > Plot ' END, dm.Floor,
+          ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
           ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
         ) AS scopePath
       FROM dbo.DependencyMaster dm
