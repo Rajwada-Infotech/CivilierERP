@@ -304,7 +304,8 @@ const CrmPlotMaster: React.FC = () => {
       return {
         plot,
         body: {
-          PlotIds: [plot.Id], UnitName: plot.PlotName, UnitType: own ? layout : unitType, UnitKind: unitKind, RatePerSqFt: Number(villaRate),
+          PlotIds: [plot.Id], UnitName: plot.PlotName, UnitType: own ? layout : unitType, UnitKind: unitKind,
+          RatePerSqFt: (villaRate !== "" && Number(villaRate) > 0) ? Number(villaRate) : 0,
           VillaTypeId: own ? own.Id : (villaTypeId ? Number(villaTypeId) : null),
           BuiltUpAreaSqFt: own ? null : (builtUpArea ? Number(builtUpArea) : null),
           SuperBuiltUpAreaSqFt: own ? null : (superBuiltUpArea ? Number(superBuiltUpArea) : null),
@@ -364,12 +365,16 @@ const CrmPlotMaster: React.FC = () => {
     if (!unitName.trim() || !unitType || !unitKind) { toast.error("Select the constructed unit name, type, and kind"); return; }
     if (!(Number(builtUpArea) > 0)) { toast.error("Enter the villa's built-up area"); return; }
     setConverting(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
+      const rateVal = villaRate !== "" && Number(villaRate) > 0 ? Number(villaRate) : null;
       const response = await fetchWithAuth(`${SETUP_API}/plots/convert`, {
         method: "POST", headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           PlotIds: selectedPlots.map((plot) => plot.Id), Combine: selectedPlots.length > 1 && conversionConfirmed, UnitName: unitName.trim(), UnitType: unitType, UnitKind: unitKind,
-          RatePerSqFt: Number(villaRate), VillaTypeId: villaTypeId ? Number(villaTypeId) : null, BuiltUpAreaSqFt: builtUpArea ? Number(builtUpArea) : null, SuperBuiltUpAreaSqFt: superBuiltUpArea ? Number(superBuiltUpArea) : null,
+          RatePerSqFt: rateVal, VillaTypeId: villaTypeId ? Number(villaTypeId) : null, BuiltUpAreaSqFt: builtUpArea ? Number(builtUpArea) : null, SuperBuiltUpAreaSqFt: superBuiltUpArea ? Number(superBuiltUpArea) : null,
         }),
       });
       const body = await response.json().catch(() => ({}));
@@ -379,7 +384,9 @@ const CrmPlotMaster: React.FC = () => {
       setSelectedIds([]); setConvertOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
       await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
-    } catch (e: any) { toast.error(e.message); } finally { setConverting(false); }
+    } catch (e: any) {
+      toast.error(e.name === "AbortError" ? "Request timed out — the server took too long. Please try again." : e.message);
+    } finally { clearTimeout(timeout); setConverting(false); }
   };
 
   const editBlocks = blockCatalog.filter((block) => String(block.ProjectId) === String(plotDraft.ProjectId));
@@ -677,7 +684,7 @@ const CrmPlotMaster: React.FC = () => {
             const missing = rows.filter((row) => !row.bua).length;
             const label = "mb-1.5 block text-xs font-medium text-muted-foreground";
             const input = "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
-            const canSubmit = !converting && !!unitKind && Number(villaRate) > 0 && (!many || conversionConfirmed) && missing === 0
+            const canSubmit = !converting && !!unitKind && (!many || conversionConfirmed) && missing === 0
               && (separate || (!!unitName.trim() && !!unitType && Number(builtUpArea) > 0));
             return (
               <>
