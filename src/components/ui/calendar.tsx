@@ -76,9 +76,12 @@ function Calendar({
       className={cn("p-3", className)}
       classNames={{
         // ── Layout ────────────────────────────────────────────────────────────
-        months: "flex flex-col sm:flex-row gap-4",
+        // `relative` anchors the prev/next arrows (the nav sits in this element, not inside
+        // the month caption) so they line up with the Month / Year row instead of floating to
+        // the popover's corners.
+        months: "relative flex flex-col sm:flex-row gap-4",
         month: "flex flex-col gap-4",
-        month_caption: "flex justify-center pt-1 relative items-center",
+        month_caption: "flex h-8 justify-center items-center",
         caption_label: "text-sm font-medium",
         // Wraps the Month + Year ThemedDropdown pair (captionLayout="dropdown")
         // — picking either is one click/tap instead of swiping the prev/next
@@ -86,14 +89,16 @@ function Calendar({
         dropdowns: "flex items-center gap-1",
 
         // ── Navigation ────────────────────────────────────────────────────────
-        nav: "flex items-center gap-1",
+        // The nav row overlays the caption row (same height), arrows at either end; the row
+        // itself ignores clicks so the Month / Year pickers between the arrows stay usable.
+        nav: "pointer-events-none absolute inset-x-0 top-0 z-10 flex h-8 items-center justify-between",
         button_previous: cn(
           buttonVariants({ variant: "outline" }),
-          "absolute left-1 h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
+          "pointer-events-auto h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
         ),
         button_next: cn(
           buttonVariants({ variant: "outline" }),
-          "absolute right-1 h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
+          "pointer-events-auto h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
         ),
 
         // ── Grid ──────────────────────────────────────────────────────────────

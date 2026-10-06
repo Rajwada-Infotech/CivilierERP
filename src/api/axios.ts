@@ -1,7 +1,7 @@
 import axios from "axios";
 import { getToken } from "../utils/tokenStorage";
 
-// Use relative /api path — the Vite dev proxy forwards to localhost:5001
+// Use relative /api path — the Vite dev proxy forwards to localhost:5000
 // and production nginx rewrites /api → backend. Never rely on VITE_API_URL.
 const api = axios.create({
   baseURL: "/api",

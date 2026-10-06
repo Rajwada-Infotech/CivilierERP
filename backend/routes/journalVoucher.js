@@ -11,7 +11,7 @@ const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEdit, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { postJournalVoucherApproval, hasPosting, reversePostingBySource } = require("../services/generalLedger");
 const { projectPredicate, projectParamGuard, assertProjectRawAllowed } = require("../services/projectScope");
@@ -443,13 +443,16 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
 
     let wasApproved = false;
     let wasRejected = false;
+    let wasPending = false;
     let beforeSnapshot = null;
     try {
       const allowPostApproval = await resolveAllowPostApproval(req, "journal-voucher");
-      await guardEdit("journal-voucher", id, { allowPostApproval });
-      const currentStatus = await getRecordStatus("journal-voucher", id);
+      // Any stage is editable: Draft/Rejected as before, Approved reopens for approval (its GL
+      // posting is reversed below), and Pending simply stays Pending.
+      const currentStatus = await guardEditAnyStage("journal-voucher", id, { allowPostApproval });
       wasApproved = currentStatus === "Approved";
       wasRejected = currentStatus === "Rejected";
+      wasPending = currentStatus === "Pending";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(pool, "dbo.JournalVoucher", "JVID", id);
       }
@@ -601,6 +604,16 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
       }
     }
 
+    // Edited while Pending: it stays Pending, but earlier sign-offs were given to the old
+    // numbers — start a fresh approval cycle so the edited voucher is reviewed from level 1.
+    if (wasPending) {
+      try {
+        await restartApprovalCycle("journal-voucher", id, user, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+      } catch (cycleErr) {
+        console.error("[journal-voucher] could not restart approval cycle after pending edit:", cycleErr.message);
+      }
+    }
+
     // A corrected, previously-Rejected voucher goes straight back into the
     // approval queue on save — no separate "Submit" click. transition()'s
     // Pending branch writes a fresh Level=0 marker, which restarts approval
@@ -623,6 +636,8 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     res.json({
       message: wasApproved
         ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
+        : wasPending
+          ? "Journal Voucher updated — still pending approval (approval restarted from level 1)"
         : resubmitted
           ? "Journal Voucher updated and re-submitted for approval"
           : "Journal Voucher updated",

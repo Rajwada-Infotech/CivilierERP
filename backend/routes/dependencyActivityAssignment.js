@@ -6,6 +6,9 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { invalidateThread } = require("../services/activityThread");
+const { makeColumnProbe } = require("../services/columnProbe");
+// ResumedAt arrives with migration 536; this code must keep working on a server that hasn't run it.
+const hasResumedAt = makeColumnProbe("dbo.DependencyActivityAssignment", "ResumedAt");
 
 // ── Project scoping ──────────────────────────────────────────────────────────
 // A rung / checkpoint / checkpoint-update belongs to the project of its
@@ -118,6 +121,25 @@ async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, sour
     INSERT INTO dbo.DependencyActivityQcAssignee (AssignmentId, QcUserId)
     SELECT @new, QcUserId FROM dbo.DependencyActivityQcAssignee WHERE AssignmentId = @old
   `);
+  // Sent back by Quality Check: the checkpoints that passed (Good / Excellent) stay ticked on the
+  // new attempt; only the ones rated Poor were un-ticked (by the QC decision, just before this) and
+  // are the ones to redo — Work Allocation flags those. A rework from an Approval rejection has no
+  // per-checkpoint verdict, so that attempt re-seeds its checklist fresh from the template instead.
+  if (source === "QC") {
+    await new sql.Request(tx).input("old", sql.Int, oldAssignmentId).input("new", sql.Int, newAssignmentId).query(`
+      INSERT INTO dbo.DependencyActivityCheckpoint
+        (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsDaily, IsChecked, CheckedAt, CheckedBy)
+      SELECT @new, c.CheckpointId, c.FieldName, c.SortOrder, c.MinWaitDays, c.IsDaily,
+             -- ticked if it was, or if Quality Check passed it (Good / Excellent); a Poor one is not
+             CASE WHEN c.IsChecked = 1 OR EXISTS (
+                    SELECT 1 FROM dbo.DependencyActivityQcCheck ck
+                    WHERE ck.AssignmentCheckpointId = c.Id AND ck.Passed = 1
+                      AND ck.QcId = (SELECT TOP 1 q.Id FROM dbo.DependencyActivityQc q WHERE q.AssignmentId = @old ORDER BY q.QcAt DESC, q.Id DESC)
+                  ) THEN 1 ELSE 0 END,
+             c.CheckedAt, c.CheckedBy
+      FROM dbo.DependencyActivityCheckpoint c WHERE c.AssignmentId = @old
+    `);
+  }
 
   return newAssignmentId;
 }
@@ -217,16 +239,21 @@ router.get(
     request.input("limit", sql.Int, limit);
     request.input("offset", sql.Int, offset);
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+    const resumedExpr = (await hasResumedAt(pool)) ? "daa.ResumedAt" : "CAST(NULL AS DATETIME2)";
     const r = await request.query(`
       SELECT
         daa.Id AS assignmentId,
         daa.DependencyMasterActivityId AS rungId,
+        ${resumedExpr} AS resumedAt,
         daa.StartDate AS startDate,
         daa.Days AS days,
         daa.EndDate AS endDate,
         daa.FirstReportedAt AS firstReportedAt,
         daa.LabourSource AS labourSource,
         daa.MaterialSource AS materialSource,
+        -- Who that actually is: the project's developer company, or the named contractor.
+        CASE daa.LabourSource WHEN 'CONTRACTOR' THEN lc.LHeadName WHEN 'DEVELOPER' THEN dev.name END AS labourSourceName,
+        CASE daa.MaterialSource WHEN 'CONTRACTOR' THEN mc.LHeadName WHEN 'DEVELOPER' THEN dev.name END AS materialSourceName,
         daa.Description AS description,
         daa.Remarks AS remarks,
         daa.Status AS status,
@@ -280,6 +307,9 @@ router.get(
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+      LEFT JOIN dbo.enterprise  dev ON dev.id = ep.company_id
+      LEFT JOIN dbo.AccountHeadMaster lc ON lc.LHeadId = daa.LabourContractorId
+      LEFT JOIN dbo.AccountHeadMaster mc ON mc.LHeadId = daa.MaterialContractorId
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
@@ -1237,6 +1267,9 @@ router.patch(
     return res.status(400).json({ error: `status must be one of: ${[...STATUS_VALUES].join(", ")}` });
   }
   const remarks = hasRemarks ? String(req.body.remarks || "").slice(0, 1000) : null;
+  // append: this is one more remark, not an edit of the earlier one — the day's logbook
+  // entry keeps every remark of the day instead of being overwritten by the last.
+  const appendRemark = hasRemarks && req.body?.append === true && !!remarks.trim();
   const progressPercent = hasProgress ? parseInt(req.body.progressPercent, 10) : null;
   if (hasProgress && (!Number.isFinite(progressPercent) || progressPercent < 0 || progressPercent > 100)) {
     return res.status(400).json({ error: "progressPercent must be an integer between 0 and 100" });
@@ -1321,6 +1354,11 @@ router.patch(
     if (hasRemarks) setClauses.push("Remarks = @remarks");
     if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
     if (isFirstReport) setClauses.push("FirstReportedAt = CAST(SYSDATETIME() AS DATE)");
+    // Put back In Progress after a hold = Resumed; going on hold again clears it.
+    if (hasStatus && (await hasResumedAt(pool))) {
+      if (current === "HOLD" && status === "IN_PROGRESS") setClauses.push("ResumedAt = SYSDATETIME()");
+      else if (status === "HOLD") setClauses.push("ResumedAt = NULL");
+    }
     const capturingPreCancel = hasStatus && status === "CANCELLED" && current && current !== "CANCELLED";
     if (capturingPreCancel) setClauses.push("PreCancelStatus = @preCancelStatus");
     const request = pool.request()
@@ -1379,12 +1417,17 @@ router.patch(
         .input("rungId", sql.Int, rungId)
         .input("progressPercent", sql.Int, final.ProgressPercent ?? null)
         .input("remarks", sql.NVarChar(1000), final.Remarks ?? null)
+        .input("append", sql.Bit, appendRemark ? 1 : 0)
         .input("by", sql.NVarChar(200), actor).query(`
           MERGE dbo.DependencyActivityDailyLog AS target
           USING (VALUES (@rungId, CAST(SYSDATETIME() AS DATE))) AS src (RungId, LogDate)
             ON target.DependencyMasterActivityId = src.RungId AND target.LogDate = src.LogDate
           WHEN MATCHED THEN
-            UPDATE SET ProgressPercent = @progressPercent, Remarks = @remarks, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+            UPDATE SET ProgressPercent = @progressPercent,
+                       Remarks = CASE WHEN @append = 1 AND ISNULL(target.Remarks, N'') <> N''
+                                      THEN RIGHT(target.Remarks + NCHAR(10) + @remarks, 1000)
+                                      ELSE @remarks END,
+                       UpdatedBy = @by, UpdatedAt = SYSDATETIME()
           WHEN NOT MATCHED THEN
             INSERT (DependencyMasterActivityId, LogDate, ProgressPercent, Remarks, CreatedBy)
             VALUES (src.RungId, src.LogDate, @progressPercent, @remarks, @by);
@@ -1649,6 +1692,15 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
     if (!rungRes.recordset.length) return res.status(404).json({ error: "Activity rung not found" });
     const activityId = rungRes.recordset[0].ActivityId;
 
+    // "Days of Completion" from the Activity Master — the default for this allocation's Days.
+    // (Column arrives with migration 533; a server that hasn't applied it just has no default.)
+    let daysOfCompletion = null;
+    try {
+      const dayRes = await pool.request().input("activityId", sql.Int, activityId)
+        .query("SELECT days_of_completion FROM dbo.ActivityMaster WHERE id = @activityId");
+      daysOfCompletion = dayRes.recordset[0]?.days_of_completion ?? null;
+    } catch (_) { /* column not there yet */ }
+
     const itemsRes = await pool.request().input("activityId", sql.Int, activityId).query(`
       SELECT img.M_Id AS itemId, img.M_Name AS itemName, img.M_code AS itemCode, img.M_UOM AS uom
       FROM dbo.ActivityItems ai
@@ -1662,10 +1714,60 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         Id AS assignmentId, StartDate AS startDate, Days AS days, EndDate AS endDate,
         LabourSource AS labourSource, MaterialSource AS materialSource,
         LabourContractorId AS labourContractorId, MaterialContractorId AS materialContractorId,
-        Description AS description, Remarks AS remarks, ApprovalLevelsJson AS approvalLevelsJson
+        Description AS description, Remarks AS remarks, ApprovalLevelsJson AS approvalLevelsJson,
+        ReworkFromAssignmentId AS reworkFromAssignmentId
       FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1
     `);
     const assignment = assignRes.recordset[0] || null;
+
+    // Whose labour / material it is, by name: the project's developer company, or the named
+    // contractor — so a reviewer sees a company, not just "Developer".
+    let labourSourceName = null;
+    let materialSourceName = null;
+    let qcStatus = null;
+    if (assignment) {
+      const devRes = await pool.request().input("rungId", sql.Int, rungId).query(`
+        SELECT c.name AS developerName
+        FROM dbo.DependencyMasterActivity dma
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        LEFT JOIN dbo.enterprise p ON p.id = dm.ProjectId
+        LEFT JOIN dbo.enterprise c ON c.id = p.company_id
+        WHERE dma.Id = @rungId
+      `);
+      const developerName = devRes.recordset[0]?.developerName ?? null;
+      const contractorIds = [assignment.labourContractorId, assignment.materialContractorId].filter((v) => v != null);
+      const contractorName = new Map();
+      if (contractorIds.length) {
+        const cr = await pool.request().query(
+          `SELECT LHeadId AS id, LHeadName AS name FROM dbo.AccountHeadMaster WHERE LHeadId IN (${contractorIds.map((v) => parseInt(v, 10)).join(",")})`,
+        );
+        cr.recordset.forEach((r) => contractorName.set(r.id, r.name));
+      }
+      const nameFor = (source, contractorId) =>
+        source === "DEVELOPER" ? developerName : source === "CONTRACTOR" ? contractorName.get(contractorId) ?? null : null;
+      labourSourceName = nameFor(assignment.labourSource, assignment.labourContractorId);
+      materialSourceName = nameFor(assignment.materialSource, assignment.materialContractorId);
+
+      // QC: the latest decision on THIS attempt, if any (none yet = not reviewed).
+      const qcRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
+        SELECT TOP 1 qc.Id AS id, qc.Decision AS decision, qc.Remarks AS remarks, qc.QcAt AS qcAt,
+               COALESCE(u.name, qc.QcBy) AS qcBy
+        FROM dbo.DependencyActivityQc qc
+        LEFT JOIN dbo.users u ON LOWER(u.email) = LOWER(qc.QcBy)
+        WHERE qc.AssignmentId = @assignmentId
+        ORDER BY qc.QcAt DESC, qc.Id DESC
+      `);
+      qcStatus = qcRes.recordset[0] || null;
+      if (qcStatus) {
+        // Each checkpoint's rating (Poor / Good / Excellent) from that same decision.
+        const checksRes = await pool.request().input("qcId", sql.Int, qcStatus.id).query(`
+          SELECT FieldName AS fieldName, Passed AS passed, Rating AS rating, Note AS note
+          FROM dbo.DependencyActivityQcCheck WHERE QcId = @qcId ORDER BY Id
+        `);
+        qcStatus = { ...qcStatus, checks: checksRes.recordset.map((c) => ({ ...c, passed: !!c.passed })) };
+        delete qcStatus.id;
+      }
+    }
 
     let materials = [];
     let engineerIds = [];
@@ -1736,12 +1838,30 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         FROM dbo.DependencyActivityCheckpoint c WHERE c.AssignmentId = @assignmentId
         ORDER BY c.SortOrder ASC, c.Id ASC
       `);
-      checkpoints = cpRes.recordset.map((c) => ({ ...c, isChecked: !!c.isChecked, isDaily: !!c.isDaily }));
+      // On a rework attempt, the checkpoints Quality Check rated Poor last time (and that aren't
+      // ticked again yet) are the ones to redo — flagged so the screens can make them blink.
+      const reworkFields = new Set();
+      if (assignment.reworkFromAssignmentId) {
+        const rw = await pool.request().input("old", sql.Int, assignment.reworkFromAssignmentId).query(`
+          SELECT ck.FieldName AS fieldName
+          FROM dbo.DependencyActivityQcCheck ck
+          WHERE ck.Rating = 'POOR'
+            AND ck.QcId = (SELECT TOP 1 Id FROM dbo.DependencyActivityQc WHERE AssignmentId = @old ORDER BY QcAt DESC, Id DESC)
+        `);
+        rw.recordset.forEach((r) => reworkFields.add(r.fieldName));
+      }
+      checkpoints = cpRes.recordset.map((c) => ({
+        ...c,
+        isChecked: !!c.isChecked,
+        isDaily: !!c.isDaily,
+        needsRework: !c.isChecked && reworkFields.has(c.fieldName),
+      }));
     }
 
     res.json({
       rungId,
       activityId,
+      daysOfCompletion,
       candidateItems: itemsRes.recordset,
       assignment: assignment
         ? {
@@ -1755,6 +1875,9 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
             materialSource: assignment.materialSource,
             labourContractorId: assignment.labourContractorId,
             materialContractorId: assignment.materialContractorId,
+            labourSourceName,
+            materialSourceName,
+            qcStatus,
             description: assignment.description,
             remarks: assignment.remarks,
             materials,
@@ -2387,6 +2510,61 @@ router.get("/:rungId/photos", authMiddleware, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// POST /:rungId/photos/carry-forward — day 1's After photos become day 2's Before.
+// Done here, in one INSERT…SELECT, rather than by the browser downloading and re-uploading
+// each photo: it happens whenever anyone opens the Photos tab or shoots a photo on a new
+// day, with no dependence on the right screen being opened first. Idempotent — once a
+// Before newer than that last After exists (the carried copy, or one the engineer took),
+// nothing more is added. Only After photos from an EARLIER day are carried; same-day
+// photos stay as shot.
+const CARRIED_FORWARD_NOTE = "Carried forward from previous After";
+router.post(
+  "/:rungId/photos/carry-forward",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const r = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("note", sql.NVarChar(500), CARRIED_FORWARD_NOTE)
+        .input("by", sql.NVarChar(200), "system").query(`
+          DECLARE @today DATE = CAST(SYSDATETIME() AS DATE);
+          DECLARE @n INT = 0;
+          DECLARE @lastDay DATE = (
+            SELECT MAX(COALESCE(LogDate, CAST(CapturedAt AS DATE))) FROM dbo.ActivityPhoto
+            WHERE DependencyMasterActivityId = @rungId AND Phase = 'after'
+              AND COALESCE(LogDate, CAST(CapturedAt AS DATE)) < @today);
+          IF @lastDay IS NOT NULL
+          BEGIN
+            DECLARE @lastAt DATETIME2 = (
+              SELECT MAX(CapturedAt) FROM dbo.ActivityPhoto
+              WHERE DependencyMasterActivityId = @rungId AND Phase = 'after'
+                AND COALESCE(LogDate, CAST(CapturedAt AS DATE)) = @lastDay);
+            IF NOT EXISTS (SELECT 1 FROM dbo.ActivityPhoto
+                           WHERE DependencyMasterActivityId = @rungId AND Phase = 'before' AND CapturedAt >= @lastAt)
+            BEGIN
+              INSERT INTO dbo.ActivityPhoto
+                (DependencyMasterActivityId, Phase, FileName, MimeType, FileData, Note, CapturedBy, CapturedAt, LogDate)
+              SELECT DependencyMasterActivityId, 'before', FileName, MimeType, FileData, @note, @by, SYSDATETIME(), @today
+              FROM dbo.ActivityPhoto
+              WHERE DependencyMasterActivityId = @rungId AND Phase = 'after'
+                AND COALESCE(LogDate, CAST(CapturedAt AS DATE)) = @lastDay;
+              SET @n = @@ROWCOUNT;
+            END
+          END
+          SELECT @n AS carried;
+        `);
+      res.json({ carried: r.recordset[0]?.carried ?? 0 });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] POST /:rungId/photos/carry-forward error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // GET /:rungId/photos/:photoId — one photo's base64 data, always reached
 // through fetchWithAuth (never a bare <img src>) for the same auth-token

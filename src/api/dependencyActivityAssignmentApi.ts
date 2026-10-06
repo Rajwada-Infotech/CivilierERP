@@ -69,6 +69,8 @@ export interface AssignmentCheckpoint {
   isDaily?: boolean;
   /** How many days already have an update logged (server-provided). */
   updateCount?: number;
+  /** Rework attempt: Quality Check rated this one Poor last time and it isn't ticked again yet. */
+  needsRework?: boolean;
 }
 
 export interface CheckpointUpdate {
@@ -127,6 +129,8 @@ export interface ApprovalLevel {
 export interface RungAssignmentDetail {
   rungId: number;
   activityId: number;
+  /** The Activity Master's "Days of Completion" — the default for the allocation's Days. */
+  daysOfCompletion?: number | null;
   candidateItems: CandidateItem[];
   assignment: {
     engineerIds: number[];
@@ -139,6 +143,18 @@ export interface RungAssignmentDetail {
     materialSource: SourceType | null;
     labourContractorId: number | null;
     materialContractorId: number | null;
+    /** The company behind each source: the project's developer company, or the named contractor. */
+    labourSourceName?: string | null;
+    materialSourceName?: string | null;
+    /** Latest Quality Check decision on this activity; null while none has been made. */
+    qcStatus?: {
+      decision: "APPROVED" | "REWORK";
+      remarks: string | null;
+      qcAt: string | null;
+      qcBy: string | null;
+      /** How each checkpoint was rated in that decision. */
+      checks?: { fieldName: string; passed: boolean; rating: "POOR" | "GOOD" | "EXCELLENT" | null; note: string | null }[];
+    } | null;
     description: string | null;
     remarks: string | null;
     materials: AssignmentMaterial[];
@@ -265,8 +281,13 @@ export interface ReportedAssignment {
   // ever a tentative plan; (firstReportedAt - startDate) is the real delay
   // before work began. Null until that first report happens.
   firstReportedAt: string | null;
+  /** When it was put back In Progress after a hold (null if it never was, or it is on hold again). */
+  resumedAt?: string | null;
   labourSource: SourceType | null;
   materialSource: SourceType | null;
+  /** The company behind the source: the project's developer company, or the named contractor. */
+  labourSourceName?: string | null;
+  materialSourceName?: string | null;
   description: string | null;
   remarks: string | null;
   status: AssignmentStatus;
@@ -417,7 +438,7 @@ export const updateAssignmentStatus = async (
 // drag-release) each call this with only the field that actually changed.
 export const updateAssignmentDetail = async (
   rungId: number,
-  patch: { status?: AssignmentStatus; remarks?: string; progressPercent?: number },
+  patch: { status?: AssignmentStatus; remarks?: string; progressPercent?: number; append?: boolean },
 ): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/status`, {
     method: "PATCH",
@@ -569,6 +590,12 @@ export interface ActivityPhotoData {
 export const getActivityPhotos = async (rungId: number, date?: string): Promise<ActivityPhotos> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/photos${date ? `?date=${date}` : ""}`);
   return handleResponse<ActivityPhotos>(res);
+};
+
+/** Day 1's After photos become day 2's Before (server-side, idempotent). Returns how many were added. */
+export const carryForwardPhotos = async (rungId: number): Promise<{ carried: number }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos/carry-forward`, { method: "POST" });
+  return handleResponse<{ carried: number }>(res);
 };
 
 export const getActivityPhoto = async (rungId: number, photoId: number): Promise<ActivityPhotoData> => {

@@ -122,7 +122,6 @@ async function fetchPlotMatrix(projectId: string, blockId: string): Promise<Matr
 
 const NONE = "__none__";
 
-
 // Available unit -> ask who it's being held for and for how long. Booking
 // itself still happens through the normal Application -> Booking flow; this
 // only reserves the unit against the matrix so no one else can book it
@@ -477,16 +476,6 @@ export function UnitMatrixPage() {
     queryKey: ["unit-matrix-projects"],
     queryFn: () => fetchOptions<Option>(`${API}/projects`),
   });
-
-  // Show the first project's matrix straight away instead of an empty
-  // "select a project" panel. Done once on load, so if the user clears the
-  // project picker afterwards it stays cleared.
-  const [autoPicked, setAutoPicked] = useState(false);
-  useEffect(() => {
-    if (autoPicked || projectId || !projects.length) return;
-    setAutoPicked(true);
-    setProjectId(String((projects as any[])[0].Id));
-  }, [projects, projectId, autoPicked]);
 
   const { data: blocks = [] } = useQuery({
     queryKey: ["unit-matrix-blocks", projectId],

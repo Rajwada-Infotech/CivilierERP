@@ -23,6 +23,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { applyDefaultDays, changeDays, changeEnd, changeStart, type AllocDates } from "./allocationDates";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -269,19 +270,6 @@ interface Props {
   onClose: () => void;
 }
 
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function diffDays(startStr: string, endStr: string): number | null {
-  const s = new Date(`${startStr}T00:00:00`);
-  const e = new Date(`${endStr}T00:00:00`);
-  const diff = Math.round((e.getTime() - s.getTime()) / 86400000);
-  return diff >= 0 ? diff : null;
-}
-
 // "Given by" is one combined dropdown — Developer (the project itself) or
 // one of the contractors already allocated to this project — encoded as a
 // single select value so there's one control instead of a
@@ -316,6 +304,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const [startDate, setStartDate] = useState<string>("");
   const [days, setDays] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+  // The start date was worked back from a typed end date (tentative), not typed itself.
+  const [startAuto, setStartAuto] = useState(false);
   const [labourSource, setLabourSource] = useState<SourceType | "">("");
   const [labourContractorId, setLabourContractorId] = useState<number | null>(null);
   const [materialSource, setMaterialSource] = useState<SourceType | "">("");
@@ -355,15 +345,26 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
       setDescription(defaultDescription);
       setQcUserIds([]);
       setApprovalLevels([]);
+      // Nothing allocated yet: Days starts at the Activity Master's Days of Completion.
+      if (detail?.daysOfCompletion != null) applyDates(applyDefaultDays(curDates(), detail.daysOfCompletion));
       return;
     }
     const a = detail.assignment;
     setEngineerIds(a.engineerIds);
     setQcUserIds(a.qcUserIds || []);
     setApprovalLevels(a.approvalLevels || []);
-    setStartDate(a.startDate ? a.startDate.slice(0, 10) : "");
-    setDays(a.days != null ? String(a.days) : "");
-    setEndDate(a.endDate ? a.endDate.slice(0, 10) : "");
+    // A saved allocation keeps its own dates; Days falls back to the Activity Master's if it has none.
+    applyDates(
+      applyDefaultDays(
+        {
+          startDate: a.startDate ? a.startDate.slice(0, 10) : "",
+          endDate: a.endDate ? a.endDate.slice(0, 10) : "",
+          days: a.days != null ? String(a.days) : "",
+          startAuto: false,
+        },
+        detail.daysOfCompletion,
+      ),
+    );
     setLabourSource(a.labourSource || "");
     setLabourContractorId(a.labourContractorId ?? null);
     setMaterialSource(a.materialSource || "");
@@ -377,26 +378,18 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
 
-  // Days drives End Date whenever Start Date is known; editing End Date
-  // directly recomputes Days the other way — whichever field the user last
-  // touched wins, no fighting over which is "the" source of truth.
-  const handleDaysChange = (value: string) => {
-    setDays(value);
-    const n = parseInt(value, 10);
-    if (startDate && Number.isFinite(n) && n >= 0) setEndDate(addDays(startDate, n));
+  // Days starts from the Activity Master. Type a Start Date and the End Date is worked out; type an
+  // End Date and a tentative Start Date is worked back from it (see allocationDates.ts).
+  const curDates = (): AllocDates => ({ startDate, endDate, days, startAuto });
+  const applyDates = (n: AllocDates) => {
+    setStartDate(n.startDate);
+    setEndDate(n.endDate);
+    setDays(n.days);
+    setStartAuto(n.startAuto);
   };
-  const handleStartDateChange = (value: string) => {
-    setStartDate(value);
-    const n = parseInt(days, 10);
-    if (value && Number.isFinite(n) && n >= 0) setEndDate(addDays(value, n));
-  };
-  const handleEndDateChange = (value: string) => {
-    setEndDate(value);
-    if (startDate && value) {
-      const d = diffDays(startDate, value);
-      if (d != null) setDays(String(d));
-    }
-  };
+  const handleDaysChange = (value: string) => applyDates(changeDays(curDates(), value));
+  const handleStartDateChange = (value: string) => applyDates(changeStart(curDates(), value));
+  const handleEndDateChange = (value: string) => applyDates(changeEnd(curDates(), value));
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -495,9 +488,19 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   onChange={(e) => handleStartDateChange(e.target.value)}
                   className={inputCls}
                 />
+                {startAuto && startDate && (
+                  <p className="text-[0.625rem] text-amber-600 dark:text-amber-400 mt-1">Tentative — worked back from the end date</p>
+                )}
               </div>
               <div>
-                <label className={labelCls}>Days</label>
+                <label className={labelCls}>
+                  Days
+                  {detail?.daysOfCompletion != null && (
+                    <span className="normal-case font-normal text-muted-foreground/70 tracking-normal">
+                      · {detail.daysOfCompletion} in Activity Master
+                    </span>
+                  )}
+                </label>
                 <input
                   type="number"
                   min={0}
@@ -668,7 +671,9 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   {checkpoints.map((cp, i) => (
                     <div
                       key={`${cp.checkpointId ?? "custom"}-${i}`}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
+                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border ${
+                        cp.needsRework ? "cp-rework-blink bg-amber-500/10 border-amber-500/50" : "bg-muted/40 border-border/50"
+                      }`}
                     >
                       <div
                         className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
@@ -678,6 +683,11 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         <Check size={9} strokeWidth={3} />
                       </div>
                       <span className="text-sm text-foreground flex-1 truncate">{cp.fieldName}</span>
+                      {cp.needsRework && (
+                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/15 px-1.5 py-0.5 rounded-full shrink-0">
+                          Redo — rated Poor
+                        </span>
+                      )}
                       {cp.isDaily && (
                         <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full shrink-0">
                           <CalendarDays size={9} /> Daily

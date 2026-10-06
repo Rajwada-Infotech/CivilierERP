@@ -633,14 +633,6 @@ const CrmLegalMilestones: React.FC = () => {
     : (trackers as any[]).find((t: any) => t.Id === selectedId);
   const selectRow = (t: any) => { setSelectedId(t.Id); setSelectedTracker(t); setSp({ bookingId: String(t.BookingId) }, { replace: true }); };
 
-  // Open the first booking's journey by default (instead of an empty "select
-  // a booking" panel); the user can still pick any other row. Skipped while a
-  // ?bookingId= deep link is being resolved above.
-  useEffect(() => {
-    if (selectedId != null || sp.get("bookingId")) return;
-    const first = (trackers as any[])[0];
-    if (first) { setSelectedId(first.Id); setSelectedTracker(first); }
-  }, [trackers, selectedId, sp]);
   // /eligible-bookings already applies the real POST gate (Approved, active,
   // not frozen, has an Agreement, no tracker yet) — no client-side filtering needed.
   const startableBookings = bookings as any[];

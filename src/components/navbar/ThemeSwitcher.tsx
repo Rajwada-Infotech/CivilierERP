@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Brush } from "iconsax-react";
-import { useTheme, useThemeOptions, type Theme } from "@/contexts/ThemeContext";
+import { useTheme, THEME_DOTS, type Theme } from "@/contexts/ThemeContext";
 
 // ─── useClickOutside ──────────────────────────────────────────────────────────
 
@@ -25,14 +25,14 @@ const ThemeOptions: React.FC<{
   currentTheme: Theme;
   setTheme: (t: Theme) => void;
   onClose: () => void;
-}> = ({ currentTheme, setTheme, onClose }) => {
-  const options = useThemeOptions();
-  return (
+}> = ({ currentTheme, setTheme, onClose }) => (
   <>
     <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
       Appearance
     </p>
-    {options.map(([t, { bg, label }]) => (
+    {(
+      Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]
+    ).map(([t, { bg, label }]) => (
       <button
         key={t}
         onClick={() => {
@@ -56,8 +56,7 @@ const ThemeOptions: React.FC<{
       </button>
     ))}
   </>
-  );
-};
+);
 
 // ─── ThemeSwitcher ────────────────────────────────────────────────────────────
 
