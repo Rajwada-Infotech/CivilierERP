@@ -29,6 +29,16 @@ const { getLastPurchaseRateByCompany } = require("../services/lastPurchaseRate")
 const { postInterCompanyStockTransferToGL } = require("../services/interCompanyStockTransferGL");
 const { reversePostingBySource } = require("../services/generalLedger");
 const { getMRItemFulfillment, recomputeMRFulfillment } = require("../services/materialRequestFulfillment");
+const {
+  faItemIdSet,
+  listTransferableTags,
+  resolveFaSelection,
+  saveIctAssets,
+  loadIctAssets,
+  assertFaReady,
+  executeFaTransfer,
+  revertFaTransfer,
+} = require("../services/interCompanyFixedAssets");
 
 // Idempotent schema migration — adds GST columns if missing (safe to run every
 // startup; IF NOT EXISTS pattern avoids errors on already-updated DBs).
@@ -317,6 +327,9 @@ async function priceItems(pool, senderCompanyId, senderCompanyName, items, apply
       // was raised from an MR — same passthrough purchaseOrders.js's own
       // item mapping does for its own mrItemId.
       mrItemId: item.mrItemId ?? item.MRItemId ?? null,
+      // Fixed Asset items: the FA Item Code (FixedAssetTagging.TagId) of every
+      // unit being moved — validated against the sender in POST /.
+      faTagIds: item.faTagIds ?? item.FaTagIds ?? [],
     });
   }
   return pricedItems;
@@ -366,6 +379,8 @@ async function executeTransfer(pool, ctx, createdBy, opts = {}) {
 
   // Validate stock is actually available before moving anything.
   await assertStockAvailable(pool, senderGodown, sender, pricedItems);
+  // ...and that every FA Item Code on the transfer is still free to move.
+  if (ictId) await assertFaReady(pool, ictId);
 
   // Credit the sender's godown OUT, debit the receiver's godown IN —
   // straight StockLedger movement, same shape stockTransfers.js already
@@ -406,6 +421,20 @@ async function executeTransfer(pool, ctx, createdBy, opts = {}) {
     totalAmount,
     createdBy,
   });
+
+  // Fixed Asset units: retire the old FA Codes on the sending side (no more
+  // depreciation or posting against them) and receive fresh assets with new FA
+  // Codes under the receiving company/project. Idempotent on a retry.
+  if (ictId) {
+    await executeFaTransfer(pool, {
+      ictId,
+      docNo,
+      transferDate,
+      receiver,
+      receiverGodown,
+      userEmail: createdBy,
+    });
+  }
 }
 
 // Loads an ICT header + its stored items back into the same context shape
@@ -653,6 +682,10 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     // at approval.
     await assertStockAvailable(pool, ctx.senderGodown, ctx.sender, pricedItems);
 
+    // A Fixed Asset unit is tracked individually (its own FA Item Code and
+    // depreciation), so the request must name exactly which units move.
+    const faByLine = await resolveFaSelection(pool, { senderProjectId: ctx.sender.ProjectId, items: pricedItems });
+
     const totalAmount        = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
     const totalGstAmount     = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
     const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
@@ -703,7 +736,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       ictId = header.recordset[0].ICTId;
 
       for (const [idx, item] of pricedItems.entries()) {
-        await tx.request()
+        const itemInsert = await tx.request()
           .input("ICTId", sql.Int, ictId)
           .input("ItemId", sql.NVarChar(50), item.itemId)
           .input("ItemName", sql.NVarChar(200), item.itemName)
@@ -720,10 +753,17 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
             INSERT INTO dbo.InterCompanyTransferItems
               (ICTId, ItemId, ItemName, UOMCode, Quantity, Rate, Amount,
                GstPct, GstAmount, AmountInclGst, SourceDocNo, SortOrder, MRItemId)
+            OUTPUT INSERTED.ICTItemId
             VALUES
               (@ICTId, @ItemId, @ItemName, @UOMCode, @Quantity, @Rate, @Amount,
                @GstPct, @GstAmount, @AmountInclGst, @SourceDocNo, @SortOrder, @MRItemId)
           `);
+        const faTags = faByLine.get(idx);
+        if (faTags?.length) {
+          await saveIctAssets(tx, {
+            ictId, ictItemId: itemInsert.recordset[0].ICTItemId, itemId: item.itemId, tags: faTags,
+          });
+        }
       }
 
       await tx.commit();
@@ -849,6 +889,45 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
     res.json({ message: "Rejected", ...result });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
+// ── GET /fa-items?ids=a,b — which of these Item Master ids are Fixed Assets ──
+// (the form needs to know to ask for FA Item Codes instead of just a quantity).
+router.get("/fa-items", authenticateToken, async (req, res) => {
+  try {
+    const ids = String(req.query.ids || "").split(",").map((x) => x.trim()).filter(Boolean);
+    res.json([...(await faItemIdSet(getPool(), ids))]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /fa-codes?projectId=&itemId= — FA Item Codes of the sending project
+// that can still be put on a transfer ──────────────────────────────────────
+router.get("/fa-codes", authenticateToken, async (req, res) => {
+  try {
+    const projectId = parsePositiveInt(req.query.projectId);
+    const itemId = String(req.query.itemId || "").trim();
+    if (!projectId || !itemId) return res.status(400).json({ error: "projectId and itemId are required." });
+    if (req.projectScope && !projectAllowed(req.projectScope, projectId)) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    res.json(await listTransferableTags(getPool(), { projectId, itemId }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/fa-codes — the FA Item Codes this transfer moves and, once
+// approved, the new code each one became ────────────────────────────────────
+router.get("/:id/fa-codes", authenticateToken, async (req, res) => {
+  try {
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+    res.json(await loadIctAssets(getPool(), id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1035,6 +1114,10 @@ router.delete("/:id", authenticateToken, requirePageRight("stock-transfers", "de
           }
         }
       }
+
+      // Fixed Asset units: give the old FA Codes back and drop the receiving
+      // side's fresh batch — refuses (409) if it has already been built on.
+      await revertFaTransfer(pool, id);
 
       await pool.request().input("RefID", sql.Int, id)
         .query("DELETE FROM dbo.StockLedger WHERE RefType = 'ICT' AND RefID = @RefID");
