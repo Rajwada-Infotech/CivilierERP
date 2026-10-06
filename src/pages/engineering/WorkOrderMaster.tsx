@@ -399,6 +399,82 @@ const withArea = (a: Activity, area: number): Partial<Activity> => {
   };
 };
 
+
+/**
+ * Turns a BOQ's activities (+ the BOQ items tied to them) into Work Order
+ * activity groups. BOQ Total Rate / Total Area carry across as-is; each BOQ item
+ * becomes a material of its activity with the BOQ's total qty as the Item Qty.
+ */
+const boqToGroups = (acts: any[], items: any[]): ActivityGroup[] => {
+  const groups = new Map<string, ActivityGroup>();
+  for (const a of acts) {
+    // Rows saved before Total Area existed were qty x unit-rate.
+    const legacy = a.Area == null && Number(a.Quantity) !== 1;
+    const area = parseFloat(a.Area ?? (legacy ? a.Quantity : 0)) || 0;
+    const totalRate = legacy
+      ? parseFloat(a.LineAmount) || 0
+      : parseFloat(a.Rate) || 0;
+    const actKey = a.ActivityId != null ? String(a.ActivityId) : "";
+    const materials: MaterialItem[] = items
+      .filter((it) => actKey && String(it.ActivityId ?? "") === actKey)
+      .map((it) => {
+        const totalQty = parseFloat(it.Quantity) || 0;
+        return {
+          id: uid(),
+          itemId: it.ItemId ?? "",
+          itemName: it.ItemName ?? "",
+          totalQty,
+          consumptionRatio: area > 0 ? totalQty / area : 0,
+          uomId: it.UomId ?? null,
+          unit: it.UomName ?? "",
+          price: parseFloat(it.Rate) || 0,
+          gstRate: parseFloat(it.TaxPct) || 0,
+          supplierId: null,
+          supplierName: "",
+        };
+      });
+    const activity: Activity = {
+      id: uid(),
+      activityId: a.ActivityId ? parseInt(a.ActivityId) : null,
+      name: a.ActivityName || "",
+      uomId: a.UomId ?? null,
+      unit: a.UomName || "",
+      totalRate,
+      ratePerUnit: area > 0 ? totalRate / area : 0,
+      area,
+      materials,
+      hsnCode: "",
+      hsnGstRate: parseFloat(a.TaxPct || 0),
+      hsnGstType: "cgst_sgst",
+    };
+    const key = a.GroupId ? `g${a.GroupId}` : `a${uid()}`;
+    const existing = groups.get(key);
+    if (existing) existing.activities.push(activity);
+    else
+      groups.set(key, {
+        id: uid(),
+        groupId: a.GroupId ? parseInt(a.GroupId) : null,
+        name: a.GroupName || a.ActivityName || "",
+        expanded: true,
+        activities: [activity],
+      });
+  }
+  return [...groups.values()];
+};
+
+/** Fetch a BOQ's activities and items and map them to Work Order groups. */
+const fetchBoqGroups = async (boqId: string): Promise<ActivityGroup[]> => {
+  const [acts, items] = await Promise.all([
+    fetchWithAuth(`/api/engineering/boq-activities/${boqId}`).then((r) => r.json()),
+    fetchWithAuth(`/api/engineering/boq-items/${boqId}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => []),
+  ]);
+  return Array.isArray(acts) && acts.length > 0
+    ? boqToGroups(acts, Array.isArray(items) ? items : [])
+    : [];
+};
+
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
 const inputCls =
@@ -3441,38 +3517,8 @@ const WorkOrderEditPanel: React.FC<{
                     // Inherit BOQ activities as WO activity groups
                     if (boqId) {
                       try {
-                        const acts = await fetchWithAuth(
-                          `/api/engineering/boq-activities/${boqId}`,
-                        ).then((r) => r.json());
-                        if (Array.isArray(acts) && acts.length > 0) {
-                          // Group by ActivityName (BOQ uses flat list; each becomes its own group)
-                          const inherited: ActivityGroup[] = acts.map(
-                            (a: any) => ({
-                              id: uid(),
-                              groupId: null,
-                              name: a.ActivityName || "",
-                              expanded: true,
-                              activities: [
-                                {
-                                  id: uid(),
-                                  activityId: a.ActivityId
-                                    ? parseInt(a.ActivityId)
-                                    : null,
-                                  name: a.ActivityName || "",
-                                  uomId: a.UomId ?? null,
-                                  unit: a.UomName || "",
-                                  ratePerUnit: parseFloat(a.Rate || 0),
-                                  area: parseFloat(a.Quantity || 0),
-                                  materials: [],
-                                  hsnCode: "",
-                                  hsnGstRate: parseFloat(a.TaxPct || 0),
-                                  hsnGstType: "cgst_sgst" as const,
-                                },
-                              ],
-                            }),
-                          );
-                          setGroups(inherited);
-                        }
+                        const inheritedGroups = await fetchBoqGroups(boqId);
+                        if (inheritedGroups.length > 0) setGroups(inheritedGroups);
                       } catch {
                         /* non-fatal */
                       }
@@ -4585,37 +4631,8 @@ const WorkOrderMaster: React.FC = () => {
                           }));
                           if (boqId) {
                             try {
-                              const acts = await fetchWithAuth(
-                                `/api/engineering/boq-activities/${boqId}`,
-                              ).then((r) => r.json());
-                              if (Array.isArray(acts) && acts.length > 0) {
-                                const inherited: ActivityGroup[] = acts.map(
-                                  (a: any) => ({
-                                    id: uid(),
-                                    groupId: null,
-                                    name: a.ActivityName || "",
-                                    expanded: true,
-                                    activities: [
-                                      {
-                                        id: uid(),
-                                        activityId: a.ActivityId
-                                          ? parseInt(a.ActivityId)
-                                          : null,
-                                        name: a.ActivityName || "",
-                                        uomId: a.UomId ?? null,
-                                        unit: a.UomName || "",
-                                        ratePerUnit: parseFloat(a.Rate || 0),
-                                        area: parseFloat(a.Quantity || 0),
-                                        materials: [],
-                                        hsnCode: "",
-                                        hsnGstRate: parseFloat(a.TaxPct || 0),
-                                        hsnGstType: "cgst_sgst" as const,
-                                      },
-                                    ],
-                                  }),
-                                );
-                                setGroups(inherited);
-                              }
+                              const inheritedGroups = await fetchBoqGroups(boqId);
+                        if (inheritedGroups.length > 0) setGroups(inheritedGroups);
                             } catch {
                               /* non-fatal */
                             }
