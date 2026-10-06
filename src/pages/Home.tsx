@@ -1858,6 +1858,14 @@ export default function HomePage() {
   const heroKpis = kpis.filter((k) => heroIds.has(k.id));
   const restKpis = kpis.filter((k) => !heroIds.has(k.id));
   const spotlightModules = moduleOrder.filter((m) => m !== "admin").slice(0, 3);
+  // Share of the user's recorded module visits, across every module they can open.
+  const totalModuleVisits = (ranking?.modules ?? []).reduce((a, m) => a + m.visits, 0);
+  const moduleSharePct = (m: string): string | null => {
+    const v = ranking?.modules.find((x) => x.module === m)?.visits ?? 0;
+    if (!totalModuleVisits || !v) return null;
+    const pct = (v / totalModuleVisits) * 100;
+    return pct < 1 ? "<1%" : `${Math.round(pct)}%`;
+  };
 
   // Within the same urgency, items from the modules this user works in come
   // first; module-less items (the approval queue) lead their urgency band.
@@ -2015,7 +2023,7 @@ export default function HomePage() {
                 className="flex flex-wrap items-center gap-2"
               >
                 <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground/55">
-                  {ranking?.personalized ? "Tuned to your work" : "Your modules"}
+                  Your top worked modules
                 </span>
                 <LayoutGroup>
                   {spotlightModules.map((m, idx) => (
@@ -2030,6 +2038,7 @@ export default function HomePage() {
                     >
                       <span className="w-1.5 h-1.5 rounded-full" style={{ background: MODULE_COLORS[m] }} />
                       {MODULE_LABELS[m]}
+                      {moduleSharePct(m) && <span className="font-semibold tabular-nums opacity-80">{moduleSharePct(m)}</span>}
                     </motion.span>
                   ))}
                 </LayoutGroup>
