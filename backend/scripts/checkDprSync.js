@@ -329,7 +329,7 @@ async function checkWorkflow() {
      LEFT JOIN dbo.RoomMaster r ON r.Id = d.RoomId LEFT JOIN dbo.UnitMaster u ON u.Id = d.FlatId LEFT JOIN dbo.BlockMaster b ON b.Id = d.TowerId
      WHERE ((d.RoomId IS NOT NULL AND (r.UnitId <> d.FlatId OR (ISNULL(r.Floor,'~') <> ISNULL(d.Floor,'~')
         -- a floorless villa's chain is placed by its plot(s) (unitLayout.chainFloorLabel)
-        AND NOT (r.Floor IS NULL AND d.Floor = (SELECT STRING_AGG(p.PlotName, '+') WITHIN GROUP (ORDER BY p.PlotName)
+        AND NOT (r.Floor IS NULL AND d.Floor = (SELECT N'Plot ' + STRING_AGG(p.PlotName, '+') WITHIN GROUP (ORDER BY p.PlotName)
                                                   FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = d.FlatId AND p.IsActive = 1)))))
         OR (d.FlatId IS NOT NULL AND (u.BlockId <> d.TowerId OR u.ProjectId <> d.ProjectId))
         OR (d.TowerId IS NOT NULL AND b.ProjectId <> d.ProjectId)) ${projectFilter("d.ProjectId")}`);

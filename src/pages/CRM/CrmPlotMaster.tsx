@@ -277,7 +277,7 @@ const CrmPlotMaster: React.FC = () => {
       if (!response.ok) throw new Error(body.error || "Could not update plot");
       toast.success(creatingPlot ? "Plot created - place it on the layout" : "Plot updated");
       setEditOpen(false); setCreatingPlot(false);
-      await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
     } catch (e: any) { toast.error(e.message); } finally { setSavingPlot(false); }
   };
   const deletePlot = async (plot: Plot) => {
@@ -287,7 +287,7 @@ const CrmPlotMaster: React.FC = () => {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Could not delete plot");
       toast.success("Plot deleted"); setSelectedIds((ids) => ids.filter((id) => id !== plot.Id));
-      await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
     } catch (e: any) { toast.error(e.message); }
   };
   // One villa per plot: each plot takes its own planned villa type (areas and
@@ -341,7 +341,7 @@ const CrmPlotMaster: React.FC = () => {
     if (failed.length) toast.error(`Not converted - ${failed.join("; ")}`, { duration: 12000 });
     setSelectedIds((ids) => ids.filter((id) => jobs.some((job) => job.plot.Id === id && failed.some((f) => f.startsWith(`${job.plot.PlotName}:`)))));
     if (!failed.length) setConvertOpen(false);
-    await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
+    await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
   };
   // Reverses a conversion made by mistake. The server refuses once the villa is
@@ -355,7 +355,7 @@ const CrmPlotMaster: React.FC = () => {
       if (!response.ok) throw new Error(body.error || body.message || "Could not undo the conversion");
       toast.success(body.message || "Conversion undone");
       setDetailOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
       await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
     } catch (e: any) { toast.error(e.message); }
   };
@@ -382,7 +382,7 @@ const CrmPlotMaster: React.FC = () => {
       toast.success(`${selectedPlots.length} plot${selectedPlots.length === 1 ? "" : "s"} converted to ${unitName.trim()} in Unit Master — ${Number(body.DprChainsCreated) || 0} DPR room chains set up`);
       if (body.DprRoomsWithoutTemplate?.length) toast.warning(`No DPR steps exist yet for: ${body.DprRoomsWithoutTemplate.join(", ")}. Set up one chain for each in Dependency Master.`, { duration: 12000 });
       setSelectedIds([]); setConvertOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
       await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
     } catch (e: any) {
       toast.error(e.name === "AbortError" ? "Request timed out — the server took too long. Please try again." : e.message);

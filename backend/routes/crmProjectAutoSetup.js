@@ -2498,4 +2498,52 @@ router.post("/plots/unconvert", requirePageRight("crm-auto-project-setup", "dele
   }
 });
 
+// GET /projects/:projectId/plot-summary — what a plotted project's setup page
+// needs at a glance: where its land stands (available / held / sold / built
+// on), its villa types and whether each has a room layout, and how far the
+// villas are wired into DPR. Counts only; one round trip.
+router.get("/projects/:projectId/plot-summary", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  const projectId = parseInt(req.params.projectId, 10);
+  if (!Number.isFinite(projectId)) return res.status(400).json({ error: "Invalid project" });
+  try {
+    const r = await getPool().request().input("p", sql.Int, projectId).query(`
+      WITH plots AS (
+        SELECT p.Id, p.ConvertedUnitId,
+          CASE
+            WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
+                         WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND b.IsActive = 1
+                           AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')) THEN 'Sold'
+            WHEN EXISTS (SELECT 1 FROM dbo.CrmApplicationPlot ap JOIN dbo.CrmApplication a ON a.Id = ap.ApplicationId
+                         WHERE ap.PlotId = p.Id AND ap.Status = N'Active' AND a.IsActive = 1
+                           AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted'))
+              OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id
+                         AND h.Status = N'Active' AND h.HoldUntil > SYSDATETIME()) THEN 'Held'
+            ELSE 'Available' END AS LandState
+        FROM dbo.PlotMaster p WHERE p.ProjectId = @p AND p.IsActive = 1
+      ),
+      villas AS (
+        SELECT DISTINCT u.Id FROM dbo.UnitMaster u JOIN plots pl ON pl.ConvertedUnitId = u.Id WHERE u.IsActive = 1
+      )
+      SELECT
+        (SELECT COUNT(*) FROM plots) AS Plots,
+        (SELECT COUNT(*) FROM plots WHERE LandState = 'Available' AND ConvertedUnitId IS NULL) AS Available,
+        (SELECT COUNT(*) FROM plots WHERE LandState = 'Held') AS Held,
+        (SELECT COUNT(*) FROM plots WHERE LandState = 'Sold') AS Sold,
+        (SELECT COUNT(*) FROM plots WHERE ConvertedUnitId IS NOT NULL) AS BuiltOn,
+        (SELECT COUNT(*) FROM villas) AS Villas,
+        (SELECT COUNT(*) FROM villas v WHERE EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.FlatId = v.Id AND d.IsActive = 1)) AS VillasWithDpr,
+        (SELECT COUNT(*) FROM dbo.RoomMaster r JOIN villas v ON v.Id = r.UnitId
+           WHERE r.IsActive = 1 AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id AND d.IsActive = 1)) AS VillaRoomsWithoutDpr,
+        (SELECT COUNT(*) FROM dbo.VillaTypeMaster vt WHERE vt.ProjectId = @p AND vt.IsActive = 1) AS VillaTypes,
+        (SELECT COUNT(*) FROM dbo.VillaTypeMaster vt JOIN dbo.RoomLayoutType l ON l.Id = vt.LayoutTypeId AND l.IsActive = 1
+           WHERE vt.ProjectId = @p AND vt.IsActive = 1) AS VillaTypesWithLayout,
+        (SELECT COUNT(*) FROM dbo.PlotMaster p WHERE p.ProjectId = @p AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL AND p.PlannedVillaTypeId IS NOT NULL) AS PlannedNotBuilt
+    `);
+    res.json(r.recordset[0]);
+  } catch (e) {
+    console.error("[auto-setup] GET plot-summary:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
