@@ -376,7 +376,6 @@ export interface ActivityScopeSummary {
   statusCounts: Partial<Record<AssignmentStatus, number>>;
   total: number;
   rooms: ScopeSummaryRoom[];
-  projects: { id: number; name: string | null }[];
 }
 export const getActivityScopeSummary = async (params?: {
   status?: AssignmentStatus;
@@ -390,6 +389,11 @@ export const getActivityScopeSummary = async (params?: {
   const query = qs.toString();
   const res = await fetchWithAuth(`${BASE}/scope-summary${query ? `?${query}` : ""}`);
   return handleResponse<ActivityScopeSummary>(res);
+};
+
+export const getScopeProjects = async (): Promise<{ id: number; name: string | null }[]> => {
+  const res = await fetchWithAuth(`${BASE}/scope-summary/projects`);
+  return handleResponse<{ id: number; name: string | null }[]>(res);
 };
 
 // StartDate is only ever a tentative plan — the real measure of how
