@@ -292,7 +292,7 @@ router.get(
         dm.TowerId AS towerId, bm.BlockName AS towerName,
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
-        dm.RoomId AS roomId, rm.RoomName AS roomName,
+        dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
         CONCAT(
           ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
           ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
@@ -421,7 +421,7 @@ router.get(
           dm.TowerId AS towerId, bm.BlockName AS towerName,
           dm.Floor AS floor,
           dm.FlatId AS flatId, um.UnitName AS flatName,
-          dm.RoomId AS roomId, rm.RoomName AS roomName,
+          dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
           COUNT(*) AS activityCount
         FROM dbo.DependencyActivityAssignment daa
         JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
@@ -433,7 +433,7 @@ router.get(
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
         WHERE daa.IsCurrent = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
           ${statusFilter && STATUS_VALUES.has(statusFilter) ? "AND daa.Status = @statusFilter" : ""}
-        GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName
+        GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName, rm.Storey
       `);
 
       const [countsRes, roomsRes] = await Promise.all([countsPromise, roomsPromise]);
@@ -518,7 +518,7 @@ router.get(
           dm.TowerId AS towerId, bm.BlockName AS towerName,
           dm.Floor AS floor,
           dm.FlatId AS flatId, um.UnitName AS flatName,
-          dm.RoomId AS roomId, rm.RoomName AS roomName,
+          dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
           CONCAT(
             ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
             ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')

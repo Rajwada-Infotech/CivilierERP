@@ -161,7 +161,7 @@ router.get("/", authMiddleware, async (req, res) => {
         dm.TowerId AS towerId, bm.BlockName AS towerName,
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
-        dm.RoomId AS roomId, rm.RoomName AS roomName,
+        dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
         dm.CreatedAt AS createdAt,
         (SELECT COUNT(*) FROM dbo.DependencyMasterActivity dma WHERE dma.DependencyMasterId = dm.Id) AS activityCount,
         -- Built server-side so the list row is ready to render as-is —
@@ -225,7 +225,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
         dm.TowerId AS towerId, bm.BlockName AS towerName,
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
-        dm.RoomId AS roomId, rm.RoomName AS roomName,
+        dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
         dm.CreatedAt AS createdAt, dm.UpdatedAt AS updatedAt
       FROM dbo.DependencyMaster dm
       LEFT JOIN dbo.enterprise   ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
