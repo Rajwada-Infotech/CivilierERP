@@ -2267,3 +2267,21 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
 [data-theme="glass"] :is([role="dialog"], [role="alertdialog"]) :is([data-dlg-head], [data-dlg-foot]) {
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 250, 252, 0.88)) !important;
 }
+
+/* Glass: custom overlay modals (fixed inset-0 > panel) get the same frosted, readable sheet. */
+[data-theme="glass"] .fixed.inset-0 > :is(.bg-card, .bg-background, [class*="bg-card/"], [class*="bg-background/"]):not(.inset-0) {
+    background:
+        var(--glass-grain, none),
+        linear-gradient(150deg,
+            color-mix(in srgb, var(--gt-a, #7dd3fc) 10%, rgba(255, 255, 255, 0.94)) 0%,
+            rgba(248, 251, 253, 0.9) 50%,
+            color-mix(in srgb, var(--gt-b, #5eead4) 10%, rgba(244, 248, 251, 0.92)) 100%) !important;
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 30px 70px -16px rgba(20, 50, 90, 0.38), inset 0 1px 0 #fff !important;
+}
+[data-theme="glass"] .fixed.inset-0 > :is(.bg-card, .bg-background) :is(.sticky.bg-card, .sticky.bg-background, .sticky[class*="bg-card/"]) {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 250, 252, 0.9)) !important;
+    backdrop-filter: blur(20px);
+}
