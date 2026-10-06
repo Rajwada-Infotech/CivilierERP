@@ -2297,6 +2297,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Any statement that errors aborts the whole transaction, so nothing
+      // half-done can be committed. (A statement cancelled by the request
+      // timeout is not covered by this — the rollback in the catch below is
+      // what releases the plot locks then, and it must never be skipped.)
+      await tx.request().query("SET XACT_ABORT ON");
       // Lock source plots and re-check all inventory claims inside this
       // transaction. UI availability is advisory; this is the authority.
       //
@@ -2424,10 +2429,14 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
         changedBy: req.user?.userId ?? null,
         notes: `Plots ${plotIds.join(", ")} -> villa ${villaName}; ${dpr.created} DPR chain(s)${dpr.skipped.length ? `; no steps yet for ${dpr.skipped.join(", ")}` : ""}` }).catch(() => {});
       res.status(201).json({ success: true, UnitId: unitId, UnitName: villaName, PlotIds: plotIds, DprChainsCreated: dpr.created, DprRoomsWithoutTemplate: dpr.skipped });
-    } catch (e) { await tx.rollback(); throw e; }
+    } catch (e) {
+      try { await tx.rollback(); } catch (rbErr) { console.error("[auto-setup] convert-plots rollback:", rbErr.message); }
+      throw e;
+    }
   } catch (e) {
     if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
     console.error("[auto-setup] POST convert-plots:", e.message);
+    if (res.headersSent) return; // the request already timed out and was answered
     res.status(e.status || 500).json({ error: e.message });
   }
 });
