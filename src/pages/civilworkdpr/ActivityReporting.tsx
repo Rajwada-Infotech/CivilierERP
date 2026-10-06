@@ -8,6 +8,7 @@ import {
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
   getActivityScopeSummary,
+  getScopeProjects,
   getActivityPhotos,
   startDelayInfo,
   type AssignmentStatus,
@@ -472,7 +473,12 @@ export default function ActivityReporting() {
   // narrow result opens itself; a broad one stays collapsed for the user to open.
   const MAX_AUTO_EXPAND_ROOMS = 6;
   const autoExpand = !!debouncedSearch && rooms.length <= MAX_AUTO_EXPAND_ROOMS;
-  const projects = summary?.projects ?? [];
+  const { data: projects = [] } = useQuery({
+    queryKey: ["civilworkdpr-scope-projects"],
+    queryFn: getScopeProjects,
+    enabled: rights.canView,
+    staleTime: 10 * 60 * 1000,
+  });
   const statusCounts = summary?.statusCounts ?? {};
   const total = summary?.total ?? 0;
 

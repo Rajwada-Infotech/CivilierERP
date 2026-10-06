@@ -436,21 +436,7 @@ router.get(
         GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName
       `);
 
-      // The project dropdown's options — every project the caller has
-      // activities in, deliberately ignoring status/search/project filters so
-      // picking one project doesn't shrink the list to just itself.
-      const projectsPromise = pool.request().query(`
-        SELECT dm.ProjectId AS id, MAX(ep.name) AS name
-        FROM dbo.DependencyActivityAssignment daa
-        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
-        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
-        LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
-        WHERE daa.IsCurrent = 1${projectPredicate(req.projectScope, "dm.ProjectId")}
-        GROUP BY dm.ProjectId
-        ORDER BY MAX(ep.name)
-      `);
-
-      const [countsRes, roomsRes, projectsRes] = await Promise.all([countsPromise, roomsPromise, projectsPromise]);
+      const [countsRes, roomsRes] = await Promise.all([countsPromise, roomsPromise]);
       const statusCounts = {};
       let total = 0;
       for (const row of countsRes.recordset) {
@@ -458,9 +444,41 @@ router.get(
         total += row.count;
       }
 
-      res.json({ statusCounts, total, rooms: roomsRes.recordset, projects: projectsRes.recordset });
+      res.json({ statusCounts, total, rooms: roomsRes.recordset });
     } catch (err) {
       console.error("[dependency-activity-assignment] GET /scope-summary error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// GET /scope-summary/projects — the project dropdown's options: every project
+// the caller has a current activity in. Its own cheap call (a project has far
+// fewer chains than there are assignments, and EXISTS stops at the first
+// hit) so it never runs on each filter change, only once per page visit.
+router.get(
+  "/scope-summary/projects",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "view"),
+  async (req, res) => {
+    try {
+      const pool = await getPool();
+      const r = await pool.request().query(`
+        SELECT ep.id AS id, ep.name AS name
+        FROM dbo.enterprise ep
+        WHERE ep.business_type = 'P'
+          AND EXISTS (
+            SELECT 1
+            FROM dbo.DependencyMaster dm
+            JOIN dbo.DependencyMasterActivity dma ON dma.DependencyMasterId = dm.Id
+            JOIN dbo.DependencyActivityAssignment daa ON daa.DependencyMasterActivityId = dma.Id AND daa.IsCurrent = 1
+            WHERE dm.ProjectId = ep.id
+          )${projectPredicate(req.projectScope, "ep.id")}
+        ORDER BY ep.name
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /scope-summary/projects error:", err.message);
       res.status(500).json({ error: err.message });
     }
   },
