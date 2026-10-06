@@ -2379,9 +2379,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
       await tx.request().input("uid", sql.Int, unitId)
         .query(`UPDATE dbo.PlotMaster SET ConvertedUnitId = @uid, ConvertedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
                 WHERE Id IN (${plotIds.join(",")})`);
+      // DPR follows conversion: the villa's rooms get their work chains now.
+      const dpr = await require("../services/autoDprChains").createChainsForUnit(tx, unitId, req.user?.email || req.user?.name || null);
       await tx.commit();
       await bumpCacheVersion("unit-master");
-      res.status(201).json({ success: true, UnitId: unitId, PlotIds: plotIds });
+      res.status(201).json({ success: true, UnitId: unitId, PlotIds: plotIds, DprChainsCreated: dpr.created, DprRoomsWithoutTemplate: dpr.skipped });
     } catch (e) { await tx.rollback(); throw e; }
   } catch (e) {
     if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
