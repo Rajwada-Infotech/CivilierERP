@@ -9,7 +9,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { isValidShortCode, ensureProjectShortCode } = require("../services/projectShortCode");
-const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
+const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers, getUnitLockReason } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
 const { getEffectiveType } = require("../services/projectType");
@@ -2241,7 +2241,8 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   const unitName = String(req.body?.UnitName || "").trim();
   const unitType = String(req.body?.UnitType || "").trim();
   const unitKind = String(req.body?.UnitKind || "").trim();
-  if (!plotIds.length || !unitName || !unitType || !unitKind) return res.status(400).json({ error: "PlotIds, UnitName, UnitType, and UnitKind are required" });
+  const hasVillaType = req.body?.VillaTypeId != null && req.body.VillaTypeId !== "";
+  if (!plotIds.length || !unitName || (!unitType && !hasVillaType) || !unitKind) return res.status(400).json({ error: "PlotIds, UnitName, UnitKind and a villa type (or unit type) are required" });
   // Merging plots into one villa cannot be undone, so it must be asked for
   // explicitly; one villa per plot is the default and needs no flag.
   if (new Set(plotIds).size > 1 && req.body?.Combine !== true) {
@@ -2264,8 +2265,13 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   let villaType = null;
   if (villaTypeId != null) {
     villaType = (await getPool().request().input("id", sql.Int, villaTypeId)
-      .query("SELECT Id, ProjectId, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt FROM dbo.VillaTypeMaster WHERE Id = @id AND IsActive = 1")).recordset[0];
+      .query(`SELECT v.Id, v.ProjectId, v.Name, v.BuiltUpAreaSqFt, v.SuperBuiltUpAreaSqFt, v.LayoutTypeId, l.Label AS LayoutLabel
+                FROM dbo.VillaTypeMaster v LEFT JOIN dbo.RoomLayoutType l ON l.Id = v.LayoutTypeId AND l.IsActive = 1
+                WHERE v.Id = @id AND v.IsActive = 1`)).recordset[0];
     if (!villaType) return res.status(400).json({ error: "Select an active villa type" });
+    // The villa type decides the rooms. Without a layout it would silently take
+    // whatever unit type the form held, so it is refused instead.
+    if (!villaType.LayoutLabel) return res.status(400).json({ error: `${villaType.Name} has no room layout — set it in Plot Master > Villa types first` });
   }
   const builtUpArea = optArea(req.body?.BuiltUpAreaSqFt ?? req.body?.AreaSqFt) ?? (villaType ? Number(villaType.BuiltUpAreaSqFt) : null);
   const superBuiltUpArea = optArea(req.body?.SuperBuiltUpAreaSqFt)
@@ -2282,7 +2288,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
       .query("SELECT Code FROM dbo.CrmConstructedAssetKind WHERE Code = @kind AND IsActive = 1");
     if (!kind.recordset.length) return res.status(400).json({ error: "Select an active constructed asset kind" });
     const resolvedType = await resolveUnitTypeInput(
-      pool, { UnitType: unitType }, { requireComposition: true },
+      pool, { UnitType: villaType ? villaType.LayoutLabel : unitType }, { requireComposition: true },
     );
     const tx = pool.transaction();
     await tx.begin();
@@ -2415,6 +2421,51 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
     if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
     console.error("[auto-setup] POST convert-plots:", e.message);
     res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Undo a plot -> villa conversion made by mistake. Allowed only while nothing
+// real hangs on the villa: no booking / application / hold on it, and no DPR
+// work started (every step still an untouched PENDING stub, no labour or
+// drawings on its rooms). Nothing is deleted: the villa, its rooms and its
+// stub chains are deactivated and the plot is freed to convert again.
+router.post("/plots/unconvert", requirePageRight("crm-auto-project-setup", "delete"), async (req, res) => {
+  const unitId = Number(req.body?.UnitId);
+  if (!Number.isInteger(unitId) || unitId <= 0) return res.status(400).json({ error: "UnitId is required" });
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const q = (text) => tx.request().input("u", sql.Int, unitId).query(text);
+    const plots = (await q("SELECT Id, PlotName FROM dbo.PlotMaster WITH (UPDLOCK) WHERE ConvertedUnitId = @u")).recordset;
+    if (!plots.length) { await tx.rollback(); return res.status(404).json({ error: "That unit was not converted from a plot" }); }
+    const lock = await getUnitLockReason(tx, unitId);
+    if (lock) { await tx.rollback(); return res.status(409).json({ error: `The villa ${lock} — release it first` }); }
+    const work = (await q(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.DependencyActivityAssignment a
+           JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
+           JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
+          WHERE d.FlatId = @u AND (ISNULL(a.Status, N'PENDING') <> N'PENDING' OR a.EngineerId IS NOT NULL OR a.StartDate IS NOT NULL)) AS Steps,
+        (SELECT COUNT(*) FROM dbo.DailyLabourEntry l JOIN dbo.RoomMaster r ON r.Id = l.RoomId WHERE r.UnitId = @u) AS Labour,
+        (SELECT COUNT(*) FROM dbo.ActivityBlueprintAnnotation b JOIN dbo.RoomMaster r ON r.Id = b.RoomId WHERE r.UnitId = @u) AS Drawings`)).recordset[0];
+    if (work.Steps || work.Labour || work.Drawings) {
+      await tx.rollback();
+      return res.status(409).json({ error: `Work has started on this villa (${work.Steps} step(s) allocated or progressed, ${work.Labour} labour entr(ies), ${work.Drawings} drawing note(s)) — it can't be undone` });
+    }
+    await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
+    await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1");
+    // Renamed as it retires: UnitMaster's name index also counts inactive rows,
+    // so keeping the name would stop this plot ever being converted again.
+    await q("UPDATE dbo.UnitMaster SET IsActive = 0, UnitName = LEFT(UnitName, 80) + N' ~undone ' + CAST(Id AS NVARCHAR(12)), UpdatedAt = SYSDATETIME() WHERE Id = @u");
+    await q("UPDATE dbo.PlotMaster SET ConvertedUnitId = NULL, ConvertedAt = NULL, UpdatedAt = SYSDATETIME() WHERE ConvertedUnitId = @u");
+    await tx.commit();
+    await bumpCacheVersion("unit-master");
+    res.json({ success: true, PlotIds: plots.map((p) => p.Id), message: `Conversion undone — ${plots.map((p) => p.PlotName).join(", ")} can be converted again` });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+    console.error("[auto-setup] POST unconvert:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
