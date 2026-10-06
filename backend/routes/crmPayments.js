@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -359,7 +359,9 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
     const req0 = pool.request();
     const conds = [
       "b.IsActive = 1",
-      "b.Status NOT IN ('Cancelled', 'Rejected')",
+      // Dead bookings owe nothing — a resold seller's or an expired booking's
+      // unpaid instalments are not dues to chase.
+      `b.Status NOT IN ${DEAD_BOOKING_SQL}`,
       "m.Status NOT IN ('Waived')",
     ];
     if (view !== "all") {

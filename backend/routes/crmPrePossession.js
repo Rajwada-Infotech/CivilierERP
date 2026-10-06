@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -85,7 +85,7 @@ function bindListFilters(request, query) {
 router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const baseCond = "b.Status NOT IN ('Cancelled','Rejected')";
+    const baseCond = `b.Status NOT IN ${DEAD_BOOKING_SQL}`;
 
     if (req.query.page === undefined) {
       const r0 = pool.request();

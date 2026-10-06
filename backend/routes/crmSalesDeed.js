@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -200,7 +200,7 @@ router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), asy
         SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = b.Id ORDER BY CreatedAt DESC
       ) hov
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled', 'Rejected')
+        AND b.Status NOT IN ${DEAD_BOOKING_SQL}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id)
         AND ag.Status = 'Registered'
         AND (b.ProjectId IS NULL OR proj.entity_type IS NULL
