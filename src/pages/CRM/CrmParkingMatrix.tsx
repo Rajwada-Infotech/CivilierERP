@@ -88,7 +88,6 @@ async function fetchMatrix(projectId: string, blockId: string): Promise<MatrixSl
 
 const NONE = "__none__";
 
-
 // Available slot -> choose whether to sell it now or just hold it for a
 // customer who's still deciding.
 function ActionChoiceDialog({
@@ -539,16 +538,6 @@ export function ParkingMatrixPage() {
     queryKey: ["parking-matrix-projects"],
     queryFn: () => fetchOptions<Option>(`${API}/projects`),
   });
-
-  // Show the first project's matrix straight away instead of an empty
-  // "select a project" panel. Done once on load, so if the user clears the
-  // project picker afterwards it stays cleared.
-  const [autoPicked, setAutoPicked] = useState(false);
-  useEffect(() => {
-    if (autoPicked || projectId || !projects.length) return;
-    setAutoPicked(true);
-    setProjectId(String((projects as any[])[0].Id));
-  }, [projects, projectId, autoPicked]);
 
   const { data: blocks = [] } = useQuery({
     queryKey: ["parking-matrix-blocks", projectId],

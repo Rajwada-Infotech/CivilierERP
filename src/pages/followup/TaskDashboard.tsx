@@ -302,9 +302,9 @@ const selectCls =
 const inputCls =
   "w-full pl-7 pr-2 py-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all";
 
-function FilterField({ icon: Icon, label, children }: { icon: React.ElementType; label: string; children: React.ReactNode }) {
+function FilterField({ icon: Icon, label, children, className = "" }: { icon: React.ElementType; label: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="min-w-0">
+    <div className={`min-w-0 ${className}`}>
       <label className="block text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
       <div className="relative">
         <Icon size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
@@ -493,7 +493,7 @@ const TaskDashboard: React.FC = () => {
             <RotateCcw size={11} /> Reset
           </button>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7 gap-2.5">
           <FilterField icon={Building2} label="Company">
             <select className={selectCls} value={filters.companyId} onChange={(e) => updateFilter({ companyId: e.target.value, projectId: "" })}>
               <option value="">All Companies</option>
@@ -524,10 +524,11 @@ const TaskDashboard: React.FC = () => {
               {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
             </select>
           </FilterField>
-          <FilterField icon={Clock} label="Date Range">
-            <div className="flex gap-1">
-              <DateInput className={`${inputCls} pl-2`} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} />
-              <DateInput className={`${inputCls} pl-2`} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} />
+          {/* Two dates need two columns' width — otherwise they spill past the card. */}
+          <FilterField icon={Clock} label="Date Range" className="col-span-2">
+            <div className="grid grid-cols-2 gap-1.5 min-w-0">
+              <DateInput className={`${inputCls} !pl-7 min-w-0`} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} placeholder="From" />
+              <DateInput className={`${inputCls} pl-2 min-w-0`} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} placeholder="To" />
             </div>
           </FilterField>
         </div>

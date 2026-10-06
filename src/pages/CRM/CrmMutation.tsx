@@ -209,16 +209,6 @@ const CrmMutation: React.FC = () => {
     setSp((p) => { p.set("mutationId", String(id)); return p; }, { replace: true });
   };
 
-  // Open the first record by default instead of an empty "select one" panel;
-  // the user can still pick any other row. Deep links (?mutationId= / ?bookingId=)
-  // keep priority.
-  useEffect(() => {
-    if (detailId != null || sp.get("mutationId") || sp.get("bookingId")) return;
-    const first = (rows as any[])[0];
-    if (first) setDetailId(first.Id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, detailId]);
-
   const handleStart = async () => {
     if (!bookingId) { toast.error("Booking is required"); return; }
     setSaving(true);
