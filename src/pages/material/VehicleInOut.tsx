@@ -77,8 +77,7 @@ import {
   Printer,
   FileDown,
 } from "lucide-react";
-import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
-import { downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
+import { printVehicleInOut, downloadVehicleInOutPdf } from "@/utils/vehicleInOutDocument";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
@@ -1180,111 +1179,13 @@ export default function VehicleInOut() {
   };
 
   // ── Print (from the preview modal) ───────────────────────────────────────────
+  // Print and Generate PDF both render the shared letterhead document
+  // (vehicleInOutDocument.ts → letterheadDocument.ts), so the two always match.
   const handlePrintVehicleRec = (rec: any) => {
-    const itemRows = Array.isArray(rec.Items)
-      ? rec.Items
-          .map(
-            (it: any, i: number) => safeHtml`
-      <tr style="border-bottom:1px solid #e5e7eb;">
-        <td style="padding:8px 10px;text-align:center;color:#6b7280;font-size:12px;">${i + 1}</td>
-        <td style="padding:8px 10px;font-weight:500;">${it.ItemName ?? "—"}</td>
-        <td style="padding:8px 10px;text-align:center;">${it.ReceivedQty ?? it.Quantity ?? "—"}</td>
-        <td style="padding:8px 10px;text-align:center;color:#6b7280;">${it.UomName ?? "—"}</td>
-      </tr>`,
-          )
-          .join("")
-      : "";
-
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Vehicle In/Out — ${escapeHtml(rec.DocNo || "—")}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
-    table { width: 100%; border-collapse: collapse; }
-    thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; }
-    @media print { body { padding: 16px; } }
-  </style>
-</head>
-<body>
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:2px solid #4f46e5;margin-bottom:28px;">
-    <div style="font-size:20px;font-weight:800;color:#4f46e5;">${escapeHtml(rec.CompanyName || "CivilierERP")}</div>
-    <div style="text-align:right;">
-      <div style="font-size:24px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">VEHICLE IN/OUT</div>
-      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${escapeHtml(rec.DocNo || "—")}</div>
-      <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${rec.DocDate ? new Date(rec.DocDate).toLocaleDateString("en-IN") : "—"}</strong></div>
-    </div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
-    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Company / Project</div>
-      <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${escapeHtml(rec.CompanyName || "—")}</div>
-      <div style="font-size:11px;color:#374151;">${escapeHtml(rec.ProjectName || "—")}</div>
-    </div>
-    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier / PO</div>
-      <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${escapeHtml(rec.SupplierName || "—")}</div>
-      <div style="font-size:11px;color:#374151;">${escapeHtml(rec.PONumber || "—")}</div>
-    </div>
-    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Vehicle</div>
-      <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${escapeHtml(rec.VehicleNo || "—")}</div>
-      <div style="font-size:11px;color:#374151;">Challan: ${escapeHtml(rec.ChallanNo || "—")}</div>
-    </div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
-    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Entry Time</div>
-      <div style="font-size:13px;font-weight:600;">${rec.EntryTime ? fmtServerDateTime(rec.EntryTime) : "—"}</div>
-    </div>
-    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Exit Time</div>
-      <div style="font-size:13px;font-weight:600;">${rec.ExitTime ? fmtServerDateTime(rec.ExitTime) : "—"}</div>
-    </div>
-  </div>
-
-  ${
-    itemRows
-      ? `<table><thead><tr>
-      <th style="width:32px;text-align:center;">#</th>
-      <th style="text-align:left;">Item</th>
-      <th style="text-align:center;">Qty</th>
-      <th style="text-align:center;">UOM</th>
-    </tr></thead><tbody>${itemRows}</tbody></table>`
-      : ""
-  }
-
-  ${rec.Remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${escapeHtml(rec.Remarks)}</div></div>` : ""}
-
-  <div style="margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
-    <span>Generated by CivilierERP</span>
-    <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
-  </div>
-</body>
-</html>`;
-
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const blobUrl = URL.createObjectURL(blob);
-    const win = window.open(blobUrl, "_blank", "width=960,height=720");
-    if (!win) {
-      URL.revokeObjectURL(blobUrl);
-      toast.error("Pop-up blocked — please allow pop-ups for this site.");
-      return;
-    }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
+    void printVehicleInOut(rec);
   };
 
-  // Same content as handlePrintVehicleRec above, as a downloaded .pdf
-  // instead of the browser's print dialog — built from the same fields so
-  // the two can never show different data for the same record.
+  // Same document as Print, downloaded as a .pdf.
   //
   // The list/grid row (list query's SELECT) never carries Items — only
   // GET /:id does — so a rec passed straight from the grid's Actions
@@ -1293,51 +1194,21 @@ export default function VehicleInOut() {
   // the grid row or the already-fully-loaded view modal.
   const handleGeneratePdfVehicleRec = async (recIn: any) => {
     const toastId = toast.loading("Generating PDF...");
-    let rec = recIn;
-    if (!Array.isArray(recIn.Items) && recIn.VehicleInOutID) {
-      try {
-        rec = await vehApi.getVehicleInOut(recIn.VehicleInOutID);
-      } catch {
-        // fall back to whatever was passed in — PDF still generates,
-        // just without the Items section.
+    try {
+      let rec = recIn;
+      if (!Array.isArray(recIn.Items) && recIn.VehicleInOutID) {
+        try {
+          rec = await vehApi.getVehicleInOut(recIn.VehicleInOutID);
+        } catch {
+          // fall back to whatever was passed in — PDF still generates,
+          // just without the Items section.
+        }
       }
+      await downloadVehicleInOutPdf(rec);
+      toast.success("PDF downloaded", { id: toastId });
+    } catch {
+      toast.error("Could not generate PDF", { id: toastId });
     }
-    const sections = [
-      {
-        title: "Overview",
-        fields: [
-          { label: "Company", value: rec.CompanyName || "—" },
-          { label: "Project", value: rec.ProjectName || "—" },
-          { label: "Supplier", value: rec.SupplierName || "—" },
-          { label: "PO No", value: rec.PONumber || "—" },
-          { label: "Vehicle No", value: rec.VehicleNo || "—" },
-          { label: "Challan No", value: rec.ChallanNo || "—" },
-          { label: "Entry Time", value: rec.EntryTime ? new Date(rec.EntryTime).toLocaleString("en-IN") : "—" },
-          { label: "Exit Time", value: rec.ExitTime ? new Date(rec.ExitTime).toLocaleString("en-IN") : "—" },
-        ],
-      },
-      ...(Array.isArray(rec.Items) && rec.Items.length > 0
-        ? [{
-            title: `Items (${rec.Items.length})`,
-            fields: rec.Items.map((it: any, i: number) => ({
-              label: `${i + 1}. ${it.ItemName ?? "—"}${it.Brand ? ` (${it.Brand})` : ""}${it.Quality ? ` [${it.Quality}]` : ""}`,
-              value: `${it.ReceivedQty ?? it.Quantity ?? "—"} ${it.UomName ?? ""}`.trim(),
-            })),
-          }]
-        : []),
-      ...(rec.Remarks ? [{ title: "Remarks", fields: [{ label: "Remarks", value: rec.Remarks }] }] : []),
-    ];
-
-    downloadMasterPreviewPdf({
-      title: rec.DocNo || "—",
-      subtitle: "Vehicle In/Out",
-      code: rec.DocNo,
-      status: rec.Status,
-      sections,
-      filename: `${(rec.DocNo || rec.VehicleInOutID || "vehicle-in-out").replace(/[^\w-]+/g, "_")}.pdf`,
-    })
-      .then(() => toast.success("PDF downloaded", { id: toastId }))
-      .catch(() => toast.error("Could not generate PDF", { id: toastId }));
   };
   _onGeneratePdf = handleGeneratePdfVehicleRec;
 

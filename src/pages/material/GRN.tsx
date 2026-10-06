@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
+import { printGrn, downloadGrnPdf } from "@/utils/grnDocument";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -31,6 +32,7 @@ import {
   AlertTriangle,
   FileWarning,
   Printer,
+  FileDown,
   CopyPlus,
   Warehouse,
   ArrowLeftRight,
@@ -1805,131 +1807,22 @@ export default function GRN() {
     }
   };
 
-  // ── Print a GRN — a standalone document opened in its own window rather
-  // than window.print()'ing the live modal. The modal uses theme CSS
-  // variables (bg-card, text-muted-foreground, ...) which don't have a
-  // print-safe light-on-white override, so printing it directly produced
-  // an unreadable page. This builds independent light-themed HTML instead,
-  // same blob-URL pattern used by PurchaseOrderMaster.tsx / VehicleInOut.tsx.
-  const handlePrintGRN = (
-    grn: any,
-    items: GRNItemLine[],
-    subtotal: number,
-    gstTotal: number,
-  ) => {
-    const grnNo = grn.GRNNo
-      ? grn.GRNNo.startsWith("GRN-")
-        ? grn.GRNNo
-        : `GRN-${grn.GRNNo}`
-      : "—";
-    const total = subtotal + gstTotal;
+  // ── Print / PDF a GRN — both render the shared letterhead document
+  // (grnDocument.ts → letterheadDocument.ts), a standalone page opened in its
+  // own window rather than window.print()'ing the live modal (whose theme CSS
+  // variables have no print-safe light-on-white override).
+  const handlePrintGRN = (grn: any) => {
+    void printGrn(grn);
+  };
 
-    const itemRows = items
-      .map(
-        (it, i) => safeHtml`
-      <tr style="border-bottom:1px solid #e5e7eb;">
-        <td style="padding:8px 10px;text-align:center;color:#6b7280;font-size:12px;">${i + 1}</td>
-        <td style="padding:8px 10px;font-weight:500;">${it.itemName || "—"}</td>
-        <td style="padding:8px 10px;text-align:center;">${it.orderedQty ?? "—"}</td>
-        <td style="padding:8px 10px;text-align:center;font-weight:600;">${it.receivedQty ?? "—"}</td>
-        <td style="padding:8px 10px;text-align:center;color:#6b7280;">${it.uom || "—"}</td>
-        <td style="padding:8px 10px;text-align:right;font-family:monospace;">₹${Number(it.rate || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-        <td style="padding:8px 10px;text-align:center;">${it.gstPct ? it.gstPct + "%" : "—"}</td>
-        <td style="padding:8px 10px;text-align:right;font-family:monospace;font-weight:700;">₹${Number(it.totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-      </tr>`,
-      )
-      .join("");
-
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>${escapeHtml(grnNo)}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
-    table { width: 100%; border-collapse: collapse; }
-    thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; }
-    @media print { body { padding: 16px; } }
-  </style>
-</head>
-<body>
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:2px solid #4f46e5;margin-bottom:28px;">
-    <div style="font-size:20px;font-weight:800;color:#4f46e5;">${escapeHtml(grn.CompanyName || "CivilierERP")}</div>
-    <div style="text-align:right;">
-      <div style="font-size:24px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">GOODS RECEIPT NOTE</div>
-      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${escapeHtml(grnNo)}</div>
-      <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${grn.GRNDate ? new Date(grn.GRNDate).toLocaleDateString("en-IN") : "—"}</strong></div>
-    </div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
-    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier</div>
-      <div style="font-weight:700;font-size:13px;">${escapeHtml(grn.SupplierName || "—")}</div>
-    </div>
-    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Purchase Order</div>
-      <div style="font-weight:700;font-size:13px;">${escapeHtml(grn.PONumber || "—")}</div>
-    </div>
-    <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Company / Project</div>
-      <div style="font-weight:600;font-size:13px;">${escapeHtml(grn.CompanyName || "—")}</div>
-      <div style="font-size:11px;color:#374151;">${escapeHtml(grn.ProjectName || "—")}</div>
-    </div>
-  </div>
-
-  <table>
-    <thead>
-      <tr>
-        <th style="width:32px;text-align:center;">#</th>
-        <th style="text-align:left;">Item</th>
-        <th style="text-align:center;">Ordered</th>
-        <th style="text-align:center;">Received</th>
-        <th style="text-align:center;">UOM</th>
-        <th style="text-align:right;">Rate (₹)</th>
-        <th style="text-align:center;">GST %</th>
-        <th style="text-align:right;">Amount (₹)</th>
-      </tr>
-    </thead>
-    <tbody>${itemRows}</tbody>
-  </table>
-
-  <div style="display:flex;justify-content:flex-end;margin-top:16px;">
-    <table style="width:260px;border-collapse:collapse;">
-      <tbody>
-        <tr><td style="color:#6b7280;padding:5px 8px;">Subtotal (excl. GST)</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
-        ${gstTotal > 0 ? `<tr><td style="color:#6b7280;padding:5px 8px;">GST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${gstTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>` : ""}
-        <tr style="border-top:2px solid #4f46e5;">
-          <td style="padding:8px;font-weight:800;font-size:14px;">Grand Total</td>
-          <td style="text-align:right;padding:8px;font-family:monospace;font-weight:800;font-size:15px;color:#4f46e5;">₹${total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  ${grn.Remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${escapeHtml(grn.Remarks)}</div></div>` : ""}
-
-  <div style="margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
-    <span>Generated by CivilierERP</span>
-    <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
-  </div>
-</body>
-</html>`;
-
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const blobUrl = URL.createObjectURL(blob);
-    const win = window.open(blobUrl, "_blank", "width=960,height=720");
-    if (!win) {
-      URL.revokeObjectURL(blobUrl);
-      toast.error("Pop-up blocked — please allow pop-ups for this site.");
-      return;
+  const handleGeneratePdfGRN = async (grn: any) => {
+    const toastId = toast.loading("Generating PDF...");
+    try {
+      await downloadGrnPdf(grn);
+      toast.success("PDF downloaded", { id: toastId });
+    } catch {
+      toast.error("Could not generate PDF", { id: toastId });
     }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
   };
 
   // ─── JSX ─────────────────────────────────────────────────────────────────────
@@ -3172,13 +3065,20 @@ export default function GRN() {
                   <div className="flex items-center gap-2">
                     {rights.canPrint && (
                       <button
-                        onClick={() =>
-                          handlePrintGRN(viewingGrn, items, subtotal, gstTotal)
-                        }
+                        onClick={() => handlePrintGRN(viewingGrn)}
                         title="Print GRN"
                         className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
                       >
                         <Printer size={18} />
+                      </button>
+                    )}
+                    {rights.canPrint && (
+                      <button
+                        onClick={() => handleGeneratePdfGRN(viewingGrn)}
+                        title="Generate PDF"
+                        className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
+                      >
+                        <FileDown size={18} />
                       </button>
                     )}
                     <button

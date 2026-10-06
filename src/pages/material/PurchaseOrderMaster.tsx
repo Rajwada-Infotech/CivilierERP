@@ -1,9 +1,10 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
+import { DM_SANS_FACE_CSS, printWhenFontsReady } from "@/utils/documentFont";
 import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
-import { downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
+import { printPurchaseOrder, downloadPurchaseOrderPdf } from "@/utils/purchaseOrderDocument";
 import { printStatusLabel } from "@/utils/printStatus";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
@@ -1009,8 +1010,9 @@ const PurchaseOrderMaster: React.FC = () => {
   <meta charset="utf-8" />
   <title>PO — ${escapeHtml(form.poNumber || "—")}</title>
   <style>
+    ${DM_SANS_FACE_CSS}
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
+    body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
     table { width: 100%; border-collapse: collapse; }
     thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; }
     @media print {
@@ -1111,10 +1113,7 @@ const PurchaseOrderMaster: React.FC = () => {
     }
     // Revoke after enough time for the window to load and print
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
+    printWhenFontsReady(win);
   };
 
   // ── Derived list data ─────────────────────────────────────────────────────
@@ -2220,313 +2219,38 @@ const PurchaseOrderMaster: React.FC = () => {
   }, [form.projectId]);
 
   // ── Print from preview modal ──────────────────────────────────────────────
+  // Print uses the shared letterhead layout (see purchaseOrderDocument.ts) —
+  // the same document Generate PDF downloads, so the two always match.
   const handlePrintFromPreview = () => {
     if (!viewingPO) return;
-    const sup = viewingPOSupplier;
-    const comp = viewingPOCompany;
-    const proj = viewingPOProject;
-
-    const supplierName =
-      viewingPO.SupplierName ?? viewingPO.supplierName ?? "—";
-    const companyName = viewingPO.CompanyName ?? viewingPO.companyName ?? "—";
-    const projectName = viewingPO.ProjectName ?? viewingPO.projectName ?? "—";
-    const poNumber = viewingPO.PurchaseOrderNo ?? viewingPO.poNumber ?? "—";
-    const poDate = viewingPO.PODate ?? viewingPO.poDate ?? "";
-    const expectedDate = viewingPO.ExpectedDeliveryDate ?? "";
-    const poStatus = viewingPO.Status ?? viewingPO.status ?? "Draft";
-    const remarks = viewingPO.Remarks ?? viewingPO.remarks ?? "";
-    const payTerms = viewingPO.PaymentTerms ?? viewingPO.paymentTerms ?? "";
-
-    const supplierNameEsc = escapeHtml(String(supplierName));
-    const companyNameEsc = escapeHtml(String(companyName));
-    const projectNameEsc = escapeHtml(String(projectName));
-    const poNumberEsc = escapeHtml(String(poNumber));
-    const poDateEsc = escapeHtml(String(poDate));
-    const expectedDateEsc = escapeHtml(String(expectedDate));
-    const remarksEsc = escapeHtml(String(remarks));
-    const payTermsEsc = escapeHtml(String(payTerms));
-
-    const isSafeLogoUrl =
-      typeof activeLogo === "string" &&
-      /^(https?:\/\/|data:image\/|\/)/i.test(activeLogo);
-    const safeLogoSrc = isSafeLogoUrl ? escapeHtml(activeLogo) : "";
-    const logoHtml = safeLogoSrc
-      ? `<img src="${safeLogoSrc}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
-      : `<span style="font-size:20px;font-weight:800;color:#4f46e5;">${companyNameEsc}</span>`;
-
-    const statusColors: Record<
-      string,
-      { bg: string; color: string; border: string }
-    > = {
-      approved: { bg: "#f0fdf4", color: "#166534", border: "#86efac" },
-      pending: { bg: "#fffbeb", color: "#92400e", border: "#fcd34d" },
-      draft: { bg: "#f3f4f6", color: "#374151", border: "#d1d5db" },
-      rejected: { bg: "#fef2f2", color: "#991b1b", border: "#fca5a5" },
-    };
-    const sc = statusColors[poStatus.toLowerCase()] ?? statusColors.draft;
-    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${printStatusLabel(poStatus).toUpperCase()}</span>`;
-
-    const lineItemsArr: any[] = Array.isArray(viewingPO.LineItems)
-      ? viewingPO.LineItems
-      : Array.isArray(viewingPO.POItems)
-        ? viewingPO.POItems
-        : [];
-    const itemRows = lineItemsArr
-      .map((li: any, i: number) => {
-        const name = li.ItemName ?? li.itemName ?? li.Description ?? "—";
-        const desc = li.itemDescription ?? li.Description ?? "—";
-        const qty = Number(li.Quantity ?? li.quantity ?? 0);
-        const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
-        const rate = Number(li.Rate ?? li.rate ?? 0);
-        const tax = Number(li.TaxPct ?? li.gstRate ?? li.tax ?? 0);
-        const amt = Number(li.LineAmount ?? li.amount ?? qty * rate);
-        return `<tr style="border-bottom:1px solid #e5e7eb;">
-        <td style="padding:8px 10px;text-align:center;color:#6b7280;font-size:12px;">${i + 1}</td>
-        <td style="padding:8px 10px;font-weight:500;">${name}</td>
-        <td style="padding:8px 10px;color:#6b7280;font-size:12px;">${desc}</td>
-        <td style="padding:8px 10px;text-align:center;">${qty}</td>
-        <td style="padding:8px 10px;text-align:center;color:#6b7280;">${unit}</td>
-        <td style="padding:8px 10px;text-align:right;font-family:monospace;">₹${rate.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-        <td style="padding:8px 10px;text-align:center;">${tax > 0 ? tax + "%" : "—"}</td>
-        <td style="padding:8px 10px;text-align:right;font-family:monospace;font-weight:700;">₹${amt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-      </tr>`;
-      })
-      .join("");
-
-    const grandTotal = Number(
-      viewingPO.TotalAmount ?? viewingPO.totalAmount ?? 0,
-    );
-    const subtotalVal = lineItemsArr.reduce(
-      (s: number, li: any) =>
-        s +
-        Number(li.Quantity ?? li.quantity ?? 0) *
-          Number(li.Rate ?? li.rate ?? 0),
-      0,
-    );
-    // Per-line CGST/SGST/IGST breakdown — previously this print only ever
-    // showed a Subtotal → Grand Total jump with no tax line at all, even
-    // though the item table's own GST% column proved tax was applied.
-    let totalCgstVal = 0;
-    let totalSgstVal = 0;
-    let totalIgstVal = 0;
-    for (const li of lineItemsArr) {
-      const base =
-        Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0);
-      totalCgstVal += (base * Number(li.CgstRate ?? li.cgstRate ?? 0)) / 100;
-      totalSgstVal += (base * Number(li.SgstRate ?? li.sgstRate ?? 0)) / 100;
-      totalIgstVal += (base * Number(li.IgstRate ?? li.igstRate ?? 0)) / 100;
-    }
-    const taxRowsPreview = [
-      totalCgstVal > 0
-        ? `<tr><td style="color:#6b7280;padding:5px 8px;">CGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalCgstVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
-        : "",
-      totalSgstVal > 0
-        ? `<tr><td style="color:#6b7280;padding:5px 8px;">SGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalSgstVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
-        : "",
-      totalIgstVal > 0
-        ? `<tr><td style="color:#6b7280;padding:5px 8px;">IGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalIgstVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
-        : "",
-    ].join("");
-
-    const tcHtml = payTermsEsc
-      ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div><div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${payTermsEsc}</div></div>`
-      : "";
-
-    const supAddr = escapeHtml(sup?.LHeadAddress ?? "");
-    const supContact = escapeHtml(sup?.LHeadContactPerson ?? "");
-    const supGST = escapeHtml(sup?.LGST ?? "");
-    const supPhone = escapeHtml(sup?.LHeadPhone ?? "");
-    const supEmail = escapeHtml(sup?.LHeadEmail ?? "");
-    const compAddr = escapeHtml(
-      [comp?.address, comp?.address_line2, comp?.city, comp?.state, comp?.pincode]
-        .filter(Boolean)
-        .join(", "),
-    );
-    const compGST = escapeHtml(comp?.gst_no ?? "");
-    const compEmail = escapeHtml(comp?.email ?? "");
-    const compPhone = escapeHtml(comp?.phone_number ?? "");
-    const projAddr = escapeHtml(
-      proj ? [proj.address, proj.city, proj.state].filter(Boolean).join(", ") : "",
-    );
-
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>PO — ${poNumberEsc}</title>
-<style>* { box-sizing: border-box; margin: 0; padding: 0; } body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; } table { width: 100%; border-collapse: collapse; } thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; } @media print { body { padding: 16px; } }</style></head>
-<body>
-<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:2px solid #4f46e5;margin-bottom:28px;">
-  <div>${logoHtml}</div>
-  <div style="text-align:right;">
-    <div style="font-size:24px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PURCHASE ORDER</div>
-    <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${poNumberEsc}</div>
-    <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${fmtDate(poDateEsc)}</strong></div>
-    ${expectedDateEsc ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">Expected: <strong>${fmtDate(expectedDateEsc)}</strong></div>` : ""}
-    ${statusHtml}
-  </div>
-</div>
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
-  <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier</div>
-    <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${supplierNameEsc}</div>
-    ${supAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${supAddr}</div>` : ""}
-    ${supContact ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Contact: <strong style="color:#111827;">${supContact}</strong></div>` : ""}
-    ${supPhone ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#128222; ${supPhone}</div>` : ""}
-    ${supEmail ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#9993; ${supEmail}</div>` : ""}
-    ${supGST ? `<div style="margin-top:5px;"><span style="font-family:monospace;font-size:10px;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:4px;display:inline-block;">GSTIN: ${supGST}</span></div>` : ""}
-  </div>
-  <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Billing Details</div>
-    <div style="font-weight:700;font-size:13px;margin-bottom:3px;">${companyNameEsc}</div>
-    ${compAddr ? `<div style="font-size:11px;color:#374151;margin-bottom:2px;">${compAddr}</div>` : ""}
-    ${compPhone ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#128222; ${compPhone}</div>` : ""}
-    ${compEmail ? `<div style="font-size:11px;color:#6b7280;margin-bottom:2px;">&#9993; ${compEmail}</div>` : ""}
-    ${compGST ? `<div style="margin-top:5px;"><span style="font-family:monospace;font-size:10px;font-weight:700;color:#4f46e5;background:#eef2ff;padding:2px 7px;border-radius:4px;display:inline-block;">GSTIN: ${compGST}</span></div>` : ""}
-  </div>
-  <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Project / Site</div>
-    <div style="font-weight:600;font-size:13px;">${projectNameEsc}</div>
-    ${projAddr}
-  </div>
-</div>
-<table><thead><tr>
-  <th style="width:32px;text-align:center;">#</th>
-  <th style="text-align:left;">Item</th>
-  <th style="text-align:left;">Description</th>
-  <th style="text-align:center;">Qty</th>
-  <th style="text-align:center;">UOM</th>
-  <th style="text-align:right;">Rate (₹)</th>
-  <th style="text-align:center;">GST %</th>
-  <th style="text-align:right;">Amount (₹)</th>
-</tr></thead><tbody>${itemRows}</tbody></table>
-<div style="display:flex;justify-content:flex-end;margin-top:16px;">
-  <table style="width:260px;border-collapse:collapse;"><tbody>
-    <tr><td style="color:#6b7280;padding:5px 8px;">Subtotal (excl. GST)</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${subtotalVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
-    ${taxRowsPreview}
-    <tr style="border-top:2px solid #4f46e5;"><td style="padding:8px;font-weight:800;font-size:14px;">Grand Total</td><td style="text-align:right;padding:8px;font-family:monospace;font-weight:800;font-size:15px;color:#4f46e5;">₹${grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
-  </tbody></table>
-</div>
-${tcHtml}
-${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${remarksEsc}</div></div>` : ""}
-<div style="margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
-  <span>Generated by CivilierERP</span>
-  <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
-</div>
-</body></html>`;
-
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const blobUrl = URL.createObjectURL(blob);
-    const win = window.open(blobUrl, "_blank", "width=960,height=720");
-    if (!win) {
-      URL.revokeObjectURL(blobUrl);
-      toast.error("Pop-up blocked — please allow pop-ups for this site.");
-      return;
-    }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
+    void printPurchaseOrder(viewingPO);
   };
 
-  // Downloads a .pdf for a PO, built from the same fields as
-  // handlePrintFromPreview above (Supplier/Company/Project, Order Items,
-  // tax breakdown, Remarks). `poIn` is whatever triggered this — a grid
-  // row (list query, no LineItems) or the already-fully-loaded preview
-  // panel (viewingPO, has LineItems/POItems) — so it always refetches the
-  // full record when LineItems/POItems isn't already present, the same
-  // way the Eye/view click above does, otherwise Order Items would be
+  // Downloads the PO as a .pdf in the shared letterhead layout. `poIn` is
+  // whatever triggered this — a grid row (list query, no LineItems) or the
+  // already-fully-loaded preview panel (viewingPO, has LineItems/POItems) — so
+  // it refetches the full record when LineItems/POItems isn't already present,
+  // the same way the Eye/view click does; otherwise Order Items would be
   // silently missing from a PDF generated straight from the grid.
   const handleGeneratePdf = async (poIn: any) => {
     const toastId = toast.loading("Generating PDF...");
-    let po = poIn;
-    const id = poIn._id ?? poIn.PurchaseOrderID ?? poIn.purchaseOrderId;
-    if (!Array.isArray(poIn.LineItems) && !Array.isArray(poIn.POItems) && id) {
-      try {
-        po = await getPurchaseOrderById(id);
-      } catch {
-        // fall back to whatever was passed in — PDF still generates,
-        // just without the Order Items section.
+    try {
+      let po = poIn;
+      const id = poIn._id ?? poIn.PurchaseOrderID ?? poIn.purchaseOrderId;
+      if (!Array.isArray(poIn.LineItems) && !Array.isArray(poIn.POItems) && id) {
+        try {
+          po = await getPurchaseOrderById(id);
+        } catch {
+          // fall back to whatever was passed in — PDF still generates,
+          // just without the items.
+        }
       }
+      const poNumber = po.PurchaseOrderNo ?? po.poNumber ?? "purchase-order";
+      await downloadPurchaseOrderPdf(po, `${String(poNumber).replace(/[^\w-]+/g, "_")}.pdf`);
+      toast.success("PDF downloaded", { id: toastId });
+    } catch {
+      toast.error("Could not generate PDF", { id: toastId });
     }
-
-    const supplierName = po.SupplierName ?? po.supplierName ?? "—";
-    const companyName = po.CompanyName ?? po.companyName ?? "—";
-    const projectName = po.ProjectName ?? po.projectName ?? "—";
-    const poNumber = po.PurchaseOrderNo ?? po.poNumber ?? "—";
-    const poDate = po.PODate ?? po.poDate ?? "";
-    const expectedDate = po.ExpectedDeliveryDate ?? "";
-    const poStatus = po.Status ?? po.status ?? "Draft";
-    const remarks = po.Remarks ?? po.remarks ?? "";
-    const payTerms = po.PaymentTerms ?? po.paymentTerms ?? "";
-
-    const lineItemsArr: any[] = Array.isArray(po.LineItems)
-      ? po.LineItems
-      : Array.isArray(po.POItems)
-        ? po.POItems
-        : [];
-
-    const itemFields = lineItemsArr.map((li: any, i: number) => {
-      const name = li.ItemName ?? li.itemName ?? li.Description ?? "—";
-      const qty = Number(li.Quantity ?? li.quantity ?? 0);
-      const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
-      const rate = Number(li.Rate ?? li.rate ?? 0);
-      const tax = Number(li.TaxPct ?? li.gstRate ?? li.tax ?? 0);
-      const amt = Number(li.LineAmount ?? li.amount ?? qty * rate);
-      return {
-        label: `${i + 1}. ${name}`,
-        value: `${qty.toLocaleString("en-IN")} ${unit} × ${fmt(rate)}${tax > 0 ? ` (+${tax}% GST)` : ""} = ${fmt(amt)}`,
-      };
-    });
-
-    const grandTotal = Number(po.TotalAmount ?? po.totalAmount ?? 0);
-    const subtotalVal = lineItemsArr.reduce(
-      (s: number, li: any) => s + Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0),
-      0,
-    );
-    let totalCgstVal = 0;
-    let totalSgstVal = 0;
-    let totalIgstVal = 0;
-    for (const li of lineItemsArr) {
-      const base = Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0);
-      totalCgstVal += (base * Number(li.CgstRate ?? li.cgstRate ?? 0)) / 100;
-      totalSgstVal += (base * Number(li.SgstRate ?? li.sgstRate ?? 0)) / 100;
-      totalIgstVal += (base * Number(li.IgstRate ?? li.igstRate ?? 0)) / 100;
-    }
-
-    const sections = [
-      {
-        title: "Overview",
-        fields: [
-          { label: "Supplier", value: supplierName },
-          { label: "Company", value: companyName },
-          { label: "Project / Site", value: projectName },
-          { label: "PO Date", value: poDate ? fmtDate(poDate) : "—" },
-          { label: "Expected Delivery", value: expectedDate ? fmtDate(expectedDate) : "—" },
-          { label: "Payment Terms", value: payTerms || "—" },
-        ],
-      },
-      ...(itemFields.length > 0 ? [{ title: `Order Items (${itemFields.length})`, fields: itemFields }] : []),
-      {
-        title: "Totals",
-        fields: [
-          { label: "Subtotal (excl. GST)", value: fmt(subtotalVal) },
-          ...(totalCgstVal > 0 ? [{ label: "CGST", value: fmt(totalCgstVal) }] : []),
-          ...(totalSgstVal > 0 ? [{ label: "SGST", value: fmt(totalSgstVal) }] : []),
-          ...(totalIgstVal > 0 ? [{ label: "IGST", value: fmt(totalIgstVal) }] : []),
-          { label: "Grand Total", value: fmt(grandTotal) },
-        ],
-      },
-      ...(remarks ? [{ title: "Remarks", fields: [{ label: "Remarks", value: remarks }] }] : []),
-    ];
-
-    downloadMasterPreviewPdf({
-      title: String(poNumber),
-      subtitle: "Purchase Order",
-      code: String(poNumber),
-      status: String(poStatus),
-      sections,
-      filename: `${String(poNumber).replace(/[^\w-]+/g, "_")}.pdf`,
-    })
-      .then(() => toast.success("PDF downloaded", { id: toastId }))
-      .catch(() => toast.error("Could not generate PDF", { id: toastId }));
   };
 
   // ── Auto-fetch details for preview pop-out ────────────────────────────────
