@@ -2233,3 +2233,10 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
     background-color: #f2f2f2 !important;
     background-image: linear-gradient(180deg, #fafafa 0%, #ebebeb 100%) !important;
 }
+
+/* BW: gradient text (bg-clip-text + text-transparent) → solid dark, readable on grey fades. */
+[data-theme="bw"] :is(.bg-clip-text, .text-transparent) {
+    background: none !important;
+    color: hsl(0 0% 10%) !important;
+    -webkit-text-fill-color: hsl(0 0% 10%) !important;
+}
