@@ -7,7 +7,7 @@
 // Every number comes from GET /api/civilworkdpr-dashboard and counts each activity's CURRENT attempt only
 // (a reworked activity isn't counted twice), scoped to the signed-in user's projects by the server.
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useNavigation } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
@@ -59,9 +59,10 @@ function Tile({ label, value, caption, icon: Icon, color, onPress, quiet }: {
 }) {
   const live = value > 0 && !quiet;
   return (
-    <Pressable
+    <TouchableOpacity
+      activeOpacity={0.8}
       onPress={onPress}
-      style={({ pressed }) => ({ ...card, flex: 1, padding: 14, overflow: "hidden", borderColor: live ? `${color}55` : colors.border, opacity: pressed ? 0.85 : 1 })}
+      style={{ ...card, flex: 1, padding: 14, overflow: "hidden", borderColor: live ? `${color}55` : colors.border }}
     >
       <View style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, backgroundColor: live ? color : colors.border }} />
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -72,7 +73,7 @@ function Tile({ label, value, caption, icon: Icon, color, onPress, quiet }: {
       </View>
       <Text style={{ fontSize: 28, fontFamily: fonts.heading.bold, color: live ? colors.foreground : colors.mutedForeground, fontVariant: ["tabular-nums"], lineHeight: 32 }}>{value}</Text>
       <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>{caption}</Text>
-    </Pressable>
+    </TouchableOpacity>
   );
 }
 
@@ -249,10 +250,11 @@ function Content({ d, firstName, trend, openList, showQc }: {
           <Title action="See all" onAction={() => openList("OVERDUE")}>Most overdue</Title>
           <View style={{ ...card, overflow: "hidden" }}>
             {d.overdueList.map((o, i) => (
-              <Pressable
+              <TouchableOpacity
                 key={o.rungId}
+                activeOpacity={0.7}
                 onPress={() => navigation.navigate("ActivityDetail", { rungId: o.rungId })}
-                style={({ pressed }) => ({ padding: 13, flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: i ? 1 : 0, borderTopColor: colors.border, backgroundColor: pressed ? colors.muted : "transparent" })}
+                style={{ padding: 13, flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: i ? 1 : 0, borderTopColor: colors.border }}
               >
                 <View style={{ minWidth: 46, alignItems: "center", paddingVertical: 5, borderRadius: 10, backgroundColor: `${RED}18` }}>
                   <Text style={{ fontSize: 15, fontFamily: fonts.heading.bold, color: RED, fontVariant: ["tabular-nums"] }}>{o.daysOverdue}</Text>
@@ -268,7 +270,7 @@ function Content({ d, firstName, trend, openList, showQc }: {
                   </Text>
                 </View>
                 <ChevronRight size={14} color={colors.mutedForeground} />
-              </Pressable>
+              </TouchableOpacity>
             ))}
           </View>
         </>
