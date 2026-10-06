@@ -321,16 +321,21 @@ const CrmPlotMaster: React.FC = () => {
     setConverting(true);
     const failed: string[] = [];
     let done = 0;
+    let dprChains = 0;
+    const noSteps = new Set<string>();
     for (const job of jobs) {
       try {
         const response = await fetchWithAuth(`${SETUP_API}/plots/convert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(job.body) });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "Could not convert");
         done++;
+        dprChains += Number(body.DprChainsCreated) || 0;
+        (body.DprRoomsWithoutTemplate || []).forEach((room: string) => noSteps.add(room.replace(/\s*\d+$/, "")));
       } catch (e: any) { failed.push(`${job.plot.PlotName}: ${e.message}`); }
     }
     setConverting(false);
-    if (done) toast.success(`${done} villa${done === 1 ? "" : "s"} created, one per plot`);
+    if (done) toast.success(`${done} villa${done === 1 ? "" : "s"} created, one per plot — ${dprChains} DPR room chain${dprChains === 1 ? "" : "s"} set up`);
+    if (noSteps.size) toast.warning(`No DPR steps exist yet for: ${[...noSteps].join(", ")}. Set up one chain for each in Dependency Master, then run "chainless rooms" to fill these villas.`, { duration: 12000 });
     if (failed.length) toast.error(`Not converted - ${failed.join("; ")}`, { duration: 12000 });
     setSelectedIds((ids) => ids.filter((id) => jobs.some((job) => job.plot.Id === id && failed.some((f) => f.startsWith(`${job.plot.PlotName}:`)))));
     if (!failed.length) setConvertOpen(false);
@@ -354,7 +359,8 @@ const CrmPlotMaster: React.FC = () => {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Could not convert plots");
-      toast.success(`${selectedPlots.length} plot${selectedPlots.length === 1 ? "" : "s"} converted to ${unitName.trim()} in Unit Master`);
+      toast.success(`${selectedPlots.length} plot${selectedPlots.length === 1 ? "" : "s"} converted to ${unitName.trim()} in Unit Master — ${Number(body.DprChainsCreated) || 0} DPR room chains set up`);
+      if (body.DprRoomsWithoutTemplate?.length) toast.warning(`No DPR steps exist yet for: ${body.DprRoomsWithoutTemplate.join(", ")}. Set up one chain for each in Dependency Master.`, { duration: 12000 });
       setSelectedIds([]); setConvertOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
       await queryClient.invalidateQueries({ queryKey: ["unit-master"] });

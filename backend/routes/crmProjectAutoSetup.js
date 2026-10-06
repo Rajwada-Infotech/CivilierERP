@@ -170,7 +170,13 @@ async function syncExistingStructure(pool, projectId) {
         .query(`
           INSERT INTO dbo.CrmProjectAutoSetupFloor
             (ProjectId, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated, IsActive, CreatedAt)
-          VALUES (@pid, @bid, -1, 'Unassigned', @uc, 1, 1, 1, SYSDATETIME())
+          -- In a plotted block the floorless units are villas built on plots,
+          -- not legacy flats missing a floor: label the row by their kind.
+          VALUES (@pid, @bid, -1, COALESCE(
+            (SELECT TOP 1 k.Name FROM dbo.UnitMaster u JOIN dbo.CrmConstructedAssetKind k ON k.Code = u.UnitKind
+              WHERE u.BlockId = @bid AND u.IsActive = 1 AND u.FloorNo IS NULL
+                AND EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id)),
+            'Unassigned'), @uc, 1, 1, 1, SYSDATETIME())
         `);
     }
   }
