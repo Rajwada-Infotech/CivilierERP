@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { View, Text, Pressable, Modal, Animated } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Home, ClipboardList, Grip, X } from "lucide-react-native";
+import { Home, ClipboardList, ShieldCheck, Grip, X } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { navigationRef } from "./navigationRef";
@@ -22,10 +22,12 @@ const ACCENT = "#0891b2";
 const ACCENT_SOFT = "#67e8f9";
 
 type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "Activities">;
+type NavItemDef = { route: NavRoute; label: string; icon: React.ComponentType<{ size?: number; color?: string }>; params?: object; key: string };
 
-const NAV_ITEMS: { route: NavRoute; label: string; icon: React.ComponentType<{ size?: number; color?: string }> }[] = [
-  { route: "Dashboard",  label: "Dashboard",  icon: Home          },
-  { route: "Activities", label: "Activities", icon: ClipboardList },
+const NAV_ITEMS: NavItemDef[] = [
+  { key: "Dashboard",  route: "Dashboard",  label: "Dashboard",     icon: Home          },
+  { key: "Activities", route: "Activities", label: "Activities",    icon: ClipboardList },
+  { key: "Quality",    route: "Activities", label: "Quality Check", icon: ShieldCheck, params: { filter: "COMPLETED" } },
 ];
 
 export function SidebarMenu({ activeRoute }: { activeRoute: string }) {
@@ -37,9 +39,12 @@ export function SidebarMenu({ activeRoute }: { activeRoute: string }) {
     Animated.timing(slide, { toValue: open ? 1 : 0, duration: 220, useNativeDriver: true }).start();
   }, [open, slide]);
 
-  const go = (route: NavRoute) => {
+  const go = (item: NavItemDef) => {
     setOpen(false);
-    if (navigationRef.isReady() && route !== activeRoute) navigationRef.navigate(route);
+    // Same screen with a different filter (Activities → Quality Check) still has to navigate.
+    if (navigationRef.isReady() && (item.route !== activeRoute || item.params)) {
+      (navigationRef.navigate as (name: string, params?: object) => void)(item.route, item.params);
+    }
   };
 
   return (
@@ -118,12 +123,12 @@ export function SidebarMenu({ activeRoute }: { activeRoute: string }) {
             {/* Nav items */}
             <View style={{ paddingHorizontal: 14, paddingBottom: 8, gap: 3 }}>
               {NAV_ITEMS.map((item) => {
-                const active = item.route === activeRoute;
+                const active = item.key !== "Quality" && item.route === activeRoute;
                 const Icon = item.icon;
                 return (
                   <Pressable
-                    key={item.route}
-                    onPress={() => go(item.route)}
+                    key={item.key}
+                    onPress={() => go(item)}
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
