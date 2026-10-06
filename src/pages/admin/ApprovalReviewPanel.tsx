@@ -48,6 +48,7 @@ import {
   getEngineers,
   SOURCE_META,
   type RungAssignmentDetail,
+  type SourceType,
   type Engineer,
 } from "@/api/dependencyActivityAssignmentApi";
 import {
@@ -63,6 +64,7 @@ import {
   Circle,
   CalendarDays,
   UserRound,
+  ShieldCheck,
   ListChecks,
   Printer,
   FileDown,
@@ -196,6 +198,39 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
       </div>
     </div>
   );
+};
+
+// Who is supplying labour / material: the company or contractor's name, with the kind as a badge.
+const SourceBadgeWithName: React.FC<{ source: SourceType; name?: string | null }> = ({ source, name }) => (
+  <span className="flex flex-wrap items-center gap-2">
+    {name && <span className="text-foreground">{name}</span>}
+    <span
+      className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[source].className}`}
+    >
+      {SOURCE_META[source].label}
+    </span>
+  </span>
+);
+
+// Where Quality Check stands on this activity.
+const QcStatusPill: React.FC<{ qc?: { decision: "APPROVED" | "REWORK" } | null }> = ({ qc }) => {
+  const meta = !qc
+    ? { label: "Not reviewed", cls: "bg-slate-500/10 text-slate-600 dark:text-slate-400" }
+    : qc.decision === "APPROVED"
+      ? { label: "Passed", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" }
+      : { label: "Sent back for rework", cls: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400" };
+  return (
+    <span className={`ml-auto text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full normal-case ${meta.cls}`}>
+      {meta.label}
+    </span>
+  );
+};
+
+// A checkpoint's Quality Check rating.
+const RATING_META: Record<string, { label: string; cls: string }> = {
+  POOR: { label: "Poor", cls: "bg-red-500/10 text-red-600 dark:text-red-400" },
+  GOOD: { label: "Good", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
+  EXCELLENT: { label: "Excellent", cls: "bg-teal-500/15 text-teal-700 dark:text-teal-300" },
 };
 
 const FormField: React.FC<{ label: string; value: React.ReactNode; accent?: boolean }> = ({ label, value, accent }) => (
@@ -672,23 +707,46 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                 </div>
               ) : rungDetail?.assignment ? (
                 <>
-                  <div>
-                    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                      <UserRound size={10} className="text-cyan-500" /> Engineers
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {rungDetail.assignment.engineerIds.length === 0 ? (
-                        <span className="text-xs text-muted-foreground italic">None assigned</span>
-                      ) : (
-                        rungDetail.assignment.engineerIds.map((id) => (
-                          <span
-                            key={id}
-                            className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
-                          >
-                            {engineers.find((e) => e.id === id)?.name || `#${id}`}
-                          </span>
-                        ))
-                      )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <UserRound size={10} className="text-cyan-500" /> Engineers
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {rungDetail.assignment.engineerIds.length === 0 ? (
+                          <span className="text-xs text-muted-foreground italic">None assigned</span>
+                        ) : (
+                          rungDetail.assignment.engineerIds.map((id) => (
+                            <span
+                              key={id}
+                              className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
+                            >
+                              {engineers.find((e) => e.id === id)?.name || `#${id}`}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <ShieldCheck size={10} className="text-violet-500" /> Quality Check
+                        <QcStatusPill qc={rungDetail.assignment.qcStatus} />
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(rungDetail.assignment.qcUserIds || []).length === 0 ? (
+                          <span className="text-xs text-muted-foreground italic">No QC engineer assigned</span>
+                        ) : (
+                          rungDetail.assignment.qcUserIds.map((id) => (
+                            <span
+                              key={id}
+                              className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
+                            >
+                              {engineers.find((e) => e.id === id)?.name || `#${id}`}
+                            </span>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -697,11 +755,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                       <FormField
                         label="Labour Given By"
                         value={
-                          <span
-                            className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.labourSource].className}`}
-                          >
-                            {SOURCE_META[rungDetail.assignment.labourSource].label}
-                          </span>
+                          <SourceBadgeWithName
+                            source={rungDetail.assignment.labourSource}
+                            name={rungDetail.assignment.labourSourceName}
+                          />
                         }
                       />
                     )}
@@ -709,11 +766,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                       <FormField
                         label="Material Given By"
                         value={
-                          <span
-                            className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.materialSource].className}`}
-                          >
-                            {SOURCE_META[rungDetail.assignment.materialSource].label}
-                          </span>
+                          <SourceBadgeWithName
+                            source={rungDetail.assignment.materialSource}
+                            name={rungDetail.assignment.materialSourceName}
+                          />
                         }
                       />
                     )}
@@ -728,23 +784,39 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                     </div>
                   )}
 
-                  {rungDetail.assignment.materials.length > 0 && (
-                    <div>
-                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                        <Package size={10} className="text-emerald-500" /> Materials ({rungDetail.assignment.materials.length})
-                      </p>
-                      <div className="rounded-xl border border-border divide-y divide-border/50">
-                        {rungDetail.assignment.materials.map((m, i) => {
-                          const candidate = rungDetail.candidateItems.find((c) => c.itemId === m.itemId);
-                          return (
-                            <div key={i} className="flex items-center justify-between px-3 py-2 text-xs">
-                              <span className="font-medium text-foreground">{candidate?.itemName || `#${m.itemId}`}</span>
-                              <span className="text-muted-foreground shrink-0">
-                                {m.quantity.toLocaleString("en-IN")}{candidate?.uom ? ` ${candidate.uom}` : ""}
-                              </span>
-                            </div>
-                          );
-                        })}
+                  {(rungDetail.assignment.materials.length > 0 || rungDetail.assignment.remarks) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                          <Package size={10} className="text-emerald-500" /> Materials ({rungDetail.assignment.materials.length})
+                        </p>
+                        {rungDetail.assignment.materials.length === 0 ? (
+                          <p className="text-xs text-muted-foreground italic">No materials entered</p>
+                        ) : (
+                          <div className="rounded-xl border border-border divide-y divide-border/50">
+                            {rungDetail.assignment.materials.map((m, i) => {
+                              const candidate = rungDetail.candidateItems.find((c) => c.itemId === m.itemId);
+                              return (
+                                <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+                                  <span className="font-medium text-foreground">{candidate?.itemName || `#${m.itemId}`}</span>
+                                  <span className="text-muted-foreground shrink-0">
+                                    {m.quantity.toLocaleString("en-IN")}{candidate?.uom ? ` ${candidate.uom}` : ""}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Remarks</p>
+                        {rungDetail.assignment.remarks ? (
+                          <p className="text-xs text-foreground whitespace-pre-wrap break-words bg-muted/30 border border-border rounded-lg px-3 py-2.5">
+                            {rungDetail.assignment.remarks}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic">No remarks</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -755,21 +827,40 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                         <ListChecks size={10} className="text-cyan-500" /> Checkpoints ({rungDetail.assignment.checkpoints.length})
                       </p>
                       <div className="rounded-xl border border-border divide-y divide-border/50">
-                        {rungDetail.assignment.checkpoints.map((cp) => (
-                          <div key={cp.id ?? cp.fieldName} className="flex items-center gap-2 px-3 py-2 text-xs">
-                            {cp.isChecked ? (
-                              <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
-                            ) : (
-                              <Circle size={13} className="text-muted-foreground/40 shrink-0" />
-                            )}
-                            <span className={cp.isChecked ? "text-foreground" : "text-muted-foreground"}>{cp.fieldName}</span>
-                            {cp.isDaily && (
-                              <span className="ml-auto text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground/70 flex items-center gap-1">
-                                <CalendarDays size={10} /> Daily{cp.updateCount ? ` · ${cp.updateCount}` : ""}
+                        {rungDetail.assignment.checkpoints.map((cp) => {
+                          const qcCheck = rungDetail.assignment?.qcStatus?.checks?.find((c) => c.fieldName === cp.fieldName);
+                          const rating = qcCheck?.rating ? RATING_META[qcCheck.rating] : null;
+                          const failed = qcCheck?.rating === "POOR";
+                          return (
+                            <div key={cp.id ?? cp.fieldName} className="flex items-center gap-2 px-3 py-2 text-xs">
+                              {failed ? (
+                                <XCircle size={13} className="text-red-500 shrink-0" />
+                              ) : cp.isChecked || qcCheck?.passed ? (
+                                <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                              ) : (
+                                <Circle size={13} className="text-muted-foreground/40 shrink-0" />
+                              )}
+                              <span className={cp.isChecked || qcCheck ? "text-foreground" : "text-muted-foreground"}>{cp.fieldName}</span>
+                              {qcCheck?.note && (
+                                <span className="text-[0.625rem] text-muted-foreground italic truncate" title={qcCheck.note}>
+                                  {qcCheck.note}
+                                </span>
+                              )}
+                              <span className="ml-auto flex items-center gap-2 shrink-0">
+                                {cp.isDaily && (
+                                  <span className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground/70 flex items-center gap-1">
+                                    <CalendarDays size={10} /> Daily{cp.updateCount ? ` · ${cp.updateCount}` : ""}
+                                  </span>
+                                )}
+                                {rating && (
+                                  <span className={`text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${rating.cls}`}>
+                                    {rating.label}
+                                  </span>
+                                )}
                               </span>
-                            )}
-                          </div>
-                        ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

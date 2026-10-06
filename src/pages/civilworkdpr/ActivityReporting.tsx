@@ -14,6 +14,7 @@ import {
   type ScopeSummaryRoom,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { ScopeLocationTree } from "@/components/civilworkdpr/ScopeLocationTree";
 import {
@@ -216,8 +217,9 @@ function ChainGroupList({
                           <span className="text-sm font-medium text-foreground leading-snug min-w-0">
                             {row.sequenceNo}. {row.activityName}
                           </span>
-                          <div onClick={(e) => e.stopPropagation()} className="shrink-0">
-                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
+                          <div onClick={(e) => e.stopPropagation()} className="shrink-0 flex flex-col items-end gap-0.5">
+                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
+                            <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} />
                           </div>
                         </div>
 
@@ -364,7 +366,8 @@ function ChainGroupList({
                             <ActivityPhotosBadge rungId={row.rungId} />
                           </td>
                           <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
-                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
+                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
+                            <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} className="mt-1" />
                           </td>
                         </tr>
                       ))}
