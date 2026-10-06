@@ -200,9 +200,7 @@ const calcAmount = (qty: string, rate: string) =>
  * entered, otherwise its Total Quantity.
  */
 const activityBasis = (a?: Pick<BoqActivity, "area" | "quantity">) => {
-  const area = parseFloat(a?.area ?? "") || 0;
-  if (area > 0) return { value: area, kind: "area" as const };
-  return { value: parseFloat(a?.quantity ?? "") || 0, kind: "qty" as const };
+  return { value: parseFloat(a?.area ?? "") || 0, kind: "area" as const };
 };
 
 const fmtQty = (n: number) =>
@@ -232,7 +230,7 @@ const blankActivity = (): BoqActivity => ({
   activityName: "",
   activityCode: "",
   description: "",
-  quantity: "",
+  quantity: "1",
   uomName: "",
   rate: "",
   tax: "18",
@@ -267,9 +265,11 @@ const rowToActivity = (r: any): BoqActivity => ({
   activityName: r.ActivityName ?? "",
   activityCode: r.ActivityCode ?? "",
   description: r.Description ?? "",
-  quantity: String(r.Quantity ?? ""),
+  quantity: "1",
   uomName: r.UomName ?? "",
-  rate: String(r.Rate ?? ""),
+  // Total Rate is the whole activity's price (not per unit). Rows saved as
+  // area x unit-rate keep their amount by showing that amount as the Total Rate.
+  rate: String(r.Quantity && Number(r.Quantity) !== 1 ? (r.LineAmount ?? r.Rate ?? "") : (r.Rate ?? "")),
   tax: String(r.TaxPct ?? "18"),
   amount: parseFloat(r.LineAmount) || 0,
 });
@@ -322,7 +322,7 @@ const buildPayload = (
     activityName: ac.activityName,
     activityCode: ac.activityCode,
     description: ac.description,
-    quantity: ac.quantity,
+    quantity: "1",
     uomName: ac.uomName,
     unit: ac.uomName,
     rate: ac.rate,
@@ -421,9 +421,11 @@ const LineEditor: React.FC<LineEditorProps> = ({
     const next = (rows as any[]).map((r, i) => {
       if (i !== idx) return r;
       const updated = { ...r, [field]: val };
-      // Activities have no separate Qty: Amount = Total Area x Total Rate.
-      if (!isItem && field === "area") updated.quantity = val;
-      if (field === "quantity" || field === "rate" || (!isItem && field === "area")) {
+      // Activities: Total Rate is the whole price, so Amount = Total Rate
+      // (Per Activity Price = Total Rate / Total Area is shown separately).
+      if (!isItem) {
+        if (field === "rate") updated.amount = parseFloat(val) || 0;
+      } else if (field === "quantity" || field === "rate") {
         updated.amount = calcAmount(updated.quantity, updated.rate);
       }
       return updated;
