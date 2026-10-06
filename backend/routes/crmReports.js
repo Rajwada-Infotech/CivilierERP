@@ -47,6 +47,8 @@ function cpbParams(req, { companyCol, projectCol, blockCol } = {}) {
   if (companyId && companyCol) clauses.push(`${companyCol} = @cpbCompanyId`);
   if (projectId && projectCol) clauses.push(`${projectCol} = @cpbProjectId`);
   if (blockId && blockCol) clauses.push(`${blockCol} = @cpbBlockId`);
+  // A project-restricted user's reports cover only their projects.
+  if (req.projectScope && projectCol) clauses.push(require("../services/projectScope").projectPredicate(req.projectScope, projectCol, "").trim());
   return {
     clauses,
     bind(r) {

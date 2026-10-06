@@ -21,8 +21,10 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
 
     // Build a project filter clause that works across all queries.
     // CrmBooking has ProjectId; we join through BookingId in child tables.
-    const projBookingCond   = projectId ? "AND b.ProjectId = @pid"  : "";
-    const projBookingAlone  = projectId ? "WHERE b.ProjectId = @pid" : "";
+    // A project-restricted user's dashboard covers only their projects.
+    const scopeCond = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "AND") : "";
+    const projBookingCond   = (projectId ? "AND b.ProjectId = @pid" : "") + scopeCond;
+    const projBookingAlone  = projBookingCond ? `WHERE 1 = 1 ${projBookingCond}` : "";
 
     const addPid = (req0) => projectId ? req0.input("pid", sql.Int, projectId) : req0;
 
@@ -31,7 +33,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT DISTINCT b.ProjectId AS Id, COALESCE(proj.name, b.ProjectName) AS Name
       FROM dbo.CrmBooking b
       LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-      WHERE b.IsActive = 1 AND b.ProjectId IS NOT NULL
+      WHERE b.IsActive = 1 AND b.ProjectId IS NOT NULL ${scopeCond}
       ORDER BY COALESCE(proj.name, b.ProjectName)
     `);
 
@@ -267,7 +269,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
           SELECT SUM(oa.Amount - ISNULL(oa.AppliedAmount,0))
           FROM dbo.CrmOnAccountPayment oa
           JOIN dbo.CrmBooking b2 ON b2.Id = oa.BookingId
-          WHERE b2.IsActive = 1 AND b2.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b2.Status = 'Approved' OR b2.ConfirmDeadline IS NULL OR b2.ConfirmDeadline >= SYSDATETIME()) ${projectId ? "AND b2.ProjectId = @pid" : ""}
+          WHERE b2.IsActive = 1 AND b2.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b2.Status = 'Approved' OR b2.ConfirmDeadline IS NULL OR b2.ConfirmDeadline >= SYSDATETIME()) ${projectId ? "AND b2.ProjectId = @pid" : ""} ${scopeCond.replace(/b\.ProjectId/g, "b2.ProjectId")}
         ), 0) AS TotalPaid,
         SUM(CASE WHEN m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
       FROM dbo.CrmPaymentMilestone m
