@@ -120,6 +120,13 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
             {projects.map((p) => <option key={p.ProjectId} value={p.ProjectId}>{p.ProjectName}</option>)}
           </select>
         </div>
+        {/* Fixed body height: choosing / clearing a project must not resize the card. */}
+        <div className="min-h-[30rem] grid content-start gap-4">
+        {!projectId && (
+          <div className="min-h-[30rem] grid place-items-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+            Choose a project to see and edit its villa types.
+          </div>
+        )}
         {projectId && (
           <>
             <div className="rounded-lg border border-border overflow-x-auto">
@@ -201,6 +208,7 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
             </div>
           </>
         )}
+        </div>
       </DialogContent>
     </Dialog>
   );
