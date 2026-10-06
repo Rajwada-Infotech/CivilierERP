@@ -2,6 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmPossessionNotice")); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -95,8 +97,9 @@ const PN_JOINS = `
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
 `;
 
-function buildPnWhere(request, query, includeStatus) {
+function buildPnWhere(request, query, includeStatus, projectScope = null) {
   const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
   const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
   const companyId = intOf(query.companyId);
   const projectId = intOf(query.projectId);
@@ -122,7 +125,7 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
 
     if (req.query.page === undefined) {
       const r0 = pool.request();
-      const where = buildPnWhere(r0, req.query, false);
+      const where = buildPnWhere(r0, req.query, false, req.projectScope);
       const result = await r0.query(`${PN_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where} ORDER BY n.CreatedAt DESC`);
       return res.json(result.recordset);
     }
@@ -134,7 +137,7 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
     const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
 
     const countReq = pool.request();
-    const countWhere = buildPnWhere(countReq, req.query, false);
+    const countWhere = buildPnWhere(countReq, req.query, false, req.projectScope);
     const countRes = await countReq.query(
       `SELECT n.Status, COUNT(*) AS C FROM dbo.CrmPossessionNotice n ${PN_JOINS} ${countWhere} GROUP BY n.Status`
     );
@@ -143,7 +146,7 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
     const total = PN_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
 
     const pageReq = pool.request();
-    const pageWhere = buildPnWhere(pageReq, req.query, true);
+    const pageWhere = buildPnWhere(pageReq, req.query, true, req.projectScope);
     pageReq.input("offset", sql.Int, (page - 1) * pageSize);
     pageReq.input("pageSize", sql.Int, pageSize);
     const rowsRes = await pageReq.query(

@@ -18,6 +18,7 @@ router.get("/", requirePageRight("crm-construction-updates", "view"), async (req
     // projectId is the real link (FK to the Unit Master project); project
     // (a ProjectName string) is kept only for old callers/back-compat.
     if (projectId) { req0.input("pid", sql.Int, parseInt(projectId)); conds.push("u.ProjectId = @pid"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "u.ProjectId", "").trim());
     else if (project) { req0.input("p", sql.NVarChar(200), project); conds.push("u.ProjectName = @p"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`

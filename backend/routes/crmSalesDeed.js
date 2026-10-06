@@ -2,6 +2,7 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
+router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 // Project access: a sale deed belongs to its booking's project.
 const { projectParamGuard, projectPredicate } = require("../services/projectScope");
 // :id is a different record on the query-payment and registry routes, so each

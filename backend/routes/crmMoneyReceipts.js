@@ -15,6 +15,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmMoneyReceipt")); }
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -63,9 +65,10 @@ function requireMoneyReceiptApprover(req, res) {
 // blocks tend to (that was the actual bug risk in the previous version —
 // nothing here changes what filters exist, only that there's one definition
 // of them instead of two).
-function applyReceiptFilters(request, query) {
+function applyReceiptFilters(request, query, projectScope = null) {
   const { bookingId, status, companyId, projectId, blockId, search, fromDate, toDate } = query;
   const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
 
   if (bookingId) {
     request.input("bid", sql.Int, parseInt(bookingId, 10));
@@ -167,7 +170,7 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
     // by definition, it's not a page of the main list.
     if (req.query.bookingId && !req.query.page) {
       const dataReq = pool.request();
-      const where = applyReceiptFilters(dataReq, req.query);
+      const where = applyReceiptFilters(dataReq, req.query, req.projectScope);
       const result = await dataReq.query(`${BASE_SELECT} ${where} ORDER BY mr.CreatedAt DESC`);
       return res.json(shapeReceipts(result.recordset));
     }
@@ -179,12 +182,12 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
     const { page, pageSize, offset } = applyPagination(req);
 
     const dataReq = pool.request();
-    const where = applyReceiptFilters(dataReq, req.query);
+    const where = applyReceiptFilters(dataReq, req.query, req.projectScope);
     dataReq.input("offset", sql.Int, offset);
     dataReq.input("pageSize", sql.Int, pageSize);
 
     const countReq = pool.request();
-    applyReceiptFilters(countReq, req.query); // same filter logic, fresh param bindings
+    applyReceiptFilters(countReq, req.query, req.projectScope); // same filter logic, fresh param bindings
 
     const [result, countResult] = await Promise.all([
       dataReq.query(`${BASE_SELECT} ${where} ORDER BY mr.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),

@@ -2,6 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmPrePossession")); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -85,7 +87,7 @@ function bindListFilters(request, query) {
 router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const baseCond = `b.Status NOT IN ${DEAD_BOOKING_SQL}`;
+    const baseCond = `b.Status NOT IN ${DEAD_BOOKING_SQL}` + (req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "");
 
     if (req.query.page === undefined) {
       const r0 = pool.request();
