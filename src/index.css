@@ -2133,7 +2133,7 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
     background-color: hsl(0 0% 94%) !important;
 }
 /* Inline-styled glows / tints / badges from page shells → neutral */
-[data-theme="bw"] main [style*="background"]:not(.w-0\.5, .w-1, .w-\[2px\], .w-\[3px\], .w-1\.5, .w-2, .h-0\.5, .h-1, .h-\[2px\], .h-\[3px\], .h-1\.5, .h-2, .h-full):not(.btn-module):not(img):not([style*="url("]):not(button):not(a):not([class*="text-white"]) {
+[data-theme="bw"] main [style*="background"]:not(:empty):not(.w-0\.5, .w-1, .w-\[2px\], .w-\[3px\], .w-1\.5, .w-2, .h-0\.5, .h-1, .h-\[2px\], .h-\[3px\], .h-1\.5, .h-2, .h-full):not(.btn-module):not(img):not([style*="url("]):not(button):not(a):not([class*="text-white"]) {
     background: hsl(0 0% 100% / 0.92) !important;
 }
 [data-theme="bw"] main [style*="radial-gradient"]:not(.w-0\.5, .w-1, .w-\[2px\], .w-\[3px\], .w-1\.5, .w-2, .h-0\.5, .h-1, .h-\[2px\], .h-\[3px\], .h-1\.5, .h-2, .h-full) {
@@ -2188,30 +2188,30 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
 
 /* BW cards: eight different grey fades (warm, cool, silver, graphite, fog,
    ash, pewter, pearl), each with a subtle texture, rotating card by card. */
-[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+1) {
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+1) {
     background-image: radial-gradient(rgba(0, 0, 0, 0.07) 0.7px, transparent 0.8px), linear-gradient(180deg, #ffffff 0%, #efece8 100%) !important;
     background-size: 9px 9px, 100% 100% !important;
 }
-[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+2) {
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+2) {
     background-image: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.035) 0 1px, transparent 1px 7px), linear-gradient(135deg, #e7eaee 0%, #ffffff 60%, #f3f4f6 100%) !important;
 }
-[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+3) {
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+3) {
     background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.025) 0 1px, transparent 1px 5px), repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.025) 0 1px, transparent 1px 5px), radial-gradient(120% 120% at 50% 40%, #ffffff 0%, #eeeeee 60%, #e2e2e2 100%) !important;
 }
-[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+4) {
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+4) {
     background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.035) 0 1px, transparent 1px 6px), linear-gradient(180deg, #ffffff 0%, #f1f1f1 55%, #dadada 100%) !important;
 }
-[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+5) {
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+5) {
     background-image: linear-gradient(160deg, #fbfbfb 0%, #f4f4f4 100%) !important;
 }
-[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+6) {
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+6) {
     background-image: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.03) 0 1px, transparent 1px 8px), linear-gradient(90deg, #e4e3e1 0%, #f6f6f5 45%, #ffffff 100%) !important;
 }
-[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+7) {
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+7) {
     background-image: radial-gradient(rgba(0, 0, 0, 0.07) 0.7px, transparent 0.8px), linear-gradient(135deg, #d9dadc 0%, #eeeeef 40%, #ffffff 100%) !important;
     background-size: 9px 9px, 100% 100% !important;
 }
-[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+8) {
+[data-theme="bw"] main :is(.bg-card, [style*="background"]:not(:empty):not(button):not(a):not([class*="text-white"]):not(.w-0\.5):not(.w-1):not(.h-1):not(.h-full):not(.h-1\.5)):nth-child(8n+8) {
     background-image: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.035) 0 1px, transparent 1px 7px), linear-gradient(0deg, #e9e7e4 0%, #f8f7f6 55%, #ffffff 100%) !important;
 }
 
@@ -2292,4 +2292,61 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
     -moz-appearance: none !important;
     appearance: none !important;
     padding-right: 2rem;
+}
+
+/* Every table scrolls sideways when its columns don't fit (instead of being
+   clipped under the pinned Actions column). The table's own box becomes the
+   scroll container, so the sticky Status/Actions cells stay pinned. */
+:is(main, [role="dialog"], .fixed) :has(> table):not(table, thead, tbody, tr, td, th) {
+    overflow-x: auto;
+    max-width: 100%;
+    min-width: 0;
+    overscroll-behavior-x: contain;
+}
+:is(main, [role="dialog"], .fixed) :has(> table) > table:not(.auto-cards) {
+    min-width: max-content;
+}
+:is(main, [role="dialog"], .fixed) :has(> table) > table.w-full:not(.auto-cards) {
+    min-width: 100%;
+}
+
+/* Glass: every floating menu / popover / select list (Radix portals) is dense frosted glass,
+   so the page behind never shows through (Export menu, dropdowns, pickers). */
+[data-theme="glass"] [data-radix-popper-content-wrapper] > :is(.bg-card, .bg-popover, .bg-background, [class*="bg-card/"], [class*="bg-popover/"], [role="menu"], [role="listbox"], [role="dialog"]),
+[data-theme="glass"] :is([role="menu"], [role="listbox"]):is(.absolute, .fixed) {
+    background: var(--glass-grain, none), linear-gradient(150deg, rgba(250, 252, 255, 0.97), rgba(238, 243, 250, 0.95)) !important;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 24px 54px -14px rgba(15, 40, 80, 0.35), inset 0 1px 0 #fff !important;
+}
+
+/* Toggles: the OFF track must be visible on every theme (bg-muted/bg-input were near-invisible on glass). */
+:is(button, [role="switch"]).rounded-full:has(> span.rounded-full[class*="translate-x"]):is(.bg-muted, .bg-input, [class*="bg-muted/"], .bg-gray-200, .bg-gray-300, .bg-slate-200, .bg-slate-300, .bg-border),
+[role="switch"][data-state="unchecked"] {
+    background-color: hsl(var(--muted-foreground) / 0.38) !important;
+    box-shadow: inset 0 0 0 1px hsl(var(--muted-foreground) / 0.25), inset 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+:is(button, [role="switch"]).rounded-full > span.rounded-full[class*="translate-x"],
+[role="switch"] > span {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Glass: cards INSIDE any overlay/dialog (modals built from shell cards on a transparent
+   wrapper) are dense frosted glass too, so the page behind never bleeds through. */
+[data-theme="glass"] :is(.fixed.inset-0, [role="dialog"]) :is(.bg-card, [class*="bg-card/"], .glass-card, [style*="backdrop-filter"]):not(button):not(.rounded-full):not(.inset-0) {
+    background:
+        var(--glass-grain, none),
+        linear-gradient(150deg,
+            color-mix(in srgb, var(--gt-a, #7dd3fc) 8%, rgba(255, 255, 255, 0.95)) 0%,
+            rgba(248, 251, 253, 0.92) 55%,
+            color-mix(in srgb, var(--gt-b, #5eead4) 8%, rgba(244, 248, 251, 0.94)) 100%) !important;
+    backdrop-filter: blur(24px) saturate(170%);
+    -webkit-backdrop-filter: blur(24px) saturate(170%);
+}
+/* nested cards inside those: plain light fill, no second blur */
+[data-theme="glass"] :is(.fixed.inset-0, [role="dialog"]) :is(.bg-card, [class*="bg-card/"]) :is(.bg-card, [class*="bg-card/"]):not(button):not(.rounded-full) {
+    background: rgba(255, 255, 255, 0.7) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
