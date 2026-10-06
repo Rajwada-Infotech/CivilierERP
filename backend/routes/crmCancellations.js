@@ -449,7 +449,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     // run on pool (not on a tx object) BEFORE we open our own transaction.
     // It enforces role-based access and status-machine guards; if it rejects,
     // we bail before touching any other table.
-    const result = await approvalTransition("crm-cancellations", id, CrmStatus.APPROVED, userEmail, req.user?.role);
+    const result = await approvalTransition("crm-cancellations", id, CrmStatus.APPROVED, userEmail, req.user?.role, null, req.user?.userId ?? null);
 
     // Multi-level approval workflows: approvalTransition returns newStatus
     // 'Pending' (not 'Approved') until the FINAL level signs off. The whole

@@ -29,6 +29,15 @@ const GL_POSTERS = {
   "debit-note": postDebitNoteApproval,
 };
 
+// Modules where money leaves the company on approval, and the column holding
+// the user who raised the request (an int user id). Used for maker-checker in
+// transition(): the raiser can never be the approver.
+const MAKER_COLUMNS = {
+  "crm-cancellations": "RequestedBy",
+  "crm-refunds": "RequestedBy",
+  "crm-brokerage": "CreatedBy",
+};
+
 // Map module slug → { table, pkCol, statusCol }
 const MODULE_MAP = {
   "expense-booking": {
@@ -711,6 +720,18 @@ async function transition(
       const authErr = new Error("You are not authorized to approve or reject records.");
       authErr.status = 403;
       throw authErr;
+    }
+    // Maker-checker: whoever raised a request that pays money out can't also
+    // approve it, whatever roles they hold. Rejecting one's own is allowed.
+    const makerColumn = MAKER_COLUMNS[module];
+    if (targetStatus === "Approved" && makerColumn && userId != null) {
+      const maker = (await getPool().request().input("id", sql.Int, Number(id))
+        .query(`SELECT ${makerColumn} AS Maker FROM ${map.table} WHERE ${map.pk} = @id`)).recordset[0]?.Maker;
+      if (maker != null && Number(maker) === Number(userId)) {
+        const sodErr = new Error("You raised this request, so someone else has to approve it.");
+        sodErr.status = 403;
+        throw sodErr;
+      }
     }
   }
 

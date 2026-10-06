@@ -565,7 +565,7 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
       return res.status(400).json({ error: msg });
     }
 
-    const result = await approvalTransition("crm-brokerage", id, CrmStatus.APPROVED, userEmail, req.user?.role);
+    const result = await approvalTransition("crm-brokerage", id, CrmStatus.APPROVED, userEmail, req.user?.role, null, req.user?.userId ?? null);
     // approvalTransition() manages its own internal transaction and commits
     // before returning, so by this point the Approved status is already
     // permanent — it can't be rolled back if the Finance handoff below

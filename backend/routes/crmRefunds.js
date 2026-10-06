@@ -492,7 +492,7 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const pool = getPool();
-    const result = await approvalTransition("crm-refunds", id, "Approved", userEmail, req.user?.role);
+    const result = await approvalTransition("crm-refunds", id, "Approved", userEmail, req.user?.role, null, req.user?.userId ?? null);
     if (result.newStatus !== "Approved") {
       return res.json({ success: true, status: result.newStatus });
     }
