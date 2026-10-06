@@ -11,7 +11,7 @@ function silentProxyError(err: NodeJS.ErrnoException) {
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const backendUrl = env.VITE_BACKEND_URL || "http://localhost:5001";
+  const backendUrl = env.VITE_BACKEND_URL || "http://localhost:5000";
   return {
   server: {
     host: "::",
