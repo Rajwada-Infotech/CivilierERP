@@ -1,7 +1,20 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
+router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
+// Project access: a sale deed belongs to its booking's project.
+const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+// :id is a different record on the query-payment and registry routes, so each
+// is traced to its booking through its own table.
+const guardDeed = projectParamGuard("SELECT b.ProjectId FROM dbo.CrmSalesDeed d JOIN dbo.CrmBooking b ON b.Id = d.BookingId WHERE d.Id = @id");
+const guardQueryPayment = projectParamGuard("SELECT b.ProjectId FROM dbo.CrmQueryPayment qp JOIN dbo.CrmBooking b ON b.Id = qp.BookingId WHERE qp.Id = @id");
+const guardRegistry = projectParamGuard("SELECT b.ProjectId FROM dbo.CrmRegistry r JOIN dbo.CrmBooking b ON b.Id = r.BookingId WHERE r.Id = @id");
+router.param("id", (req, res, next, value) => {
+  if (req.path.startsWith("/query-payment/")) return guardQueryPayment(req, res, next, value);
+  if (req.path.startsWith("/registry/")) return guardRegistry(req, res, next, value);
+  return guardDeed(req, res, next, value);
+});
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -200,7 +213,7 @@ router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), asy
         SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = b.Id ORDER BY CreatedAt DESC
       ) hov
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled', 'Rejected')
+        AND b.Status NOT IN ${DEAD_BOOKING_SQL}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id)
         AND ag.Status = 'Registered'
         AND (b.ProjectId IS NULL OR proj.entity_type IS NULL
@@ -231,6 +244,7 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
     // several columns together, not one stored column) — it stays a
     // post-fetch filter, same as before, just now applied to an
     // already-scoped set rather than the entire table.
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }

@@ -1,6 +1,8 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, "SELECT ProjectId FROM dbo.CrmOccupancyCertificate WHERE Id = @id"); }
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -48,6 +50,7 @@ router.get("/", requirePageRight("crm-oc-cc", "view"), async (req, res) => {
     const req0 = pool.request();
     const where = [];
     if (projectId) { req0.input("pid", sql.Int, parseInt(projectId)); where.push("oc.ProjectId = @pid"); }
+    if (req.projectScope) where.push(require("../services/projectScope").projectPredicate(req.projectScope, "oc.ProjectId", "").trim());
     if (blockId)   { req0.input("bid", sql.Int, parseInt(blockId));   where.push("oc.BlockId = @bid");   }
     if (status)    { req0.input("st",  sql.NVarChar(20), status);     where.push("oc.Status = @st");    }
     const q = buildSelect() + (where.length ? " WHERE " + where.join(" AND ") : "") + " ORDER BY oc.ProjectName, oc.BlockName, oc.CreatedAt DESC";

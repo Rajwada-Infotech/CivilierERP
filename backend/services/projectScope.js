@@ -209,7 +209,58 @@ async function assertGodownAllowed(req, res, godownId) {
   return false;
 }
 
+// ── CRM ──────────────────────────────────────────────────────────────────────
+// Every CRM record hangs off a booking or an application, which carry the
+// project. crmProjectGuards(router, idSql) wires the standard :bookingId and
+// :applicationId guards and, for :id, either one SQL text or a map of
+// { "/path-prefix/": sql, default: sql } when :id means different records on
+// different routes. Each SQL must SELECT ProjectId given @id.
+const CRM_BOOKING_PROJECT_SQL = "SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id";
+const CRM_APPLICATION_PROJECT_SQL = "SELECT ProjectId FROM dbo.CrmApplication WHERE Id = @id";
+
+// The project of a row linked to a booking (and optionally an application).
+function crmViaBookingSql(table, { withApplication = false, bookingCol = "BookingId" } = {}) {
+  return withApplication
+    ? `SELECT COALESCE(b.ProjectId, a.ProjectId) AS ProjectId FROM dbo.${table} x
+       LEFT JOIN dbo.CrmBooking b ON b.Id = x.${bookingCol} LEFT JOIN dbo.CrmApplication a ON a.Id = x.ApplicationId WHERE x.Id = @id`
+    : `SELECT b.ProjectId FROM dbo.${table} x JOIN dbo.CrmBooking b ON b.Id = x.${bookingCol} WHERE x.Id = @id`;
+}
+
+function crmProjectGuards(router, idSql = null) {
+  router.param("bookingId", projectParamGuard(CRM_BOOKING_PROJECT_SQL));
+  router.param("applicationId", projectParamGuard(CRM_APPLICATION_PROJECT_SQL));
+  if (!idSql) return;
+  if (typeof idSql === "string") { router.param("id", projectParamGuard(idSql)); return; }
+  const guards = Object.fromEntries(Object.entries(idSql).map(([k, v]) => [k, projectParamGuard(v)]));
+  router.param("id", (req, res, next, value) => {
+    const key = Object.keys(guards).find((p) => p !== "default" && req.path.startsWith(p));
+    return (guards[key] || guards.default || ((_q, _s, n) => n()))(req, res, next, value);
+  });
+}
+
+// A customer can span projects: a restricted user may open one only when at
+// least one of the customer's applications is inside their projects.
+async function crmCustomerGuard(req, res, next, value) {
+  if (!req.projectScope) return next();
+  const id = parseInt(value, 10);
+  if (!Number.isFinite(id)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, id).query(
+      `SELECT TOP 1 1 AS x FROM dbo.CrmApplication a WHERE a.CustomerId = @id ${projectPredicate(req.projectScope, "a.ProjectId")}`);
+    if (!r.recordset.length) {
+      const exists = await getPool().request().input("id", sql.Int, id).query("SELECT TOP 1 1 AS x FROM dbo.CrmApplication WHERE CustomerId = @id");
+      if (exists.recordset.length) return res.status(403).json({ error: "You don't have access to this customer's projects." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
 module.exports = {
+  crmProjectGuards,
+  crmViaBookingSql,
+  crmCustomerGuard,
   assertGodownAllowed,
   ebResolvedProjectSql,
   paymentProjectSql,

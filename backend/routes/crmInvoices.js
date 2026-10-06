@@ -47,6 +47,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       const req_ = pool.request().input("pageSize", sql.Int, pageSizeNum).input("offset", sql.Int, offset);
       let where = "WHERE 1=1";
       if (projectId) { where += " AND b.ProjectId = @pid"; req_.input("pid", sql.Int, parseInt(projectId, 10)); }
+      if (req.projectScope) where += require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId");
       if (blockId)   { where += " AND b.BlockId = @bkid"; req_.input("bkid", sql.Int, parseInt(blockId, 10)); }
       if (search) {
         where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR COALESCE(proj.name, b.ProjectName) LIKE @s)";

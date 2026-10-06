@@ -432,10 +432,35 @@ async function resolveResaleFeeGst(pool, feeAmount, { landSale = false } = {}) {
   return { hsnCode: resolved.hsnCode, rate, gstAmount: Math.round(fee * rate) / 100 };
 }
 
+/**
+ * A shop / office can't be sold until its GST is set up. Commercial property
+ * is taxed differently from homes, but with no rule marked ForCommercial = 1 a
+ * commercial unit silently takes a residential rule (rules left blank apply
+ * to both) or the residential constant fallback — under-charging GST the
+ * company then owes itself. So the sale is refused up front, before anything
+ * is written, naming what to set up. Units not of a commercial kind pass.
+ */
+async function assertCommercialGstReady(pool, unitIds) {
+  const ids = (unitIds || []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return;
+  const commercialKinds = await require("./projectType").loadCommercialKinds(pool);
+  if (!commercialKinds.size) return;
+  const units = (await pool.request().query(
+    `SELECT UnitName, UnitKind FROM dbo.UnitMaster WHERE Id IN (${ids.join(",")})`)).recordset
+    .filter((u) => commercialKinds.has(String(u.UnitKind || "").toUpperCase()));
+  if (!units.length) return;
+  const ready = (await pool.request().input("a", sql.NVarChar(50), APPLIES_TO.UNIT_PARKING).query(
+    "SELECT TOP 1 1 AS x FROM dbo.CrmGstRule WHERE IsActive = 1 AND AppliesTo = @a AND ForCommercial = 1")).recordset.length;
+  if (!ready) {
+    throw new GstSetupError(`${units.map((u) => u.UnitName).join(", ")} ${units.length === 1 ? "is" : "are"} commercial, and no commercial GST rule is set up yet. Add an active Unit + Parking rule marked "Commercial" in the GST rules master (with its HSN), then book.`);
+  }
+}
+
 module.exports = {
   isLandSale,
   resolveResaleFeeGst,
   GstSetupError,
+  assertCommercialGstReady,
   resolveUnitParkingHsn,
   resolveLandOwnedByBookingCustomer,
   resolveExtraWorkHsn,

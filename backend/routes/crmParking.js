@@ -2,6 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmParkingAllotment", { withApplication: true })); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -496,6 +498,7 @@ router.get("/", requirePageRight("crm-parking-booking", "view"), async (req, res
     // clause can't reference a SELECT-list alias at the same query level).
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("(a.CompanyId = @companyId OR b.CompanyId = @companyId)"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("COALESCE(p.ProjectId, s.ProjectId) = @projectId"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "COALESCE(p.ProjectId, s.ProjectId)", "").trim());
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("COALESCE(p.BlockId, s.BlockId) = @blockId"); }
     const result = await req0.query(`${ALLOTMENT_SELECT} WHERE ${conds.join(" AND ")} ORDER BY pa.CreatedAt DESC`);
     res.json(result.recordset);

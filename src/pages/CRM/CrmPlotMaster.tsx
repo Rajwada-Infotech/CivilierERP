@@ -305,37 +305,59 @@ const CrmPlotMaster: React.FC = () => {
       return {
         plot,
         body: {
-          PlotIds: [plot.Id], UnitName: plot.PlotName, UnitType: layout || unitType, UnitKind: unitKind, RatePerSqFt: Number(villaRate),
+          PlotIds: [plot.Id], UnitName: plot.PlotName, UnitType: own ? layout : unitType, UnitKind: unitKind, RatePerSqFt: Number(villaRate),
           VillaTypeId: own ? own.Id : (villaTypeId ? Number(villaTypeId) : null),
           BuiltUpAreaSqFt: own ? null : (builtUpArea ? Number(builtUpArea) : null),
           SuperBuiltUpAreaSqFt: own ? null : (superBuiltUpArea ? Number(superBuiltUpArea) : null),
         },
         ok: !!own || villaTypeId !== "" || Number(builtUpArea) > 0,
-        typed: !!(layout || unitType),
+        // A planned type decides the rooms; one without a layout is reported,
+        // never silently swapped for the dialog's type.
+        typed: own ? !!layout : !!unitType,
       };
     });
     const noArea = jobs.filter((job) => !job.ok).map((job) => job.plot.PlotName);
     if (noArea.length) { toast.error(`No villa type planned on ${noArea.join(", ")} - choose a villa type or enter the built-up area for them`); return; }
     const noType = jobs.filter((job) => !job.typed).map((job) => job.plot.PlotName);
-    if (noType.length) { toast.error(`Select a unit type for ${noType.join(", ")}`); return; }
+    if (noType.length) { toast.error(`No room layout for ${noType.join(", ")} — set the layout on their villa type (Villa types), or select a unit type for plots with no planned type`); return; }
     setConverting(true);
     const failed: string[] = [];
     let done = 0;
+    let dprChains = 0;
+    const noSteps = new Set<string>();
     for (const job of jobs) {
       try {
         const response = await fetchWithAuth(`${SETUP_API}/plots/convert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(job.body) });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "Could not convert");
         done++;
+        dprChains += Number(body.DprChainsCreated) || 0;
+        (body.DprRoomsWithoutTemplate || []).forEach((room: string) => noSteps.add(room.replace(/\s*\d+$/, "")));
       } catch (e: any) { failed.push(`${job.plot.PlotName}: ${e.message}`); }
     }
     setConverting(false);
-    if (done) toast.success(`${done} villa${done === 1 ? "" : "s"} created, one per plot`);
+    if (done) toast.success(`${done} villa${done === 1 ? "" : "s"} created, one per plot — ${dprChains} DPR room chain${dprChains === 1 ? "" : "s"} set up`);
+    if (noSteps.size) toast.warning(`No DPR steps exist yet for: ${[...noSteps].join(", ")}. Set up one chain for each in Dependency Master, then run "chainless rooms" to fill these villas.`, { duration: 12000 });
     if (failed.length) toast.error(`Not converted - ${failed.join("; ")}`, { duration: 12000 });
     setSelectedIds((ids) => ids.filter((id) => jobs.some((job) => job.plot.Id === id && failed.some((f) => f.startsWith(`${job.plot.PlotName}:`)))));
     if (!failed.length) setConvertOpen(false);
     await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
+  };
+  // Reverses a conversion made by mistake. The server refuses once the villa is
+  // booked or held, or any DPR work has started; nothing is deleted.
+  const undoConversion = async (plot: Plot) => {
+    if (!plot.ConvertedUnitId) return;
+    if (!window.confirm(`Undo the conversion of ${plot.PlotName}? The villa ${plot.ConvertedUnitName || ""} and its untouched DPR steps are retired and the plot can be converted again.`)) return;
+    try {
+      const response = await fetchWithAuth(`${SETUP_API}/plots/unconvert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ UnitId: plot.ConvertedUnitId }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not undo the conversion");
+      toast.success(body.message || "Conversion undone");
+      setDetailOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
+      await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
+    } catch (e: any) { toast.error(e.message); }
   };
   const convert = async () => {
     if (selectedPlots.length > 1 && !conversionConfirmed) { toast.error("Tick the confirmation under the preview first"); return; }
@@ -354,7 +376,8 @@ const CrmPlotMaster: React.FC = () => {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Could not convert plots");
-      toast.success(`${selectedPlots.length} plot${selectedPlots.length === 1 ? "" : "s"} converted to ${unitName.trim()} in Unit Master`);
+      toast.success(`${selectedPlots.length} plot${selectedPlots.length === 1 ? "" : "s"} converted to ${unitName.trim()} in Unit Master — ${Number(body.DprChainsCreated) || 0} DPR room chains set up`);
+      if (body.DprRoomsWithoutTemplate?.length) toast.warning(`No DPR steps exist yet for: ${body.DprRoomsWithoutTemplate.join(", ")}. Set up one chain for each in Dependency Master.`, { duration: 12000 });
       setSelectedIds([]); setConvertOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["plot-master"] });
       await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
@@ -826,7 +849,13 @@ const CrmPlotMaster: React.FC = () => {
                 <div><p className="text-xs text-muted-foreground">Neighbours</p><p>{detailPlot.AdjacentPlotCount || 0}</p></div>
               </div>
               {detailPlot.ConvertedUnitId && (
-                <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3"><p className="text-xs text-muted-foreground">Converted Unit Master record</p><p className="font-medium">{detailPlot.ConvertedUnitName || `Unit #${detailPlot.ConvertedUnitId}`}</p></div>
+                <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 flex items-center justify-between gap-3">
+                  <div><p className="text-xs text-muted-foreground">Converted Unit Master record</p><p className="font-medium">{detailPlot.ConvertedUnitName || `Unit #${detailPlot.ConvertedUnitId}`}</p></div>
+                  {rights.canDelete && (
+                    <button onClick={() => undoConversion(detailPlot)} className="shrink-0 px-3 py-1.5 text-xs border border-destructive/40 text-destructive rounded-lg hover:bg-destructive/10"
+                      title="Only while the villa is unsold and no DPR work has started">Undo conversion</button>
+                  )}
+                </div>
               )}
               <div className="flex justify-end gap-2">
                 <button onClick={() => setDetailOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Close</button>
