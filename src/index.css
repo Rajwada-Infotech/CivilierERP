@@ -1587,7 +1587,7 @@ button[role="combobox"]:focus {
    bubbles: white specular highlight top-left, faint iridescent body, bright
    rim and soft drop shadow. Every icon gets a subtle embossed glint.
    Coloured action buttons (module gradients, solid fills) are untouched. */
-[data-theme="glass"] :is(.rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-full):is(.w-5, .w-6, .w-7, .w-8, .w-9, .w-10, .w-11, .w-12, .w-14):has(> svg:only-child):not(.btn-module):not(.gradient-accent):not([class*="bg-red-"]):not([class*="bg-green-"]):not([class*="bg-emerald-6"]):not([class*="bg-primary"]):not(.bg-destructive):not(.login-page *) {
+[data-theme="glass"] :is(.rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-full):is(.w-5, .w-6, .w-7, .w-8, .w-9, .w-10, .w-11, .w-12, .w-14):has(> svg:only-child):not(.btn-module):not(.gradient-accent):not([class*="bg-red-"]):not([class*="bg-green-"]):not([class*="bg-emerald-6"]):not([class*="bg-primary"]):not(.bg-destructive):not(.login-page *):not(.text-white):not([class*="text-white/"]):not(:has(> svg.text-white)):not([class*="-400"]):not([class*="-500"]):not([class*="-600"]):not([class*="-700"]):not([class*="-800"]):not([class*="bg-[#"]):not([style*="background"]) {
     background:
         radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.55) 28%, transparent 58%),
         linear-gradient(140deg, rgba(255, 255, 255, 0.55), rgba(214, 233, 255, 0.55) 45%, rgba(208, 250, 238, 0.5) 75%, rgba(255, 255, 255, 0.55)) !important;
@@ -1603,7 +1603,7 @@ button[role="combobox"]:focus {
     filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.85)) drop-shadow(0 1px 1.5px rgba(30, 64, 110, 0.18));
 }
 /* …but not on icons inside solid coloured buttons / badges */
-[data-theme="glass"] :is(.btn-module, .gradient-accent, [class*="bg-red-6"], [class*="bg-emerald-6"], [class*="bg-green-6"], .bg-destructive) svg {
+[data-theme="glass"] :is(.btn-module, .gradient-accent, [class*="bg-red-6"], [class*="bg-emerald-6"], [class*="bg-green-6"], .bg-destructive, .text-white) svg {
     filter: none;
 }
 
@@ -1713,7 +1713,7 @@ button[role="combobox"]:focus {
     background: var(--glass-grain), linear-gradient(150deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.22)) !important;
     box-shadow: var(--glass-edge), 0 6px 14px -6px rgba(15, 40, 80, 0.22) !important;
 }
-[data-theme="glass"] :is(.rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-full):is(.w-5, .w-6, .w-7, .w-8, .w-9, .w-10, .w-11, .w-12, .w-14):has(> svg:only-child):not(.btn-module):not(.gradient-accent):not([class*="bg-red-"]):not([class*="bg-green-"]):not([class*="bg-emerald-6"]):not([class*="bg-primary"]):not(.bg-destructive) {
+[data-theme="glass"] :is(.rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-full):is(.w-5, .w-6, .w-7, .w-8, .w-9, .w-10, .w-11, .w-12, .w-14):has(> svg:only-child):not(.btn-module):not(.gradient-accent):not([class*="bg-red-"]):not([class*="bg-green-"]):not([class*="bg-emerald-6"]):not([class*="bg-primary"]):not(.bg-destructive):not(.login-page *):not(.text-white):not([class*="text-white/"]):not(:has(> svg.text-white)):not([class*="-400"]):not([class*="-500"]):not([class*="-600"]):not([class*="-700"]):not([class*="-800"]):not([class*="bg-[#"]):not([style*="background"]) {
     background:
         radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.5) 30%, transparent 60%),
         var(--glass-grain),
