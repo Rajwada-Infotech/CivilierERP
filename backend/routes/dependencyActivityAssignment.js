@@ -381,9 +381,11 @@ router.get(
   async (req, res) => {
     const statusFilter = req.query.status ? String(req.query.status).toUpperCase() : null;
     const search = req.query.search ? String(req.query.search).trim() : null;
+    const projectFilterId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     try {
       const pool = await getPool();
 
+      const projectCond = Number.isFinite(projectFilterId) ? " AND dm.ProjectId = @projectFilterId" : "";
       const searchCond = search ? `
           AND (
             am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
@@ -392,6 +394,7 @@ router.get(
 
       const countsReq = pool.request();
       if (search) countsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (projectCond) countsReq.input("projectFilterId", sql.Int, projectFilterId);
       // Started now, awaited below: the status counts and the room list are
       // independent aggregates over the same tables, so they run in parallel
       // instead of one after the other (the search made this the slow call).
@@ -405,11 +408,12 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
         GROUP BY daa.Status
       `);
       const roomsReq = pool.request();
       if (search) roomsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (projectCond) roomsReq.input("projectFilterId", sql.Int, projectFilterId);
       if (statusFilter && STATUS_VALUES.has(statusFilter)) roomsReq.input("statusFilter", sql.NVarChar(20), statusFilter);
       const roomsPromise = roomsReq.query(`
         SELECT
@@ -427,7 +431,7 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
           ${statusFilter && STATUS_VALUES.has(statusFilter) ? "AND daa.Status = @statusFilter" : ""}
         GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName
       `);
@@ -443,6 +447,38 @@ router.get(
       res.json({ statusCounts, total, rooms: roomsRes.recordset });
     } catch (err) {
       console.error("[dependency-activity-assignment] GET /scope-summary error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// GET /scope-summary/projects — the project dropdown's options: every project
+// the caller has a current activity in. Its own cheap call (a project has far
+// fewer chains than there are assignments, and EXISTS stops at the first
+// hit) so it never runs on each filter change, only once per page visit.
+router.get(
+  "/scope-summary/projects",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "view"),
+  async (req, res) => {
+    try {
+      const pool = await getPool();
+      const r = await pool.request().query(`
+        SELECT ep.id AS id, ep.name AS name
+        FROM dbo.enterprise ep
+        WHERE ep.business_type = 'P'
+          AND EXISTS (
+            SELECT 1
+            FROM dbo.DependencyMaster dm
+            JOIN dbo.DependencyMasterActivity dma ON dma.DependencyMasterId = dm.Id
+            JOIN dbo.DependencyActivityAssignment daa ON daa.DependencyMasterActivityId = dma.Id AND daa.IsCurrent = 1
+            WHERE dm.ProjectId = ep.id
+          )${projectPredicate(req.projectScope, "ep.id")}
+        ORDER BY ep.name
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /scope-summary/projects error:", err.message);
       res.status(500).json({ error: err.message });
     }
   },

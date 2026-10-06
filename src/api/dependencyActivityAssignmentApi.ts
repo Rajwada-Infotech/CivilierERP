@@ -380,13 +380,20 @@ export interface ActivityScopeSummary {
 export const getActivityScopeSummary = async (params?: {
   status?: AssignmentStatus;
   search?: string;
+  projectId?: number;
 }): Promise<ActivityScopeSummary> => {
   const qs = new URLSearchParams();
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
   if (params?.status) qs.set("status", params.status);
   if (params?.search) qs.set("search", params.search);
   const query = qs.toString();
   const res = await fetchWithAuth(`${BASE}/scope-summary${query ? `?${query}` : ""}`);
   return handleResponse<ActivityScopeSummary>(res);
+};
+
+export const getScopeProjects = async (): Promise<{ id: number; name: string | null }[]> => {
+  const res = await fetchWithAuth(`${BASE}/scope-summary/projects`);
+  return handleResponse<{ id: number; name: string | null }[]>(res);
 };
 
 // StartDate is only ever a tentative plan — the real measure of how

@@ -8,6 +8,7 @@ import {
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
   getActivityScopeSummary,
+  getScopeProjects,
   getActivityPhotos,
   startDelayInfo,
   type AssignmentStatus,
@@ -426,6 +427,7 @@ export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | "ALL">("ALL");
   const [search, setSearch] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [detailRow, setDetailRow] = useState<ReportedAssignment | null>(null);
   const [detailTab, setDetailTab] = useState<"overview" | "blueprint" | "photos">("overview");
   const openDetail = (row: ReportedAssignment, tab: "overview" | "blueprint" | "photos" = "overview") => {
@@ -451,11 +453,12 @@ export default function ActivityReporting() {
   // room are only ever fetched on demand, by RoomActivities, once that
   // room's node is expanded (see its own comment above).
   const { data: summary, isLoading } = useQuery({
-    queryKey: ["civilworkdpr-activity-reporting", "summary", statusFilter, debouncedSearch],
+    queryKey: ["civilworkdpr-activity-reporting", "summary", statusFilter, debouncedSearch, projectId],
     queryFn: () =>
       getActivityScopeSummary({
         status: statusFilter !== "ALL" ? statusFilter : undefined,
         search: debouncedSearch || undefined,
+        projectId: projectId ? Number(projectId) : undefined,
       }),
     enabled: rights.canView,
     // Keep showing the previous tree while the next search is fetched instead
@@ -470,6 +473,12 @@ export default function ActivityReporting() {
   // narrow result opens itself; a broad one stays collapsed for the user to open.
   const MAX_AUTO_EXPAND_ROOMS = 6;
   const autoExpand = !!debouncedSearch && rooms.length <= MAX_AUTO_EXPAND_ROOMS;
+  const { data: projects = [] } = useQuery({
+    queryKey: ["civilworkdpr-scope-projects"],
+    queryFn: getScopeProjects,
+    enabled: rights.canView,
+    staleTime: 10 * 60 * 1000,
+  });
   const statusCounts = summary?.statusCounts ?? {};
   const total = summary?.total ?? 0;
 
@@ -494,6 +503,19 @@ export default function ActivityReporting() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3 px-3.5 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-muted/30">
               <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
+              {projects.length > 0 && (
+                <select
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  className="py-1.5 px-2.5 w-full sm:w-52 text-xs rounded-lg border border-border bg-background text-foreground outline-none focus:ring-2 focus:ring-cyan-500/30"
+                >
+                  <option value="">All projects</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name || `Project ${p.id}`}</option>
+                  ))}
+                </select>
+              )}
               <div className="relative w-full sm:w-auto">
                 <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
@@ -511,6 +533,7 @@ export default function ActivityReporting() {
                     <X size={12} />
                   </button>
                 )}
+              </div>
               </div>
             </div>
 
@@ -547,7 +570,7 @@ export default function ActivityReporting() {
                   ? "No activities have been assigned yet — click an activity chip in Work Allocation's Link Dependency chain to assign one."
                   : debouncedSearch
                     ? `No activities match "${debouncedSearch}".`
-                    : "No activities match this status."}
+                    : "No activities match these filters."}
               </div>
             ) : (
               <div className="p-2 sm:p-4">
