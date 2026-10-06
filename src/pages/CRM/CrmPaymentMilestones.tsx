@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -178,12 +178,6 @@ const CrmPaymentMilestones: React.FC = () => {
     queryFn: () => fetchBookings(pickerScope),
     staleTime: 5 * 60_000,
   });
-  // Open the first booking in scope by default (also after the company /
-  // project / search filter changes); the user can switch from the picker.
-  useEffect(() => {
-    const first = (bookings as any[])[0];
-    if (!selectedBookingId && first) setSp({ bookingId: String(first.Id) }, { replace: true });
-  }, [bookings, selectedBookingId, setSp]);
   const { data: milestoneData, isLoading, isError, error: milestoneError, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-milestones", selectedBookingId],
     queryFn: () => fetchMilestones(selectedBookingId),
