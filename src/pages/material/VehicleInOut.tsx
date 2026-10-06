@@ -1456,7 +1456,7 @@ export default function VehicleInOut() {
                           setQualityByItem({});
                           setBrandByItem({});
                         }}
-                        className={`${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
+                        className={`appearance-none ${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
                       >
                         <option value="">Select Company…</option>
                         {(companies as any[]).map((c: any) => (
@@ -1712,7 +1712,7 @@ export default function VehicleInOut() {
                         }}
                         disabled={!!form.poId}
                         title={form.poId ? "Supplier is set by the selected PO" : undefined}
-                        className={`${inpSel} ${form.poId ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`}
+                        className={`appearance-none ${inpSel} ${form.poId ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`}
                       >
                         <option value="">Select Supplier…</option>
                         {(suppliers as any[]).map((s: any) => (

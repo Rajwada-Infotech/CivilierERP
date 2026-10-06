@@ -872,7 +872,7 @@ const ChequeMaster: React.FC = () => {
                     <select
                       value={form.companyId}
                       onChange={(e) => handleCompanyChange(e.target.value)}
-                      className={`${sel} ${errors.companyId ? "border-destructive" : ""}`}
+                      className={`appearance-none ${sel} ${errors.companyId ? "border-destructive" : ""}`}
                     >
                       <option value="">Select Company...</option>
                       {companies.map((c) => (
@@ -911,7 +911,7 @@ const ChequeMaster: React.FC = () => {
                     <select
                       value={form.bankId}
                       onChange={(e) => handleBankChange(e.target.value)}
-                      className={`${sel} pl-8 ${errors.bankId ? "border-destructive" : ""}`}
+                      className={`appearance-none ${sel} pl-8 ${errors.bankId ? "border-destructive" : ""}`}
                     >
                       <option value="">Select Bank...</option>
                       {banksForCompany.map((b) => (

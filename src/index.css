@@ -2285,3 +2285,11 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 250, 252, 0.9)) !important;
     backdrop-filter: blur(20px);
 }
+
+/* One arrow only: when a native <select> sits beside a custom chevron icon, hide the browser's arrow. */
+:has(> select):has(> :is(.lucide-chevron-down, .lucide-chevrons-up-down, .lucide-chevron-up-down), > * > :is(.lucide-chevron-down, .lucide-chevrons-up-down)) > select:not([multiple]) {
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    padding-right: 2rem;
+}

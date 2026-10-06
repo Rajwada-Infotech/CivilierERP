@@ -1203,7 +1203,7 @@ export default function Issues() {
                       value={header.godownId}
                       onChange={(e) => handleGodownChange(e.target.value)}
                       disabled={!header.companyId || !header.projectId}
-                      className={`${selectCls} border-emerald-500/30 focus:ring-emerald-500/30 disabled:opacity-60 disabled:cursor-not-allowed`}
+                      className={`appearance-none ${selectCls} border-emerald-500/30 focus:ring-emerald-500/30 disabled:opacity-60 disabled:cursor-not-allowed`}
                     >
                       <option value="">
                         {!header.companyId || !header.projectId
