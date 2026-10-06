@@ -29,6 +29,23 @@ const projectGuard = (sqlText) => async (req, res, next, value) => {
   }
 };
 router.param("rungId", projectGuard(`SELECT dm.ProjectId ${RUNG_TO_PROJECT} WHERE dma.Id = @id`));
+// A retired chain (its room / unit removed, or a villa conversion undone) takes
+// no more work: allocating, reporting or approving a step on it would record
+// progress against something that no longer exists. Reading it stays allowed.
+router.param("rungId", async (req, res, next, value) => {
+  if (req.method === "GET") return next();
+  const id = parseInt(value, 10);
+  if (!Number.isFinite(id)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, id).query(`SELECT dm.IsActive, dm.Alias ${RUNG_TO_PROJECT} WHERE dma.Id = @id`);
+    if (r.recordset.length && !r.recordset[0].IsActive) {
+      return res.status(409).json({ error: `"${r.recordset[0].Alias}" has been retired — no more work can be recorded on it.` });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 const CHECKPOINT_TO_PROJECT = `
   FROM dbo.DependencyActivityCheckpoint cp
   JOIN dbo.DependencyActivityAssignment daa ON daa.Id = cp.AssignmentId
@@ -181,10 +198,14 @@ router.get(
     // Always the current attempt — a reworked rung can have older,
     // superseded assignment rows sitting alongside it (see migration 488),
     // and every list/tile/queue in the app should only ever see the live one.
+    // Retired chains take no more work, so they leave the work lists too —
+    // unless one specific chain is asked for, which still shows its history.
     const conds = ["daa.IsCurrent = 1"];
     if (Number.isFinite(dependencyMasterId)) {
       request.input("dependencyMasterId", sql.Int, dependencyMasterId);
       conds.push("dm.Id = @dependencyMasterId");
+    } else {
+      conds.push("dm.IsActive = 1");
     }
     if (roomIdIsNull) {
       conds.push("dm.RoomId IS NULL");
