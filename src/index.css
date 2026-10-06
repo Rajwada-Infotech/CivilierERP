@@ -1766,18 +1766,32 @@ button[role="combobox"]:focus {
    • the tumbled grain is one fixed overlay instead of per surface;
    • only top-level panels blur, with a lighter radius; nested cards,
      table cells and small elements don't add blurs of their own. */
+/* Water tint follows the active module (data-module on <body> carries its
+   --mod-from / --mod-via / --mod-to colours): Material glows green, Finance
+   indigo, CRM sky… softly faded. Home / no module: aqua water. */
+[data-theme="glass"] body {
+    --gt-a: #22d3ee;
+    --gt-b: #67e8f9;
+    --gt-c: #2dd4bf;
+}
+[data-theme="glass"] body[data-module] {
+    --gt-a: var(--mod-from);
+    --gt-b: var(--mod-via);
+    --gt-c: var(--mod-to);
+}
 [data-theme="glass"] body::before {
     content: "";
     position: fixed;
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background: radial-gradient(30rem 26rem at 12% 8%, rgba(34, 211, 238, 0.22), transparent 65%),
-        radial-gradient(34rem 28rem at 88% 12%, rgba(103, 232, 249, 0.20), transparent 65%),
-        radial-gradient(36rem 30rem at 70% 62%, rgba(45, 212, 191, 0.16), transparent 65%),
-        radial-gradient(30rem 26rem at 16% 80%, rgba(94, 234, 212, 0.16), transparent 65%),
-        radial-gradient(26rem 22rem at 46% 34%, rgba(125, 211, 252, 0.18), transparent 65%),
-        linear-gradient(160deg, #f4fafb 0%, #f0f7f8 50%, #f5fafa 100%);
+    background:
+        radial-gradient(30rem 26rem at 12% 8%, color-mix(in srgb, var(--gt-a) 24%, transparent), transparent 65%),
+        radial-gradient(34rem 28rem at 88% 12%, color-mix(in srgb, var(--gt-b) 20%, transparent), transparent 65%),
+        radial-gradient(36rem 30rem at 70% 62%, color-mix(in srgb, var(--gt-c) 18%, transparent), transparent 65%),
+        radial-gradient(30rem 26rem at 16% 80%, color-mix(in srgb, var(--gt-a) 16%, transparent), transparent 65%),
+        radial-gradient(26rem 22rem at 46% 34%, color-mix(in srgb, var(--gt-b) 16%, transparent), transparent 65%),
+        linear-gradient(160deg, #f5f9fa 0%, #f2f6f8 50%, #f6f9fa 100%);
 }
 [data-theme="glass"] body::after {
     content: "";
@@ -1818,4 +1832,14 @@ button[role="combobox"]:focus {
    page) was repainted constantly — too costly for a barely visible effect. */
 [data-theme="glass"] svg {
     filter: none !important;
+}
+
+/* Glass: sidebar hover / active highlight in the active module's colour
+   (instead of the neutral grey sidebar-accent). */
+[data-theme="glass"] [class*="hover:bg-sidebar-accent"]:hover,
+[data-theme="glass"] [class*="hover:bg-muted"]:is(aside *, nav *):hover {
+    background-color: color-mix(in srgb, var(--mod-from, #22d3ee) 14%, transparent) !important;
+}
+[data-theme="glass"] :is(.bg-sidebar-accent, [class*=" bg-sidebar-accent/"], [class^="bg-sidebar-accent/"]) {
+    background-color: color-mix(in srgb, var(--mod-from, #22d3ee) 18%, transparent) !important;
 }
