@@ -18,6 +18,7 @@ import {
   FileText,
   Wallet,
   Printer,
+  FileDown,
   X,
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -32,6 +33,7 @@ import type { ExpenseRecord } from "@/pages/material/ExpenseBooking/types";
 import { GLAccountPath } from "@/components/finance/GLAccountPath";
 import { getOAAdjustmentsForInvoice, reverseOAAdjustment, type OAInvoiceAdjustment } from "@/api/onAccountApi";
 import { toast } from "sonner";
+import { printInvoice, downloadInvoicePdf, type InvoiceFigures, type InvoiceItemRow } from "@/utils/invoiceDocument";
 import { RotateCcw } from "lucide-react";
 import { ArrowDownCircle } from "lucide-react";
 
@@ -450,6 +452,76 @@ export function ExpenseBookingPreviewModal({
     displayPayableAfterTds - (previewRecord.totalPaid ?? 0),
   );
 
+  // ── Print / Generate PDF ──────────────────────────────────────────────────
+  // Both render the shared letterhead document (invoiceDocument.ts). The
+  // amounts passed in are the very figures this modal displays above (GRN-
+  // linked bookings use the live GRN breakdown, the rest computeBreakdown), so
+  // the printed invoice can never disagree with the screen.
+  const buildInvoiceFigures = (): InvoiceFigures => {
+    const hasGrnItems = !!grnBreakdown && grnBreakdown.items.length > 0;
+    const directItems = (previewRecord.directItems ?? []).filter((it) => Number(it.amount) > 0);
+    const allocations = previewRecord.expenseHeadAllocations ?? [];
+    const basic = hasGrnItems ? grnBreakdown!.totals.totalBase : previewRecord.basicAmount;
+
+    const items: InvoiceItemRow[] = hasGrnItems
+      ? grnBreakdown!.items.map((it, i) => ({
+          name: it.itemName || `Item ${i + 1}`,
+          qty: fmtQty(it.receivedQty),
+          amount: Number(it.baseAmount) || 0,
+          sub: Number(it.gstAmount) > 0 ? `GST ${it.gstPercent}%  ·  ₹${fmt(it.gstAmount)}` : null,
+        }))
+      : directItems.length > 0
+        ? directItems.map((it) => ({
+            name: it.description || "Item",
+            qty: `${fmtQty(it.qty)}${it.uom ? ` ${it.uom}` : ""}`,
+            amount: Number(it.amount) || 0,
+            sub: `Rate ₹${fmt(it.rate)}`,
+          }))
+        : allocations.length > 0
+          ? allocations.map((a: any) => ({ name: a.label ?? "Expense Head", qty: "—", amount: Number(a.amount) || 0 }))
+          : [{ name: previewRecord.expenseHeadName || previewRecord.bookingName || "Booking", qty: "—", amount: previewRecord.basicAmount }];
+
+    const gst = hasGrnItems
+      ? [
+          ...(grnBreakdown!.totals.totalCGST > 0 ? [{ label: "CGST", amount: grnBreakdown!.totals.totalCGST }] : []),
+          ...(grnBreakdown!.totals.totalSGST > 0 ? [{ label: "SGST", amount: grnBreakdown!.totals.totalSGST }] : []),
+          ...(grnBreakdown!.totals.totalGST - grnBreakdown!.totals.totalCGST - grnBreakdown!.totals.totalSGST > 0.005
+            ? [{ label: "IGST", amount: grnBreakdown!.totals.totalGST - grnBreakdown!.totals.totalCGST - grnBreakdown!.totals.totalSGST }]
+            : []),
+        ]
+      : [
+          ...(cgstAmt > 0 ? [{ label: `CGST (${previewRecord.cgstRate}%)`, amount: cgstAmt }] : []),
+          ...(sgstAmt > 0 ? [{ label: `SGST (${previewRecord.sgstRate}%)`, amount: sgstAmt }] : []),
+          ...(igstAmt > 0 ? [{ label: `IGST (${previewRecord.igstRate}%)`, amount: igstAmt }] : []),
+        ];
+
+    return {
+      items,
+      basic,
+      gst,
+      net: displayNetAmount,
+      tds: displayTdsAmount,
+      tdsPercentage: previewRecord.tdsPercentage,
+      payable: displayPayableAfterTds,
+      paid: previewRecord.totalPaid ?? 0,
+      remaining: displayRemainingAmount,
+    };
+  };
+
+  const handlePrintInvoice = () => {
+    void printInvoice(previewRecord, buildInvoiceFigures());
+  };
+
+  const handleGenerateInvoicePdf = async () => {
+    const toastId = toast.loading("Generating PDF...");
+    try {
+      await downloadInvoicePdf(previewRecord, buildInvoiceFigures());
+      toast.success("PDF downloaded", { id: toastId });
+    } catch {
+      toast.error("Could not generate PDF", { id: toastId });
+    }
+  };
+
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 expense-preview-modal">
       <style>{`
@@ -479,10 +551,16 @@ export function ExpenseBookingPreviewModal({
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <button
-                onClick={() => window.print()}
+                onClick={handlePrintInvoice}
                 className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
               >
                 <Printer size={13} /><span className="hidden sm:inline">Print</span>
+              </button>
+              <button
+                onClick={handleGenerateInvoicePdf}
+                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+              >
+                <FileDown size={13} /><span className="hidden sm:inline">Generate PDF</span>
               </button>
               {canEdit && (
                 <button
