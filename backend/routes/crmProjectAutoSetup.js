@@ -2363,9 +2363,19 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
         }
       }
       const area = superBuiltUpArea ?? builtUpArea;
+      // A bare name (the plot's own, e.g. "P-100") is given the same
+      // SHORT/BLOCK/ prefix every other unit carries, so the villa and its DPR
+      // chains ("SW/A/P-100/Bedroom 1") read like the rest of the system.
+      let villaName = unitName;
+      if (!villaName.includes("/")) {
+        const proj = await getProject(tx, first.ProjectId);
+        const blk = (await tx.request().input("b", sql.Int, first.BlockId).query("SELECT BlockName FROM dbo.BlockMaster WHERE Id = @b")).recordset[0];
+        const short = proj ? resolveShortCode(proj) : "";
+        if (short && blk?.BlockName) villaName = `${short}/${String(blk.BlockName).trim()}/${unitName}`;
+      }
       const created = await tx.request()
         .input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId)
-        .input("name", sql.NVarChar(100), unitName).input("type", sql.NVarChar(50), resolvedType.unitType)
+        .input("name", sql.NVarChar(100), villaName).input("type", sql.NVarChar(50), resolvedType.unitType)
         .input("layoutTypeId", sql.Int, resolvedType.layoutTypeId)
         .input("kind", sql.NVarChar(20), unitKind)
         .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), villaRate)
@@ -2379,6 +2389,16 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
       await tx.request().input("uid", sql.Int, unitId)
         .query(`UPDATE dbo.PlotMaster SET ConvertedUnitId = @uid, ConvertedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
                 WHERE Id IN (${plotIds.join(",")})`);
+      // A plotted block has no floors, so its villas sit in the block's
+      // floorless row (FloorNo = -1) — what makes them show in Room Master and
+      // DPR pickers. Labelled with the asset kind's own name, e.g. "Villa".
+      await tx.request().input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId).input("kind", sql.NVarChar(20), unitKind).query(`
+        DECLARE @n INT = (SELECT COUNT(*) FROM dbo.UnitMaster WHERE BlockId = @bid AND IsActive = 1 AND FloorNo IS NULL);
+        IF EXISTS (SELECT 1 FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @bid AND FloorNo = -1 AND IsActive = 1)
+          UPDATE dbo.CrmProjectAutoSetupFloor SET UnitCount = @n, HasUnits = 1, UpdatedAt = SYSDATETIME() WHERE BlockId = @bid AND FloorNo = -1 AND IsActive = 1;
+        ELSE
+          INSERT INTO dbo.CrmProjectAutoSetupFloor (ProjectId, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated, IsActive, CreatedAt)
+          VALUES (@pid, @bid, -1, (SELECT TOP 1 Name FROM dbo.CrmConstructedAssetKind WHERE Code = @kind), @n, 1, 1, 1, SYSDATETIME());`);
       // DPR follows conversion: the villa's rooms get their work chains now.
       const dpr = await require("../services/autoDprChains").createChainsForUnit(tx, unitId, req.user?.email || req.user?.name || null);
       await tx.commit();
