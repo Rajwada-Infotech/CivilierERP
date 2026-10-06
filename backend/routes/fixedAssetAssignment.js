@@ -43,6 +43,7 @@ router.get("/fa-item-codes", requirePageRight("fixed-asset-assignment", "view"),
       LEFT JOIN dbo.enterprise co ON co.id = fa.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = fa.ProjectId
       WHERE fa.FAItemCode IS NOT NULL AND fa.AssetCode IS NOT NULL AND fa.Status <> 'Deleted'
+        AND fa.AssetStatus <> 'Transferred'   -- code retired by an Inter-Company Transfer
         AND NOT EXISTS (
           SELECT 1 FROM dbo.FixedAssetAssignment a WHERE a.AssetId = fa.AssetId
         )

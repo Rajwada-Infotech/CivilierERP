@@ -27,6 +27,9 @@ export interface InterCompanyTransferItemPayload {
   /** Set when this line came from a Material Request — the source
    *  MaterialRequestItems row (see SourceMRId on the transfer payload). */
   mrItemId?: number | null;
+  /** Fixed Asset items only: the FixedAssetTagging.TagId of every unit being
+   *  moved — one FA Item Code per unit, so its length must equal `qty`. */
+  faTagIds?: number[];
 }
 
 export interface InterCompanyTransferPayload {
@@ -230,4 +233,57 @@ export const deleteInterCompanyTransfer = async (
 ): Promise<{ message: string }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   return handleResponse(res);
+};
+
+
+// ── Fixed Asset items ─────────────────────────────────────────────────────────
+// A Fixed Asset unit is tracked individually (its own FA Item Code and
+// depreciation), so a transfer must name exactly which units move. On approval
+// the old codes become "Transferred" (no more depreciation / posting) and the
+// receiving company gets fresh FA Inventory entries with brand-new FA Codes.
+
+/** Which of these Item Master ids are Fixed Assets. */
+export const getFaItemIds = async (ids: string[]): Promise<string[]> => {
+  if (!ids.length) return [];
+  const res = await fetchWithAuth(`${BASE}/fa-items?ids=${encodeURIComponent(ids.join(","))}`);
+  return handleResponse<string[]>(res);
+};
+
+export interface TransferableFaCode {
+  TagId: number;
+  FAItemCode: string;
+  ItemId: string;
+  GodownId: number | null;
+  RecordAssetId: number | null;
+  RecordDocNo: string | null;
+  Custodian: string | null;
+  DepreciationType: string | null;
+  DepreciationRate: number | null;
+}
+
+/** Active FA Item Codes of the sending project that can still go on a transfer. */
+export const getTransferableFaCodes = async (projectId: number, itemId: string): Promise<TransferableFaCode[]> => {
+  const res = await fetchWithAuth(
+    `${BASE}/fa-codes?projectId=${projectId}&itemId=${encodeURIComponent(itemId)}`,
+  );
+  return handleResponse<TransferableFaCode[]>(res);
+};
+
+export interface IctFaCode {
+  ICTAssetId: number;
+  ICTItemId: number | null;
+  ItemId: string;
+  TagId: number;
+  /** The code that was moved (old). */
+  FAItemCode: string;
+  /** "Tagged" while the transfer is pending, "Transferred" once approved. */
+  TagStatus: string | null;
+  TransferredAt: string | null;
+  /** The fresh code it became in the receiving company (once approved). */
+  TransferredToCode: string | null;
+}
+
+export const getIctFaCodes = async (ictId: number): Promise<IctFaCode[]> => {
+  const res = await fetchWithAuth(`${BASE}/${ictId}/fa-codes`);
+  return handleResponse<IctFaCode[]>(res);
 };

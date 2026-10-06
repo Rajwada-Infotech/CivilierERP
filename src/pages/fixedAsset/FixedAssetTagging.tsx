@@ -40,6 +40,7 @@ function fmtDate(s: string | null | undefined) {
 const STATUS_COLORS: Record<string, string> = {
   Tagged:    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
   Cancelled: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  Transferred: "bg-slate-200 text-slate-700 dark:bg-slate-700/40 dark:text-slate-300",
 };
 
 const RECORD_COLORS: Record<string, string> = {
@@ -900,13 +901,22 @@ export default function FixedAssetTagging() {
                         <p className="font-medium truncate">{t.AssetName || "—"}</p>
                         <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{t.FAItemCode || "—"}</td>
+                      <td className="px-4 py-3 font-mono text-xs">
+                        <span className={t.Status === "Transferred" ? "text-muted-foreground line-through" : "text-yellow-600 dark:text-yellow-400"}>{t.FAItemCode || "—"}</span>
+                        {t.TransferredToCode && (
+                          <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 no-underline">→ {t.TransferredToCode}</p>
+                        )}
+                        {t.TransferredFromCode && (
+                          <p className="text-[0.625rem] text-teal-600 dark:text-teal-400">← {t.TransferredFromCode}</p>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {t.CompanyName || "—"}{t.ProjectName ? ` / ${t.ProjectName}` : ""}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[t.Status] ?? ""}`}>
-                          {t.Status}
+                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[t.Status] ?? ""}`}
+                          title={t.Status === "Transferred" ? "Not available — transferred to another company's project" : undefined}>
+                          {t.Status === "Transferred" ? "Transferred · Not Available" : t.Status}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -930,8 +940,8 @@ export default function FixedAssetTagging() {
                           {rights.canDelete && (
                             <button
                               onClick={() => setDeleteId(t.TagId)}
-                              disabled={hasRecord}
-                              title={hasRecord ? "Has a Fixed Asset Record — delete that first" : "Delete"}
+                              disabled={hasRecord || t.Status === "Transferred" || !!t.SourceICTId}
+                              title={t.Status === "Transferred" || t.SourceICTId ? "Moved by an Inter-Company Transfer — delete the transfer to undo it" : hasRecord ? "Has a Fixed Asset Record — delete that first" : "Delete"}
                               className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:cursor-not-allowed">
                               <Trash2 size={13} />
                             </button>
