@@ -49,6 +49,7 @@ import {
   type SalesSummaryData,
 } from "@/api/homeDashboardApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { PersonalizedWidgets } from "@/components/home/PersonalizedWidgets";
 import {
   ResponsiveContainer,
   BarChart,
@@ -1897,6 +1898,8 @@ export default function HomePage() {
           // fade+rise, StatCard's sparkline/counter) replays each time,
           // not just once on first mount.
           <div key={dataUpdatedAt || "initial"} className="space-y-4">
+            <PersonalizedWidgets access={access} />
+
             {/* ── Hero stat cards ── */}
             {heroKpis.length > 0 && (
               <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
