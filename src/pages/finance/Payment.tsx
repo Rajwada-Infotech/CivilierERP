@@ -1,5 +1,5 @@
 import React from "react";
-import { DM_SANS_FACE_CSS, printWhenFontsReady } from "@/utils/documentFont";
+import { printPayment, downloadPaymentPdf } from "@/utils/paymentDocument";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -62,6 +62,7 @@ import {
   Search,
   Eye,
   Printer,
+  FileDown,
   ArrowRight,
   RefreshCw,
   History,
@@ -441,261 +442,28 @@ const Payment: React.FC = () => {
   }, []);
 
 
-  // Print/PDF payment voucher
+  // Print / Generate PDF — both render the shared letterhead document
+  // (paymentDocument.ts -> letterheadDocument.ts), so the two always match.
   const handlePrintPayment = (
     rec: PaymentRecord,
     companyDetail: CompanyDetail | null,
     chain: ChainSummary | null = null,
   ) => {
-    const logoHtml = companyDetail?.logo
-      ? `<img src="${companyDetail.logo}" alt="Logo" style="height:60px;max-width:180px;object-fit:contain;" />`
-      : `<span style="font-size:18px;font-weight:800;color:#4f46e5;">${companyDetail?.name ?? rec.company ?? "—"}</span>`;
+    printPayment(rec, companyDetail, chain);
+  };
 
-    const companyAddress = [
-      companyDetail?.address,
-      companyDetail?.address_line2,
-      companyDetail?.city,
-      companyDetail?.state,
-      companyDetail?.pincode,
-    ]
-      .filter(Boolean)
-      .join(", ");
-
-    const statusColor: Record<string, string> = {
-      Draft: "#64748b",
-      Pending: "#d97706",
-      Approved: "#059669",
-      Rejected: "#dc2626",
-    };
-    const sColor = statusColor[rec.status] ?? "#64748b";
-
-    const modeColor: Record<string, string> = {
-      Cheque: "#4f46e5",
-      "Post-Dated Cheque": "#7c3aed",
-      NEFT: "#0891b2",
-      UPI: "#059669",
-      RTGS: "#d97706",
-      IMPS: "#ea580c",
-      Cash: "#16a34a",
-    };
-    const mColor = modeColor[rec.mode] ?? "#4f46e5";
-
-    const field = (label: string, value: string | null | undefined) =>
-      value
-        ? `<tr>
-            <td style="padding:7px 12px;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;width:160px;">${label}</td>
-            <td style="padding:7px 12px;font-size:13px;font-weight:500;color:#111827;">${value}</td>
-           </tr>`
-        : "";
-
-    const sectionTitle = (label: string) =>
-      `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#4f46e5;margin:20px 0 8px;">${label}</div>`;
-
-    const supplier = chain?.supplier ?? null;
-    const docChain = chain?.chain ?? null;
-
-    const supplierRows = supplier
-      ? [
-          field("Supplier Name", supplier.name),
-          field("Supplier Code", supplier.code),
-          field("Address", supplier.address),
-          field("Contact No.", supplier.phone),
-          field("Email", supplier.email),
-          field("GST No.", supplier.gst),
-          field("PAN No.", supplier.pan),
-        ].join("")
-      : "";
-
-    const docRefRows = [
-      field("Invoice No.", docChain?.vendorInvoiceNo || null),
-      field("Invoice Date", docChain?.vendorInvoiceDate || null),
-      field("Purchase Order Ref.", docChain?.poNo || null),
-      field("GRN Ref.", docChain?.grnNo || null),
-      field("Material Request Ref.", docChain?.mrDocNo || null),
-      field(
-        "Expense Booking Ref.",
-        docChain?.expenseDocNo || rec.expenseRef || null,
-      ),
-    ].join("");
-
-    const paymentRows = [
-      field("Payment Ref", rec.docNo || "—"),
-      field("Payment Purpose", rec.paymentName),
-      field("Paid To", rec.paidTo),
-      field("Date", rec.date || "—"),
-      field("Mode", rec.mode || "—"),
-      field("Bank Account", rec.bankName || null),
-      field(
-        "Reference / Txn ID",
-        rec.chequeNo
-          ? `Cheque #${rec.chequeNo}`
-          : rec.neftNumber ||
-              rec.upiTransactionId ||
-              rec.rtgsReference ||
-              rec.impsReference ||
-              rec.cardReference ||
-              null,
-      ),
-      field("Cheque Date", rec.chequeDate || null),
-      field("Cheque Lot", rec.chequeLotNumber || null),
-      field("Card Used", rec.cardDisplay || null),
-      field("Company", rec.company || "—"),
-      field("Project", rec.project || "—"),
-      field("Project Site", rec.projectSite || null),
-      field("Parent Doc", rec.parentDocNo || null),
-    ].join("");
-
-    const baseAmount = rec.baseAmount ?? null;
-    const cgstRate = rec.cgstRate ?? null;
-    const sgstRate = rec.sgstRate ?? null;
-    const igstRate = rec.igstRate ?? null;
-    const hasTaxDetails =
-      baseAmount != null && (cgstRate || sgstRate || igstRate);
-    const cgstAmt =
-      hasTaxDetails && cgstRate ? (baseAmount! * cgstRate) / 100 : 0;
-    const sgstAmt =
-      hasTaxDetails && sgstRate ? (baseAmount! * sgstRate) / 100 : 0;
-    const igstAmt =
-      hasTaxDetails && igstRate ? (baseAmount! * igstRate) / 100 : 0;
-
-    const taxRows = hasTaxDetails
-      ? [
-          field("Taxable Amount", formatINR(baseAmount!)),
-          cgstRate ? field(`CGST (${cgstRate}%)`, formatINR(cgstAmt)) : "",
-          sgstRate ? field(`SGST (${sgstRate}%)`, formatINR(sgstAmt)) : "",
-          igstRate ? field(`IGST (${igstRate}%)`, formatINR(igstAmt)) : "",
-        ].join("")
-      : "";
-
-    // Direct Expense Payment (migration 303) — paid straight against one
-    // or more Expense Heads, no Party involved.
-    const expenseHeadRows =
-      rec.expenseHeadAllocations && rec.expenseHeadAllocations.length > 0
-        ? rec.expenseHeadAllocations
-            .map((a) => field(a.label ?? "Expense Head", formatINR(a.amount)))
-            .join("")
-        : "";
-
-    // TDS (migration 304)
-    const tdsRows = rec.tdsId
-      ? [
-          field("TDS Nature", rec.tdsNature),
-          field("TDS Name", rec.tdsName),
-          rec.tdsPercentage != null ? field("TDS Rate", `${rec.tdsPercentage}%`) : "",
-          field("TDS Amount", formatINR(rec.tdsAmount || 0)),
-          field("Net Payable", formatINR(Math.max(0, (rec.amount ?? 0) - (rec.tdsAmount || 0)))),
-        ].join("")
-      : "";
-
-    const printedAt = new Date().toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-    const signBlock = (label: string) =>
-      `<div style="flex:1;text-align:center;">
-         <div style="border-top:1px solid #9ca3af;margin:36px 12px 6px;"></div>
-         <div style="font-size:11px;color:#6b7280;">${label}</div>
-       </div>`;
-
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Payment Receipt — ${rec.docNo || rec.paymentName}</title>
-  <style>
-    ${DM_SANS_FACE_CSS}
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; background: #fff; color: #111827; padding: 36px; font-size: 13px; }
-    table { border-collapse: collapse; width: 100%; }
-    tr:nth-child(even) { background: #f9fafb; }
-    @media print { body { padding: 16px; } button { display: none !important; } }
-  </style>
-</head>
-<body>
-  <!-- Company header -->
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:2px solid #4f46e5;margin-bottom:8px;">
-    <div>
-      ${logoHtml}
-      ${companyAddress ? `<div style="margin-top:6px;font-size:11px;color:#6b7280;max-width:340px;">${companyAddress}</div>` : ""}
-      <div style="font-size:11px;color:#6b7280;margin-top:2px;">
-        ${[companyDetail?.phone_number, companyDetail?.email].filter(Boolean).join("  ·  ")}
-      </div>
-      <div style="font-size:11px;color:#6b7280;margin-top:2px;">
-        ${[companyDetail?.gst_no ? `GSTIN: ${companyDetail.gst_no}` : null, companyDetail?.pan ? `PAN: ${companyDetail.pan}` : null].filter(Boolean).join("  ·  ")}
-      </div>
-    </div>
-    <div style="text-align:right;">
-      <div style="font-size:22px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PAYMENT RECEIPT</div>
-      <div style="font-size:14px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${rec.docNo || "—"}</div>
-      <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
-        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">
-          ${printStatusLabel(rec.status)}
-        </span>
-        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${mColor}18;color:${mColor};border:1px solid ${mColor}40;">
-          ${rec.mode}
-        </span>
-      </div>
-    </div>
-  </div>
-
-  <!-- Amount highlight -->
-  <div style="margin:18px 0 8px;padding:16px 20px;background:linear-gradient(135deg,#4f46e510,#7c3aed10);border-radius:12px;border:1px solid #4f46e520;display:flex;align-items:center;justify-content:space-between;">
-    <div>
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#6b7280;margin-bottom:2px;">Payment Amount</div>
-      <div style="font-size:28px;font-weight:800;color:#4f46e5;font-family:monospace;">${formatINR(rec.amount ?? 0)}</div>
-    </div>
-    <div style="text-align:right;">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#6b7280;margin-bottom:2px;">Payment Date</div>
-      <div style="font-size:16px;font-weight:700;color:#111827;">${rec.date || "—"}</div>
-    </div>
-  </div>
-
-  ${supplierRows ? sectionTitle("Supplier / Vendor Information") : ""}
-  ${supplierRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${supplierRows}</tbody></table></div>` : ""}
-
-  ${sectionTitle("Payment Information")}
-  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
-    <table><tbody>${paymentRows}${docRefRows}</tbody></table>
-  </div>
-
-  ${taxRows ? sectionTitle("Tax Details") : ""}
-  ${taxRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${taxRows}</tbody></table></div>` : ""}
-
-  ${expenseHeadRows ? sectionTitle(rec.expenseHeadAllocations!.length > 1 ? "Expense Heads" : "Expense Head") : ""}
-  ${expenseHeadRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${expenseHeadRows}</tbody></table></div>` : ""}
-
-  ${tdsRows ? sectionTitle("TDS Details") : ""}
-  ${tdsRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${tdsRows}</tbody></table></div>` : ""}
-
-  <!-- Signatories -->
-  <div style="display:flex;gap:8px;margin-top:48px;">
-    ${signBlock("Prepared By")}
-    ${signBlock("Approved By")}
-    ${signBlock("Authorized Signatory")}
-  </div>
-
-  <!-- Footer -->
-  <div style="margin-top:28px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:10px;color:#9ca3af;">
-    <span>This is a system-generated receipt and does not require a physical signature.</span>
-    <span>Printed: ${printedAt}</span>
-  </div>
-</body>
-</html>`;
-
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const blobUrl = URL.createObjectURL(blob);
-    const win = window.open(blobUrl, "_blank", "width=860,height=720");
-    if (!win) {
-      URL.revokeObjectURL(blobUrl);
-      toast.error("Pop-up blocked — please allow pop-ups.");
-      return;
+  const handleGeneratePdfPayment = async (
+    rec: PaymentRecord,
+    companyDetail: CompanyDetail | null,
+    chain: ChainSummary | null = null,
+  ) => {
+    const toastId = toast.loading("Generating PDF...");
+    try {
+      await downloadPaymentPdf(rec, companyDetail, chain);
+      toast.success("PDF downloaded", { id: toastId });
+    } catch {
+      toast.error("Could not generate PDF", { id: toastId });
     }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    printWhenFontsReady(win);
   };
   const [loadingExpense, setLoadingExpense] = useState(false);
   const [syncingBalances, setSyncingBalances] = useState(false);
@@ -6042,7 +5810,21 @@ const Payment: React.FC = () => {
                   }
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
                 >
-                  <Printer size={12} /> Print / PDF
+                  <Printer size={12} /> Print
+                </button>
+              )}
+              {rights.canPrint && (
+                <button
+                  onClick={() =>
+                    handleGeneratePdfPayment(
+                      viewingRec,
+                      viewingCompanyDetail,
+                      viewingChain,
+                    )
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                >
+                  <FileDown size={12} /> Generate PDF
                 </button>
               )}
               {rights.canEdit && (
