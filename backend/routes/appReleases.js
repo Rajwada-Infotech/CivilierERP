@@ -27,6 +27,7 @@ const APP_CATALOG = {
   "fixed-asset": { label: "Civilier Fixed Asset", packageName: "com.rajwadainfotech.civiliererpfixedasset", fileName: "CivilierERPFixedAsset.apk" },
   "follow-up": { label: "Civilier Follow-Up", packageName: "com.rajwadainfotech.civilierfollowup", fileName: "CivilierERPFollowUp.apk" },
   maintenance: { label: "Civilier Maintenance", packageName: "com.rajwadainfotech.civiliermaintenance", fileName: "CivilierERPMaintenance.apk" },
+  cwd: { label: "Civilier Work DPR", packageName: "com.rajwadainfotech.civiliercwd", fileName: "CivilierERPWorkDPR.apk" },
 };
 
 const upload = multer({

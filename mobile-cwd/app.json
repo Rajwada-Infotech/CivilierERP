@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "Civilier Work DPR",
+    "slug": "mobile-cwd",
+    "scheme": "civiliercwd",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rajwadainfotech.civiliercwd",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CivilierERP Work DPR uses the camera to attach site photos to activities.",
+        "NSPhotoLibraryUsageDescription": "CivilierERP Work DPR needs access to your photo library to attach existing photos to activities."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E1F4F8",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.rajwadainfotech.civiliercwd",
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      "expo-notifications",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "owner": "grenxnja"
+  }
+}
