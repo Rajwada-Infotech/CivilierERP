@@ -115,6 +115,7 @@ router.delete("/pending-batches/:assetId", requirePageRight("fixed-asset-tagging
       `);
       const b = r.recordset[0];
       if (!b) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+      if (b.SourceType === "ICT") { await tx.rollback(); return res.status(409).json({ error: "This stock arrived through an Inter-Company Transfer — delete or reverse that transfer instead." }); }
       if (b.SourceType !== "GRN") { await tx.rollback(); return res.status(409).json({ error: "This stock came from Inventory Import — reverse it from Inventory Import instead." }); }
       if (b.TagCount > 0 || b.AssetStatus !== "Pending") { await tx.rollback(); return res.status(409).json({ error: "This stock already has FA Item Codes — delete those tagging entries instead." }); }
       await tx.request().input("AssetId", sql.Int, assetId).query(`DELETE FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`);
@@ -237,6 +238,7 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
     const result = await request.query(`
       SELECT
         t.TagId, t.DocNo, t.DocDate, t.FinYear, t.TaggedQty, t.FAItemCode, t.Remarks, t.Status,
+        t.TransferredAt, t.TransferredToCode, t.TransferredFromCode, t.SourceICTId,
         t.CreatedBy, t.CreatedAt,
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
@@ -501,7 +503,7 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
     await tx.begin();
     try {
       const tagRes = await tx.request().input("TagId", sql.Int, id).query(`
-        SELECT t.TagId, t.AssetId, t.Status, fa.Quantity,
+        SELECT t.TagId, t.AssetId, t.Status, t.SourceICTId, fa.Quantity,
                ISNULL((SELECT SUM(t2.TaggedQty) FROM dbo.FixedAssetTagging t2 WITH (UPDLOCK, HOLDLOCK)
                        WHERE t2.AssetId = t.AssetId AND t2.Status = 'Tagged'), 0) AS TaggedSoFar
         FROM dbo.FixedAssetTagging t WITH (UPDLOCK, HOLDLOCK)
@@ -510,6 +512,15 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
       `);
       const tag = tagRes.recordset[0];
       if (!tag) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+
+      // Moved by an Inter-Company Transfer: the old code is retired history and
+      // the new one belongs to that transfer — only deleting the transfer undoes it.
+      if (tag.Status === "Transferred" || tag.SourceICTId) {
+        await tx.rollback();
+        return res.status(409).json({ error: tag.Status === "Transferred"
+          ? "This FA Item Code was transferred to another company — delete the Inter-Company Transfer to undo it."
+          : "This FA Item Code arrived through an Inter-Company Transfer — delete that transfer to undo it." });
+      }
 
       // A tag that's already been completed into a Fixed Asset Record
       // can't be removed out from under it — that would leave a live

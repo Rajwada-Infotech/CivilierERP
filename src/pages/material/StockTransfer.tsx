@@ -38,6 +38,9 @@ import {
   getInterCompanyTransfer,
   deleteInterCompanyTransfer,
   getInterCompanyTransferPosting,
+  getFaItemIds,
+  getTransferableFaCodes,
+  getIctFaCodes,
   type InterCompanyTransferSummary,
   type InterCompanyTransferPreview,
 } from "@/api/interCompanyTransferApi";
@@ -90,6 +93,11 @@ interface TItem {
   stockKnown?: boolean;
   /** True when this item's total requested qty (all lines) exceeds the stock. */
   stockShort?: boolean;
+  /** Inter-company + Fixed Asset item: the units moved are picked by FA Item Code
+   *  (one per unit), so the quantity follows the selection. Computed each render. */
+  isFa?: boolean;
+  /** FixedAssetTagging.TagId of each unit picked on this line. */
+  faTagIds?: number[];
 }
 
 interface AvailableItem {
@@ -243,6 +251,92 @@ function GodownSelect({
   );
 }
 
+// ─── FA Item Code picker ──────────────────────────────────────────────────────
+// A Fixed Asset unit has its own FA Item Code and depreciation, so an inter-
+// company transfer says exactly which units move. Selecting codes sets the
+// line's quantity. On approval the old codes become "Transferred" and the
+// receiving company gets fresh FA Inventory entries with brand-new FA Codes.
+function FaCodePicker({
+  projectId,
+  itemId,
+  selected,
+  takenElsewhere,
+  onChange,
+}: {
+  projectId: number | undefined;
+  itemId: string;
+  selected: number[];
+  takenElsewhere: Set<number>;
+  onChange: (ids: number[]) => void;
+}) {
+  const { data: codes = [], isLoading, isError } = useQuery({
+    queryKey: ["ict-fa-codes", projectId, itemId],
+    queryFn: () => getTransferableFaCodes(projectId!, itemId),
+    enabled: !!projectId && !!itemId,
+    staleTime: 15_000,
+  });
+
+  const toggle = (id: number) =>
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+
+  return (
+    <div className="ml-10 mr-3 -mt-1 mb-1 rounded-xl border border-dashed border-teal-500/40 bg-teal-500/5 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <p className="text-[0.625rem] font-semibold uppercase tracking-wider text-teal-700 dark:text-teal-400">
+          Fixed Asset — select the FA Item Code of each unit being transferred
+        </p>
+        <span
+          className={`text-[0.625rem] font-semibold px-2 py-0.5 rounded-full ${
+            selected.length > 0 ? "bg-teal-500/15 text-teal-700 dark:text-teal-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+          }`}
+        >
+          {selected.length} selected
+        </span>
+      </div>
+      {!projectId ? (
+        <p className="text-[0.6875rem] text-muted-foreground">Pick the source godown first.</p>
+      ) : isLoading ? (
+        <p className="text-[0.6875rem] text-muted-foreground">Loading FA Item Codes…</p>
+      ) : isError ? (
+        <p className="text-[0.6875rem] text-red-500">Couldn't load the FA Item Codes.</p>
+      ) : codes.length === 0 ? (
+        <p className="text-[0.6875rem] text-amber-700 dark:text-amber-400">
+          No active FA Item Codes for this item in the sending project — tag the stock in FA Inventory first, or the codes are already on another transfer.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {codes.map((c) => {
+            const on = selected.includes(c.TagId);
+            const blocked = !on && takenElsewhere.has(c.TagId);
+            return (
+              <button
+                key={c.TagId}
+                type="button"
+                disabled={blocked}
+                onClick={() => toggle(c.TagId)}
+                title={[
+                  c.RecordDocNo ? `Fixed Asset Record ${c.RecordDocNo}` : "No Fixed Asset Record yet",
+                  c.Custodian ? `Held by ${c.Custodian}` : "",
+                  blocked ? "Selected on another line" : "",
+                ].filter(Boolean).join(" · ")}
+                className={`px-2 py-1 rounded-lg border text-[0.6875rem] font-mono transition-colors ${
+                  on
+                    ? "border-teal-500 bg-teal-500/20 text-teal-800 dark:text-teal-200 font-semibold"
+                    : blocked
+                      ? "border-border bg-muted/40 text-muted-foreground/50 cursor-not-allowed"
+                      : "border-border bg-background text-foreground hover:border-teal-500/60"
+                }`}
+              >
+                {on ? "✓ " : ""}{c.FAItemCode}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Item Search Row ──────────────────────────────────────────────────────────
 function ItemSearchRow({
   item,
@@ -311,6 +405,7 @@ function ItemSearchRow({
       itemName: a.itemName,
       uom: a.uom,
       availableQty: a.available,
+      faTagIds: [],
     });
     setSearch(a.itemName);
     setOpen(false);
@@ -436,7 +531,9 @@ function ItemSearchRow({
           step="any"
           value={item.qty}
           onChange={(e) => onUpdate(idx, { qty: e.target.value })}
-          placeholder="Qty"
+          placeholder={item.isFa ? "Pick codes ↓" : "Qty"}
+          readOnly={!!item.isFa}
+          title={item.isFa ? "Quantity follows the FA Item Codes selected below" : undefined}
           disabled={!item.itemId}
           className={`w-full px-2 py-2 rounded-lg border text-xs text-foreground bg-background outline-none disabled:opacity-50 ${
             overLimit || overMrPending ? "border-red-400" : "border-border"
@@ -780,6 +877,12 @@ function ICTPreviewModal({
     retry: 1,
   });
 
+  const { data: faCodes = [] } = useQuery({
+    queryKey: ["inter-company-transfer-fa-codes", ictId, detail?.Status],
+    queryFn: () => getIctFaCodes(ictId),
+    enabled: !!detail,
+  });
+
   const [tab, setTab] = useState<"details" | "posting">("details");
   const { data: posting, isLoading: postingLoading } = useQuery({
     queryKey: ["inter-company-transfer-posting", ictId],
@@ -914,6 +1017,31 @@ function ICTPreviewModal({
                 </table>
               </div>
             </div>
+
+            {faCodes.length > 0 && (
+              <div className="px-5 pb-4">
+                <p className="text-xs font-semibold text-muted-foreground mb-1.5">
+                  Fixed Asset codes
+                </p>
+                <div className="rounded-lg border border-border overflow-hidden text-xs">
+                  {faCodes.map((c) => (
+                    <div key={c.ICTAssetId} className="flex items-center justify-between gap-3 px-3 py-1.5 border-b border-border/60 last:border-0">
+                      <span className="font-mono text-muted-foreground">{c.FAItemCode}</span>
+                      {c.TransferredToCode ? (
+                        <span className="font-mono text-teal-700 dark:text-teal-300">→ {c.TransferredToCode}</span>
+                      ) : c.TagStatus === "Transferred" ? (
+                        <span className="text-amber-600 dark:text-amber-400">Transferred — awaiting new code</span>
+                      ) : (
+                        <span className="text-muted-foreground/70 italic">reserved — moves on approval</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[0.625rem] text-muted-foreground/80 mt-1">
+                  On approval the old code becomes Not Available / Transferred (no further depreciation or posting); the receiving company gets a fresh entry with a new FA Code and sets up its own depreciation.
+                </p>
+              </div>
+            )}
 
             {DOC_LINKS.filter((d) => d.id).length > 0 ? (
               <div className="px-5 pb-4">
@@ -1709,8 +1837,24 @@ export default function StockTransfer() {
     return m;
   }, [fromStockData]);
   const stockKnown = !!fromGodownId && !!fromStockData && !isLoadingStock;
+
+  // Inter-company only: which of the picked items are Fixed Assets (they need
+  // their FA Item Codes chosen instead of just a quantity).
+  const pickedItemIds = useMemo(
+    () => [...new Set(items.map((it) => it.itemId).filter(Boolean))].sort(),
+    [items],
+  );
+  const { data: faItemIdList = [] } = useQuery({
+    queryKey: ["ict-fa-items", pickedItemIds.join(",")],
+    queryFn: () => getFaItemIds(pickedItemIds),
+    enabled: transferMode === "inter" && pickedItemIds.length > 0,
+    staleTime: 60_000,
+  });
+  const faItemSet = useMemo(() => new Set(faItemIdList.map((x) => x.toLowerCase())), [faItemIdList]);
+  const isFaLine = (it: TItem) => transferMode === "inter" && !!it.itemId && faItemSet.has(it.itemId.toLowerCase());
+
   const liveItems: TItem[] = useMemo(() => {
-    if (!stockKnown) return items;
+    if (!stockKnown) return items.map((it) => ({ ...it, isFa: isFaLine(it) }));
     const demand = new Map<string, number>();
     for (const it of items) {
       if (!it.itemId) continue;
@@ -1721,9 +1865,13 @@ export default function StockTransfer() {
       if (!it.itemId) return it;
       const k = it.itemId.toLowerCase();
       const avail = stockByItem.get(k) ?? 0;
-      return { ...it, availableQty: avail, stockKnown: true, stockShort: (demand.get(k) ?? 0) > avail + 0.0001 && (parseFloat(it.qty) || 0) > 0 };
+      return { ...it, isFa: isFaLine(it), availableQty: avail, stockKnown: true, stockShort: (demand.get(k) ?? 0) > avail + 0.0001 && (parseFloat(it.qty) || 0) > 0 };
     });
-  }, [items, stockKnown, stockByItem]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, stockKnown, stockByItem, faItemSet, transferMode]);
+
+  // A Fixed Asset line must name exactly one FA Item Code per unit.
+  const faLinesIncomplete = liveItems.some((it) => it.isFa && (it.faTagIds?.length ?? 0) === 0);
   const shortLines = liveItems.filter((it) => it.stockShort);
   const hasInsufficientStock = shortLines.length > 0;
 
@@ -1742,6 +1890,7 @@ export default function StockTransfer() {
     !!toGodownId &&
     (transferMode === "inter" || fromGodownId !== toGodownId) &&
     items.some((it) => it.itemId && parseFloat(it.qty) > 0) &&
+    !faLinesIncomplete &&
     !hasOverLimit &&
     !hasOverMrPending &&
     !(fromGodownId && isLoadingStock) &&
@@ -1759,6 +1908,7 @@ export default function StockTransfer() {
         uom: it.uom,
         remarks: it.remarks,
         mrItemId: it.mrItemId ?? null,
+        faTagIds: it.faTagIds ?? [],
       }));
 
     if (transferMode === "inter") {
@@ -1791,6 +1941,7 @@ export default function StockTransfer() {
             qty: it.qty,
             mrItemId: it.mrItemId ?? undefined,
             ...(Number.isFinite(manual) && manual > 0 ? { manualRate: manual } : {}),
+            ...(faItemSet.has(it.itemId.toLowerCase()) ? { faTagIds: it.faTagIds ?? [] } : {}),
           };
         }),
       });
@@ -2401,15 +2552,29 @@ export default function StockTransfer() {
                   </div>
 
                   {liveItems.map((it, idx) => (
-                    <ItemSearchRow
-                      key={idx}
-                      item={it}
-                      idx={idx}
-                      onUpdate={updateItem}
-                      onRemove={removeItem}
-                      availableItems={availableItems}
-                      isLoadingStock={isLoadingStock}
-                    />
+                    <React.Fragment key={idx}>
+                      <ItemSearchRow
+                        item={it}
+                        idx={idx}
+                        onUpdate={updateItem}
+                        onRemove={removeItem}
+                        availableItems={availableItems}
+                        isLoadingStock={isLoadingStock}
+                      />
+                      {it.isFa && (
+                        <FaCodePicker
+                          projectId={fromGodown?.ProjectID ?? undefined}
+                          itemId={it.itemId}
+                          selected={it.faTagIds ?? []}
+                          takenElsewhere={
+                            new Set(
+                              liveItems.flatMap((o, oi) => (oi !== idx ? o.faTagIds ?? [] : [])),
+                            )
+                          }
+                          onChange={(ids) => updateItem(idx, { faTagIds: ids, qty: ids.length ? String(ids.length) : "" })}
+                        />
+                      )}
+                    </React.Fragment>
                   ))}
                   </div>{/* min-w */}
                   </div>{/* overflow-x-auto */}

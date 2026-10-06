@@ -22,7 +22,10 @@ export interface FixedAssetListItem {
   Custodian: string | null;
   CustodianUserId: number | null;
   DepreciationRate: number | null;
-  AssetStatus: "Pending" | "Active" | "Sold" | "Scrapped" | "Under Maintenance";
+  AssetStatus: "Pending" | "Active" | "Sold" | "Scrapped" | "Under Maintenance" | "Transferred";
+  /** Set once the asset left this company through an Inter-Company Transfer —
+   *  depreciation stops from this month and the record is history only. */
+  TransferredAt?: string | null;
   SellingPrice: number | null;
   RepairType: string | null;   // SAC code (dbo.HSN.HCode where HIsSAC = 1)
   Status: string;

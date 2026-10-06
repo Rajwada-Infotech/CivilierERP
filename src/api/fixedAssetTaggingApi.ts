@@ -19,7 +19,14 @@ export interface TaggingListItem {
   TaggedQty: number;
   FAItemCode: string | null;
   Remarks: string | null;
-  Status: "Tagged" | "Cancelled";
+  /** "Transferred" = retired by an Inter-Company Transfer (Not Available). */
+  Status: "Tagged" | "Cancelled" | "Transferred";
+  /** Sending side: when the code was retired and the new code it became. */
+  TransferredAt?: string | null;
+  TransferredToCode?: string | null;
+  /** Receiving side: the old code this fresh one replaced. */
+  TransferredFromCode?: string | null;
+  SourceICTId?: number | null;
   CreatedBy: string | null;
   CreatedAt: string;
   CompanyId: number | null;
