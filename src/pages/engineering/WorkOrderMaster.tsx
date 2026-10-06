@@ -372,7 +372,7 @@ const EMPTY_GROUP = (): ActivityGroup => ({
 // activity Area. ratePerUnit / consumptionRatio stay the stored per-unit values.
 
 /** Whole-activity labour amount. */
-const actLabour = (a: Activity): number => a.totalRate ?? actLabour(a);
+const actLabour = (a: Activity): number => a.totalRate ?? a.ratePerUnit * a.area;
 /** Whole-activity quantity of one material. */
 const matQty = (m: MaterialItem, a: Activity): number =>
   m.totalQty ?? m.consumptionRatio * a.area;
