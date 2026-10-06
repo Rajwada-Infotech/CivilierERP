@@ -22,12 +22,19 @@ async function templatesFor(scopeProjectId) {
   if (hit && Date.now() - hit.at < TTL_MS) return hit.map;
   const req = getPool().request();
   if (scopeProjectId != null) req.input("p", sql.Int, scopeProjectId);
+  // READPAST: this runs on its own connection while the caller's transaction
+  // (a plot conversion, a room re-sync) holds locks on the rooms it just
+  // inserted. On a large table SQL Server scans RoomMaster rather than
+  // seeking it, reaches those locked rows and waits on the very transaction
+  // that is waiting for this query — the conversion then hangs until it times
+  // out. Skipping locked rows is safe: they are brand-new rooms with no chain,
+  // so they can never be a template.
   const rows = (await req.query(`
     SELECT d.Id, d.WorkType, r.RoomCategoryId,
            STRING_AGG(CAST(a.ActivityId AS NVARCHAR(20)) + ':' + ISNULL(a.WorkType, ''), ',') WITHIN GROUP (ORDER BY a.SequenceNo) AS Sig
-    FROM dbo.DependencyMaster d
-    JOIN dbo.RoomMaster r ON r.Id = d.RoomId
-    JOIN dbo.DependencyMasterActivity a ON a.DependencyMasterId = d.Id
+    FROM dbo.DependencyMaster d WITH (READPAST)
+    JOIN dbo.RoomMaster r WITH (READPAST) ON r.Id = d.RoomId
+    JOIN dbo.DependencyMasterActivity a WITH (READPAST) ON a.DependencyMasterId = d.Id
     WHERE d.IsActive = 1 AND r.RoomCategoryId IS NOT NULL ${scopeProjectId != null ? "AND d.ProjectId = @p" : ""}
     GROUP BY d.Id, d.WorkType, r.RoomCategoryId`)).recordset;
   const byCat = new Map();
