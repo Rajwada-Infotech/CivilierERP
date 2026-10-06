@@ -269,7 +269,7 @@ function PartyInvoiceRenderer({
             <select
               value={g.partyType}
               onChange={(e) => onChange({ ...EMPTY_PARTY_INVOICE_GROUP, partyType: e.target.value })}
-              className={`${selectCls} ${error && !g.partyType ? "border-destructive" : ""}`}
+              className={`appearance-none ${selectCls} ${error && !g.partyType ? "border-destructive" : ""}`}
             >
               <option value="">Select party type…</option>
               {PARTY_TYPES.map((p) => (
@@ -329,7 +329,7 @@ function PartyInvoiceRenderer({
               });
               onInvoiceResolved(opt);
             }}
-            className={`${selectCls} ${error && g.partyId && !g.billId ? "border-destructive" : ""}`}
+            className={`appearance-none ${selectCls} ${error && g.partyId && !g.billId ? "border-destructive" : ""}`}
           >
             <option value="">{loadingInvoices ? "Loading…" : "Select invoice…"}</option>
             {invoiceOptions.map((o) => (

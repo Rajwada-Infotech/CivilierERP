@@ -4005,7 +4005,7 @@ const PurchaseOrderMaster: React.FC = () => {
                         setField("companyId", e.target.value);
                         setField("projectId", "");
                       }}
-                      className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
+                      className={`appearance-none ${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
                     >
                       <option value="">— Select Company —</option>
                       {companies.map((c) => (
@@ -4040,7 +4040,7 @@ const PurchaseOrderMaster: React.FC = () => {
                     <select
                       value={form.projectId}
                       onChange={(e) => setField("projectId", e.target.value)}
-                      className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
+                      className={`appearance-none ${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
                     >
                       <option value="">— Select Project —</option>
                       {filteredFormProjects.map((p) => (

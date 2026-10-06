@@ -2101,7 +2101,7 @@ export default function GRN() {
                         value={formData.poId}
                         onChange={(e) => handlePOSelect(e.target.value)}
                         disabled={!!editingId || loadingPO}
-                        className={`${inpSel} ${!!editingId || loadingPO ? "opacity-60 cursor-not-allowed" : ""}`}
+                        className={`appearance-none ${inpSel} ${!!editingId || loadingPO ? "opacity-60 cursor-not-allowed" : ""}`}
                       >
                         <option value="">
                           {loadingPO
@@ -2155,7 +2155,7 @@ export default function GRN() {
                             loadingVehicleInOuts ||
                             formData.grnSourceMode === "remaining"
                           }
-                          className={`${inpSel} ${!!editingId || loadingPO || loadingVehicleInOuts || formData.grnSourceMode === "remaining" ? "opacity-60 cursor-not-allowed" : ""}`}
+                          className={`appearance-none ${inpSel} ${!!editingId || loadingPO || loadingVehicleInOuts || formData.grnSourceMode === "remaining" ? "opacity-60 cursor-not-allowed" : ""}`}
                         >
                           <option value="">
                             {loadingVehicleInOuts
