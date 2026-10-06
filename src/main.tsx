@@ -178,6 +178,9 @@ const isShortValue = (t: string) =>
 // labelled, actions in the footer). DataTable has its own cards already.
 function markCardTables() {
   document.querySelectorAll<HTMLTableElement>("main table, [role=dialog] table").forEach((table) => {
+    // A calendar's day grid is a table too (role="grid"), and a date popup is itself role="dialog" —
+    // turning its weeks into cards is what squashed the calendar into narrow boxes on phones.
+    if (table.getAttribute("role") === "grid") { table.classList.remove("auto-cards"); return; }
     if (!table.tHead || table.closest(".md\\:block")) { table.classList.remove("auto-cards"); return; }
     const { placed, ncols } = placeCells(table);
     if (ncols < 3) { table.classList.remove("auto-cards"); return; }
@@ -202,6 +205,7 @@ function markCardTables() {
 function markNowrapCells() {
   document.querySelectorAll<HTMLTableCellElement>("main table td, [role=dialog] table td").forEach((td) => {
     if (td.hasAttribute("colspan")) return;
+    if (td.closest('table[role="grid"]')) return; // calendar day cells
     const candidates: HTMLElement[] = [td, ...Array.from(td.querySelectorAll<HTMLElement>("*"))];
     candidates.forEach((el) => {
       // Only elements whose own text (direct text nodes) is the value.

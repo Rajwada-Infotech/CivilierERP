@@ -1,4 +1,5 @@
 import React from "react";
+import { DM_SANS_FACE_CSS, printWhenFontsReady } from "@/utils/documentFont";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -606,8 +607,9 @@ const Payment: React.FC = () => {
   <meta charset="utf-8" />
   <title>Payment Receipt — ${rec.docNo || rec.paymentName}</title>
   <style>
+    ${DM_SANS_FACE_CSS}
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #111827; padding: 36px; font-size: 13px; }
+    body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; background: #fff; color: #111827; padding: 36px; font-size: 13px; }
     table { border-collapse: collapse; width: 100%; }
     tr:nth-child(even) { background: #f9fafb; }
     @media print { body { padding: 16px; } button { display: none !important; } }
@@ -693,10 +695,7 @@ const Payment: React.FC = () => {
       return;
     }
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-    win.onload = () => {
-      win.focus();
-      win.print();
-    };
+    printWhenFontsReady(win);
   };
   const [loadingExpense, setLoadingExpense] = useState(false);
   const [syncingBalances, setSyncingBalances] = useState(false);

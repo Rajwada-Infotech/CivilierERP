@@ -9,6 +9,7 @@ import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
 import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
+import { ALL_MODULES, hexToHsl } from "./moduleDefs";
 import {
   Settings,
   ChevronDown,
@@ -81,37 +82,14 @@ const Dropdown = ({
 
 // ─── Module color helpers ──────────────────────────────────────────────────────
 
-// RGB triplets for dynamic glow (matches ModuleStrip ringRgb values)
-const MODULE_GLOW_RGB: Record<string, string> = {
-  finance: "99,102,241",
-  material: "16,185,129",
-  "fixed-asset": "234,179,8",
-  followup: "129,140,248",
-  engineering: "249,115,22",
-  ticket: "236,72,153",
-  sales: "168,85,247",
-  records: "225,29,72",
-  civilworkdpr: "8,145,178",
-  admin: "59,130,246",
-  crm: "14,165,233",
-};
-
-// HSL values derived from MODULE_HEADER hex colors in AppSidebar for consistency
-const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
-  finance: { h: 239, s: 84, l: 67 }, // #6366f1 indigo
-  material: { h: 160, s: 84, l: 39 }, // #10b981 emerald
-  "fixed-asset": { h: 45, s: 93, l: 47 }, // #eab308 yellow
-  followup: { h: 174, s: 82, l: 31 }, // #0d9488 teal
-  engineering: { h: 25, s: 95, l: 53 }, // #f97316 orange
-  ticket: { h: 330, s: 81, l: 60 }, // #ec4899 pink
-  sales: { h: 271, s: 91, l: 65 }, // #a855f7 purple
-  records: { h: 347, s: 77, l: 50 }, // #e11d48 rose
-  civilworkdpr: { h: 192, s: 91, l: 36 }, // #0891b2 cyan/teal
-  admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
-  crm: { h: 199, s: 89, l: 48 }, // #0ea5e9 sky
-  maintenance: { h: 85, s: 85, l: 35 }, // #65a30d lime
-  "hr-payroll": { h: 45, s: 93, l: 47 }, // #eab308 yellow
-};
+// Glow RGB and HSL per module, derived from the one shared module list (moduleDefs.tsx) so the top
+// bar, the module strip and the mobile nav can never disagree about a module's colour.
+const MODULE_GLOW_RGB: Record<string, string> = Object.fromEntries(
+  ALL_MODULES.map((m) => [m.id, m.ringRgb]),
+);
+const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = Object.fromEntries(
+  ALL_MODULES.map((m) => [m.id, hexToHsl(m.color)]),
+);
 
 function moduleColorVars(id: string): React.CSSProperties {
   const c = MODULE_COLORS[id] ?? MODULE_COLORS.finance;
