@@ -682,8 +682,10 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     }
     try {
       await require("../services/villaLand").assertVillaBuyerOwnsLand(pool, [newUnitId], ctx.CustomerId);
+      await require("../services/crmGst").assertCommercialGstReady(pool, [newUnitId]);
     } catch (e) {
       if (e.status) return res.status(e.status).json({ error: e.message });
+      if (e instanceof require("../services/crmGst").GstSetupError) return res.status(400).json({ error: e.message });
       throw e;
     }
     // Priced from the new unit's saleable area — without one the booking

@@ -46,6 +46,18 @@ class CrmCreationError extends Error {
   }
 }
 
+// A commercial unit can't be applied for or booked until its GST rule exists
+// (services/crmGst.js assertCommercialGstReady); surfaced as a creation error.
+async function assertCommercialGst(pool, unitIds) {
+  const { assertCommercialGstReady, GstSetupError } = require("./crmGst");
+  try {
+    await assertCommercialGstReady(pool, unitIds);
+  } catch (e) {
+    if (e instanceof GstSetupError) throw new CrmCreationError(e.message, 400);
+    throw e;
+  }
+}
+
 async function assertConnectedPlotGroup(pool, plotIds) {
   if (plotIds.length < 2) return;
   const pairs = await pool.request().query(`
@@ -309,7 +321,10 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   const rawAppPlotIds = Array.isArray(b.PreferredPlotIds) ? b.PreferredPlotIds.map(Number).filter(Number.isInteger) : [];
   const rawAppUnitIds = Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0 ? b.PreferredUnitIds : (hasValue(b.PreferredUnitId) ? [b.PreferredUnitId] : []);
   const preferredUnitId = rawAppUnitIds.length > 0 ? rawAppUnitIds[0] : null;
-  if (rawAppUnitIds.length > 0) await assertVillaBuyer(pool, rawAppUnitIds, customerId);
+  if (rawAppUnitIds.length > 0) {
+    await assertVillaBuyer(pool, rawAppUnitIds, customerId);
+    await assertCommercialGst(pool, rawAppUnitIds);
+  }
   let unitName = b.InterestedUnit || null;
   if (rawAppPlotIds.length > 0) {
     const plots = await validatePlotSelection(pool, rawAppPlotIds, { projectId: b.ProjectId });
@@ -832,6 +847,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     await validatePlotSelection(pool, unitIds, { applicationId: parseInt(b.ApplicationId) });
   } else {
     await assertVillaBuyer(pool, unitIds, appRow.recordset[0].CustomerId);
+    await assertCommercialGst(pool, unitIds);
   }
 
   // Fetch all selected units
