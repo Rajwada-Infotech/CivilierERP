@@ -174,6 +174,7 @@ const syncBoqActivities = async (
       .input("ActivityId", sqlRef.NVarChar(100), ac.activityId || null)
       .input("ActivityName", sqlRef.NVarChar(255), activityName)
       .input("ActivityCode", sqlRef.NVarChar(50), ac.activityCode || null)
+      .input("Area", sqlRef.Decimal(18, 4), ac.area === "" || ac.area == null ? null : parseFloat(ac.area) || 0)
       .input("Description", sqlRef.NVarChar(sqlRef.MAX), ac.description || null)
       .input("Quantity", sqlRef.Decimal(18, 4), qty)
       .input("UomId", sqlRef.Int, uomId)
@@ -183,10 +184,10 @@ const syncBoqActivities = async (
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
       .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqActivities
-          (BoqID, ActivityId, ActivityName, ActivityCode, Description,
+          (BoqID, ActivityId, ActivityName, ActivityCode, Area, Description,
            Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
         VALUES
-          (@BoqID, @ActivityId, @ActivityName, @ActivityCode, @Description,
+          (@BoqID, @ActivityId, @ActivityName, @ActivityCode, @Area, @Description,
            @Quantity, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
       `);
   }

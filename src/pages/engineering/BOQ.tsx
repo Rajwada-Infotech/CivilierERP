@@ -71,6 +71,8 @@ interface BoqItem {
 interface BoqActivity {
   Id?: number;
   _key: string;
+  /** Total area of the activity (optional) — with Qty it is the basis for per-unit figures. */
+  area: string;
   activityId: string;
   activityName: string;
   activityCode: string;
@@ -184,6 +186,19 @@ const fmtDate = (d?: string) =>
 const calcAmount = (qty: string, rate: string) =>
   (parseFloat(qty) || 0) * (parseFloat(rate) || 0);
 
+/**
+ * What an activity's per-unit figures are divided by: its Total Area when one is
+ * entered, otherwise its Total Quantity.
+ */
+const activityBasis = (a?: Pick<BoqActivity, "area" | "quantity">) => {
+  const area = parseFloat(a?.area ?? "") || 0;
+  if (area > 0) return { value: area, kind: "area" as const };
+  return { value: parseFloat(a?.quantity ?? "") || 0, kind: "qty" as const };
+};
+
+const fmtQty = (n: number) =>
+  n.toLocaleString("en-IN", { maximumFractionDigits: 4 });
+
 const blankItem = (): BoqItem => ({
   _key: uid(),
   activityId: "",
@@ -201,6 +216,7 @@ const blankItem = (): BoqItem => ({
 
 const blankActivity = (): BoqActivity => ({
   _key: uid(),
+  area: "",
   activityId: "",
   activityName: "",
   activityCode: "",
@@ -231,6 +247,7 @@ const rowToItem = (r: any): BoqItem => ({
 const rowToActivity = (r: any): BoqActivity => ({
   Id: r.Id,
   _key: uid(),
+  area: r.Area != null ? String(r.Area) : "",
   activityId: r.ActivityId ?? "",
   activityName: r.ActivityName ?? "",
   activityCode: r.ActivityCode ?? "",
@@ -276,6 +293,7 @@ const buildPayload = (
     };
   }),
   BoqActivities: activities.map((ac) => ({
+    area: ac.area,
     activityId: ac.activityId,
     activityName: ac.activityName,
     activityCode: ac.activityCode,
@@ -391,6 +409,9 @@ const LineEditor: React.FC<LineEditorProps> = ({
     0,
   );
   const grandTotal = itemsTotal + activitiesTotal;
+  // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
+  // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
+  const colCount = readOnly ? 12 : 13;
 
   return (
     <div
@@ -497,10 +518,12 @@ const LineEditor: React.FC<LineEditorProps> = ({
             <col style={{ width: 80 }} />
             <col style={{ width: 120 }} />
             <col style={{ width: 72 }} />
+            <col style={{ width: isItem ? 130 : 84 }} />
             <col style={{ width: 96 }} />
             <col style={{ width: 96 }} />
             <col style={{ width: 64 }} />
             <col style={{ width: 108 }} />
+            {!isItem && <col style={{ width: 130 }} />}
             <col />
             {!readOnly && <col style={{ width: 36 }} />}
           </colgroup>
@@ -512,28 +535,30 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 borderBottom: "1px solid hsl(var(--border))",
               }}
             >
-              {[
-                "#",
-                isItem ? "Item" : "Activity",
-                ...(isItem ? ["For Activity"] : []),
-                "Code",
-                "Spec / Notes",
-                "Qty",
-                "UOM",
-                "Rate (₹)",
-                "Tax %",
-                "Amount (₹)",
-                "Tax Amt (₹)",
-              ].map((h, i0) => {
-                const i = isItem && i0 > 2 ? i0 - 1 : i0;
+              {(
+                [
+                  ["#", "center"],
+                  [isItem ? "Item" : "Activity", "left"],
+                  ...(isItem ? [["For Activity", "left"]] : []),
+                  ["Code", "left"],
+                  ["Spec / Notes", "left"],
+                  [isItem ? "Item Qty" : "Total Qty", "right"],
+                  [isItem ? "Per Unit Qty" : "Total Area", "right"],
+                  ["UOM", "left"],
+                  [isItem ? "Rate (₹)" : "Total Rate (₹)", "right"],
+                  ["Tax %", "right"],
+                  ["Amount (₹)", "right"],
+                  ...(!isItem ? [["Per Activity Price", "right"]] : []),
+                  ["Tax Amt (₹)", "right"],
+                ] as [string, "left" | "right" | "center"][]
+              ).map(([h, align]) => {
                 return (
                 <th
                   key={h}
                   style={{
                     padding: "0 8px",
                     height: 30,
-                    textAlign:
-                      i >= 4 && i !== 5 ? "right" : i === 0 ? "center" : "left",
+                    textAlign: align,
                     fontSize: 10,
                     fontWeight: 600,
                     letterSpacing: "0.07em",
@@ -556,7 +581,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
             {(rows as any[]).length === 0 ? (
               <tr>
                 <td
-                  colSpan={(readOnly ? 10 : 11) + (isItem ? 1 : 0)}
+                  colSpan={colCount}
                   style={{
                     textAlign: "center",
                     padding: 32,
@@ -870,6 +895,88 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       )}
                     </td>
 
+                    {/* Per Unit Qty (items) / Total Area (activities) */}
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                        textAlign: "right",
+                      }}
+                    >
+                      {isItem ? (
+                        (() => {
+                          const act = row.activityId
+                            ? boqActivities.find((a) => a.activityId === row.activityId)
+                            : undefined;
+                          const basis = activityBasis(act);
+                          const q = parseFloat(row.quantity) || 0;
+                          if (!act || basis.value <= 0 || q <= 0) {
+                            return (
+                              <span
+                                title={
+                                  !act
+                                    ? "Pick the activity this item is for"
+                                    : "Enter the activity's Total Area or Total Qty and this item's quantity"
+                                }
+                                style={{ color: "hsl(var(--muted-foreground))" }}
+                              >
+                                —
+                              </span>
+                            );
+                          }
+                          return (
+                            <span
+                              title={`${fmtQty(q)} ÷ ${fmtQty(basis.value)} (activity ${basis.kind === "area" ? "area" : "quantity"})`}
+                              style={{
+                                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                                fontVariantNumeric: "tabular-nums",
+                                fontSize: 12.5,
+                                fontWeight: 600,
+                                color: "hsl(var(--primary))",
+                              }}
+                            >
+                              {fmtQty(q / basis.value)}
+                              <span style={{ fontSize: 9.5, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>
+                                {` ${row.uomName || ""} / ${basis.kind === "area" ? "area" : "unit"}`}
+                              </span>
+                            </span>
+                          );
+                        })()
+                      ) : readOnly ? (
+                        <span
+                          style={{
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
+                            fontSize: 12.5,
+                          }}
+                        >
+                          {row.area || "—"}
+                        </span>
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          value={row.area ?? ""}
+                          placeholder="0"
+                          onChange={(e) => upd(idx, "area", e.target.value)}
+                          style={{
+                            width: "100%",
+                            height: 30,
+                            border: "0.5px solid hsl(var(--border))",
+                            borderRadius: 4,
+                            background: "hsl(var(--background))",
+                            padding: "0 7px",
+                            fontSize: 12,
+                            color: "hsl(var(--foreground))",
+                            outline: "none",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
+                            textAlign: "right",
+                          }}
+                        />
+                      )}
+                    </td>
+
                     {/* UOM */}
                     <td
                       style={{
@@ -1021,6 +1128,40 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       </span>
                     </td>
 
+                    {/* Per Activity Price (activities only): amount ÷ area (or ÷ qty) */}
+                    {!isItem && (
+                      <td
+                        style={{
+                          borderRight: "1px solid hsl(var(--border))",
+                          padding: "4px 10px",
+                          textAlign: "right",
+                        }}
+                      >
+                        {(() => {
+                          const basis = activityBasis(row);
+                          if (basis.value <= 0 || amt <= 0) {
+                            return <span style={{ color: "hsl(var(--muted-foreground))" }}>—</span>;
+                          }
+                          return (
+                            <span
+                              title={`${fmt(amt)} ÷ ${fmtQty(basis.value)} (${basis.kind === "area" ? "total area" : "total qty"})`}
+                              style={{
+                                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                                fontVariantNumeric: "tabular-nums",
+                                fontSize: 12.5,
+                                fontWeight: 600,
+                              }}
+                            >
+                              {fmt(amt / basis.value)}
+                              <span style={{ fontSize: 9.5, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>
+                                {basis.kind === "area" ? " / area" : " / unit"}
+                              </span>
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    )}
+
                     {/* Tax Amt */}
                     <td
                       style={{
@@ -1099,7 +1240,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 }}
               >
                 <td
-                  colSpan={(readOnly ? 9 : 10) + (isItem ? 1 : 0)}
+                  colSpan={colCount - 2}
                   style={{
                     textAlign: "right",
                     padding: "6px 10px",
@@ -2036,6 +2177,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
                 : (record.BoqActivities ?? []).map(rowToActivity)
             }
             uoms={uoms}
+            boqActivities={(record.BoqActivities ?? []).map(rowToActivity)}
             itemsTotal={itemsTotal}
             activitiesTotal={activitiesTotal}
             onChange={() => {}}
