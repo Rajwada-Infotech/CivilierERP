@@ -376,12 +376,15 @@ export interface ActivityScopeSummary {
   statusCounts: Partial<Record<AssignmentStatus, number>>;
   total: number;
   rooms: ScopeSummaryRoom[];
+  projects: { id: number; name: string | null }[];
 }
 export const getActivityScopeSummary = async (params?: {
   status?: AssignmentStatus;
   search?: string;
+  projectId?: number;
 }): Promise<ActivityScopeSummary> => {
   const qs = new URLSearchParams();
+  if (params?.projectId) qs.set("projectId", String(params.projectId));
   if (params?.status) qs.set("status", params.status);
   if (params?.search) qs.set("search", params.search);
   const query = qs.toString();

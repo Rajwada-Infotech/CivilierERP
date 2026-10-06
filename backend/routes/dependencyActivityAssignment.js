@@ -381,9 +381,11 @@ router.get(
   async (req, res) => {
     const statusFilter = req.query.status ? String(req.query.status).toUpperCase() : null;
     const search = req.query.search ? String(req.query.search).trim() : null;
+    const projectFilterId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     try {
       const pool = await getPool();
 
+      const projectCond = Number.isFinite(projectFilterId) ? " AND dm.ProjectId = @projectFilterId" : "";
       const searchCond = search ? `
           AND (
             am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
@@ -392,6 +394,7 @@ router.get(
 
       const countsReq = pool.request();
       if (search) countsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (projectCond) countsReq.input("projectFilterId", sql.Int, projectFilterId);
       // Started now, awaited below: the status counts and the room list are
       // independent aggregates over the same tables, so they run in parallel
       // instead of one after the other (the search made this the slow call).
@@ -405,11 +408,12 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
         GROUP BY daa.Status
       `);
       const roomsReq = pool.request();
       if (search) roomsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (projectCond) roomsReq.input("projectFilterId", sql.Int, projectFilterId);
       if (statusFilter && STATUS_VALUES.has(statusFilter)) roomsReq.input("statusFilter", sql.NVarChar(20), statusFilter);
       const roomsPromise = roomsReq.query(`
         SELECT
@@ -427,12 +431,26 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
           ${statusFilter && STATUS_VALUES.has(statusFilter) ? "AND daa.Status = @statusFilter" : ""}
         GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName
       `);
 
-      const [countsRes, roomsRes] = await Promise.all([countsPromise, roomsPromise]);
+      // The project dropdown's options — every project the caller has
+      // activities in, deliberately ignoring status/search/project filters so
+      // picking one project doesn't shrink the list to just itself.
+      const projectsPromise = pool.request().query(`
+        SELECT dm.ProjectId AS id, MAX(ep.name) AS name
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        WHERE daa.IsCurrent = 1${projectPredicate(req.projectScope, "dm.ProjectId")}
+        GROUP BY dm.ProjectId
+        ORDER BY MAX(ep.name)
+      `);
+
+      const [countsRes, roomsRes, projectsRes] = await Promise.all([countsPromise, roomsPromise, projectsPromise]);
       const statusCounts = {};
       let total = 0;
       for (const row of countsRes.recordset) {
@@ -440,7 +458,7 @@ router.get(
         total += row.count;
       }
 
-      res.json({ statusCounts, total, rooms: roomsRes.recordset });
+      res.json({ statusCounts, total, rooms: roomsRes.recordset, projects: projectsRes.recordset });
     } catch (err) {
       console.error("[dependency-activity-assignment] GET /scope-summary error:", err.message);
       res.status(500).json({ error: err.message });
