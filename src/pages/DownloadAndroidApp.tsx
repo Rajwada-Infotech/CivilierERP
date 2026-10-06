@@ -64,6 +64,15 @@ const APPS = [
     downloadName: "CivilierERP-Maintenance.apk",
     version: "1.0.0",
   },
+  {
+    key: "cwd",
+    title: "Civilier Work DPR",
+    description:
+      "For site engineers, QC and approvers — scan or download to install the Work DPR app (allocation, reporting, quality check, transfer) on your device.",
+    apkPath: "/downloads/CivilierERPWorkDPR.apk",
+    downloadName: "CivilierERP-WorkDPR.apk",
+    version: "1.0.0",
+  },
 ] as const;
 
 function AppCard({ title, description, apkPath, downloadName, version }: (typeof APPS)[number]) {

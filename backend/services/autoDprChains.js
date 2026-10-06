@@ -1,62 +1,35 @@
 // Gives a new unit's rooms their DPR work chains at the moment the unit is
 // created (e.g. a plot converted into a villa), so DPR follows conversion with
-// no script run. Same rule as scripts/cloneChainForChainlessRooms.js: each
-// room copies the step list most chains of its room category already use
-// (this project's own when it has any), every step starting as a PENDING stub.
+// no script run. Each room copies the step list of the most recent chain of
+// its room category (this project's own first), every step a PENDING stub.
 // Floor comes from chainFloorLabel, so a villa is placed by its plot.
 // A room whose category has no chain anywhere yet is skipped and reported.
 const { sql } = require("../db");
 const { chainFloorLabel } = require("./unitLayout");
-const { getPool } = require("../db");
-// Template chain per room category: the most common step list, from this
-// project's own chains when it has any for that category, else from all.
-// Read through the shared pool (not the caller's transaction, so it never
-// sits inside a conversion's plot lock) and cached for a few minutes: the
-// all-projects scan touches every chain and must not run once per villa.
-const TTL_MS = 5 * 60 * 1000;
-const cache = new Map(); // scope -> { at, map: Map(categoryId -> donor) }
-
-async function templatesFor(scopeProjectId) {
-  const key = scopeProjectId == null ? "all" : `p${scopeProjectId}`;
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.map;
-  const req = getPool().request();
-  if (scopeProjectId != null) req.input("p", sql.Int, scopeProjectId);
-  const rows = (await req.query(`
-    SELECT d.Id, d.WorkType, r.RoomCategoryId,
-           STRING_AGG(CAST(a.ActivityId AS NVARCHAR(20)) + ':' + ISNULL(a.WorkType, ''), ',') WITHIN GROUP (ORDER BY a.SequenceNo) AS Sig
-    FROM dbo.DependencyMaster d
-    JOIN dbo.RoomMaster r ON r.Id = d.RoomId
-    JOIN dbo.DependencyMasterActivity a ON a.DependencyMasterId = d.Id
-    WHERE d.IsActive = 1 AND r.RoomCategoryId IS NOT NULL ${scopeProjectId != null ? "AND d.ProjectId = @p" : ""}
-    GROUP BY d.Id, d.WorkType, r.RoomCategoryId`)).recordset;
-  const byCat = new Map();
-  for (const r of rows) (byCat.get(r.RoomCategoryId) || byCat.set(r.RoomCategoryId, []).get(r.RoomCategoryId)).push(r);
-  const map = new Map();
-  for (const [cat, cs] of byCat) {
-    const freq = new Map();
-    for (const c of cs) freq.set(`${c.WorkType}|${c.Sig}`, (freq.get(`${c.WorkType}|${c.Sig}`) || 0) + 1);
-    const top = [...freq.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    map.set(cat, cs.find((c) => `${c.WorkType}|${c.Sig}` === top));
-  }
-  cache.set(key, { at: Date.now(), map });
-  return map;
-}
-
-async function donorsFor(projectId, cats) {
-  const own = await templatesFor(projectId);
+// Template chain per room category: this project's own most recent chain for
+// it (so once a pilot villa's steps are tailored, every later villa copies
+// them), else the most recent one anywhere. One indexed TOP 1 per category on
+// the caller's own connection — it used to group every chain's full step list
+// across the database (~430k rows on production) on a second connection,
+// which ran past the 60 s request limit inside the conversion transaction and
+// held Plot Master locked while it did.
+async function donorsFor(db, projectId, cats) {
   const pick = new Map();
-  let all = null;
   for (const cat of cats) {
-    if (own.has(cat)) { pick.set(cat, own.get(cat)); continue; }
-    all = all || await templatesFor(null);
-    if (all.has(cat)) pick.set(cat, all.get(cat));
+    const row = (await db.request().input("cat", sql.Int, cat).input("p", sql.Int, projectId).query(`
+      SELECT TOP 1 d.Id, d.WorkType, d.ProjectId
+      FROM dbo.DependencyMaster d
+      JOIN dbo.RoomMaster r ON r.Id = d.RoomId
+      WHERE d.IsActive = 1 AND r.RoomCategoryId = @cat
+        AND EXISTS (SELECT 1 FROM dbo.DependencyMasterActivity x WHERE x.DependencyMasterId = d.Id)
+      ORDER BY CASE WHEN d.ProjectId = @p THEN 0 ELSE 1 END, d.Id DESC`)).recordset[0];
+    if (row) pick.set(cat, row);
   }
   return pick;
 }
 
-/** Drops cached templates, e.g. after a project's chains were tailored. */
-function clearTemplateCache() { cache.clear(); }
+/** Kept for callers; templates are no longer cached (each lookup is a seek). */
+function clearTemplateCache() {}
 
 
 async function createChainsForUnit(db, unitId, actor) {
@@ -71,7 +44,7 @@ async function createChainsForUnit(db, unitId, actor) {
   const floor = await chainFloorLabel(db, unit);
 
   const cats = [...new Set(rooms.map((r) => r.RoomCategoryId))];
-  const pick = await donorsFor(unit.ProjectId, cats);
+  const pick = await donorsFor(db, unit.ProjectId, cats);
 
   let created = 0;
   const skipped = [];

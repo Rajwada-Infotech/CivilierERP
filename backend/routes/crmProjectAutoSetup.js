@@ -2254,14 +2254,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   }
   // The villa's own construction rate. Never the plot's land rate: the plot's
   // owner has already paid for the land, and a villa priced at the land rate
-  // would charge them for it again. Rate is optional — null when not provided.
+  // would charge them for it again. Rate is optional — defaults to 0 when not provided.
   const villaRateRaw = req.body?.RatePerSqFt;
-  const villaRate = villaRateRaw == null || villaRateRaw === "" || villaRateRaw === 0 || villaRateRaw === "0"
-    ? null
+  const villaRate = (villaRateRaw == null || villaRateRaw === "" || Number(villaRateRaw) < 0 || !Number.isFinite(Number(villaRateRaw)))
+    ? 0
     : Number(villaRateRaw);
-  if (villaRate !== null && (!Number.isFinite(villaRate) || villaRate < 0)) {
-    return res.status(400).json({ error: "Construction rate must be a positive number." });
-  }
   // A villa's built-up area is its own (per villa design), never the land
   // area. Super built-up is optional; when given it is the saleable area, as
   // for flats (AreaSqFt = SBU), otherwise the built-up area is.
@@ -2300,6 +2297,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Any statement that errors aborts the whole transaction, so nothing
+      // half-done can be committed. (A statement cancelled by the request
+      // timeout is not covered by this — the rollback in the catch below is
+      // what releases the plot locks then, and it must never be skipped.)
+      await tx.request().query("SET XACT_ABORT ON");
       // Lock source plots and re-check all inventory claims inside this
       // transaction. UI availability is advisory; this is the authority.
       //
@@ -2427,10 +2429,14 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
         changedBy: req.user?.userId ?? null,
         notes: `Plots ${plotIds.join(", ")} -> villa ${villaName}; ${dpr.created} DPR chain(s)${dpr.skipped.length ? `; no steps yet for ${dpr.skipped.join(", ")}` : ""}` }).catch(() => {});
       res.status(201).json({ success: true, UnitId: unitId, UnitName: villaName, PlotIds: plotIds, DprChainsCreated: dpr.created, DprRoomsWithoutTemplate: dpr.skipped });
-    } catch (e) { await tx.rollback(); throw e; }
+    } catch (e) {
+      try { await tx.rollback(); } catch (rbErr) { console.error("[auto-setup] convert-plots rollback:", rbErr.message); }
+      throw e;
+    }
   } catch (e) {
     if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
     console.error("[auto-setup] POST convert-plots:", e.message);
+    if (res.headersSent) return; // the request already timed out and was answered
     res.status(e.status || 500).json({ error: e.message });
   }
 });

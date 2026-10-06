@@ -63,7 +63,8 @@ describe("createChainsForUnit — a villa's rooms get their DPR chains", () => {
     { Id: 3, RoomName: "Store Room", RoomCategoryId: 9 },
   ];
   // Templates: the project has its own (tailored) Bedroom chain; Kitchen only exists elsewhere.
-  const templates = (scopedToProject) => (scopedToProject
+  const OWN = [{ Id: 700, WorkType: "INTERNAL", RoomCategoryId: 1, Sig: "villa-steps" }];
+  const templates = (scopedToProject) => (scopedToProject ? OWN : null) || (scopedToProject
     ? [{ Id: 700, WorkType: "INTERNAL", RoomCategoryId: 1, Sig: "villa-steps" }]
     : [
       { Id: 100, WorkType: "INTERNAL", RoomCategoryId: 1, Sig: "flat-steps" },
@@ -87,6 +88,13 @@ describe("createChainsForUnit — a villa's rooms get their DPR chains", () => {
       if (/FROM dbo\.UnitMaster WHERE Id = @u/.test(q)) return [unit];
       if (/FROM dbo\.RoomMaster r\s+WHERE r\.UnitId/.test(q)) return rooms;
       if (/FROM dbo\.PlotMaster/.test(q)) return [{ Plots: "P-100" }];
+      if (/SELECT TOP 1 d\.Id, d\.WorkType/.test(q)) {
+        // Newest first, the project's own ahead of everyone else's.
+        const cs = templates(true).concat(templates(false)).filter((c) => c.RoomCategoryId === inputs.cat)
+          .map((c) => ({ ...c, ProjectId: templates(true).includes(c) ? inputs.p : 99 }))
+          .sort((x, y) => (x.ProjectId === inputs.p ? 0 : 1) - (y.ProjectId === inputs.p ? 0 : 1) || y.Id - x.Id);
+        return cs.slice(0, 1);
+      }
       if (/INSERT INTO dbo\.DependencyMaster /.test(q)) { inserted.push({ ...inputs }); return [{ id: nextId++ }]; }
       if (/INSERT INTO dbo\.DependencyMasterActivity/.test(q)) { donors.push(inputs.D); return []; }
       return [];
@@ -102,9 +110,9 @@ describe("createChainsForUnit — a villa's rooms get their DPR chains", () => {
     const r = await createChainsForUnit(txDb(), 50, "tester");
     expect(r.skipped).toEqual(["Store Room"]);
   });
-  test("the project's own (tailored) step list wins; otherwise the most common one is copied", async () => {
+  test("the project's own (tailored) chain wins; otherwise the newest one anywhere is copied", async () => {
     await createChainsForUnit(txDb(), 50, "tester");
-    // Bedroom: donor 700, the project's own. Kitchen: 200, the most common list elsewhere.
-    expect(donors).toEqual([700, 200]);
+    // Bedroom: donor 700, the project's own. Kitchen: 202, the newest elsewhere.
+    expect(donors).toEqual([700, 202]);
   });
 });
