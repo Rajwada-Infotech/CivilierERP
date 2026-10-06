@@ -2331,3 +2331,22 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
 [role="switch"] > span {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
+
+/* Glass: cards INSIDE any overlay/dialog (modals built from shell cards on a transparent
+   wrapper) are dense frosted glass too, so the page behind never bleeds through. */
+[data-theme="glass"] :is(.fixed.inset-0, [role="dialog"]) :is(.bg-card, [class*="bg-card/"], .glass-card, [style*="backdrop-filter"]):not(button):not(.rounded-full):not(.inset-0) {
+    background:
+        var(--glass-grain, none),
+        linear-gradient(150deg,
+            color-mix(in srgb, var(--gt-a, #7dd3fc) 8%, rgba(255, 255, 255, 0.95)) 0%,
+            rgba(248, 251, 253, 0.92) 55%,
+            color-mix(in srgb, var(--gt-b, #5eead4) 8%, rgba(244, 248, 251, 0.94)) 100%) !important;
+    backdrop-filter: blur(24px) saturate(170%);
+    -webkit-backdrop-filter: blur(24px) saturate(170%);
+}
+/* nested cards inside those: plain light fill, no second blur */
+[data-theme="glass"] :is(.fixed.inset-0, [role="dialog"]) :is(.bg-card, [class*="bg-card/"]) :is(.bg-card, [class*="bg-card/"]):not(button):not(.rounded-full) {
+    background: rgba(255, 255, 255, 0.7) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
