@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import {
   getActivityPhotos,
+  carryForwardPhotos,
   getActivityPhoto,
   uploadActivityPhoto,
   deleteActivityPhoto,
@@ -60,6 +61,7 @@ import {
   type AssignmentCheckpoint,
   type AssignmentStatus,
   type DailyLogEntry,
+  type ProgressLogEntry,
 } from "@/api/dependencyActivityAssignmentApi";
 import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 import {
@@ -253,46 +255,27 @@ function PhotosTab({ rungId }: { rungId: number }) {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["activity-photos", rungId] });
 
-  // A new "After" shot marks one work cycle done — the field engineer
-  // shouldn't have to separately re-photograph "Before" for the next
-  // cycle when it's just whatever the site looked like a moment ago,
-  // i.e. the After that was just superseded. So the moment there's an
-  // After newer than the current Before, clone that After into Before
-  // automatically. Guarded by comparing timestamps (not just "any before
-  // exists") so this stays idempotent — safe to call on every load, not
-  // just right before a new capture.
-  const carryForwardBeforeIfNeeded = async () => {
+  // Day 1's After photos become day 2's Before. Done on the server (one INSERT…SELECT,
+  // idempotent) the moment the tab opens — and again right before a new photo is taken —
+  // so it never depends on someone having shot an After first or on the browser
+  // downloading and re-uploading each image.
+  const carryForward = async () => {
     try {
-      const current = await getActivityPhotos(rungId);
-      const lastAfter = current.after[0]; // ORDER BY CapturedAt DESC
-      if (!lastAfter) return;
-      const lastBefore = current.before[0];
-      const alreadyCarried = lastBefore && lastBefore.capturedAt >= lastAfter.capturedAt;
-      if (alreadyCarried) return;
-      const raw = await getActivityPhoto(rungId, lastAfter.id);
-      const blob = await (await fetch(`data:${raw.mimeType};base64,${raw.dataBase64}`)).blob();
-      const file = new File([blob], `before-carried-${Date.now()}.jpg`, { type: raw.mimeType });
-      await uploadActivityPhoto(rungId, "before", file, CARRIED_FORWARD_NOTE);
-      refresh();
+      const { carried } = await carryForwardPhotos(rungId);
+      if (carried > 0) refresh();
     } catch {
-      // Best-effort — a failed carry-forward should never block the new capture.
+      // Best-effort — a failed carry-forward should never block the Photos tab or a new capture.
     }
   };
-
-  // Reconciles on every load too, not just right before a new capture —
-  // otherwise a Before that should already reflect yesterday's After only
-  // ever shows up the next time someone happens to take a new After photo,
-  // which could be days later. Keyed on the latest After's own id so this
-  // re-checks whenever a new After actually lands, not on every re-render.
   useEffect(() => {
-    if (data?.after?.[0]) carryForwardBeforeIfNeeded();
+    void carryForward();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.after?.[0]?.id]);
+  }, [rungId]);
 
   const addPhoto = async (blob: Blob) => {
     setUploading(true);
     try {
-      await carryForwardBeforeIfNeeded();
+      await carryForward();
       const note = await getGeoTag();
       const file = new File([blob], `${activeTag}-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" });
       await uploadActivityPhoto(rungId, activeTag, file, note || undefined);
@@ -827,13 +810,38 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+// "Developer" or "Contractor" on its own says nothing — show whose labour / material it is.
+function SourceValue({ source, name }: { source: string | null; name?: string | null }) {
+  if (!source) return <>—</>;
+  const kind = source.charAt(0) + source.slice(1).toLowerCase();
+  return name ? (
+    <span className="flex flex-col">
+      <span className="text-foreground">{name}</span>
+      <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{kind}</span>
+    </span>
+  ) : (
+    <>{kind}</>
+  );
+}
+
 function OverviewTab({ row }: { row: ReportedAssignment }) {
   const queryClient = useQueryClient();
-  const [remarks, setRemarks] = useState(row.remarks ?? "");
+  // Each remark is a new entry, so a second (third…) one the same day is just another "Add".
+  const [remarks, setRemarks] = useState("");
+  const { data: progressLog = [] } = useQuery({
+    queryKey: ["activity-progress-log", row.rungId],
+    queryFn: () => getProgressLog(row.rungId),
+  });
+  const remarkHistory = progressLog.filter((e) => !!e.remarks).slice(0, 8);
   const remarksMutation = useMutation({
-    mutationFn: (next: string) => updateAssignmentDetail(row.rungId, { remarks: next }),
+    mutationFn: (next: string) => updateAssignmentDetail(row.rungId, { remarks: next.trim(), append: true }),
     onSuccess: () => {
+      setRemarks("");
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      queryClient.invalidateQueries({ queryKey: ["activity-progress-log", row.rungId] });
+      queryClient.invalidateQueries({ queryKey: ["activity-daily-log", row.rungId] });
+      toast.success("Remark added.");
     },
     onError: (err: any) => toast.error(err?.message || "Failed to save remarks."),
   });
@@ -870,8 +878,8 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
         </Field>
         <Field label="End Date">{row.endDate ? new Date(row.endDate).toLocaleDateString("en-IN") : "—"}</Field>
         <Field label="Days">{row.days ?? "—"}</Field>
-        <Field label="Labour Source">{row.labourSource ?? "—"}</Field>
-        <Field label="Material Source">{row.materialSource ?? "—"}</Field>
+        <Field label="Labour Source"><SourceValue source={row.labourSource} name={row.labourSourceName} /></Field>
+        <Field label="Material Source"><SourceValue source={row.materialSource} name={row.materialSourceName} /></Field>
       </div>
 
       {row.description && <Field label="Description">{row.description}</Field>}
@@ -900,17 +908,33 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
         <textarea
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
-          onBlur={() => {
-            if (remarks !== (row.remarks ?? "")) remarksMutation.mutate(remarks);
-          }}
           rows={3}
           placeholder="Add a note about this activity…"
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
         />
-        {remarksMutation.isPending && (
-          <p className="text-[0.625rem] text-muted-foreground mt-1 flex items-center gap-1">
-            <Loader2 size={9} className="animate-spin" /> Saving…
-          </p>
+        <div className="flex items-center justify-end gap-2 mt-1.5">
+          {remarksMutation.isPending && <Loader2 size={11} className="animate-spin text-muted-foreground" />}
+          <button
+            type="button"
+            onClick={() => remarksMutation.mutate(remarks)}
+            disabled={!remarks.trim() || remarksMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[0.6875rem] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-50 transition-colors"
+          >
+            <Save size={11} /> Add remark
+          </button>
+        </div>
+        {remarkHistory.length > 0 && (
+          <div className="mt-2 rounded-lg border border-border bg-background/60 divide-y divide-border/60 max-h-44 overflow-y-auto">
+            {remarkHistory.map((e) => (
+              <div key={e.id} className="px-3 py-1.5 text-[0.6875rem]">
+                <p className="text-foreground/90 whitespace-pre-wrap break-words">{e.remarks}</p>
+                <p className="text-muted-foreground/80 truncate">
+                  {e.loggedBy || "—"} ·{" "}
+                  {new Date(e.loggedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </p>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -1162,13 +1186,49 @@ function HistoryTab({ rungId }: { rungId: number }) {
 // One permanent snapshot per day this activity was reported on (see the
 // PATCH /:rungId/status route's MERGE) — newest first. Photos for a day are
 // fetched lazily on expand since most days won't be opened.
+const dayKey = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : "");
+const fmtLongDate = (key: string) => {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+};
+const fmtClock = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
+function DailyLogPhotoGroup({
+  label,
+  photos,
+  rungId,
+  onOpen,
+}: {
+  label: string;
+  photos: ActivityPhotoMeta[];
+  rungId: number;
+  onOpen: (p: ActivityPhotoMeta) => void;
+}) {
+  return (
+    <div>
+      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+        {label} · {photos.length}
+      </p>
+      {photos.length === 0 ? (
+        <p className="text-[0.6875rem] text-muted-foreground/70 italic">None</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {photos.map((p) => (
+            <PhotoThumb key={p.id} rungId={rungId} photo={p} onOpen={() => onOpen(p)} onDeleted={() => {}} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Photos for one day, Before and After side by side (carried-forward Befores are flagged by PhotoThumb).
 function DailyLogDayPhotos({ rungId, logDate }: { rungId: number; logDate: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ["activity-photos", rungId, logDate],
     queryFn: () => getActivityPhotos(rungId, logDate),
   });
   const [lightboxPhoto, setLightboxPhoto] = useState<ActivityPhotoMeta | null>(null);
-  const all = [...(data?.before ?? []), ...(data?.after ?? [])];
 
   if (isLoading) {
     return (
@@ -1177,29 +1237,45 @@ function DailyLogDayPhotos({ rungId, logDate }: { rungId: number; logDate: strin
       </div>
     );
   }
-  if (all.length === 0) {
+  if (!data || data.before.length + data.after.length === 0) {
     return <p className="text-[0.6875rem] text-muted-foreground/70 flex items-center gap-1 py-1"><ImageOff size={11} /> No photos logged this day</p>;
   }
   return (
     <>
-      <div className="flex flex-wrap gap-2 pt-1">
-        {all.map((p) => (
-          <PhotoThumb key={p.id} rungId={rungId} photo={p} onOpen={() => setLightboxPhoto(p)} onDeleted={() => {}} />
-        ))}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <DailyLogPhotoGroup label="Before" photos={data.before} rungId={rungId} onOpen={setLightboxPhoto} />
+        <DailyLogPhotoGroup label="After" photos={data.after} rungId={rungId} onOpen={setLightboxPhoto} />
       </div>
       {lightboxPhoto && <PhotoLightbox rungId={rungId} photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />}
     </>
   );
 }
 
+// The full history, newest day first: every remark in full, each progress move (from → to), and
+// the day's photos — nothing hidden behind a click for the recent days.
 function DailyLogTab({ rungId }: { rungId: number }) {
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ["activity-daily-log", rungId],
     queryFn: () => getDailyLog(rungId),
   });
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const { data: progressLog = [] } = useQuery({
+    queryKey: ["activity-progress-log", rungId],
+    queryFn: () => getProgressLog(rungId),
+  });
+  const RECENT_OPEN = 5;
+  const [openSet, setOpenSet] = useState<Set<string> | null>(null); // null = default (most recent days open)
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const queryClient = useQueryClient();
+
+  // Every update of a day (oldest first), keyed by the day it happened on.
+  const updatesByDay = useMemo(() => {
+    const m = new Map<string, ProgressLogEntry[]>();
+    [...progressLog].reverse().forEach((e) => {
+      const k = dayKey(e.loggedAt);
+      m.set(k, [...(m.get(k) ?? []), e]);
+    });
+    return m;
+  }, [progressLog]);
 
   const handleDelete = async (entry: DailyLogEntry) => {
     if (!window.confirm("Delete this daily log entry?")) return;
@@ -1233,61 +1309,114 @@ function DailyLogTab({ rungId }: { rungId: number }) {
   }
 
   const todayStr = todayIso();
+  const keyOf = (e: DailyLogEntry) => dayKey(e.logDate);
+  const isOpenDay = (e: DailyLogEntry, idx: number) => (openSet ? openSet.has(keyOf(e)) : idx < RECENT_OPEN);
+  const toggle = (e: DailyLogEntry, idx: number) => {
+    const next = new Set(openSet ?? entries.filter((_x, i) => i < RECENT_OPEN).map(keyOf));
+    const k = keyOf(e);
+    if (isOpenDay(e, idx)) next.delete(k);
+    else next.add(k);
+    setOpenSet(next);
+  };
 
   return (
-    <div className="flex flex-col gap-2">
-      {entries.map((entry) => {
-        const isToday = entry.logDate === todayStr;
-        const isOpen = expanded === entry.logDate;
+    <div className="flex flex-col gap-2.5">
+      <div className="flex items-center justify-between">
+        <p className="text-[0.6875rem] text-muted-foreground">
+          {entries.length} day{entries.length === 1 ? "" : "s"} logged
+        </p>
+        <div className="flex items-center gap-3 text-[0.6875rem] font-medium">
+          <button type="button" className="text-cyan-700 dark:text-cyan-300 hover:underline" onClick={() => setOpenSet(new Set(entries.map(keyOf)))}>
+            Expand all
+          </button>
+          <button type="button" className="text-muted-foreground hover:text-foreground hover:underline" onClick={() => setOpenSet(new Set())}>
+            Collapse all
+          </button>
+        </div>
+      </div>
+
+      {entries.map((entry, idx) => {
+        const key = keyOf(entry);
+        const isToday = key === todayStr;
+        const open = isOpenDay(entry, idx);
+        const updates = updatesByDay.get(key) ?? [];
+        const before = entries[idx + 1]?.progressPercent ?? 0; // the previous logged day (list is newest first)
+        const after = entry.progressPercent;
+        const moved = after != null ? after - before : null;
         return (
           <div key={entry.id} className="rounded-xl border border-border bg-muted/10 overflow-hidden">
             <div className="flex items-center hover:bg-muted/30 transition-colors">
-            <button
-              type="button"
-              onClick={() => setExpanded(isOpen ? null : entry.logDate)}
-              className="flex-1 min-w-0 flex items-center gap-3 px-3.5 py-2.5 text-left"
-            >
-              <div className="flex flex-col items-start shrink-0 w-24">
-                <span className="text-sm font-heading font-semibold text-foreground">
-                  {new Date(entry.logDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                </span>
-                {isToday && (
-                  <span className="text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
-                    Today
-                  </span>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-foreground truncate">{entry.remarks || <span className="text-muted-foreground italic">No remarks</span>}</p>
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5 flex items-center gap-2">
-                  {entry.progressPercent != null && (
-                    <span className="flex items-center gap-1">
-                      <TrendingUp size={10} /> {entry.progressPercent}%
+              <button type="button" onClick={() => toggle(entry, idx)} className="flex-1 min-w-0 flex items-center gap-3 px-3.5 py-2.5 text-left">
+                <div className="flex flex-col items-start shrink-0">
+                  <span className="text-sm font-heading font-semibold text-foreground">{fmtLongDate(key)}</span>
+                  {isToday && (
+                    <span className="text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full mt-0.5">Today</span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 text-[0.6875rem] text-muted-foreground">
+                  {after != null && (
+                    <span className="flex items-center gap-1 font-medium text-foreground">
+                      <TrendingUp size={11} />
+                      {moved ? `${before}% → ${after}%` : `${after}%`}
+                      {moved ? (
+                        <span className={moved > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600"}>({moved > 0 ? "+" : ""}{moved})</span>
+                      ) : (
+                        <span className="font-normal text-muted-foreground">no change</span>
+                      )}
                     </span>
                   )}
                   {entry.photoCount > 0 && (
-                    <span className="flex items-center gap-1">
-                      <CameraIcon size={10} /> {entry.photoCount}
-                    </span>
+                    <span className="flex items-center gap-1"><CameraIcon size={11} /> {entry.photoCount}</span>
                   )}
-                  {entry.updatedBy && <span>· {entry.updatedBy}</span>}
-                </p>
-              </div>
-              {isOpen ? <ChevronLeft size={14} className="rotate-90 text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
-            </button>
-            <button
-              type="button"
-              title="Delete entry"
-              onClick={() => handleDelete(entry)}
-              disabled={deletingId === entry.id}
-              className="shrink-0 mr-2 w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-            >
-              {deletingId === entry.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-            </button>
+                  {entry.updatedBy && <span className="truncate max-w-[140px]">{entry.updatedBy}</span>}
+                </div>
+                {open ? <ChevronLeft size={14} className="rotate-90 text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+              </button>
+              <button
+                type="button"
+                title="Delete entry"
+                onClick={() => handleDelete(entry)}
+                disabled={deletingId === entry.id}
+                className="shrink-0 mr-2 w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+              >
+                {deletingId === entry.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              </button>
             </div>
-            {isOpen && (
-              <div className="px-3.5 pb-3 border-t border-border">
-                <DailyLogDayPhotos rungId={rungId} logDate={entry.logDate} />
+
+            {open && (
+              <div className="px-3.5 pb-3.5 pt-2.5 border-t border-border flex flex-col gap-3.5">
+                <div>
+                  <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Updates</p>
+                  {updates.length > 0 ? (
+                    <div className="flex flex-col gap-2">
+                      {updates.map((u) => (
+                        <div key={u.id} className="rounded-lg border border-border/70 bg-background/60 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2 text-[0.6875rem]">
+                            <span className="font-medium text-foreground flex items-center gap-1.5">
+                              {u.fromProgressPercent != null && u.toProgressPercent != null ? (
+                                <>
+                                  <TrendingUp size={10} /> {u.fromProgressPercent}% → {u.toProgressPercent}%
+                                </>
+                              ) : (
+                                "Remark"
+                              )}
+                            </span>
+                            <span className="text-muted-foreground shrink-0">
+                              {fmtClock(u.loggedAt)}
+                              {u.loggedBy ? ` · ${u.loggedBy}` : ""}
+                            </span>
+                          </div>
+                          {u.remarks && <p className="text-xs text-foreground whitespace-pre-wrap break-words mt-1">{u.remarks}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : entry.remarks ? (
+                    <p className="text-xs text-foreground whitespace-pre-wrap break-words">{entry.remarks}</p>
+                  ) : (
+                    <p className="text-[0.6875rem] text-muted-foreground/70 italic">No remarks or progress changes recorded</p>
+                  )}
+                </div>
+                <DailyLogDayPhotos rungId={rungId} logDate={key} />
               </div>
             )}
           </div>

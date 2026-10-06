@@ -76,6 +76,7 @@ export interface FundTransferSummary {
   Mode: FundTransferMode | null;
   ChequeNo: string | null;
   ChequeLotNumber: string | null;
+  ChequeLotId?: number | null;
   ChequeDate: string | null;
   IsPostDated: boolean;
   DigitalRefNumber: string | null;
@@ -162,6 +163,21 @@ export const rejectFundTransfer = async (id: number, note?: string) => {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ note }),
+  });
+  return handleResponse(res);
+};
+
+/** Edit any field, at any stage. Draft stays Draft; Rejected is re-submitted; Pending stays
+ *  Pending (approval restarts); Approved (post-approval right) has its GL posting reversed,
+ *  goes back to Pending and is logged in Finance → Amendment. */
+export const updateFundTransfer = async (
+  id: number,
+  payload: FundTransferPayload,
+): Promise<{ message: string; reopenedForApproval?: boolean; resubmitted?: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
   return handleResponse(res);
 };

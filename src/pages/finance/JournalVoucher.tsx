@@ -109,6 +109,14 @@ function fmtDate(d?: string | null) {
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+// What saving an edit does to the voucher, by its current status.
+const editTitle = (status: string) =>
+  status === "Approved"
+    ? "Edit (reverses its posting and reopens for approval)"
+    : status === "Pending"
+      ? "Edit (stays pending; approval restarts)"
+      : "Edit";
+
 export default function JournalVoucher() {
   const rights = usePageRights("journal-voucher");
   const [vouchers, setVouchers] = useState<JournalVoucherSummary[]>([]);
@@ -378,9 +386,10 @@ export default function JournalVoucher() {
       if (editingId) {
         const result: any = await updateJournalVoucher(editingId, payload);
         toast.success(
-          result?.reopenedForApproval
-            ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
-            : "Journal Voucher updated",
+          result?.message ||
+            (result?.reopenedForApproval
+              ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
+              : "Journal Voucher updated"),
         );
       } else {
         await createJournalVoucher(payload);
@@ -567,11 +576,11 @@ export default function JournalVoucher() {
                       <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
                     </div>
                     <div className="flex gap-1">
-                      {v.Status !== "Pending" && rights.canEdit && (
+                      {rights.canEdit && (
                         <button
                           disabled={editLoading}
                           onClick={() => startEdit(v)}
-                          title={v.Status === "Approved" ? "Edit (reopens for approval)" : "Edit"}
+                          title={editTitle(v.Status)}
                           className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
                         >
                           <Pencil size={13} />
@@ -678,11 +687,11 @@ export default function JournalVoucher() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-1">
-                        {v.Status !== "Pending" && rights.canEdit && (
+                        {rights.canEdit && (
                           <button
                             disabled={editLoading}
                             onClick={(e) => { e.stopPropagation(); startEdit(v); }}
-                            title={v.Status === "Approved" ? "Edit (reopens for approval)" : "Edit"}
+                            title={editTitle(v.Status)}
                             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
                           >
                             <Pencil size={13} />
@@ -729,7 +738,7 @@ export default function JournalVoucher() {
                 </DialogTitle>
                 <DialogDescription className="text-[0.6875rem] mt-0.5">
                   {editingId
-                    ? "Editing an already-approved voucher reverses its GL posting and sends it back for approval."
+                    ? "Every field can be changed. An approved voucher has its GL posting reversed and goes back for approval; a pending one stays pending and its approval restarts."
                     : "Debit total must equal credit total before saving."}
                 </DialogDescription>
               </div>
