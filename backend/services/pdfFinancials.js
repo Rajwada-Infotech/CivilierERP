@@ -39,6 +39,8 @@ const PALETTE = {
 //         showGrandTotalBar (default true) }
 // Returns nothing; advances doc.y past the block it drew.
 function drawFinancialBreakdown(doc, rows, opts) {
+  // Font names — defaults to Helvetica; invoices pass DM Sans (see pdfFonts.js).
+  const F = (opts && opts.fonts) || { regular: "Helvetica", bold: "Helvetica-Bold", italic: "Helvetica-Oblique" };
   const {
     left,
     width,
@@ -51,7 +53,7 @@ function drawFinancialBreakdown(doc, rows, opts) {
   const C = PALETTE;
 
   if (title) {
-    doc.font("Helvetica-Bold").fontSize(9).fillColor(C.goldDeep)
+    doc.font(F.bold).fontSize(9).fillColor(C.goldDeep)
       .text(title.toUpperCase(), left, doc.y, { characterSpacing: 0.8 });
     doc.y += 14;
     doc.fillColor("#000000");
@@ -78,7 +80,7 @@ function drawFinancialBreakdown(doc, rows, opts) {
   // feel by simply being adjacent; kept single-row for compactness.
   doc.rect(left, tableTop, totalW, headerH).fill(C.navy);
   let x = left;
-  doc.font("Helvetica-Bold").fontSize(7).fillColor(C.white);
+  doc.font(F.bold).fontSize(7).fillColor(C.white);
   headers.forEach((h, i) => {
     doc.text(h.toUpperCase(), x + 6, tableTop + 8, { width: cw[i] - 12, align: aligns[i], characterSpacing: 0.2 });
     x += cw[i];
@@ -112,7 +114,7 @@ function drawFinancialBreakdown(doc, rows, opts) {
     ];
     x = left;
     cells.forEach((cell, i) => {
-      doc.font(i === 0 ? "Helvetica-Bold" : "Helvetica").fontSize(8.5).fillColor(C.ink)
+      doc.font(i === 0 ? F.bold : F.regular).fontSize(8.5).fillColor(C.ink)
         .text(String(cell), x + 6, y + 6, { width: cw[i] - 12, align: aligns[i], lineBreak: false });
       x += cw[i];
     });
@@ -126,7 +128,7 @@ function drawFinancialBreakdown(doc, rows, opts) {
     const totalCells = ["Total", "", money(sumTaxable), "", money(sumCgst), money(sumSgst), money(sumTotal)];
     x = left;
     totalCells.forEach((cell, i) => {
-      doc.font("Helvetica-Bold").fontSize(8.5).fillColor(C.navy)
+      doc.font(F.bold).fontSize(8.5).fillColor(C.navy)
         .text(String(cell), x + 6, y + 6, { width: cw[i] - 12, align: aligns[i], lineBreak: false });
       x += cw[i];
     });
@@ -151,9 +153,9 @@ function drawFinancialBreakdown(doc, rows, opts) {
     const gtH = 34;
     doc.rect(left, y, totalW, gtH).fill(C.navy);
     doc.rect(left, y, 4, gtH).fill(C.gold);
-    doc.font("Helvetica-Bold").fontSize(10.5).fillColor(C.gold)
+    doc.font(F.bold).fontSize(10.5).fillColor(C.gold)
       .text(grandTotalLabel.toUpperCase(), left + 16, y + 11, { width: totalW * 0.5, characterSpacing: 0.6 });
-    doc.font("Helvetica-Bold").fontSize(15).fillColor(C.white)
+    doc.font(F.bold).fontSize(15).fillColor(C.white)
       .text(`Rs. ${money(grandTotal != null ? grandTotal : sumTotal)}`, left, y + 8, { width: totalW - 16, align: "right" });
     doc.fillColor("#000000");
     y += gtH;
@@ -162,7 +164,7 @@ function drawFinancialBreakdown(doc, rows, opts) {
   doc.y = y + 10;
 
   if (note) {
-    doc.font("Helvetica-Oblique").fontSize(7).fillColor(C.muted)
+    doc.font(F.italic).fontSize(7).fillColor(C.muted)
       .text(note, left, doc.y, { width: width });
     doc.fillColor("#000000");
     doc.y += 12;

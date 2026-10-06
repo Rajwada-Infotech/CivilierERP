@@ -6,10 +6,10 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { AssignmentStatusSelect } from "./AssignmentStatusSelect";
 
-function show(status: Parameters<typeof AssignmentStatusSelect>[0]["status"]) {
+function show(status: Parameters<typeof AssignmentStatusSelect>[0]["status"], resumed = false) {
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <AssignmentStatusSelect rungId={1} status={status} />
+      <AssignmentStatusSelect rungId={1} status={status} resumed={resumed} />
     </QueryClientProvider>,
   );
   return screen.getByRole("combobox") as HTMLSelectElement;
@@ -30,5 +30,21 @@ describe("AssignmentStatusSelect shows the real status", () => {
     const select = show("IN_PROGRESS");
     expect(select.value).toBe("IN_PROGRESS");
     expect([...select.options].map((o) => o.textContent)).toEqual(["In Progress", "Hold", "Cancelled"]);
+  });
+});
+
+describe("Resumed", () => {
+  it("an In Progress activity put back after a hold reads Resumed", () => {
+    const select = show("IN_PROGRESS", true);
+    expect(select.value).toBe("IN_PROGRESS");
+    expect(select.selectedOptions[0].textContent).toBe("Resumed");
+  });
+
+  it("only In Progress can be Resumed — a hold or a normal start is unchanged", () => {
+    expect(show("HOLD", true).selectedOptions[0].textContent).toBe("Hold");
+  });
+
+  it("a normal In Progress still reads In Progress", () => {
+    expect(show("IN_PROGRESS", false).selectedOptions[0].textContent).toBe("In Progress");
   });
 });

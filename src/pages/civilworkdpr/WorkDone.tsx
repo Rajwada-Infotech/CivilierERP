@@ -11,6 +11,7 @@ import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/component
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
 import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { ScopeLocationTree } from "@/components/civilworkdpr/ScopeLocationTree";
 import { BulkAssignModal } from "@/pages/masters/DependencyMaster/components/BulkAssignModal";
@@ -692,8 +693,9 @@ export default function WorkDone() {
                                     {rung.sequenceNo}. {rung.activityName}
                                   </span>
                                   {assignment && (
-                                    <div className="shrink-0">
-                                      <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
+                                    <div className="shrink-0 flex flex-col items-end gap-0.5">
+                                      <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} resumed={!!assignment.resumedAt} />
+                                      <TimelineHint status={assignment.status} startDate={assignment.startDate} days={assignment.days} endDate={assignment.endDate} />
                                     </div>
                                   )}
                                 </div>
@@ -798,7 +800,8 @@ export default function WorkDone() {
                                           )}
                                         </td>
                                         <td className="px-3.5 py-3">
-                                          <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
+                                          <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} resumed={!!assignment.resumedAt} />
+                                          <TimelineHint status={assignment.status} startDate={assignment.startDate} days={assignment.days} endDate={assignment.endDate} className="mt-1" />
                                         </td>
                                       </>
                                     ) : (

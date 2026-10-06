@@ -71,7 +71,8 @@ import {
 } from "iconsax-react";
 
 import { useModule } from "@/contexts/ModuleContext";
-import { MODULE_DASHBOARD_ROUTES } from "@/contexts/module.utils";
+import { MODULE_DASHBOARD_ROUTES, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
+import { ALL_MODULES, hexToHsl } from "./moduleDefs";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
@@ -128,130 +129,24 @@ interface SetupItem {
 }
 
 // ── Module colour system ──────────────────────────────────────────────────────
-const MODULE_META: Record<
-  string,
-  {
-    h: number;
-    s: number;
-    l: number;
-    icon: React.ElementType;
-    label: string;
-    route: string;
-  }
-> = {
+// Built from the shared module list (moduleDefs.tsx) — the same icon, name, colour and order as the
+// desktop module strip and the top bar. Only the "Menu" placeholder (no module open) is local.
+type ModuleMeta = {
+  h: number;
+  s: number;
+  l: number;
+  icon: React.ElementType;
+  label: string;
+  route: string;
+};
+const MODULE_META: Record<string, ModuleMeta> = {
   __none__: { h: 242, s: 65, l: 58, icon: Grip, label: "Menu", route: "/home" },
-  finance: {
-    h: 217,
-    s: 91,
-    l: 60,
-    icon: Bank,
-    label: "Finance",
-    route: MODULE_DASHBOARD_ROUTES.finance,
-  },
-  material: {
-    h: 160,
-    s: 60,
-    l: 45,
-    icon: Receipt21,
-    label: "Material",
-    route: MODULE_DASHBOARD_ROUTES.material,
-  },
-  "fixed-asset": {
-    h: 45,
-    s: 93,
-    l: 47,
-    icon: Cpu,
-    label: "Fixed Asset",
-    route: MODULE_DASHBOARD_ROUTES["fixed-asset"],
-  },
-  loan: {
-    h: 142,
-    s: 71,
-    l: 45,
-    icon: MoneyRecive,
-    label: "Loan",
-    route: MODULE_DASHBOARD_ROUTES.loan,
-  },
-  followup: {
-    h: 174,
-    s: 72,
-    l: 40,
-    icon: Category2,
-    label: "Follow Up",
-    route: MODULE_DASHBOARD_ROUTES.followup,
-  },
-  engineering: {
-    h: 38,
-    s: 92,
-    l: 50,
-    icon: ClipboardText,
-    label: "Engineering",
-    route: MODULE_DASHBOARD_ROUTES.engineering,
-  },
-  civilworkdpr: {
-    h: 192,
-    s: 91,
-    l: 36,
-    icon: Chart21,
-    label: "Civil Work DPR",
-    route: MODULE_DASHBOARD_ROUTES.civilworkdpr,
-  },
-  ticket: {
-    h: 330,
-    s: 80,
-    l: 60,
-    icon: Message2,
-    label: "Ticket",
-    route: MODULE_DASHBOARD_ROUTES.ticket,
-  },
-  sales: {
-    h: 271,
-    s: 91,
-    l: 65,
-    icon: ShoppingCart,
-    label: "Sales",
-    route: MODULE_DASHBOARD_ROUTES.sales,
-  },
-  maintenance: {
-    h: 84,
-    s: 81,
-    l: 35,
-    icon: Wrench,
-    label: "Maintenance",
-    route: MODULE_DASHBOARD_ROUTES.maintenance,
-  },
-  records: {
-    h: 347,
-    s: 77,
-    l: 50,
-    icon: Archive,
-    label: "Records",
-    route: MODULE_DASHBOARD_ROUTES.records,
-  },
-  "sales-automation": {
-    h: 330,
-    s: 70,
-    l: 55,
-    icon: VideoPlay,
-    label: "Sales Automation",
-    route: MODULE_DASHBOARD_ROUTES["sales-automation"],
-  },
-  crm: {
-    h: 199,
-    s: 89,
-    l: 48,
-    icon: Building3,
-    label: "CRM",
-    route: MODULE_DASHBOARD_ROUTES.crm,
-  },
-  admin: {
-    h: 217,
-    s: 91,
-    l: 60,
-    icon: Shield,
-    label: "Admin",
-    route: "/admin/dashboard",
-  },
+  ...Object.fromEntries(
+    ALL_MODULES.map((m): [string, ModuleMeta] => [
+      m.id,
+      { ...hexToHsl(m.color), icon: m.icon, label: m.label, route: MODULE_DASHBOARD_ROUTES[m.id] },
+    ]),
+  ),
 };
 
 // ── Setup item lists (mirrors TopNavbar) ─────────────────────────────────────
@@ -856,13 +751,12 @@ export const MobileNav: React.FC = () => {
   const activeModKey = isAdminPage ? "admin" : (activeModule ?? "__none__");
   const activeMod = MODULE_META[activeModKey] ?? MODULE_META.__none__;
 
+  // Exactly who the desktop module strip shows each module to.
+  const isAdminTier = isAdminTierRole(currentUser?.role ?? "");
   const moduleModules = Object.entries(MODULE_META).filter(([id]) => {
     if (id === "__none__") return false;
-    if (id === "admin") return isAdmin;
-    if (currentUser?.role?.toLowerCase() === "engineer") {
-      return ["followup", "engineering", "ticket", "records"].includes(id);
-    }
-    return true;
+    if (id === "admin") return isAdminTier || canAccessPage("approval-inbox" as any);
+    return sharedUserHasModuleAccess(id, isAdminTier, (pk) => canAccessPage(pk as any));
   });
 
   const themeCheck: Record<Theme, string> = {

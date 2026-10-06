@@ -48,6 +48,7 @@ import {
   getEngineers,
   SOURCE_META,
   type RungAssignmentDetail,
+  type SourceType,
   type Engineer,
 } from "@/api/dependencyActivityAssignmentApi";
 import {
@@ -63,12 +64,22 @@ import {
   Circle,
   CalendarDays,
   UserRound,
+  ShieldCheck,
   ListChecks,
   Printer,
   FileDown,
 } from "lucide-react";
-import { printMasterPreview, downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
+import { printMasterPreview, downloadMasterPreviewPdf, type PreviewSection } from "@/utils/masterPreviewPrint";
 import { toast } from "sonner";
+import {
+  loadMRCompany,
+  mrDocFromRecord,
+  printMaterialRequest,
+  downloadMaterialRequestPdf,
+} from "@/utils/materialRequestDocument";
+import { printPurchaseOrder, downloadPurchaseOrderPdf } from "@/utils/purchaseOrderDocument";
+import { printGrn, downloadGrnPdf } from "@/utils/grnDocument";
+import { printVehicleInOut, downloadVehicleInOutPdf } from "@/utils/vehicleInOutDocument";
 
 // ─── Approval chain types — matches GET /api/approval-workflows/trail ────────
 
@@ -196,6 +207,39 @@ const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step, isLas
       </div>
     </div>
   );
+};
+
+// Who is supplying labour / material: the company or contractor's name, with the kind as a badge.
+const SourceBadgeWithName: React.FC<{ source: SourceType; name?: string | null }> = ({ source, name }) => (
+  <span className="flex flex-wrap items-center gap-2">
+    {name && <span className="text-foreground">{name}</span>}
+    <span
+      className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[source].className}`}
+    >
+      {SOURCE_META[source].label}
+    </span>
+  </span>
+);
+
+// Where Quality Check stands on this activity.
+const QcStatusPill: React.FC<{ qc?: { decision: "APPROVED" | "REWORK" } | null }> = ({ qc }) => {
+  const meta = !qc
+    ? { label: "Not reviewed", cls: "bg-slate-500/10 text-slate-600 dark:text-slate-400" }
+    : qc.decision === "APPROVED"
+      ? { label: "Passed", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" }
+      : { label: "Sent back for rework", cls: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400" };
+  return (
+    <span className={`ml-auto text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full normal-case ${meta.cls}`}>
+      {meta.label}
+    </span>
+  );
+};
+
+// A checkpoint's Quality Check rating.
+const RATING_META: Record<string, { label: string; cls: string }> = {
+  POOR: { label: "Poor", cls: "bg-red-500/10 text-red-600 dark:text-red-400" },
+  GOOD: { label: "Good", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
+  EXCELLENT: { label: "Excellent", cls: "bg-teal-500/15 text-teal-700 dark:text-teal-300" },
 };
 
 const FormField: React.FC<{ label: string; value: React.ReactNode; accent?: boolean }> = ({ label, value, accent }) => (
@@ -416,7 +460,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   // Approval Chain) so the exported doc can never show something the
   // reviewer didn't actually see here.
   const previewSections = (() => {
-    const sections: { title: string; fields: { label: string; value?: string | number | boolean | null }[] }[] = [];
+    const sections: PreviewSection[] = [];
 
     const overviewFields: { label: string; value?: string | number | boolean | null }[] = [
       { label: usesRungDetail ? "Start Date" : "Date", value: fmtDate(item.RecordDate) },
@@ -440,31 +484,76 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     sections.push({ title: "Overview", fields: overviewFields });
 
     if (lineItems.length > 0) {
-      const itemFields = isJournalVoucher
-        ? lineItems.map((li, i) => {
-            const debit = Number(li.DebitAmount) || 0;
-            const credit = Number(li.CreditAmount) || 0;
-            return {
-              label: `${i + 1}. ${(li.LHeadName as string) || "—"}`,
-              value: debit > 0 ? `Dr ${fmtAmount(debit)}` : `Cr ${fmtAmount(credit)}`,
-            };
-          })
-        : isMaterialRequest
-          ? lineItems.map((li, i) => {
-              const name = (li.ItemName ?? li.itemName ?? "—") as string;
+      const money = (n: number) => fmtAmount(n);
+      if (isJournalVoucher) {
+        const totalDr = lineItems.reduce((a, li) => a + (Number(li.DebitAmount) || 0), 0);
+        const totalCr = lineItems.reduce((a, li) => a + (Number(li.CreditAmount) || 0), 0);
+        sections.push({
+          title: "Journal Entry",
+          fields: [],
+          table: {
+            columns: [
+              { header: "#", align: "center" },
+              { header: "Ledger" },
+              { header: "Debit", align: "right" },
+              { header: "Credit", align: "right" },
+            ],
+            rows: lineItems.map((li, i) => {
+              const debit = Number(li.DebitAmount) || 0;
+              const credit = Number(li.CreditAmount) || 0;
+              return [i + 1, (li.LHeadName as string) || "—", debit > 0 ? money(debit) : "", credit > 0 ? money(credit) : ""];
+            }),
+            footer: ["", "Total", money(totalDr), money(totalCr)],
+          },
+        });
+      } else if (isMaterialRequest) {
+        sections.push({
+          title: `Items (${lineItems.length})`,
+          fields: [],
+          table: {
+            columns: [
+              { header: "#", align: "center" },
+              { header: "Item" },
+              { header: "Qty", align: "right" },
+              { header: "UOM" },
+            ],
+            rows: lineItems.map((li, i) => [
+              i + 1,
+              (li.ItemName ?? li.itemName ?? "—") as string,
+              Number(li.Quantity ?? li.quantity ?? 0).toLocaleString("en-IN"),
+              (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string,
+            ]),
+          },
+        });
+      } else {
+        sections.push({
+          title: `Items (${lineItems.length})`,
+          fields: [],
+          table: {
+            columns: [
+              { header: "#", align: "center" },
+              { header: "Item" },
+              { header: "Qty", align: "right" },
+              { header: "UOM" },
+              { header: "Rate", align: "right" },
+              { header: "Amount", align: "right" },
+            ],
+            rows: lineItems.map((li, i) => {
               const qty = Number(li.Quantity ?? li.quantity ?? 0);
-              const uom = (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
-              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""}` };
-            })
-          : lineItems.map((li, i) => {
-              const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
-              const qty = Number(li.Quantity ?? li.quantity ?? 0);
-              const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
               const rate = Number(li.Rate ?? li.rate ?? 0);
               const amount = Number(li.LineAmount ?? li.AmountInclGst ?? li.amount ?? qty * rate);
-              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""} × ${fmtAmount(rate)} = ${fmtAmount(amount)}` };
-            });
-      sections.push({ title: isJournalVoucher ? "Journal Entry" : `Items (${lineItems.length})`, fields: itemFields });
+              return [
+                i + 1,
+                (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string,
+                qty.toLocaleString("en-IN"),
+                (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string,
+                money(rate),
+                money(amount),
+              ];
+            }),
+          },
+        });
+      }
     }
 
     if (!usesRungDetail && extraFields.length > 0) {
@@ -489,18 +578,54 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   })();
 
   const previewTitle = item.Reference || `#${item.RecordId}`;
+
+  // Material Requests have their own letterhead-style document (same one the
+  // Material Request page prints) instead of the generic label/value layout.
+  // Needs the full record (company, items); until it has loaded, fall back to
+  // the generic document below.
+  const mrDocument = async () => {
+    const rec = detail as Record<string, any>;
+    const company = await loadMRCompany(rec.CompanyId, rec.CompanyName);
+    return mrDocFromRecord(
+      { ...rec, DocNo: rec.DocNo ?? item.Reference, CreatedBy: rec.CreatedByName ?? item.CreatedBy ?? rec.CreatedBy, Status: rec.Status ?? item.Status },
+      company,
+    );
+  };
+  const useMrDocument = item.Module === "material-requests" && !!detail;
+  // Purchase Orders likewise use their own letterhead document once the full
+  // record (with LineItems) has loaded.
+  const usePoDocument = item.Module === "purchase-orders" && !!detail;
+  const useGrnDocument = item.Module === "goods-receipt" && !!detail;
+  const useVioDocument = item.Module === "vehicle-in-out" && !!detail;
+
   const docActions = (
     <div className="flex items-center gap-1.5 shrink-0">
       <button
-        onClick={() =>
+        onClick={async () => {
+          if (useMrDocument) {
+            printMaterialRequest(await mrDocument());
+            return;
+          }
+          if (useVioDocument) {
+            await printVehicleInOut({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status });
+            return;
+          }
+          if (useGrnDocument) {
+            await printGrn({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status });
+            return;
+          }
+          if (usePoDocument) {
+            await printPurchaseOrder({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status });
+            return;
+          }
           printMasterPreview({
             title: previewTitle,
             subtitle: item.ModuleLabel,
             code: item.Reference,
             status: item.Status,
             sections: previewSections,
-          })
-        }
+          });
+        }}
         title="Print"
         className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
       >
@@ -509,6 +634,32 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
       <button
         onClick={() => {
           const toastId = toast.loading("Generating PDF...");
+          const filename = `${(item.Reference || item.RecordId || "document").replace(/[^\w-]+/g, "_")}.pdf`;
+          if (useVioDocument) {
+            downloadVehicleInOutPdf({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status }, filename)
+              .then(() => toast.success("PDF downloaded", { id: toastId }))
+              .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+            return;
+          }
+          if (useGrnDocument) {
+            downloadGrnPdf({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status }, filename)
+              .then(() => toast.success("PDF downloaded", { id: toastId }))
+              .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+            return;
+          }
+          if (usePoDocument) {
+            downloadPurchaseOrderPdf({ ...(detail as Record<string, any>), Status: (detail as any).Status ?? item.Status }, filename)
+              .then(() => toast.success("PDF downloaded", { id: toastId }))
+              .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+            return;
+          }
+          if (useMrDocument) {
+            mrDocument()
+              .then((doc) => downloadMaterialRequestPdf(doc, filename))
+              .then(() => toast.success("PDF downloaded", { id: toastId }))
+              .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+            return;
+          }
           downloadMasterPreviewPdf({
             title: previewTitle,
             subtitle: item.ModuleLabel,
@@ -672,23 +823,46 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                 </div>
               ) : rungDetail?.assignment ? (
                 <>
-                  <div>
-                    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                      <UserRound size={10} className="text-cyan-500" /> Engineers
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {rungDetail.assignment.engineerIds.length === 0 ? (
-                        <span className="text-xs text-muted-foreground italic">None assigned</span>
-                      ) : (
-                        rungDetail.assignment.engineerIds.map((id) => (
-                          <span
-                            key={id}
-                            className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
-                          >
-                            {engineers.find((e) => e.id === id)?.name || `#${id}`}
-                          </span>
-                        ))
-                      )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <UserRound size={10} className="text-cyan-500" /> Engineers
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {rungDetail.assignment.engineerIds.length === 0 ? (
+                          <span className="text-xs text-muted-foreground italic">None assigned</span>
+                        ) : (
+                          rungDetail.assignment.engineerIds.map((id) => (
+                            <span
+                              key={id}
+                              className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
+                            >
+                              {engineers.find((e) => e.id === id)?.name || `#${id}`}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <ShieldCheck size={10} className="text-violet-500" /> Quality Check
+                        <QcStatusPill qc={rungDetail.assignment.qcStatus} />
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(rungDetail.assignment.qcUserIds || []).length === 0 ? (
+                          <span className="text-xs text-muted-foreground italic">No QC engineer assigned</span>
+                        ) : (
+                          rungDetail.assignment.qcUserIds.map((id) => (
+                            <span
+                              key={id}
+                              className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
+                            >
+                              {engineers.find((e) => e.id === id)?.name || `#${id}`}
+                            </span>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -697,11 +871,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                       <FormField
                         label="Labour Given By"
                         value={
-                          <span
-                            className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.labourSource].className}`}
-                          >
-                            {SOURCE_META[rungDetail.assignment.labourSource].label}
-                          </span>
+                          <SourceBadgeWithName
+                            source={rungDetail.assignment.labourSource}
+                            name={rungDetail.assignment.labourSourceName}
+                          />
                         }
                       />
                     )}
@@ -709,11 +882,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                       <FormField
                         label="Material Given By"
                         value={
-                          <span
-                            className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.materialSource].className}`}
-                          >
-                            {SOURCE_META[rungDetail.assignment.materialSource].label}
-                          </span>
+                          <SourceBadgeWithName
+                            source={rungDetail.assignment.materialSource}
+                            name={rungDetail.assignment.materialSourceName}
+                          />
                         }
                       />
                     )}
@@ -728,23 +900,39 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                     </div>
                   )}
 
-                  {rungDetail.assignment.materials.length > 0 && (
-                    <div>
-                      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                        <Package size={10} className="text-emerald-500" /> Materials ({rungDetail.assignment.materials.length})
-                      </p>
-                      <div className="rounded-xl border border-border divide-y divide-border/50">
-                        {rungDetail.assignment.materials.map((m, i) => {
-                          const candidate = rungDetail.candidateItems.find((c) => c.itemId === m.itemId);
-                          return (
-                            <div key={i} className="flex items-center justify-between px-3 py-2 text-xs">
-                              <span className="font-medium text-foreground">{candidate?.itemName || `#${m.itemId}`}</span>
-                              <span className="text-muted-foreground shrink-0">
-                                {m.quantity.toLocaleString("en-IN")}{candidate?.uom ? ` ${candidate.uom}` : ""}
-                              </span>
-                            </div>
-                          );
-                        })}
+                  {(rungDetail.assignment.materials.length > 0 || rungDetail.assignment.remarks) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                          <Package size={10} className="text-emerald-500" /> Materials ({rungDetail.assignment.materials.length})
+                        </p>
+                        {rungDetail.assignment.materials.length === 0 ? (
+                          <p className="text-xs text-muted-foreground italic">No materials entered</p>
+                        ) : (
+                          <div className="rounded-xl border border-border divide-y divide-border/50">
+                            {rungDetail.assignment.materials.map((m, i) => {
+                              const candidate = rungDetail.candidateItems.find((c) => c.itemId === m.itemId);
+                              return (
+                                <div key={i} className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
+                                  <span className="font-medium text-foreground">{candidate?.itemName || `#${m.itemId}`}</span>
+                                  <span className="text-muted-foreground shrink-0">
+                                    {m.quantity.toLocaleString("en-IN")}{candidate?.uom ? ` ${candidate.uom}` : ""}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Remarks</p>
+                        {rungDetail.assignment.remarks ? (
+                          <p className="text-xs text-foreground whitespace-pre-wrap break-words bg-muted/30 border border-border rounded-lg px-3 py-2.5">
+                            {rungDetail.assignment.remarks}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic">No remarks</p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -755,21 +943,40 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                         <ListChecks size={10} className="text-cyan-500" /> Checkpoints ({rungDetail.assignment.checkpoints.length})
                       </p>
                       <div className="rounded-xl border border-border divide-y divide-border/50">
-                        {rungDetail.assignment.checkpoints.map((cp) => (
-                          <div key={cp.id ?? cp.fieldName} className="flex items-center gap-2 px-3 py-2 text-xs">
-                            {cp.isChecked ? (
-                              <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
-                            ) : (
-                              <Circle size={13} className="text-muted-foreground/40 shrink-0" />
-                            )}
-                            <span className={cp.isChecked ? "text-foreground" : "text-muted-foreground"}>{cp.fieldName}</span>
-                            {cp.isDaily && (
-                              <span className="ml-auto text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground/70 flex items-center gap-1">
-                                <CalendarDays size={10} /> Daily{cp.updateCount ? ` · ${cp.updateCount}` : ""}
+                        {rungDetail.assignment.checkpoints.map((cp) => {
+                          const qcCheck = rungDetail.assignment?.qcStatus?.checks?.find((c) => c.fieldName === cp.fieldName);
+                          const rating = qcCheck?.rating ? RATING_META[qcCheck.rating] : null;
+                          const failed = qcCheck?.rating === "POOR";
+                          return (
+                            <div key={cp.id ?? cp.fieldName} className="flex items-center gap-2 px-3 py-2 text-xs">
+                              {failed ? (
+                                <XCircle size={13} className="text-red-500 shrink-0" />
+                              ) : cp.isChecked || qcCheck?.passed ? (
+                                <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                              ) : (
+                                <Circle size={13} className="text-muted-foreground/40 shrink-0" />
+                              )}
+                              <span className={cp.isChecked || qcCheck ? "text-foreground" : "text-muted-foreground"}>{cp.fieldName}</span>
+                              {qcCheck?.note && (
+                                <span className="text-[0.625rem] text-muted-foreground italic truncate" title={qcCheck.note}>
+                                  {qcCheck.note}
+                                </span>
+                              )}
+                              <span className="ml-auto flex items-center gap-2 shrink-0">
+                                {cp.isDaily && (
+                                  <span className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground/70 flex items-center gap-1">
+                                    <CalendarDays size={10} /> Daily{cp.updateCount ? ` · ${cp.updateCount}` : ""}
+                                  </span>
+                                )}
+                                {rating && (
+                                  <span className={`text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${rating.cls}`}>
+                                    {rating.label}
+                                  </span>
+                                )}
                               </span>
-                            )}
-                          </div>
-                        ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

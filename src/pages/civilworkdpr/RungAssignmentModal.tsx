@@ -671,7 +671,9 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   {checkpoints.map((cp, i) => (
                     <div
                       key={`${cp.checkpointId ?? "custom"}-${i}`}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
+                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border ${
+                        cp.needsRework ? "cp-rework-blink bg-amber-500/10 border-amber-500/50" : "bg-muted/40 border-border/50"
+                      }`}
                     >
                       <div
                         className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
@@ -681,6 +683,11 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         <Check size={9} strokeWidth={3} />
                       </div>
                       <span className="text-sm text-foreground flex-1 truncate">{cp.fieldName}</span>
+                      {cp.needsRework && (
+                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/15 px-1.5 py-0.5 rounded-full shrink-0">
+                          Redo — rated Poor
+                        </span>
+                      )}
                       {cp.isDaily && (
                         <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full shrink-0">
                           <CalendarDays size={9} /> Daily

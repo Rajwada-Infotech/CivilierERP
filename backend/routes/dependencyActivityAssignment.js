@@ -6,6 +6,9 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { invalidateThread } = require("../services/activityThread");
+const { makeColumnProbe } = require("../services/columnProbe");
+// ResumedAt arrives with migration 536; this code must keep working on a server that hasn't run it.
+const hasResumedAt = makeColumnProbe("dbo.DependencyActivityAssignment", "ResumedAt");
 
 // ── Project scoping ──────────────────────────────────────────────────────────
 // A rung / checkpoint / checkpoint-update belongs to the project of its
@@ -118,6 +121,25 @@ async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, sour
     INSERT INTO dbo.DependencyActivityQcAssignee (AssignmentId, QcUserId)
     SELECT @new, QcUserId FROM dbo.DependencyActivityQcAssignee WHERE AssignmentId = @old
   `);
+  // Sent back by Quality Check: the checkpoints that passed (Good / Excellent) stay ticked on the
+  // new attempt; only the ones rated Poor were un-ticked (by the QC decision, just before this) and
+  // are the ones to redo — Work Allocation flags those. A rework from an Approval rejection has no
+  // per-checkpoint verdict, so that attempt re-seeds its checklist fresh from the template instead.
+  if (source === "QC") {
+    await new sql.Request(tx).input("old", sql.Int, oldAssignmentId).input("new", sql.Int, newAssignmentId).query(`
+      INSERT INTO dbo.DependencyActivityCheckpoint
+        (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsDaily, IsChecked, CheckedAt, CheckedBy)
+      SELECT @new, c.CheckpointId, c.FieldName, c.SortOrder, c.MinWaitDays, c.IsDaily,
+             -- ticked if it was, or if Quality Check passed it (Good / Excellent); a Poor one is not
+             CASE WHEN c.IsChecked = 1 OR EXISTS (
+                    SELECT 1 FROM dbo.DependencyActivityQcCheck ck
+                    WHERE ck.AssignmentCheckpointId = c.Id AND ck.Passed = 1
+                      AND ck.QcId = (SELECT TOP 1 q.Id FROM dbo.DependencyActivityQc q WHERE q.AssignmentId = @old ORDER BY q.QcAt DESC, q.Id DESC)
+                  ) THEN 1 ELSE 0 END,
+             c.CheckedAt, c.CheckedBy
+      FROM dbo.DependencyActivityCheckpoint c WHERE c.AssignmentId = @old
+    `);
+  }
 
   return newAssignmentId;
 }
@@ -217,10 +239,12 @@ router.get(
     request.input("limit", sql.Int, limit);
     request.input("offset", sql.Int, offset);
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+    const resumedExpr = (await hasResumedAt(pool)) ? "daa.ResumedAt" : "CAST(NULL AS DATETIME2)";
     const r = await request.query(`
       SELECT
         daa.Id AS assignmentId,
         daa.DependencyMasterActivityId AS rungId,
+        ${resumedExpr} AS resumedAt,
         daa.StartDate AS startDate,
         daa.Days AS days,
         daa.EndDate AS endDate,
@@ -1330,6 +1354,11 @@ router.patch(
     if (hasRemarks) setClauses.push("Remarks = @remarks");
     if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
     if (isFirstReport) setClauses.push("FirstReportedAt = CAST(SYSDATETIME() AS DATE)");
+    // Put back In Progress after a hold = Resumed; going on hold again clears it.
+    if (hasStatus && (await hasResumedAt(pool))) {
+      if (current === "HOLD" && status === "IN_PROGRESS") setClauses.push("ResumedAt = SYSDATETIME()");
+      else if (status === "HOLD") setClauses.push("ResumedAt = NULL");
+    }
     const capturingPreCancel = hasStatus && status === "CANCELLED" && current && current !== "CANCELLED";
     if (capturingPreCancel) setClauses.push("PreCancelStatus = @preCancelStatus");
     const request = pool.request()
@@ -1685,10 +1714,60 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         Id AS assignmentId, StartDate AS startDate, Days AS days, EndDate AS endDate,
         LabourSource AS labourSource, MaterialSource AS materialSource,
         LabourContractorId AS labourContractorId, MaterialContractorId AS materialContractorId,
-        Description AS description, Remarks AS remarks, ApprovalLevelsJson AS approvalLevelsJson
+        Description AS description, Remarks AS remarks, ApprovalLevelsJson AS approvalLevelsJson,
+        ReworkFromAssignmentId AS reworkFromAssignmentId
       FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1
     `);
     const assignment = assignRes.recordset[0] || null;
+
+    // Whose labour / material it is, by name: the project's developer company, or the named
+    // contractor — so a reviewer sees a company, not just "Developer".
+    let labourSourceName = null;
+    let materialSourceName = null;
+    let qcStatus = null;
+    if (assignment) {
+      const devRes = await pool.request().input("rungId", sql.Int, rungId).query(`
+        SELECT c.name AS developerName
+        FROM dbo.DependencyMasterActivity dma
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        LEFT JOIN dbo.enterprise p ON p.id = dm.ProjectId
+        LEFT JOIN dbo.enterprise c ON c.id = p.company_id
+        WHERE dma.Id = @rungId
+      `);
+      const developerName = devRes.recordset[0]?.developerName ?? null;
+      const contractorIds = [assignment.labourContractorId, assignment.materialContractorId].filter((v) => v != null);
+      const contractorName = new Map();
+      if (contractorIds.length) {
+        const cr = await pool.request().query(
+          `SELECT LHeadId AS id, LHeadName AS name FROM dbo.AccountHeadMaster WHERE LHeadId IN (${contractorIds.map((v) => parseInt(v, 10)).join(",")})`,
+        );
+        cr.recordset.forEach((r) => contractorName.set(r.id, r.name));
+      }
+      const nameFor = (source, contractorId) =>
+        source === "DEVELOPER" ? developerName : source === "CONTRACTOR" ? contractorName.get(contractorId) ?? null : null;
+      labourSourceName = nameFor(assignment.labourSource, assignment.labourContractorId);
+      materialSourceName = nameFor(assignment.materialSource, assignment.materialContractorId);
+
+      // QC: the latest decision on THIS attempt, if any (none yet = not reviewed).
+      const qcRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
+        SELECT TOP 1 qc.Id AS id, qc.Decision AS decision, qc.Remarks AS remarks, qc.QcAt AS qcAt,
+               COALESCE(u.name, qc.QcBy) AS qcBy
+        FROM dbo.DependencyActivityQc qc
+        LEFT JOIN dbo.users u ON LOWER(u.email) = LOWER(qc.QcBy)
+        WHERE qc.AssignmentId = @assignmentId
+        ORDER BY qc.QcAt DESC, qc.Id DESC
+      `);
+      qcStatus = qcRes.recordset[0] || null;
+      if (qcStatus) {
+        // Each checkpoint's rating (Poor / Good / Excellent) from that same decision.
+        const checksRes = await pool.request().input("qcId", sql.Int, qcStatus.id).query(`
+          SELECT FieldName AS fieldName, Passed AS passed, Rating AS rating, Note AS note
+          FROM dbo.DependencyActivityQcCheck WHERE QcId = @qcId ORDER BY Id
+        `);
+        qcStatus = { ...qcStatus, checks: checksRes.recordset.map((c) => ({ ...c, passed: !!c.passed })) };
+        delete qcStatus.id;
+      }
+    }
 
     let materials = [];
     let engineerIds = [];
@@ -1759,7 +1838,24 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         FROM dbo.DependencyActivityCheckpoint c WHERE c.AssignmentId = @assignmentId
         ORDER BY c.SortOrder ASC, c.Id ASC
       `);
-      checkpoints = cpRes.recordset.map((c) => ({ ...c, isChecked: !!c.isChecked, isDaily: !!c.isDaily }));
+      // On a rework attempt, the checkpoints Quality Check rated Poor last time (and that aren't
+      // ticked again yet) are the ones to redo — flagged so the screens can make them blink.
+      const reworkFields = new Set();
+      if (assignment.reworkFromAssignmentId) {
+        const rw = await pool.request().input("old", sql.Int, assignment.reworkFromAssignmentId).query(`
+          SELECT ck.FieldName AS fieldName
+          FROM dbo.DependencyActivityQcCheck ck
+          WHERE ck.Rating = 'POOR'
+            AND ck.QcId = (SELECT TOP 1 Id FROM dbo.DependencyActivityQc WHERE AssignmentId = @old ORDER BY QcAt DESC, Id DESC)
+        `);
+        rw.recordset.forEach((r) => reworkFields.add(r.fieldName));
+      }
+      checkpoints = cpRes.recordset.map((c) => ({
+        ...c,
+        isChecked: !!c.isChecked,
+        isDaily: !!c.isDaily,
+        needsRework: !c.isChecked && reworkFields.has(c.fieldName),
+      }));
     }
 
     res.json({
@@ -1779,6 +1875,9 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
             materialSource: assignment.materialSource,
             labourContractorId: assignment.labourContractorId,
             materialContractorId: assignment.materialContractorId,
+            labourSourceName,
+            materialSourceName,
+            qcStatus,
             description: assignment.description,
             remarks: assignment.remarks,
             materials,
