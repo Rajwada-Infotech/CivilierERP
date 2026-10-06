@@ -1843,3 +1843,22 @@ button[role="combobox"]:focus {
 [data-theme="glass"] :is(.bg-sidebar-accent, [class*=" bg-sidebar-accent/"], [class^="bg-sidebar-accent/"]) {
     background-color: color-mix(in srgb, var(--mod-from, #22d3ee) 18%, transparent) !important;
 }
+
+/* ── No text overflow outside tables ─────────────────────────────────────
+   1) A flex / grid child that contains truncating text may shrink, so
+      .truncate / line-clamp always ends in "…" instead of pushing past its
+      card (flex items otherwise refuse to shrink below their content).
+   2) Blocks holding headings / paragraphs may shrink too, and those break
+      only a word that can't fit on a line by itself (long IDs / numbers)
+      instead of overflowing their container. Normal words are unaffected;
+      tables, buttons and pills keep their own rules. */
+main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clamp-2, .line-clamp-3):not(.shrink-0),
+[role="dialog"] :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clamp-2, .line-clamp-3):not(.shrink-0) {
+    min-width: 0;
+}
+:is(main, [role="dialog"]) :is(.flex, .inline-flex, .grid) > :has(> :is(h1, h2, h3, h4, h5, h6, p)):not(.shrink-0):not(table *) {
+    min-width: 0;
+}
+:is(main, [role="dialog"]) :is(h1, h2, h3, h4, h5, h6, p):not(table *):not(button *):not(.truncate) {
+    overflow-wrap: break-word;
+}

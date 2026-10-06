@@ -634,13 +634,13 @@ function GodownCard({
       <div className="p-5">
         {/* Header row */}
         <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-muted">
               <Warehouse size={19} className="text-muted-foreground" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-sm font-heading font-bold text-foreground truncate">
+                <p className="text-sm font-heading font-bold text-foreground break-words [overflow-wrap:anywhere]" title={godown.GodownName}>
                   {godown.GodownName}
                 </p>
                 {!godown.IsActive && (
