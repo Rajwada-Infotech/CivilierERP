@@ -2,6 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmAfsQueryPayment")); }
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -60,6 +62,7 @@ router.get("/", requirePageRight("crm-afs-query-payment", "view"), async (req, r
     // Company/Project/Block narrows the set server-side instead.
     if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (req.projectScope) where.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
     const result = await req0.query(`${AQP_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY aqp.CreatedAt DESC`);
     res.json(result.recordset);

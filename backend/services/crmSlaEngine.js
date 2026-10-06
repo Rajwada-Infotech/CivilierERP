@@ -29,6 +29,21 @@ const { releaseAllParkingForBooking } = require("../routes/crmParking");
 const logger = require("../logger");
 
 const INTERVAL_MS = 60 * 60 * 1000; // hourly, same cadence as escalationEngine.js
+
+// A booking that missed its confirmation window is only auto-expired when
+// nothing real hangs on it. One already submitted for approval (waiting on the
+// Marketing Head / Director) or with any money received is a live sale held up
+// by the office, not an abandoned one: expiring it would release the unit and
+// strand the customer's money with no refund raised. Those stay as they are
+// and surface on the SLA dashboard instead. Applied to alias `bk`.
+const EXPIRABLE_BOOKING_SQL = `
+  AND bk.ReadyForApprovalAt IS NULL
+  AND ISNULL(bk.WorkflowStage, N'') NOT IN (N'MarketingHeadApproval', N'DirectorApproval', N'Confirmed')
+  AND NOT EXISTS (SELECT 1 FROM dbo.CrmPaymentMilestone pm WHERE pm.BookingId = bk.Id AND ISNULL(pm.AmountPaid, 0) > 0)
+  AND NOT EXISTS (SELECT 1 FROM dbo.CrmMoneyReceipt mr WHERE mr.BookingId = bk.Id AND ISNULL(mr.Amount, 0) > 0
+                    AND ISNULL(mr.Status, N'') NOT IN (N'Rejected', N'Cancelled', N'Bounced'))
+  AND NOT EXISTS (SELECT 1 FROM dbo.CrmOnAccountPayment oa WHERE oa.BookingId = bk.Id AND ISNULL(oa.Amount, 0) > 0
+                    AND ISNULL(oa.Status, N'') NOT IN (N'Rejected', N'Cancelled', N'Bounced', N'Refunded'))`;
 const COOLDOWN_HOURS = 24; // don't re-notify the same overdue record within this window
 
 // Customer side has no Users.id to notify through — a CrmCommunicationLog
@@ -210,6 +225,7 @@ const REGISTRY = [
         LEFT JOIN dbo.UnitMaster u ON u.Id = bk.UnitId
         WHERE bk.IsActive = 1 AND bk.Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired', 'Transferred')
           AND bk.ConfirmDeadline IS NOT NULL AND bk.ConfirmDeadline < SYSDATETIME()
+          ${EXPIRABLE_BOOKING_SQL}
       `);
       return r.recordset;
     },
@@ -221,9 +237,11 @@ const REGISTRY = [
       // expires it, and only runs the release cascade below, if it's still
       // genuinely in a state this sweep should touch.
       const claimed = await pool.request().input("id", sql.Int, row.Id).query(`
-        UPDATE dbo.CrmBooking SET Status = 'Expired'
+        UPDATE bk SET Status = 'Expired'
         OUTPUT INSERTED.Id
-        WHERE Id = @id AND IsActive = 1 AND Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired', 'Transferred')
+        FROM dbo.CrmBooking bk
+        WHERE bk.Id = @id AND bk.IsActive = 1 AND bk.Status NOT IN ('Approved', 'Cancelled', 'Rejected', 'Expired', 'Transferred')
+          ${EXPIRABLE_BOOKING_SQL}
       `);
       if (!claimed.recordset.length) return false;
 

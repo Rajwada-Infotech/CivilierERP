@@ -37,7 +37,8 @@ const LEVELS = [
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const floorRank = (f: string) => (f === "G" ? -1 : Number.isFinite(Number(f)) ? Number(f) : Number.MAX_SAFE_INTEGER);
-const floorLabel = (f: string) => (!f ? "No floor" : f === "G" ? "Ground Floor" : `Floor ${f}`);
+// A villa in a plotted block has no floor; its chains carry the plot label instead.
+const floorLabel = (f: string) => (!f ? "No floor" : f === "G" ? "Ground Floor" : Number.isFinite(Number(f)) ? `Floor ${f}` : `Plot ${f}`);
 
 function buildTree<T extends ScopeLocatable>(rows: T[], getCount: (item: T) => number): TreeNode<T>[] {
   const root = new Map<string, TreeNode<T>>();

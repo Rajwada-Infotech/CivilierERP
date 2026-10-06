@@ -1,7 +1,9 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on records outside their projects.
+{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, { "/on-account/": crmViaBookingSql("CrmOnAccountPayment"), default: crmViaBookingSql("CrmPaymentMilestone") }); }
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -359,9 +361,12 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
     const req0 = pool.request();
     const conds = [
       "b.IsActive = 1",
-      "b.Status NOT IN ('Cancelled', 'Rejected')",
+      // Dead bookings owe nothing — a resold seller's or an expired booking's
+      // unpaid instalments are not dues to chase.
+      `b.Status NOT IN ${DEAD_BOOKING_SQL}`,
       "m.Status NOT IN ('Waived')",
     ];
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (view !== "all") {
       conds.push("(m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0");
     }

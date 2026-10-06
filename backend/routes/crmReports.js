@@ -1,5 +1,5 @@
 const express = require("express");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -47,6 +47,8 @@ function cpbParams(req, { companyCol, projectCol, blockCol } = {}) {
   if (companyId && companyCol) clauses.push(`${companyCol} = @cpbCompanyId`);
   if (projectId && projectCol) clauses.push(`${projectCol} = @cpbProjectId`);
   if (blockId && blockCol) clauses.push(`${blockCol} = @cpbBlockId`);
+  // A project-restricted user's reports cover only their projects.
+  if (req.projectScope && projectCol) clauses.push(require("../services/projectScope").projectPredicate(req.projectScope, projectCol, "").trim());
   return {
     clauses,
     bind(r) {
@@ -63,7 +65,7 @@ router.get("/booking-register", requirePageRight("crm-bookings", "view"), async 
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(b.BookingDate AS DATE)");
     const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
-    const conds = ["b.IsActive = 1", `b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')`, ...dr.clauses, ...cpb.clauses];
+    const conds = ["b.IsActive = 1", `b.Status NOT IN ${DEAD_BOOKING_SQL}`, ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
     const result = await r.query(`
@@ -87,7 +89,7 @@ router.get("/payment-collection", requirePageRight("crm-payments", "view"), asyn
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(m.DueDate AS DATE)");
     const cpb = cpbParams(req, { companyCol: "b.CompanyId", projectCol: "b.ProjectId", blockCol: "b.BlockId" });
-    const conds = ["b.IsActive = 1", `b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}')`, ...dr.clauses, ...cpb.clauses];
+    const conds = ["b.IsActive = 1", `b.Status NOT IN ${DEAD_BOOKING_SQL}`, ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
     const result = await r.query(`
@@ -174,7 +176,7 @@ router.get("/overdue-payments", requirePageRight("crm-payments", "view"), async 
       WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Transferred')
+        AND b.Status NOT IN ${DEAD_BOOKING_SQL}
         ${cpb.clauses.length ? "AND " + cpb.clauses.join(" AND ") : ""}
       ORDER BY m.DueDate ASC
     `);

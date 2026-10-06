@@ -333,6 +333,16 @@ async function checkWorkflow() {
                                                   FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = d.FlatId AND p.IsActive = 1)))))
         OR (d.FlatId IS NOT NULL AND (u.BlockId <> d.TowerId OR u.ProjectId <> d.ProjectId))
         OR (d.TowerId IS NOT NULL AND b.ProjectId <> d.ProjectId)) ${projectFilter("d.ProjectId")}`);
+  await check(sec, "Plot linked to a villa that is missing or inactive (convert / undo left it half-done)", [["PlotMaster", "ConvertedUnitId"]],
+    `SELECT p.Id, p.PlotName, p.ConvertedUnitId FROM dbo.PlotMaster p LEFT JOIN dbo.UnitMaster u ON u.Id = p.ConvertedUnitId
+     WHERE p.IsActive = 1 AND p.ConvertedUnitId IS NOT NULL AND (u.Id IS NULL OR u.IsActive = 0) ${projectFilter("p.ProjectId")}`);
+  await check(sec, "Villa room with no DPR chain although its room type has one elsewhere  [fix: cloneChainForChainlessRooms]", [["PlotMaster", "ConvertedUnitId"]],
+    `SELECT r.Id, r.RoomName, u.UnitName FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId AND u.IsActive = 1
+     WHERE r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL ${projectFilter("r.ProjectId")}
+       AND EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)
+       AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id AND d.IsActive = 1)
+       AND EXISTS (SELECT 1 FROM dbo.DependencyMaster d2 JOIN dbo.RoomMaster r2 ON r2.Id = d2.RoomId
+                   WHERE d2.IsActive = 1 AND r2.RoomCategoryId = r.RoomCategoryId)`);
   await check(sec, "Chain whose Floor was saved as the text 'null' (floorless unit)", [["DependencyMaster"]],
     `SELECT d.Id, d.Alias, d.FlatId FROM dbo.DependencyMaster d WHERE d.Floor IN (N'null', N'undefined', N'') ${projectFilter("d.ProjectId")}`);
   await check(sec, "Active chain on an inactive room / flat / tower", [["DependencyMaster"]],

@@ -513,6 +513,19 @@ async function syncUnitRooms(db, unitId, { removeUnused = false, createdBy = nul
     result.created += inserts.length;
   }
 
+  // A villa built on a plot keeps its DPR in step with its rooms: rooms this
+  // sync added get their work chains at once (services/autoDprChains.js).
+  // Flats are left to the chainless-rooms script, as before.
+  if (result.created > 0) {
+    const villa = await db.request().input("u", sql.Int, unitId)
+      .query("SELECT TOP 1 1 AS v FROM dbo.PlotMaster WHERE ConvertedUnitId = @u AND IsActive = 1");
+    if (villa.recordset.length) {
+      const dpr = await require("./autoDprChains").createChainsForUnit(db, unitId, createdBy != null ? String(createdBy) : null);
+      result.dprChainsCreated = dpr.created;
+      if (dpr.skipped.length) result.dprRoomsWithoutTemplate = dpr.skipped;
+    }
+  }
+
   return result;
 }
 

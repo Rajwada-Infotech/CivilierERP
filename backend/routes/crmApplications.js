@@ -2,6 +2,9 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+// Project access: a restricted user gets 403 on applications outside their projects.
+const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmApplication WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -189,9 +192,10 @@ const APP_SELECT = `
 // apart on what "matches the current filter set" means (the exact drift
 // risk that broke tab counts once pagination made "count what's on this
 // page" stop being a valid substitute for "count everything that matches").
-function buildApplicationFilters(req0, query) {
+function buildApplicationFilters(req0, query, projectScope = null) {
   const { status, search, companyId, projectId, blockId } = query;
   const conds = ["a.IsActive = 1"];
+  if (projectScope) conds.push(projectPredicate(projectScope, "a.ProjectId", "").trim());
   if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
   if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("a.CompanyId = @companyId"); }
   if (projectId) { req0.input("projectId", sql.Int, parseInt(projectId, 10)); conds.push("a.ProjectId = @projectId"); }
@@ -226,7 +230,7 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     // else silently breaks from this rebuild.
     if (!page) {
       const req0 = pool.request();
-      const where = buildApplicationFilters(req0, req.query);
+      const where = buildApplicationFilters(req0, req.query, req.projectScope);
       const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
       let rows = result.recordset;
       if (forBooking) {
@@ -246,7 +250,7 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     // application lands in the right tab consistently everywhere.
     const { page: pageNum, pageSize, offset } = applyPagination(req);
     const req0 = pool.request();
-    const where = buildApplicationFilters(req0, req.query);
+    const where = buildApplicationFilters(req0, req.query, req.projectScope);
     req0.input("offset", sql.Int, offset).input("pageSize", sql.Int, pageSize);
     let displayStageWhere = "";
     if (req.query.displayStage) {
@@ -302,7 +306,7 @@ router.get("/stage-counts", requirePageRight("crm-applications", "view"), async 
   try {
     const pool = getPool();
     const req0 = pool.request();
-    const where = buildApplicationFilters(req0, req.query);
+    const where = buildApplicationFilters(req0, req.query, req.projectScope);
     const result = await req0.query(`
       SELECT ${DISPLAY_STAGE_EXPR} AS DisplayStage, COUNT(*) AS Cnt
       FROM (${APP_SELECT} ${where}) x
