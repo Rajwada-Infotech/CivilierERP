@@ -15,6 +15,8 @@ const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
 const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
 const { getEffectiveType } = require("../services/projectType");
 
+const PLOT_CONVERSION_TIMEOUT_MS = 120000;
+
 // Mirrors unitMaster.js's syncUnitPaymentPlanTags — deactivate all, then
 // upsert each valid plan ID back in. Called after generating each unit so
 // the block's payment plans propagate down to every generated unit.
@@ -2238,6 +2240,7 @@ router.delete("/plots/:id", requirePageRight("crm-auto-project-setup", "delete")
 // Convert one or more adjacent plots into one constructed asset. The source
 // plots remain in PlotMaster for land-sale history; UnitMaster begins here.
 router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
+  res.setTimeout(PLOT_CONVERSION_TIMEOUT_MS);
   const plotIds = Array.isArray(req.body?.PlotIds) ? req.body.PlotIds.map(Number).filter(Number.isInteger) : [];
   const unitName = String(req.body?.UnitName || "").trim();
   const unitType = String(req.body?.UnitType || "").trim();
