@@ -34,9 +34,9 @@ const summary = (over: Record<string, unknown> = {}) => ({
   skippedCancelledOrApproved: 2,
   eligible: 10,
   willChange: 7,
-  engineers: { requested: true, willFill: 7, alreadySet: 3 },
-  qc: { requested: false, willFill: 0, alreadySet: 0 },
-  approval: { requested: false, willFill: 0, alreadySet: 0 },
+  engineers: { requested: true, willFill: 7, alreadySet: 3, willReplace: 0 },
+  qc: { requested: false, willFill: 0, alreadySet: 0, willReplace: 0 },
+  approval: { requested: false, willFill: 0, alreadySet: 0, willReplace: 0 },
   ...over,
 });
 
@@ -104,14 +104,24 @@ describe("BulkAssignModal", () => {
     expect(await screen.findByText(/of 10 activities will be updated/)).toBeTruthy();
     expect(screen.getByText(/2 cancelled or already approved are skipped/)).toBeTruthy();
     expect(screen.getByText(/3 already set, left as they are/)).toBeTruthy();
-    expect(api.preview).toHaveBeenLastCalledWith({ projectId: 5, towerId: 11, engineerIds: [1, 2], qcUserIds: [], approvalLevels: [] });
+    expect(api.preview).toHaveBeenLastCalledWith({ projectId: 5, towerId: 11, engineerIds: [1, 2], qcUserIds: [], approvalLevels: [], overwrite: false });
 
     const assign = await screen.findByRole("button", { name: "Assign 7 activities" });
     await waitFor(() => expect((assign as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(assign);
     await waitFor(() => expect(api.apply).toHaveBeenCalledTimes(1));
-    expect(api.apply.mock.calls[0][0]).toEqual({ projectId: 5, towerId: 11, engineerIds: [1, 2], qcUserIds: [], approvalLevels: [] });
+    expect(api.apply.mock.calls[0][0]).toEqual({ projectId: 5, towerId: 11, engineerIds: [1, 2], qcUserIds: [], approvalLevels: [], overwrite: false });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("Overwrite existing is off by default and is sent when ticked", async () => {
+    mount();
+    pickProject("Pristine Enclave");
+    fireEvent.click(screen.getByRole("button", { name: "Select engineers…" }));
+    await screen.findByText(/activities will be updated/);
+    expect(api.preview.mock.calls.at(-1)?.[0].overwrite).toBe(false);
+    fireEvent.click(screen.getByLabelText(/Overwrite existing/));
+    await waitFor(() => expect(api.preview.mock.calls.at(-1)?.[0].overwrite).toBe(true));
   });
 
   it("with every block chosen, towerId is null", async () => {
@@ -123,7 +133,7 @@ describe("BulkAssignModal", () => {
   });
 
   it("says so, and keeps Assign off, when everything is already set", async () => {
-    api.preview.mockResolvedValue({ applied: false, summary: summary({ willChange: 0, engineers: { requested: true, willFill: 0, alreadySet: 10 } }) });
+    api.preview.mockResolvedValue({ applied: false, summary: summary({ willChange: 0, engineers: { requested: true, willFill: 0, alreadySet: 10, willReplace: 0 } }) });
     mount();
     pickProject("Pristine Enclave");
     fireEvent.click(screen.getByRole("button", { name: "Select engineers…" }));
