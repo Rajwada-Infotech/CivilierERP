@@ -33,6 +33,7 @@ const {
 const { transition, writeAuditLog } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { makeColumnProbe } = require("../services/columnProbe");
 const { poExistsForMR } = require("../utils/materialChainGuard");
 const {
   getMRItemFulfillment,
@@ -982,6 +983,156 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       DocNo: created.recordset[0]?.DocNo,
       Status: created.recordset[0]?.Status,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /from-work-order/:woId ───────────────────────────────────────────────
+// Raises a Material Request for the materials of an APPROVED Work Order. One line per item
+// (+ unit) with the quantities summed across the WO's activities. The MR then follows the
+// normal flow (approval -> quotation if applicable -> PO -> GRN -> invoice) and carries
+// SourceWOId / SourceWODocNo so the document chain starts at the Work Order. One live MR per
+// Work Order: a second request is refused (409) while the first is not Rejected/Cancelled.
+const hasSourceWO = makeColumnProbe("dbo.MaterialRequests", "SourceWOId");
+
+router.post("/from-work-order/:woId", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  const woId = parseInt(req.params.woId, 10);
+  if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid work order id" });
+
+  try {
+    const pool = getPool();
+    await ensureTablesExist(pool);
+    if (!(await hasSourceWO(pool))) {
+      return res.status(503).json({ error: "Material Requests from Work Orders need migration 545 — ask an administrator to run the database migrations." });
+    }
+
+    const wo = (await pool.request().input("id", sql.Int, woId).query(`
+      SELECT Id, DocumentNumber, DocNo, Status, CompanyId, ProjectId
+      FROM dbo.WorkOrderHeader WHERE Id = @id
+    `)).recordset[0];
+    if (!wo) return res.status(404).json({ error: "Work order not found" });
+    if (!assertProjectAllowed(req, res, wo.ProjectId)) return;
+    if (wo.Status !== "Approved") {
+      return res.status(400).json({ error: "A Material Request can only be raised from an approved work order." });
+    }
+    const woNo = wo.DocNo || wo.DocumentNumber || `WO-${woId}`;
+
+    const existing = (await pool.request().input("id", sql.Int, woId).query(`
+      SELECT TOP 1 MRId, DocNo, Status FROM dbo.MaterialRequests
+      WHERE SourceWOId = @id AND Status NOT IN ('Rejected', 'Cancelled')
+      ORDER BY MRId DESC
+    `)).recordset[0];
+    if (existing) {
+      return res.status(409).json({
+        error: `Material Request ${existing.DocNo || "#" + existing.MRId} already exists for this work order.`,
+        mrId: existing.MRId,
+        docNo: existing.DocNo,
+        status: existing.Status,
+      });
+    }
+
+    const mats = (await pool.request().input("id", sql.Int, woId).query(`
+      SELECT m.ItemId, MAX(img.M_Name) AS ItemName, uom.UOMCode, SUM(ISNULL(m.Quantity, 0)) AS Quantity
+      FROM dbo.WorkOrderActivityMaterials m
+      JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
+      LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = m.ItemId
+      LEFT JOIN dbo.UOMMaster uom ON uom.Id = m.UOMId
+      WHERE a.WorkOrderHeaderId = @id AND m.ItemId IS NOT NULL
+      GROUP BY m.ItemId, uom.UOMCode
+      HAVING SUM(ISNULL(m.Quantity, 0)) > 0
+      ORDER BY MAX(img.M_Name), m.ItemId
+    `)).recordset;
+    if (!mats.length) {
+      return res.status(400).json({ error: "This work order has no material items to request." });
+    }
+
+    let dtId = null;
+    try {
+      dtId = await resolveDocTypeId(pool, sql, "REQ");
+    } catch {
+      /* no MR doc type — proceed without numbering */
+    }
+    let lockedDocNo = null;
+    if (dtId) {
+      try {
+        lockedDocNo = await lockNextDocNumber(pool, sql, {
+          docTypeId: dtId,
+          tableName: "MaterialRequests",
+          docNoColumn: "DocNo",
+          issuedBy: user,
+        });
+      } catch {
+        lockedDocNo = null;
+      }
+    }
+
+    const today = new Date();
+    const tx = pool.transaction();
+    await tx.begin();
+    let newId;
+    try {
+      const insertHdr = await tx
+        .request()
+        .input("CompanyId", sql.Int, wo.CompanyId || null)
+        .input("ProjectId", sql.Int, wo.ProjectId || null)
+        .input("FinYearId", sql.Int, await resolveFinYearId(pool, null, today))
+        .input("RequestDate", sql.Date, today)
+        .input("Reason", sql.NVarChar(sql.MAX), `Materials for Work Order ${woNo}`)
+        .input("Remarks", sql.NVarChar(sql.MAX), `Raised from approved Work Order ${woNo}`)
+        .input("DocTypeId", sql.Int, dtId || null)
+        .input("DocNo", sql.NVarChar(50), lockedDocNo || null)
+        .input("SourceWOId", sql.Int, woId)
+        .input("SourceWODocNo", sql.NVarChar(100), woNo)
+        .input("CreatedBy", sql.NVarChar(200), user).query(`
+          INSERT INTO dbo.MaterialRequests
+            (CompanyId, ProjectId, FinYearId, RequestDate, Priority, Reason, Remarks, Status,
+             DocTypeId, DocNo, SourceWOId, SourceWODocNo, CreatedBy, UpdatedBy)
+          OUTPUT INSERTED.MRId
+          VALUES (@CompanyId, @ProjectId, @FinYearId, @RequestDate, 'Normal', @Reason, @Remarks, 'Draft',
+                  @DocTypeId, @DocNo, @SourceWOId, @SourceWODocNo, @CreatedBy, @CreatedBy)
+        `);
+      newId = insertHdr.recordset[0].MRId;
+
+      for (const m of mats) {
+        await tx
+          .request()
+          .input("MRId", sql.Int, newId)
+          .input("ItemId", sql.NVarChar(50), String(m.ItemId))
+          .input("ItemName", sql.NVarChar(200), m.ItemName || null)
+          .input("UOMCode", sql.NVarChar(20), m.UOMCode || null)
+          .input("Quantity", sql.Decimal(18, 4), parseFloat(m.Quantity) || 0).query(`
+            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity)
+            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity)
+          `);
+      }
+      await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — the original error is what propagates */
+      }
+      throw txErr;
+    }
+
+    if (lockedDocNo) {
+      await backPatchRecordId(pool, sql, lockedDocNo, "MaterialRequests", newId);
+    }
+    await bumpCacheVersion("material-requests");
+
+    // Same as a hand-made MR: Draft -> Pending straight away, then the usual approval.
+    try {
+      await transition("material-requests", newId, "Pending", req.user?.email || user, req.user?.role);
+    } catch (submitErr) {
+      console.warn("MR auto-submit failed (non-fatal):", submitErr.message);
+    }
+
+    const created = (await pool.request().input("id", sql.Int, newId)
+      .query("SELECT DocNo, Status FROM dbo.MaterialRequests WHERE MRId = @id")).recordset[0];
+    res.status(201).json({ MRId: newId, DocNo: created?.DocNo, Status: created?.Status, itemCount: mats.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Popover,
@@ -65,14 +65,17 @@ import {
   getWorkOrders,
   getWorkOrder,
   deleteWorkOrder,
-  getWOPOPrefill,
+  createMaterialRequestFromWO,
+  MaterialRequestExistsError,
   type WOItemOption,
 } from "@/api/workOrderApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getTCRecords } from "@/api/tcMasterApi";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
+import { getDocumentChain } from "@/api/materialChainApi";
 import { getHsn } from "@/api/hsnApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
@@ -1726,7 +1729,8 @@ const WorkOrderDetailPanel: React.FC<{
   >({});
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [creatingMaterialPO, setCreatingMaterialPO] = useState(false);
+  const [creatingMR, setCreatingMR] = useState(false);
+  const queryClient = useQueryClient();
   const rights = usePageRights("work-order");
 
   const { status: chainStatus } = useWOChainStatus(workOrderId ?? null);
@@ -1774,22 +1778,37 @@ const WorkOrderDetailPanel: React.FC<{
     }
   };
 
-  const handleCreateMaterialPO = async () => {
-    setCreatingMaterialPO(true);
+  // The Work Order's chain tells us whether a (live) Material Request already exists for it.
+  const { data: woChain } = useQuery({
+    queryKey: ["document-chain", "wo", workOrderId],
+    queryFn: () => getDocumentChain("wo", workOrderId),
+    enabled: !!workOrderId && detail?.Status === "Approved",
+    staleTime: 30_000,
+  });
+  const existingMR = woChain?.downstream
+    .filter((n) => n.docType === "mr" && n.status !== "Rejected" && n.status !== "Cancelled")
+    .at(-1);
+
+  const openMaterialRequest = (mrId: number) =>
+    navigate(`/material/material-request?view=${mrId}`);
+
+  const handleCreateMaterialRequest = async () => {
+    setCreatingMR(true);
     try {
-      const prefill = await getWOPOPrefill(workOrderId);
-      if (prefill.items.length === 0) {
-        toast.info(
-          "This work order has no material items to create a PO from.",
-        );
-        return;
-      }
-      navigate("/material/purchase-order", { state: { woPrefill: prefill } });
+      const mr = await createMaterialRequestFromWO(workOrderId);
+      toast.success(`Material Request ${mr.DocNo ?? "#" + mr.MRId} created with ${mr.itemCount} item${mr.itemCount === 1 ? "" : "s"}.`);
+      await queryClient.invalidateQueries({ queryKey: ["document-chain"] });
+      openMaterialRequest(mr.MRId);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error("Could not load work order materials: " + msg);
+      if (err instanceof MaterialRequestExistsError) {
+        toast.info(err.message);
+        await queryClient.invalidateQueries({ queryKey: ["document-chain"] });
+        openMaterialRequest(err.mrId);
+      } else {
+        toast.error(err instanceof Error ? err.message : "Could not create the Material Request.");
+      }
     } finally {
-      setCreatingMaterialPO(false);
+      setCreatingMR(false);
     }
   };
 
@@ -1909,16 +1928,16 @@ const WorkOrderDetailPanel: React.FC<{
               )}
               {detail.Status === "Approved" && (
                 <button
-                  onClick={() => void handleCreateMaterialPO()}
-                  disabled={creatingMaterialPO}
+                  onClick={() => (existingMR ? openMaterialRequest(existingMR.id) : void handleCreateMaterialRequest())}
+                  disabled={creatingMR}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-medium hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors disabled:opacity-60"
                 >
-                  {creatingMaterialPO ? (
+                  {creatingMR ? (
                     <span className="w-3 h-3 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
                   ) : (
                     <ShoppingCart size={12} />
                   )}
-                  Create Material PO
+                  {existingMR ? `View Material Request ${existingMR.docNo ?? ""}`.trim() : "Create Material Request"}
                 </button>
               )}
               {rights.canDelete && (
@@ -2042,6 +2061,11 @@ const WorkOrderDetailPanel: React.FC<{
             )}
           </div>
         </div>
+      </div>
+
+      {/* Linked documents: Work Order → Material Request → Quotation → PO → GRN → Invoice */}
+      <div className="rounded-xl border border-border bg-card px-4 sm:px-5 pb-4 sm:pb-5">
+        <DocumentChainPanel docType="wo" id={workOrderId} />
       </div>
 
       {/* Chain Status — Expense & Payment trail */}
@@ -3227,24 +3251,8 @@ const WorkOrderEditPanel: React.FC<{
   const handleConfirm = async () => {
     setConfirming(true);
     try {
-      const result = await confirmWorkOrder(workOrderId, null);
-      if (result.thresholdMet && result.woPOsCreated > 0) {
-        const poNos = result.purchaseOrders
-          .map((p) => p.PurchaseOrderNo)
-          .join(", ");
-        toast.success(
-          `Work order confirmed! ${result.woPOsCreated} Material PO${result.woPOsCreated > 1 ? "s" : ""} auto-created: ${poNos}`,
-          { duration: 6000 },
-        );
-      } else if (!result.thresholdMet) {
-        toast.info(
-          `Work order confirmed. Material cost (₹${result.totalMaterialCost.toLocaleString("en-IN")}) is below threshold — no Material PO created.`,
-        );
-      } else {
-        toast.info(
-          "Work order confirmed. Configure Material PO document type in System Settings to enable auto-creation.",
-        );
-      }
+      await confirmWorkOrder(workOrderId, null);
+      toast.success("Work order confirmed.");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(msg || "Confirm failed.");
@@ -4025,6 +4033,17 @@ const WorkOrderMaster: React.FC = () => {
   // ── Tab state ─────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("create");
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+
+  // Deep link from the document chain: /engineering/work-order?view=<id> opens that Work Order.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const viewId = parseInt(searchParams.get("view") ?? "", 10);
+    if (!Number.isFinite(viewId)) return;
+    setSelectedOrderId(viewId);
+    setViewMode("detail");
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // ── Form state ────────────────────────────────────────────────────────────
   const [form, setForm] = useState<WorkOrderForm>(EMPTY_FORM());
