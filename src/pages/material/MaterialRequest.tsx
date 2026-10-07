@@ -485,6 +485,24 @@ export default function MaterialRequest() {
     [],
   );
 
+  useEffect(() => {
+    setCart((prev) => {
+      let changed = false;
+      const next = prev.map((ci) => {
+        const found = ci.ItemId ? itemMap[ci.ItemId] : undefined;
+        if (!found || ci.DefaultUOM) return ci;
+        changed = true;
+        return {
+          ...ci,
+          DefaultUOM: found.DefaultUOM || ci.UOMCode || undefined,
+          AvailableStock: Number(found.AvailableStock ?? ci.AvailableStock ?? 0),
+          ItemName: ci.ItemName || found.M_Name,
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [itemMap]);
+
   const pickItem = useCallback(
     (cartKey: string, itemId: string) => {
       const found = itemMap[itemId];
@@ -1604,6 +1622,14 @@ export default function MaterialRequest() {
                                 {u.Symbol ? ` (${u.Symbol})` : ""}
                               </option>
                             ))}
+                            {ci.UOMCode &&
+                              ci.UOMCode !== ci.DefaultUOM &&
+                              !relevant.some((u: any) => u.UOMCode === ci.UOMCode) &&
+                              !extraAlternates.some((u) => u.UOMCode === ci.UOMCode) && (
+                                <option value={ci.UOMCode}>
+                                  {uomMap[ci.UOMCode]?.UOMName ?? ci.UOMCode}
+                                </option>
+                              )}
                             {extraAlternates.length > 0 && (
                               <optgroup label="Tagged for this item">
                                 {extraAlternates.map((u) => (
