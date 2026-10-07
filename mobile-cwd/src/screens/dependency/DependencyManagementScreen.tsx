@@ -86,7 +86,7 @@ function ProjectChains({ projectId, term }: { projectId: number; term: string })
 }
 
 export default function DependencyManagementScreen() {
-  const rights = usePageRights("civilworkdpr-work-done");
+  const rights = usePageRights("civilworkdpr-dependency");
   const qc = useQueryClient();
   const [open, setOpen] = useState<number | null>(null);
   const [search, setSearch] = useState("");
