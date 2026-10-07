@@ -1101,6 +1101,26 @@ router.get("/boq-activities/:boqId", async (req, res) => {
   }
 });
 
+// ── GET /engineering/boq-items/:boqId ──────────────────────────────────────────
+// BoqItems of a BOQ (each carries the ActivityId it is required for) so the Work
+// Order can inherit them as the materials of the matching activity.
+router.get("/boq-items/:boqId", async (req, res) => {
+  const boqId = parseInt(req.params.boqId, 10);
+  if (!Number.isFinite(boqId))
+    return res.status(400).json({ error: "Invalid BOQ ID" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("BoqID", sql.Int, boqId)
+      .query("SELECT * FROM dbo.BoqItems WHERE BoqID = @BoqID ORDER BY SortOrder");
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[GET /engineering/boq-items/:boqId]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /engineering/approved-boqs ─────────────────────────────────────────────
 // Lightweight list of Approved BOQs for the Work Order BOQ picker.
 router.get(

@@ -53,7 +53,8 @@ export const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
   engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
   ticket:      ["ticket-dashboard", "tickets"],
   sales:       ["sale-order", "sale-invoice", "sales-payment"],
-  civilworkdpr: ["civilworkdpr-dashboard"],
+  // Every page of the module, so a user granted only e.g. Quality Check still sees (and can reach) it.
+  civilworkdpr: ["civilworkdpr-dashboard", "civilworkdpr-dependency", "civilworkdpr-work-done", "civilworkdpr-activity-reporting", "civilworkdpr-quality-check", "civilworkdpr-work-transfer", "civilworkdpr-worker-attendance", "civilworkdpr-daily-labour", "civilworkdpr-amendment", "civilworkdpr-room-master"],
   "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
   maintenance: ["maintenance-dashboard"],
   loan:        ["loan-dashboard", "loan-sanction"],

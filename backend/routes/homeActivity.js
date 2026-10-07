@@ -32,6 +32,9 @@ router.post("/usage", async (req, res) => {
       `);
     res.json({ success: true });
   } catch (err) {
+    // Table not created yet (code deployed before `migrate.js up` ran migration 539): usage tracking is
+    // best-effort, so don't 500 every page view.
+    if (err.number === 208) return res.json({ success: true, skipped: true });
     console.error("[homeActivity] POST /usage:", err.message);
     res.status(500).json({ error: "Failed to record usage" });
   }
@@ -51,6 +54,8 @@ router.get("/module-ranking", async (req, res) => {
     `);
     res.json(rankAllowed(r.recordset, allowedModules));
   } catch (err) {
+    // Same as /usage: no table yet means no history, i.e. the default order.
+    if (err.number === 208) return res.json(rankAllowed([], allowedModules));
     console.error("[homeActivity] GET /module-ranking:", err.message);
     res.status(500).json({ error: "Failed to load module ranking" });
   }

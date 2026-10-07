@@ -140,8 +140,10 @@ interface MaterialItem {
   id: string;
   itemId: string;
   itemName: string;
-  /** Consumption ratio per unit of activity area (e.g. 60 units per m³) */
+  /** Per-unit-of-area quantity (e.g. 60 per m³) — derived: totalQty ÷ activity area */
   consumptionRatio: number;
+  /** Total quantity of this item for the whole activity (what the user enters) */
+  totalQty?: number;
   uomId: number | null;
   unit: string;
   price: number;
@@ -161,7 +163,10 @@ interface Activity {
   name: string;
   uomId: number | null;
   unit: string;
+  /** Rate per unit of area — derived: totalRate ÷ area (this is the "Per Activity Price") */
   ratePerUnit: number;
+  /** Total labour rate for the whole activity (what the user enters) */
+  totalRate?: number;
   area: number;
   materials: MaterialItem[];
   /** HSN code selected for this activity */
@@ -361,6 +366,115 @@ const EMPTY_GROUP = (): ActivityGroup => ({
   expanded: true,
 });
 
+// ─── BOQ-style quantity logic ─────────────────────────────────────────────────
+// The user enters the activity's Total Rate and each item's total Qty; the
+// per-area figures (Per Activity Price, per-unit item qty) are derived from the
+// activity Area. ratePerUnit / consumptionRatio stay the stored per-unit values.
+
+/** Whole-activity labour amount. */
+const actLabour = (a: Activity): number => a.totalRate ?? a.ratePerUnit * a.area;
+/** Whole-activity quantity of one material. */
+const matQty = (m: MaterialItem, a: Activity): number =>
+  m.totalQty ?? m.consumptionRatio * a.area;
+const matCost = (m: MaterialItem, a: Activity): number => matQty(m, a) * m.price;
+const fmtQ = (n: number) =>
+  n.toLocaleString("en-IN", { maximumFractionDigits: 4 });
+
+/** Patch for a new Total Rate: the rate per area follows. */
+const withTotalRate = (a: Activity, totalRate: number): Partial<Activity> => ({
+  totalRate,
+  ratePerUnit: a.area > 0 ? totalRate / a.area : 0,
+});
+/** Patch for a new Area: totals are kept, every per-area figure is recomputed. */
+const withArea = (a: Activity, area: number): Partial<Activity> => {
+  const totalRate = actLabour(a);
+  return {
+    area,
+    totalRate,
+    ratePerUnit: area > 0 ? totalRate / area : 0,
+    materials: a.materials.map((m) => {
+      const totalQty = matQty(m, a);
+      return { ...m, totalQty, consumptionRatio: area > 0 ? totalQty / area : 0 };
+    }),
+  };
+};
+
+
+/**
+ * Turns a BOQ's activities (+ the BOQ items tied to them) into Work Order
+ * activity groups. BOQ Total Rate / Total Area carry across as-is; each BOQ item
+ * becomes a material of its activity with the BOQ's total qty as the Item Qty.
+ */
+const boqToGroups = (acts: any[], items: any[]): ActivityGroup[] => {
+  const groups = new Map<string, ActivityGroup>();
+  for (const a of acts) {
+    // Rows saved before Total Area existed were qty x unit-rate.
+    const legacy = a.Area == null && Number(a.Quantity) !== 1;
+    const area = parseFloat(a.Area ?? (legacy ? a.Quantity : 0)) || 0;
+    const totalRate = legacy
+      ? parseFloat(a.LineAmount) || 0
+      : parseFloat(a.Rate) || 0;
+    const actKey = a.ActivityId != null ? String(a.ActivityId) : "";
+    const materials: MaterialItem[] = items
+      .filter((it) => actKey && String(it.ActivityId ?? "") === actKey)
+      .map((it) => {
+        const totalQty = parseFloat(it.Quantity) || 0;
+        return {
+          id: uid(),
+          itemId: it.ItemId ?? "",
+          itemName: it.ItemName ?? "",
+          totalQty,
+          consumptionRatio: area > 0 ? totalQty / area : 0,
+          uomId: it.UomId ?? null,
+          unit: it.UomName ?? "",
+          price: parseFloat(it.Rate) || 0,
+          gstRate: parseFloat(it.TaxPct) || 0,
+          supplierId: null,
+          supplierName: "",
+        };
+      });
+    const activity: Activity = {
+      id: uid(),
+      activityId: a.ActivityId ? parseInt(a.ActivityId) : null,
+      name: a.ActivityName || "",
+      uomId: a.UomId ?? null,
+      unit: a.UomName || "",
+      totalRate,
+      ratePerUnit: area > 0 ? totalRate / area : 0,
+      area,
+      materials,
+      hsnCode: "",
+      hsnGstRate: parseFloat(a.TaxPct || 0),
+      hsnGstType: "cgst_sgst",
+    };
+    const key = a.GroupId ? `g${a.GroupId}` : `a${uid()}`;
+    const existing = groups.get(key);
+    if (existing) existing.activities.push(activity);
+    else
+      groups.set(key, {
+        id: uid(),
+        groupId: a.GroupId ? parseInt(a.GroupId) : null,
+        name: a.GroupName || a.ActivityName || "",
+        expanded: true,
+        activities: [activity],
+      });
+  }
+  return [...groups.values()];
+};
+
+/** Fetch a BOQ's activities and items and map them to Work Order groups. */
+const fetchBoqGroups = async (boqId: string): Promise<ActivityGroup[]> => {
+  const [acts, items] = await Promise.all([
+    fetchWithAuth(`/api/engineering/boq-activities/${boqId}`).then((r) => r.json()),
+    fetchWithAuth(`/api/engineering/boq-items/${boqId}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => []),
+  ]);
+  return Array.isArray(acts) && acts.length > 0
+    ? boqToGroups(acts, Array.isArray(items) ? items : [])
+    : [];
+};
+
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
 const inputCls =
@@ -434,10 +548,10 @@ const MaterialBreakdownModal: React.FC<{
   const [open, setOpen] = useState(false);
 
   const materialsTotal = activity.materials.reduce(
-    (sum, m) => sum + m.consumptionRatio * activity.area * m.price,
+    (sum, m) => sum + matCost(m, activity),
     0,
   );
-  const labourTotal = activity.ratePerUnit * activity.area;
+  const labourTotal = actLabour(activity);
 
   const addMaterial = () =>
     onUpdateMaterials([...activity.materials, EMPTY_MATERIAL()]);
@@ -461,6 +575,7 @@ const MaterialBreakdownModal: React.FC<{
       itemId: found ? found.id : "",
       itemName: found ? found.name : "",
       consumptionRatio: 0,
+      totalQty: 0,
       gstRate: found ? (found.gstRate ?? 0) : 0,
       ...(resolvedUom != null
         ? { uomId: resolvedUom.id, unit: resolvedUom.name }
@@ -557,19 +672,19 @@ const MaterialBreakdownModal: React.FC<{
                     )}
                   </div>
                   <span className="text-[0.625rem] text-blue-600 dark:text-blue-400 font-medium hidden sm:block">
-                    Auto-applied as multiplier to all materials
+                    Per-unit qty = Item Qty ÷ Area
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 text-[0.625rem] text-blue-700 dark:text-blue-300 font-medium bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded">
                   <Calculator size={10} />
-                  Ratio × Area × Price
+                  Item Qty × Price
                 </div>
               </div>
               {activity.area === 0 && (
                 <p className="text-[0.625rem] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1">
                   <AlertCircle size={10} className="shrink-0" />
-                  Set the Activity Area in the activity row first — material
-                  totals will be 0 until then.
+                  Set the Activity Area in the activity row first — the per-unit
+                  quantities need it.
                 </p>
               )}
             </div>
@@ -603,7 +718,7 @@ const MaterialBreakdownModal: React.FC<{
                 <div className="space-y-2">
                   {activity.materials.map((mat, idx) => {
                     const lineTotal =
-                      mat.consumptionRatio * activity.area * mat.price;
+                      matCost(mat, activity);
                     return (
                       <div
                         key={mat.id}
@@ -674,21 +789,28 @@ const MaterialBreakdownModal: React.FC<{
                         <div className="grid grid-cols-3 gap-2">
                           <div>
                             <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                              Ratio / Unit
+                              Item Qty (total)
                             </p>
                             <input
                               type="number"
                               min={0}
-                              value={mat.consumptionRatio || ""}
-                              onChange={(e) =>
+                              value={matQty(mat, activity) || ""}
+                              onChange={(e) => {
+                                const q = parseFloat(e.target.value) || 0;
                                 updateMaterial(idx, {
+                                  totalQty: q,
                                   consumptionRatio:
-                                    parseFloat(e.target.value) || 0,
-                                })
-                              }
-                              placeholder="e.g. 60"
+                                    activity.area > 0 ? q / activity.area : 0,
+                                });
+                              }}
+                              placeholder="e.g. 60000"
                               className={cellInput}
                             />
+                            <p className="text-[0.625rem] text-muted-foreground mt-1">
+                              {activity.area > 0 && matQty(mat, activity) > 0
+                                ? `Per unit: ${fmtQ(matQty(mat, activity) / activity.area)}${mat.unit ? ` ${mat.unit}` : ""} / area`
+                                : "Per unit: —"}
+                            </p>
                           </div>
                           <div>
                             <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
@@ -754,8 +876,7 @@ const MaterialBreakdownModal: React.FC<{
                         {lineTotal > 0 && (
                           <div className="flex items-center justify-between pt-1 border-t border-border/50">
                             <span className="text-xs text-muted-foreground">
-                              {mat.consumptionRatio} × {activity.area}{" "}
-                              {activity.unit} × ₹{mat.price}
+                              {fmtQ(matQty(mat, activity))} × ₹{mat.price}
                             </span>
                             <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                               {fmt(
@@ -781,7 +902,7 @@ const MaterialBreakdownModal: React.FC<{
                   <div className="divide-y divide-border/50">
                     {activity.materials.map((mat) => {
                       const lt =
-                        mat.consumptionRatio * activity.area * mat.price;
+                        matCost(mat, activity);
                       return (
                         <div
                           key={mat.id}
@@ -795,8 +916,8 @@ const MaterialBreakdownModal: React.FC<{
                             )}
                           </span>
                           <span className="text-muted-foreground shrink-0">
-                            {mat.consumptionRatio > 0
-                              ? `${mat.consumptionRatio} × ${activity.area}`
+                            {matQty(mat, activity) > 0
+                              ? `${fmtQ(matQty(mat, activity))} qty`
                               : "—"}
                           </span>
                           <span className="text-muted-foreground shrink-0">
@@ -815,7 +936,7 @@ const MaterialBreakdownModal: React.FC<{
                     <div className="flex items-center justify-between px-3 py-2">
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Package size={11} className="text-amber-500" />
-                        Materials (Ratio × Area × Price)
+                        Materials (Item Qty × Price)
                       </span>
                       <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                         {fmt(materialsTotal)}
@@ -824,7 +945,7 @@ const MaterialBreakdownModal: React.FC<{
                     <div className="flex items-center justify-between px-3 py-2">
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Hammer size={11} className="text-blue-500" />
-                        Labour (Rate × Area)
+                        Labour (Total Rate)
                       </span>
                       <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
                         {labourTotal > 0 ? fmt(labourTotal) : "—"}
@@ -1064,9 +1185,9 @@ const ActivityRow: React.FC<{
   const safeOptions = ensureArray<ActivityOption>(activityOptions);
   const safeUomOptions = ensureArray<DropdownOption>(uomOptions);
 
-  const labourTotal = activity.ratePerUnit * activity.area;
+  const labourTotal = actLabour(activity);
   const materialsTotal = activity.materials.reduce(
-    (sum, m) => sum + m.consumptionRatio * activity.area * m.price,
+    (sum, m) => sum + matCost(m, activity),
     0,
   );
   const activitySubtotal = labourTotal + materialsTotal;
@@ -1181,7 +1302,7 @@ const ActivityRow: React.FC<{
               min={0}
               value={activity.area || ""}
               onChange={(e) =>
-                onUpdate({ area: parseFloat(e.target.value) || 0 })
+                onUpdate(withArea(activity, parseFloat(e.target.value) || 0))
               }
               placeholder="0"
               className={cellInput}
@@ -1191,7 +1312,7 @@ const ActivityRow: React.FC<{
         <div className="grid grid-cols-2 gap-2">
           <div>
             <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-              Rate / Unit (Labour)
+              Total Rate (Labour)
             </p>
             <div className="relative">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
@@ -1200,9 +1321,9 @@ const ActivityRow: React.FC<{
               <input
                 type="number"
                 min={0}
-                value={activity.ratePerUnit || ""}
+                value={actLabour(activity) || ""}
                 onChange={(e) =>
-                  onUpdate({ ratePerUnit: parseFloat(e.target.value) || 0 })
+                  onUpdate(withTotalRate(activity, parseFloat(e.target.value) || 0))
                 }
                 placeholder="0"
                 className={`${cellInput} pl-6`}
@@ -1228,6 +1349,11 @@ const ActivityRow: React.FC<{
               <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
                 <Hammer size={9} />
                 Labour: {fmt(labourTotal)}
+              </span>
+            )}
+            {labourTotal > 0 && activity.area > 0 && (
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md bg-sky-50 dark:bg-sky-950/30 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800">
+                Per Activity Price: {fmt(labourTotal / activity.area)} / area
               </span>
             )}
             {materialsTotal > 0 && (
@@ -1277,11 +1403,11 @@ const ActivityRow: React.FC<{
             <input
               type="number"
               min={0}
-              value={activity.ratePerUnit || ""}
+              value={actLabour(activity) || ""}
               onChange={(e) =>
-                onUpdate({ ratePerUnit: parseFloat(e.target.value) || 0 })
+                onUpdate(withTotalRate(activity, parseFloat(e.target.value) || 0))
               }
-              placeholder="Rate"
+              placeholder="Total Rate"
               className={`${cellInput} pl-6`}
             />
           </div>
@@ -1290,7 +1416,7 @@ const ActivityRow: React.FC<{
             min={0}
             value={activity.area || ""}
             onChange={(e) =>
-              onUpdate({ area: parseFloat(e.target.value) || 0 })
+              onUpdate(withArea(activity, parseFloat(e.target.value) || 0))
             }
             placeholder="Area"
             className={cellInput}
@@ -1334,6 +1460,11 @@ const ActivityRow: React.FC<{
               <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
                 <Hammer size={9} />
                 Labour: {fmt(labourTotal)}
+              </span>
+            )}
+            {labourTotal > 0 && activity.area > 0 && (
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded bg-sky-50 dark:bg-sky-950/30 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800">
+                Per Activity Price: {fmt(labourTotal / activity.area)} / area
               </span>
             )}
             {materialsTotal > 0 && (
@@ -1397,14 +1528,14 @@ const ActivityGroupCard: React.FC<{
   const safeActivityOptions = ensureArray<ActivityOption>(activityOptions);
 
   const groupLabourTotal = group.activities.reduce(
-    (sum, a) => sum + a.ratePerUnit * a.area,
+    (sum, a) => sum + actLabour(a),
     0,
   );
   const groupMaterialsTotal = group.activities.reduce(
     (sum, a) =>
       sum +
       a.materials.reduce(
-        (ms, m) => ms + m.consumptionRatio * a.area * m.price,
+        (ms, m) => ms + matCost(m, a),
         0,
       ),
     0,
@@ -1514,7 +1645,7 @@ const ActivityGroupCard: React.FC<{
                   "#",
                   "Activity",
                   "Unit",
-                  "Rate / Unit (Labour)",
+                  "Total Rate (Labour)",
                   "Area",
                   "Materials",
                   "SAC / GST",
@@ -3052,9 +3183,9 @@ const WorkOrderEditPanel: React.FC<{
       let hsnGst = 0;
       for (const g of groups) {
         for (const a of g.activities) {
-          const aLabour = a.ratePerUnit * a.area;
+          const aLabour = actLabour(a);
           const aMaterials = a.materials.reduce(
-            (s, m) => s + m.consumptionRatio * a.area * m.price,
+            (s, m) => s + matCost(m, a),
             0,
           );
           const aSubtotal = aLabour + aMaterials;
@@ -3137,16 +3268,16 @@ const WorkOrderEditPanel: React.FC<{
           UOMId: a.uomId ?? null,
           Rate: a.ratePerUnit || null,
           Area: a.area || null,
-          LabourAmount: a.ratePerUnit * a.area || null,
+          LabourAmount: actLabour(a) || null,
           MaterialAmount:
             a.materials.reduce(
-              (s, m) => s + m.consumptionRatio * a.area * m.price,
+              (s, m) => s + matCost(m, a),
               0,
             ) || null,
           GrandTotal:
-            a.ratePerUnit * a.area +
+            actLabour(a) +
               a.materials.reduce(
-                (s, m) => s + m.consumptionRatio * a.area * m.price,
+                (s, m) => s + matCost(m, a),
                 0,
               ) || null,
           Remarks: null,
@@ -3386,38 +3517,8 @@ const WorkOrderEditPanel: React.FC<{
                     // Inherit BOQ activities as WO activity groups
                     if (boqId) {
                       try {
-                        const acts = await fetchWithAuth(
-                          `/api/engineering/boq-activities/${boqId}`,
-                        ).then((r) => r.json());
-                        if (Array.isArray(acts) && acts.length > 0) {
-                          // Group by ActivityName (BOQ uses flat list; each becomes its own group)
-                          const inherited: ActivityGroup[] = acts.map(
-                            (a: any) => ({
-                              id: uid(),
-                              groupId: null,
-                              name: a.ActivityName || "",
-                              expanded: true,
-                              activities: [
-                                {
-                                  id: uid(),
-                                  activityId: a.ActivityId
-                                    ? parseInt(a.ActivityId)
-                                    : null,
-                                  name: a.ActivityName || "",
-                                  uomId: a.UomId ?? null,
-                                  unit: a.UomName || "",
-                                  ratePerUnit: parseFloat(a.Rate || 0),
-                                  area: parseFloat(a.Quantity || 0),
-                                  materials: [],
-                                  hsnCode: "",
-                                  hsnGstRate: parseFloat(a.TaxPct || 0),
-                                  hsnGstType: "cgst_sgst" as const,
-                                },
-                              ],
-                            }),
-                          );
-                          setGroups(inherited);
-                        }
+                        const inheritedGroups = await fetchBoqGroups(boqId);
+                        if (inheritedGroups.length > 0) setGroups(inheritedGroups);
                       } catch {
                         /* non-fatal */
                       }
@@ -4081,9 +4182,9 @@ const WorkOrderMaster: React.FC = () => {
       let hsnGst = 0;
       for (const g of groups) {
         for (const a of g.activities) {
-          const aLabour = a.ratePerUnit * a.area;
+          const aLabour = actLabour(a);
           const aMaterials = a.materials.reduce(
-            (s, m) => s + m.consumptionRatio * a.area * m.price,
+            (s, m) => s + matCost(m, a),
             0,
           );
           const aSubtotal = aLabour + aMaterials;
@@ -4171,9 +4272,9 @@ const WorkOrderMaster: React.FC = () => {
         created.DocumentNumber || created.DocNo || form.docNumber;
       const activities = groups.flatMap((g) =>
         g.activities.map((a) => {
-          const labourAmt = a.ratePerUnit * a.area;
+          const labourAmt = actLabour(a);
           const materialAmt = a.materials.reduce(
-            (s, m) => s + m.consumptionRatio * a.area * m.price,
+            (s, m) => s + matCost(m, a),
             0,
           );
           return {
@@ -4530,37 +4631,8 @@ const WorkOrderMaster: React.FC = () => {
                           }));
                           if (boqId) {
                             try {
-                              const acts = await fetchWithAuth(
-                                `/api/engineering/boq-activities/${boqId}`,
-                              ).then((r) => r.json());
-                              if (Array.isArray(acts) && acts.length > 0) {
-                                const inherited: ActivityGroup[] = acts.map(
-                                  (a: any) => ({
-                                    id: uid(),
-                                    groupId: null,
-                                    name: a.ActivityName || "",
-                                    expanded: true,
-                                    activities: [
-                                      {
-                                        id: uid(),
-                                        activityId: a.ActivityId
-                                          ? parseInt(a.ActivityId)
-                                          : null,
-                                        name: a.ActivityName || "",
-                                        uomId: a.UomId ?? null,
-                                        unit: a.UomName || "",
-                                        ratePerUnit: parseFloat(a.Rate || 0),
-                                        area: parseFloat(a.Quantity || 0),
-                                        materials: [],
-                                        hsnCode: "",
-                                        hsnGstRate: parseFloat(a.TaxPct || 0),
-                                        hsnGstType: "cgst_sgst" as const,
-                                      },
-                                    ],
-                                  }),
-                                );
-                                setGroups(inherited);
-                              }
+                              const inheritedGroups = await fetchBoqGroups(boqId);
+                        if (inheritedGroups.length > 0) setGroups(inheritedGroups);
                             } catch {
                               /* non-fatal */
                             }

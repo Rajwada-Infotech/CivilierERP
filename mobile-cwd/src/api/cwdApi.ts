@@ -512,9 +512,28 @@ export interface TransferCandidate {
   engineerNames: string | null;
 }
 
-/** The activities an engineer still holds (Allocated / In Progress / Hold / Rework) — finished work can't move. */
-export const getTransferCandidates = (engineerId: number): Promise<TransferCandidate[]> =>
-  getJson(`/api/dependency-activity-assignment/transfer/candidates?engineerId=${engineerId}`, "Failed to load the engineer's activities");
+export interface TransferPage {
+  rows: TransferCandidate[];
+  total: number;
+  /** Counts across ALL of the engineer's transferable work (ignores the project/search filter). */
+  projects: { id: number; name: string | null; count: number }[];
+}
+
+/** One page of the activities an engineer still holds (Allocated / In Progress / Hold / Rework) — finished work can't move. */
+export const getTransferCandidates = ({ engineerId, page, limit = 40, projectId, search }: { engineerId: number; page: number; limit?: number; projectId?: number | null; search?: string }): Promise<TransferPage> => {
+  const qs = new URLSearchParams({ engineerId: String(engineerId), page: String(page), limit: String(limit) });
+  if (projectId) qs.set("projectId", String(projectId));
+  if (search) qs.set("search", search);
+  return getJson(`/api/dependency-activity-assignment/transfer/candidates?${qs}`, "Failed to load the engineer's activities");
+};
+
+/** Every id matching the current filter, for "Select all" (the list only holds the pages loaded so far). */
+export const getTransferCandidateIds = async ({ engineerId, projectId, search }: { engineerId: number; projectId?: number | null; search?: string }): Promise<number[]> => {
+  const qs = new URLSearchParams({ engineerId: String(engineerId) });
+  if (projectId) qs.set("projectId", String(projectId));
+  if (search) qs.set("search", search);
+  return (await getJson<{ ids: number[] }>(`/api/dependency-activity-assignment/transfer/candidates/ids?${qs}`, "Failed to select all")).ids;
+};
 
 export const transferWork = (payload: { fromEngineerId: number; toEngineerId: number; assignmentIds: number[]; remarks?: string }) =>
   send<{ success: boolean; transferred: number }>("POST", "/api/dependency-activity-assignment/transfer", payload, "Transfer failed");
