@@ -1554,7 +1554,14 @@ export default function HomePage() {
     civilworkdpr: [
       "civilworkdpr-dashboard",
       "civilworkdpr-dependency",
+      "civilworkdpr-work-done",
+      "civilworkdpr-activity-reporting",
+      "civilworkdpr-quality-check",
+      "civilworkdpr-work-transfer",
       "civilworkdpr-worker-attendance",
+      "civilworkdpr-daily-labour",
+      "civilworkdpr-amendment",
+      "civilworkdpr-room-master",
     ],
     crm: [
       "crm-dashboard",
