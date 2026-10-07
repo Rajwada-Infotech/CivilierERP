@@ -4,7 +4,7 @@
 // item has moved on, so a bulk transfer never half-applies.
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft, Check, Search, X } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
@@ -12,7 +12,7 @@ import { toast } from "@/components/Toast";
 import { StatusPill } from "@/components/StatusPill";
 import { PickerField, TextField } from "@/components/form";
 import { usePageRights } from "@/hooks/usePageRights";
-import { getEngineers, getTransferCandidates, transferWork, type TransferCandidate } from "@/api/cwdApi";
+import { getEngineers, getTransferCandidateIds, getTransferCandidates, transferWork, type TransferCandidate } from "@/api/cwdApi";
 import { ACCENT, Btn } from "../activities/tabs/ui";
 
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—");
@@ -28,27 +28,37 @@ export default function WorkTransferScreen() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const peopleQ = useQuery({ queryKey: ["cwd-engineers"], queryFn: getEngineers, enabled: rights.canView, staleTime: 300_000 });
-  const candQ = useQuery({
-    queryKey: ["cwd-transfer-candidates", fromId],
-    queryFn: () => getTransferCandidates(Number(fromId)),
+  // Search runs on the server after a short pause; the list loads 40 at a time.
+  const [term, setTerm] = useState("");
+  useEffect(() => { const t = setTimeout(() => setTerm(search.trim()), 350); return () => clearTimeout(t); }, [search]);
+  const PAGE = 40;
+  const candQ = useInfiniteQuery({
+    queryKey: ["cwd-transfer-candidates", fromId, projectId, term],
+    queryFn: ({ pageParam }) => getTransferCandidates({ engineerId: Number(fromId), page: pageParam, limit: PAGE, projectId, search: term || undefined }),
+    initialPageParam: 1,
+    getNextPageParam: (last, all) => (all.length * PAGE < last.total ? all.length + 1 : undefined),
     enabled: rights.canView && !!fromId,
+    placeholderData: (prev) => prev,
+    staleTime: 30_000,
   });
   useEffect(() => { setSelected(new Set()); setProjectId(null); }, [fromId]);
 
   const people = (peopleQ.data ?? []).map((p) => ({ key: String(p.id), label: p.name }));
-  const cands = candQ.data ?? [];
-  const projects = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const c of cands) m.set(c.projectId, c.projectName || `Project ${c.projectId}`);
-    return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [cands]);
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return cands.filter((c) => (projectId == null || c.projectId === projectId) && (!q || [c.activityName, c.scopePath, c.projectName].some((v) => (v || "").toLowerCase().includes(q))));
-  }, [cands, projectId, search]);
+  const visible = useMemo(() => candQ.data?.pages.flatMap((p) => p.rows) ?? [], [candQ.data]);
+  const totalMatching = candQ.data?.pages[0]?.total ?? 0;
+  const projects = useMemo(() => (candQ.data?.pages[0]?.projects ?? []).map((p) => ({ id: p.id, name: p.name || `Project ${p.id}`, count: p.count })), [candQ.data]);
+  const totalAll = projects.reduce((a, p) => a + p.count, 0);
 
-  const allSelected = visible.length > 0 && visible.every((c) => selected.has(c.assignmentId));
-  const toggleAll = () => setSelected((p) => { const n = new Set(p); visible.forEach((c) => (allSelected ? n.delete(c.assignmentId) : n.add(c.assignmentId))); return n; });
+  const [selectingAll, setSelectingAll] = useState(false);
+  const allSelected = totalMatching > 0 && selected.size >= totalMatching;
+  // "Select all" covers everything matching the filter, not only the rows loaded so far.
+  const toggleAll = async () => {
+    if (allSelected) { setSelected(new Set()); return; }
+    setSelectingAll(true);
+    try { setSelected(new Set(await getTransferCandidateIds({ engineerId: Number(fromId), projectId, search: term || undefined }))); }
+    catch (e) { Alert.alert("Couldn't select all", (e as Error).message); }
+    finally { setSelectingAll(false); }
+  };
   const toggle = (id: number) => setSelected((p) => { const n = new Set(p); if (!n.delete(id)) n.add(id); return n; });
 
   const fromName = people.find((p) => p.key === fromId)?.label;
@@ -102,7 +112,7 @@ export default function WorkTransferScreen() {
             <FlatList
               horizontal
               showsHorizontalScrollIndicator={false}
-              data={[{ id: null as number | null, name: "All projects" }, ...projects.map((p) => ({ id: p.id as number | null, name: p.name }))]}
+              data={[{ id: null as number | null, name: "All projects" }, ...projects.map((p) => ({ id: p.id as number | null, name: `${p.name} (${p.count})` }))]}
               keyExtractor={(p) => String(p.id)}
               style={{ marginTop: 8 }}
               contentContainerStyle={{ gap: 8 }}
@@ -117,9 +127,9 @@ export default function WorkTransferScreen() {
             />
           )}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-            <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{fromName}'s activities · {selected.size} of {cands.length} selected</Text>
+            <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{fromName}'s activities · {selected.size} of {totalAll} selected</Text>
             {visible.length > 0 && rights.canEdit && (
-              <TouchableOpacity onPress={toggleAll}><Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: ACCENT }}>{allSelected ? "Clear shown" : "Select all shown"}</Text></TouchableOpacity>
+              <TouchableOpacity disabled={selectingAll} onPress={toggleAll}><Text style={{ fontSize: 11.5, fontFamily: fonts.heading.semibold, color: ACCENT, opacity: selectingAll ? 0.5 : 1 }}>{allSelected ? "Clear selection" : `Select all ${totalMatching}`}</Text></TouchableOpacity>
             )}
           </View>
         </>
@@ -159,6 +169,9 @@ export default function WorkTransferScreen() {
         renderItem={renderItem}
         ListHeaderComponent={header}
         keyboardShouldPersistTaps="handled"
+        onEndReachedThreshold={0.6}
+        onEndReached={() => { if (candQ.hasNextPage && !candQ.isFetchingNextPage) candQ.fetchNextPage(); }}
+        ListFooterComponent={candQ.isFetchingNextPage ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 14 }} /> : null}
         initialNumToRender={10}
         windowSize={7}
         contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
@@ -166,7 +179,7 @@ export default function WorkTransferScreen() {
           !fromId ? <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 30 }}>Pick the engineer to transfer work from.</Text>
           : candQ.isLoading ? <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 30 }} />
           : candQ.error ? <Text style={{ color: colors.destructive, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 20 }}>{(candQ.error as Error).message}</Text>
-          : <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 30 }}>{cands.length === 0 ? "This engineer has no transferable activities." : "No activities match your filters."}</Text>
+          : <Text style={{ textAlign: "center", color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, paddingVertical: 30 }}>{totalAll === 0 ? "This engineer has no transferable activities." : "No activities match your filters."}</Text>
         }
       />
       {rights.canEdit && (

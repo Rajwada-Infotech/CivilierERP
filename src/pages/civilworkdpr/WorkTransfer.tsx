@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
@@ -9,7 +9,8 @@ import { usePageRights } from "@/hooks/usePageRights";
 import {
   ASSIGNMENT_STATUS_META,
   getEngineers,
-  getTransferCandidates,
+  getTransferCandidateIds,
+  getTransferCandidatesPage,
   transferWork,
 } from "@/api/dependencyActivityAssignmentApi";
 import { ArrowRightLeft, Loader2, Search } from "lucide-react";
@@ -40,40 +41,62 @@ export default function WorkTransfer() {
     enabled: rights.canView,
   });
 
-  const { data: candidates = [], isLoading, isFetching } = useQuery({
-    queryKey: ["civilworkdpr-transfer-candidates", fromId],
-    queryFn: () => getTransferCandidates(Number(fromId)),
+  // The search is applied on the server (after a short pause), and the list loads 50 at a time.
+  const [term, setTerm] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setTerm(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const PAGE = 50;
+  const candQ = useInfiniteQuery({
+    queryKey: ["civilworkdpr-transfer-candidates", fromId, projectFilter, term],
+    queryFn: ({ pageParam }) =>
+      getTransferCandidatesPage({
+        engineerId: Number(fromId),
+        page: pageParam,
+        limit: PAGE,
+        projectId: projectFilter ? Number(projectFilter) : undefined,
+        search: term || undefined,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (last, all) => (all.length * PAGE < last.total ? all.length + 1 : undefined),
     enabled: rights.canView && !!fromId,
+    placeholderData: (prev) => prev,
+    staleTime: 30_000,
   });
+  const isLoading = candQ.isLoading;
+  const visible = useMemo(() => candQ.data?.pages.flatMap((p) => p.rows) ?? [], [candQ.data]);
+  const totalMatching = candQ.data?.pages[0]?.total ?? 0;
+  const projects = useMemo(
+    () => (candQ.data?.pages[0]?.projects ?? []).map((p) => ({ id: p.id, name: p.name || `Project ${p.id}`, count: p.count })),
+    [candQ.data],
+  );
+  const totalAll = projects.reduce((a, p) => a + p.count, 0);
 
   useEffect(() => {
     setSelected(new Set());
     setProjectFilter("");
   }, [fromId]);
 
-  const projects = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const c of candidates) m.set(c.projectId, c.projectName || `Project ${c.projectId}`);
-    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [candidates]);
-
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return candidates.filter((c) => {
-      if (projectFilter && String(c.projectId) !== projectFilter) return false;
-      if (!q) return true;
-      return [c.activityName, c.scopePath, c.projectName, c.engineerNames].some((v) => (v || "").toLowerCase().includes(q));
-    });
-  }, [candidates, projectFilter, search]);
-
   const allVisibleSelected = visible.length > 0 && visible.every((c) => selected.has(c.assignmentId));
-  const toggleAllVisible = () =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allVisibleSelected) visible.forEach((c) => next.delete(c.assignmentId));
-      else visible.forEach((c) => next.add(c.assignmentId));
-      return next;
-    });
+  const [selectingAll, setSelectingAll] = useState(false);
+  // "Select all" covers everything matching the filter, not just the rows loaded so far.
+  const toggleAllVisible = async () => {
+    if (allVisibleSelected && selected.size >= Math.min(totalMatching, visible.length)) {
+      setSelected(new Set());
+      return;
+    }
+    setSelectingAll(true);
+    try {
+      const ids = await getTransferCandidateIds({ engineerId: Number(fromId), projectId: projectFilter ? Number(projectFilter) : undefined, search: term || undefined });
+      setSelected(new Set(ids));
+    } catch (e: any) {
+      toast.error(e.message || "Couldn't select all.");
+    } finally {
+      setSelectingAll(false);
+    }
+  };
   const toggleOne = (id: number) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -174,7 +197,7 @@ export default function WorkTransfer() {
                 </span>
                 {fromId && (
                   <span className="text-[0.6875rem] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                    {selected.size} of {candidates.length} selected
+                    {selected.size} of {totalAll} selected
                   </span>
                 )}
                 <div className="ml-auto flex flex-wrap items-center gap-2 w-full sm:w-auto">
@@ -186,7 +209,7 @@ export default function WorkTransfer() {
                     >
                       <option value="">All projects</option>
                       {projects.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
+                        <option key={p.id} value={p.id}>{p.name} ({p.count})</option>
                       ))}
                     </select>
                   )}
@@ -210,7 +233,7 @@ export default function WorkTransfer() {
                         <Checkbox
                           checked={allVisibleSelected}
                           onCheckedChange={toggleAllVisible}
-                          disabled={visible.length === 0 || !rights.canEdit}
+                          disabled={visible.length === 0 || !rights.canEdit || selectingAll}
                           aria-label="Select all"
                         />
                       </th>
@@ -225,12 +248,12 @@ export default function WorkTransfer() {
                   <tbody className="divide-y divide-border/50">
                     {!fromId ? (
                       <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">Pick the engineer to transfer work from.</td></tr>
-                    ) : isLoading || isFetching ? (
+                    ) : isLoading ? (
                       <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground"><Loader2 size={16} className="inline animate-spin mr-2" />Loading…</td></tr>
                     ) : visible.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
-                          {candidates.length === 0 ? "This engineer has no transferable activities." : "No activities match your filters."}
+                          {totalAll === 0 ? "This engineer has no transferable activities." : "No activities match your filters."}
                         </td>
                       </tr>
                     ) : (
@@ -265,6 +288,23 @@ export default function WorkTransfer() {
                   </tbody>
                 </table>
               </div>
+
+              {fromId && visible.length > 0 && (
+                <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-border/60 text-xs text-muted-foreground">
+                  <span>Showing {visible.length} of {totalMatching}</span>
+                  {candQ.hasNextPage && (
+                    <button
+                      type="button"
+                      onClick={() => candQ.fetchNextPage()}
+                      disabled={candQ.isFetchingNextPage}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-foreground disabled:opacity-50"
+                    >
+                      {candQ.isFetchingNextPage && <Loader2 size={12} className="animate-spin" />}
+                      Load more
+                    </button>
+                  )}
+                </div>
+              )}
 
               {rights.canEdit && (
                 <div className="flex items-center justify-end gap-3 px-5 py-3.5 border-t border-border bg-muted/20">

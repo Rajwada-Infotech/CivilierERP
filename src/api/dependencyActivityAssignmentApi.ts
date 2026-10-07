@@ -840,6 +840,37 @@ export const getTransferCandidates = async (engineerId: number, projectId?: numb
   return handleResponse<TransferCandidate[]>(res);
 };
 
+export interface TransferCandidatePage {
+  rows: TransferCandidate[];
+  total: number;
+  /** Counts across ALL of the engineer's transferable work (ignores the project/search filter). */
+  projects: { id: number; name: string | null; count: number }[];
+}
+
+/** One page of an engineer's transferable activities, filtered and ordered on the server. */
+export const getTransferCandidatesPage = async (params: {
+  engineerId: number;
+  page: number;
+  limit?: number;
+  projectId?: number;
+  search?: string;
+}): Promise<TransferCandidatePage> => {
+  const qs = new URLSearchParams({ engineerId: String(params.engineerId), page: String(params.page), limit: String(params.limit ?? 50) });
+  if (params.projectId) qs.set("projectId", String(params.projectId));
+  if (params.search) qs.set("search", params.search);
+  const res = await fetchWithAuth(`${BASE}/transfer/candidates?${qs.toString()}`);
+  return handleResponse<TransferCandidatePage>(res);
+};
+
+/** Every id matching the current project/search filter, for "select all" (the page only holds some). */
+export const getTransferCandidateIds = async (params: { engineerId: number; projectId?: number; search?: string }): Promise<number[]> => {
+  const qs = new URLSearchParams({ engineerId: String(params.engineerId) });
+  if (params.projectId) qs.set("projectId", String(params.projectId));
+  if (params.search) qs.set("search", params.search);
+  const res = await fetchWithAuth(`${BASE}/transfer/candidates/ids?${qs.toString()}`);
+  return (await handleResponse<{ ids: number[] }>(res)).ids;
+};
+
 export const transferWork = async (payload: {
   fromEngineerId: number;
   toEngineerId: number;
