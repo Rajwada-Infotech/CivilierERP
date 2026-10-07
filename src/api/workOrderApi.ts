@@ -391,11 +391,15 @@ export interface WOPOPrefill {
   totalMaterialCost: number;
 }
 
-export interface WorkOrderMaterialRequest {
-  MRId: number;
-  DocNo: string | null;
-  Status: string | null;
-  itemCount: number;
+/** Everything the Material Request form needs to be pre-filled from an approved Work Order. */
+export interface WorkOrderMRPrefill {
+  WOId: number;
+  WODocNo: string;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  Reason: string;
+  Remarks: string;
+  items: { ItemId: string; ItemName: string | null; UOMCode: string | null; Quantity: number }[];
 }
 
 /** Raised when the Work Order already has a live Material Request (HTTP 409). */
@@ -410,15 +414,15 @@ export class MaterialRequestExistsError extends Error {
   }
 }
 
-/** Raise a Material Request for the materials of an approved Work Order (items summed per item + unit). */
-export const createMaterialRequestFromWO = async (id: number): Promise<WorkOrderMaterialRequest> => {
-  const res = await fetchWithAuth(`/api/material-requests/from-work-order/${id}`, { method: "POST" });
+/** The Work Order's materials (summed per item + unit) shaped for the Material Request form. Creates nothing. */
+export const getMaterialRequestPrefillFromWO = async (id: number): Promise<WorkOrderMRPrefill> => {
+  const res = await fetchWithAuth(`/api/material-requests/from-work-order/${id}/prefill`);
   const body = await res.json().catch(() => ({}));
   if (res.status === 409 && body.mrId) {
     throw new MaterialRequestExistsError(body.error || "A Material Request already exists", body.mrId, body.docNo ?? null);
   }
-  if (!res.ok) throw new Error(body.error || `Failed to create the Material Request: ${res.status}`);
-  return body as WorkOrderMaterialRequest;
+  if (!res.ok) throw new Error(body.error || `Failed to load the work order materials: ${res.status}`);
+  return body as WorkOrderMRPrefill;
 };
 
 export const confirmWorkOrder = async (

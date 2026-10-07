@@ -2,9 +2,10 @@ process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = process.env.JWT_SECRET || "mr-from-wo-test-secret";
 
 /**
- * POST /api/material-requests/from-work-order/:woId
- * An APPROVED work order raises one Material Request: one line per item (+unit) with quantities summed,
- * tagged with SourceWOId so the document chain starts at the work order. One live MR per work order.
+ * An APPROVED work order opens the Material Request form pre-filled (GET .../from-work-order/:woId/prefill,
+ * one line per item + unit, quantities summed, nothing created). The form is then saved through the normal
+ * POST /api/material-requests with SourceWOId, which tags the MR so the document chain starts at the work
+ * order. One live MR per work order.
  */
 
 const jwt = require("jsonwebtoken");
@@ -105,10 +106,20 @@ jest.mock("../db", () => ({
 const token = () =>
   jwt.sign({ userId: 1, email: "smoke@example.com", name: "Super Admin", role: "super_admin", roleId: 1 }, process.env.JWT_SECRET);
 
-const post = async (woId = 12) => {
+const appFor = async () => {
   const { createApp } = require("../server");
-  const app = await createApp();
-  return request(app).post(`/api/material-requests/from-work-order/${woId}`).set("Authorization", `Bearer ${token()}`).send({});
+  return createApp();
+};
+const getPrefill = async (woId = 12) => {
+  const app = await appFor();
+  return request(app).get(`/api/material-requests/from-work-order/${woId}/prefill`).set("Authorization", `Bearer ${token()}`);
+};
+const postMR = async (extra = {}) => {
+  const app = await appFor();
+  return request(app)
+    .post("/api/material-requests")
+    .set("Authorization", `Bearer ${token()}`)
+    .send({ CompanyId: 1, ProjectId: 3, Reason: "Materials", items: [{ ItemId: "7", UOMCode: "BAG", Quantity: 20 }], ...extra });
 };
 
 beforeEach(() => {
@@ -123,65 +134,85 @@ beforeEach(() => {
   mockTx = null;
 });
 
-describe("POST /material-requests/from-work-order/:woId", () => {
-  test("approved work order -> one MR with a line per item, tagged with the work order", async () => {
-    const res = await post();
-    expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ MRId: 321, DocNo: "MR-2026-00007", Status: "Pending", itemCount: 2 });
-
-    const header = mockTx.inputs.find((i) => i.kind === "header");
-    expect(header).toMatchObject({ CompanyId: 1, ProjectId: 3, SourceWOId: 12, SourceWODocNo: "WO-2026-00004" });
-    expect(header.Reason).toContain("WO-2026-00004");
-    const items = mockTx.inputs.filter((i) => i.kind === "item");
-    expect(items.map((i) => [i.ItemId, i.UOMCode, i.Quantity])).toEqual([
-      ["7", "BAG", 150],
-      ["9", "CFT", 40],
+describe("GET /material-requests/from-work-order/:woId/prefill", () => {
+  test("approved work order -> the form data, items summed per item, nothing created", async () => {
+    const res = await getPrefill();
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ WOId: 12, WODocNo: "WO-2026-00004", CompanyId: 1, ProjectId: 3 });
+    expect(res.body.Reason).toContain("WO-2026-00004");
+    expect(res.body.items).toEqual([
+      { ItemId: "7", ItemName: "Cement", UOMCode: "BAG", Quantity: 150 },
+      { ItemId: "9", ItemName: "Sand", UOMCode: "CFT", Quantity: 40 },
     ]);
-    expect(mockTx.commit).toHaveBeenCalledTimes(1);
-    expect(mockTx.rollback).not.toHaveBeenCalled();
+    expect(mockTx).toBeNull(); // no transaction, so no MR was written
   });
 
-  test("a work order that is not approved is refused, nothing is written", async () => {
+  test("a work order that is not approved is refused", async () => {
     mockWo.Status = "Pending";
-    const res = await post();
+    const res = await getPrefill();
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/approved work order/i);
-    expect(mockTx).toBeNull();
   });
 
   test("an unknown work order is a 404", async () => {
     mockWo = null;
-    expect((await post()).status).toBe(404);
+    expect((await getPrefill()).status).toBe(404);
   });
 
-  test("a second request while the first is live is refused with the existing MR (409)", async () => {
+  test("while a live MR exists for the work order it answers 409 with that MR", async () => {
     mockExisting = { MRId: 55, DocNo: "MR-2026-00003", Status: "Pending" };
-    const res = await post();
+    const res = await getPrefill();
     expect(res.status).toBe(409);
     expect(res.body).toMatchObject({ mrId: 55, docNo: "MR-2026-00003" });
-    expect(mockTx).toBeNull();
   });
 
   test("a work order with no material lines is refused", async () => {
     mockMats = [];
-    const res = await post();
+    const res = await getPrefill();
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/no material items/i);
-    expect(mockTx).toBeNull();
   });
 
   test("before migration 545 it says so instead of failing on a missing column", async () => {
     mockHasColumn = false;
-    const res = await post();
+    const res = await getPrefill();
     expect(res.status).toBe(503);
     expect(res.body.error).toMatch(/migration 545/i);
-    expect(mockTx).toBeNull();
   });
 
   test("a bad id is a 400", async () => {
-    const { createApp } = require("../server");
-    const app = await createApp();
-    const res = await request(app).post("/api/material-requests/from-work-order/abc").set("Authorization", `Bearer ${token()}`).send({});
+    expect((await getPrefill("abc")).status).toBe(400);
+  });
+});
+
+describe("POST /material-requests with SourceWOId (saved from the pre-filled form)", () => {
+  test("the edited form is saved as sent and tagged with the work order", async () => {
+    const res = await postMR({ SourceWOId: 12, items: [{ ItemId: "7", UOMCode: "BAG", Quantity: 20 }] });
+    expect(res.status).toBe(201);
+    const header = mockTx.inputs.find((i) => i.kind === "header");
+    expect(header).toMatchObject({ SourceWOId: 12, SourceWODocNo: "WO-2026-00004" });
+    const items = mockTx.inputs.filter((i) => i.kind === "item");
+    expect(items.map((i) => [i.ItemId, i.Quantity])).toEqual([["7", 20]]); // the user's edit, not the work order's 150
+    expect(mockTx.commit).toHaveBeenCalledTimes(1);
+  });
+
+  test("a work order that is not approved cannot be the source", async () => {
+    mockWo.Status = "Draft";
+    const res = await postMR({ SourceWOId: 12 });
     expect(res.status).toBe(400);
+    expect(mockTx).toBeNull();
+  });
+
+  test("a second MR for the same work order is refused while the first is live", async () => {
+    mockExisting = { MRId: 55, DocNo: "MR-2026-00003", Status: "Pending" };
+    const res = await postMR({ SourceWOId: 12 });
+    expect(res.status).toBe(409);
+    expect(mockTx).toBeNull();
+  });
+
+  test("a normal MR without SourceWOId is unchanged", async () => {
+    const res = await postMR();
+    expect(res.status).toBe(201);
+    expect(mockTx.inputs.find((i) => i.kind === "header").SourceWOId).toBeNull();
   });
 });

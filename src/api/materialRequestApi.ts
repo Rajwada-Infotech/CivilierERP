@@ -54,6 +54,8 @@ export interface CreateMRPayload {
   Priority?: string;
   Reason: string;
   Remarks?: string | null;
+  /** Set when the request is raised from an approved Work Order (checked again by the server). */
+  SourceWOId?: number | null;
   items: MRLineItem[];
 }
 

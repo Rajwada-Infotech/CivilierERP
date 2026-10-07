@@ -65,7 +65,7 @@ import {
   getWorkOrders,
   getWorkOrder,
   deleteWorkOrder,
-  createMaterialRequestFromWO,
+  getMaterialRequestPrefillFromWO,
   MaterialRequestExistsError,
   type WOItemOption,
 } from "@/api/workOrderApi";
@@ -1795,10 +1795,9 @@ const WorkOrderDetailPanel: React.FC<{
   const handleCreateMaterialRequest = async () => {
     setCreatingMR(true);
     try {
-      const mr = await createMaterialRequestFromWO(workOrderId);
-      toast.success(`Material Request ${mr.DocNo ?? "#" + mr.MRId} created with ${mr.itemCount} item${mr.itemCount === 1 ? "" : "s"}.`);
-      await queryClient.invalidateQueries({ queryKey: ["document-chain"] });
-      openMaterialRequest(mr.MRId);
+      // Nothing is created here: the Material Request form opens pre-filled so it can be changed, then saved.
+      const woPrefill = await getMaterialRequestPrefillFromWO(workOrderId);
+      navigate("/material/material-request", { state: { woPrefill } });
     } catch (err: unknown) {
       if (err instanceof MaterialRequestExistsError) {
         toast.info(err.message);
