@@ -606,8 +606,19 @@ function buildInboxQueries(module, projectScope = null) {
           CAST(b.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                   AS ApprovedBy,
           ''                                   AS ApprovedAt,
-          ''                                   AS RejectedBy,
-          ISNULL(CAST(b.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL((
+            SELECT TOP 1 ApproverEmail
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'dbo.BOQ' AND RecordId = b.BoqID AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                               AS RejectedBy,
+          -- The reviewer's reason for rejecting, NOT the document's own Remarks (those show under Details).
+          ISNULL((
+            SELECT TOP 1 CAST(Note AS NVARCHAR(MAX))
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'dbo.BOQ' AND RecordId = b.BoqID AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                               AS RejectionNote,
           ISNULL(b.UpdatedAt, b.CreatedAt)     AS LastModified
         FROM dbo.BOQ b
         LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
