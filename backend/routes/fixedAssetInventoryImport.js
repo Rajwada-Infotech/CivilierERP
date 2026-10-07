@@ -178,7 +178,7 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
         .input("PurchaseCost",      sql.Decimal(18,2), purchaseCost)
         .input("Quantity",          sql.Decimal(18,3), qtyVal)
         .input("AssetStatus",       sql.NVarChar(30), "Pending")
-        .input("Remarks",           sql.NVarChar(sql.MAX), `Manually imported via Inventory Import ${docNo}${remarks ? " — " + remarks : ""}`)
+        .input("Remarks",           sql.NVarChar(sql.MAX), `Imported stock — without GRN (Inventory Import ${docNo})${remarks ? " — " + remarks : ""}`)
         .input("SourceType",        sql.NVarChar(20), "IMPORT")
         .input("SourceId",          sql.Int, importId)
         .input("SourceItemId",      sql.NVarChar(100), itemIdVal)
@@ -215,7 +215,7 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
           const result = await autoTagBatch(pool, {
             assetId, itemId: itemIdVal, itemName: item.M_Name, qty: qtyVal,
             companyId: companyIdVal, projectId: projectIdVal, godownId: godownIdVal,
-            docDate, sourceDocNo: docNo, userEmail: email,
+            docDate, sourceDocNo: docNo, userEmail: email, receiptLabel: "IMPORT",
           });
           tagged = result.tagged;
         } catch (err) {

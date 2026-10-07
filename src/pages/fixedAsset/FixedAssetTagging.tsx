@@ -17,6 +17,7 @@ import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { parseSheetDate } from "@/lib/xlsxBook";
+import { createInventoryImport } from "@/api/fixedAssetInventoryImportApi";
 import { downloadFaInventoryTemplate, readFaImportFile } from "./faInventoryExcel";
 import {
   getEligibleAssetItems, getPendingBatches, deletePendingBatch, getFixedAssetTaggings, createFixedAssetTagging,
@@ -127,7 +128,10 @@ interface ImportRow {
   itemName: string;
   docDate: string;
   quantity: number;
+  rate: number | null;
   remarks?: string;
+  /** FA Item Codes generated for this row once imported. */
+  tagged?: number;
   status: "valid" | "success" | "error";
   message?: string;
 }
@@ -281,6 +285,7 @@ export default function FixedAssetTagging() {
         description: preview,
       });
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
@@ -296,6 +301,7 @@ export default function FixedAssetTagging() {
     onSuccess: () => {
       toast.success("Tagging entry updated");
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
       setEditTag(null);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -306,6 +312,7 @@ export default function FixedAssetTagging() {
     onSuccess: () => {
       toast.success("Tagging entry deleted");
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
@@ -381,14 +388,8 @@ export default function FixedAssetTagging() {
       const projectList = ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects);
       const godownList = ensureArray<Godown>(godownsData?.data).filter((g) => !g.IsDeleted && g.IsActive);
 
-      // Eligible items depend on (company, project, godown, finYear) scope —
-      // cache per unique combination so rows sharing a scope don't refetch.
-      const eligibleCache = new Map<string, EligibleAssetItem[]>();
-
       const norm = (v: unknown) => String(v ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-      // Quantity already claimed by earlier valid rows, per godown + item, so two
-      // rows can't together tag more units than are actually untagged.
-      const usedQty = new Map<string, number>();
+
 
       const results: ImportRow[] = [];
       for (const raw of rawRows) {
@@ -399,6 +400,7 @@ export default function FixedAssetTagging() {
         const itemNameIn   = raw.ItemName;
         const docDateRaw   = raw.Date;
         const quantityRaw  = raw.Quantity;
+        const rateRaw      = raw.Rate;
         const remarks      = raw.Remarks;
 
         const row: ImportRow = {
@@ -414,6 +416,7 @@ export default function FixedAssetTagging() {
           itemName: itemNameIn || "—",
           docDate: docDateRaw,
           quantity: 0,
+          rate: null,
           remarks: remarks || undefined,
           status: "error",
         };
@@ -496,34 +499,19 @@ export default function FixedAssetTagging() {
           continue;
         }
 
-        // ── Received, untagged stock of that item at the godown ──
-        const cacheKey = `${company.id}|${project.id}|${godown.GodownID}|${finYear}`;
-        let items = eligibleCache.get(cacheKey);
-        if (!items) {
-          items = await getEligibleAssetItems({
-            godownId: godown.GodownID,
-            companyId: company.id,
-            projectId: project.id,
-            finYear,
-          });
-          eligibleCache.set(cacheKey, items);
+        // No stock / GRN requirement: the import itself adds the stock to the godown.
+        let rate: number | null = null;
+        if (rateRaw !== "") {
+          rate = Number(rateRaw.replace(/[,₹\s]/g, ""));
+          if (!Number.isFinite(rate) || rate < 0) {
+            row.message = `Rate "${rateRaw}" must be a number (0 or more)`;
+            results.push(row);
+            continue;
+          }
         }
-        const item = items.find((i) => String(i.ItemId).toLowerCase() === String(master!.M_Id).toLowerCase());
-        if (!item) {
-          row.message = `No untagged stock of "${master.M_Name}" at godown "${godown.GodownName}" for ${finYear} — receive it (GRN / Inventory Import) first`;
-          results.push(row);
-          continue;
-        }
-        const usedKey = `${godown.GodownID}|${item.ItemId}`;
-        const already = usedQty.get(usedKey) ?? 0;
-        if (quantity + already > item.UntaggedQty) {
-          row.message = `Only ${fmt(Math.max(0, item.UntaggedQty - already))} unit(s) of "${item.ItemName}" left to tag at this godown${already ? " (earlier rows in this file use the rest)" : ""}`;
-          results.push(row);
-          continue;
-        }
-        usedQty.set(usedKey, already + quantity);
-        row.itemId = item.ItemId;
-        row.itemName = item.ItemName || master.M_Name || itemNameIn;
+        row.rate = rate;
+        row.itemId = String(master.M_Id);
+        row.itemName = master.M_Name || itemNameIn;
         row.status = "valid";
         results.push(row);
       }
@@ -550,16 +538,19 @@ export default function FixedAssetTagging() {
     for (const row of validRows) {
       const idx = finalResults.findIndex((r) => r.row === row.row);
       try {
-        await createFixedAssetTagging({
+        // Imported stock goes straight into the godown (no GRN), then follows the
+        // normal FA tagging / FA Code generation — same call Inventory Import uses.
+        const created = await createInventoryImport({
           docDate: row.docDate,
           companyId: row.companyId,
           projectId: row.projectId!,
           godownId: row.godownId!,
           itemId: row.itemId!,
-          numberOfItems: row.quantity,
+          quantity: row.quantity,
+          rate: row.rate,
           remarks: row.remarks || undefined,
         });
-        finalResults[idx] = { ...row, status: "success" };
+        finalResults[idx] = { ...row, status: "success", tagged: created.tagged };
       } catch (err) {
         finalResults[idx] = { ...row, status: "error", message: err instanceof Error ? err.message : "Failed to create" };
       }
@@ -573,6 +564,7 @@ export default function FixedAssetTagging() {
     const errorCount = finalResults.length - successCount;
     if (successCount > 0) {
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
@@ -929,7 +921,14 @@ export default function FixedAssetTagging() {
                     const hasRecord = t.RecordStatus === "Done";
                     return (
                     <tr key={t.TagId} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs">{t.DocNo || "—"}</td>
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {t.DocNo || "—"}
+                        {t.StockSource === "IMPORT" && (
+                          <span title="Stock added by import — no GRN" className="mt-1 block w-fit rounded-full bg-sky-100 px-2 py-0.5 text-[0.625rem] font-sans font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">
+                            Imported Stock / Without GRN
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(t.DocDate)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium truncate">{t.AssetName || "—"}</p>
@@ -1128,7 +1127,7 @@ export default function FixedAssetTagging() {
                           {r.status === "error" ? (
                             <span className="text-destructive">{r.message}</span>
                           ) : r.status === "success" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><Check size={12} /> Imported</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><Check size={12} /> Imported{r.tagged ? ` · ${r.tagged} FA code${r.tagged === 1 ? "" : "s"}` : " · awaiting tagging"}</span>
                           ) : (
                             <span className="text-emerald-600 dark:text-emerald-400">Valid</span>
                           )}
