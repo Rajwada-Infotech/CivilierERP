@@ -27,6 +27,8 @@ export interface TaggingListItem {
   /** Receiving side: the old code this fresh one replaced. */
   TransferredFromCode?: string | null;
   SourceICTId?: number | null;
+  /** Where the tagged stock came from: GRN, IMPORT (added without a GRN) or ICT. */
+  StockSource?: string | null;
   CreatedBy: string | null;
   CreatedAt: string;
   CompanyId: number | null;
