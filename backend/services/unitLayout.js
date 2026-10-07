@@ -306,7 +306,7 @@ async function chainFloorLabel(db, unit, { asLabel = true } = {}) {
   const type = await getEffectiveType(db, { blockId: unit.BlockId });
   if (type.HasFloors) throw new Error(`${unit.UnitName} has no floor — set its floor in Auto Project Setup first`);
   const r = await db.request().input("u", sql.Int, unit.UnitId ?? unit.Id).query(`
-    SELECT STRING_AGG(PlotName, '+') WITHIN GROUP (ORDER BY PlotName) AS Plots
+    SELECT N'Plot ' + STRING_AGG(PlotName, '+') WITHIN GROUP (ORDER BY PlotName) AS Plots
     FROM dbo.PlotMaster WHERE ConvertedUnitId = @u AND IsActive = 1`);
   const plots = r.recordset[0]?.Plots;
   if (!plots) throw new Error(`${unit.UnitName} is in a ${type.Name} block but isn't built on a plot — convert it from its plot first`);

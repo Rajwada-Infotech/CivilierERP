@@ -30,6 +30,12 @@ function firstPickableType(types: LayoutType[]): string {
 
 type TemplateRow = { UnitType: string; UnitKind?: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 type PaymentPlan = { Id: number; PlanName: string; IsActive: boolean };
+// GET /projects/:id/plot-summary — where a plotted project's land and villas stand.
+type PlotSummary = {
+  Plots: number; Available: number; Held: number; Sold: number; BuiltOn: number;
+  Villas: number; VillasWithDpr: number; VillaRoomsWithoutDpr: number;
+  VillaTypes: number; VillaTypesWithLayout: number; PlannedNotBuilt: number;
+};
 type UnitEdit = { UnitName: string; FloorNo: string; UnitType: string; UnitKind?: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 
 async function fetchApplicablePlans(projectId: string): Promise<PaymentPlan[]> {
@@ -132,7 +138,7 @@ const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; tit
 // Blocks → Floors → Units progress, so it's obvious at a glance which part of
 // the setup is complete and what comes next.
 const SetupProgress: React.FC<{ steps: { label: string; detail: string; done: boolean; active: boolean }[] }> = ({ steps }) => (
-  <ol className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+  <ol className={`grid grid-cols-1 gap-2 ${steps.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
     {steps.map((s, i) => (
       <li
         key={s.label}
@@ -160,6 +166,53 @@ const SetupProgress: React.FC<{ steps: { label: string; detail: string; done: bo
   </ol>
 );
 
+
+// ── Land & villas at a glance (plotted projects) ────────────────────────────
+// A plotted project's real state is its land and what has been built on it,
+// not floors and units: plots by where they stand, then — for a type that
+// builds on its plots — villa types (each needs a room layout before a plot
+// can be converted) and villas on DPR. Every figure links to where it's acted on.
+const PlotSummaryPanel: React.FC<{ s: PlotSummary; buildsVillas: boolean }> = ({ s, buildsVillas }) => {
+  const tile = (label: string, value: number, tone = "text-foreground", hint?: string) => (
+    <div className="rounded-lg border border-border bg-card px-3 py-2.5 min-w-0">
+      <div className={`text-lg font-heading font-semibold tabular-nums ${tone}`}>{value.toLocaleString("en-IN")}</div>
+      <div className="text-[0.6875rem] text-muted-foreground truncate" title={hint || label}>{label}</div>
+    </div>
+  );
+  const typesMissingLayout = s.VillaTypes - s.VillaTypesWithLayout;
+  return (
+    <div className="rounded-xl border border-border bg-card/60 p-3.5 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-heading font-semibold">Land{buildsVillas ? " & villas" : ""}</p>
+        <a href="/crm/setup/plot-master" className="text-xs text-primary hover:underline inline-flex items-center gap-1">Open Plot Master <ExternalLink size={11} /></a>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {tile("Plots", s.Plots)}
+        {tile("Available", s.Available, "text-emerald-600 dark:text-emerald-400")}
+        {tile("Held / applied", s.Held, "text-sky-600 dark:text-sky-400")}
+        {tile("Sold", s.Sold, "text-rose-600 dark:text-rose-400")}
+      </div>
+      {buildsVillas && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {tile("Villa types", s.VillaTypes)}
+          {tile("Built on (villas)", s.Villas, "text-violet-600 dark:text-violet-400", `${s.BuiltOn} plot(s) converted`)}
+          {tile("Villas on DPR", s.VillasWithDpr)}
+          {tile("Planned, not built", s.PlannedNotBuilt, "text-muted-foreground", "Plots with a planned villa type, not converted yet")}
+        </div>
+      )}
+      {buildsVillas && typesMissingLayout > 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          {typesMissingLayout} of {s.VillaTypes} villa type{s.VillaTypes === 1 ? "" : "s"} {typesMissingLayout === 1 ? "has" : "have"} no room layout — plots planned on {typesMissingLayout === 1 ? "it" : "them"} can't be converted yet. Set it in Plot Master → Villa types.
+        </p>
+      )}
+      {buildsVillas && s.VillaRoomsWithoutDpr > 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          {s.VillaRoomsWithoutDpr} villa room{s.VillaRoomsWithoutDpr === 1 ? " has" : "s have"} no DPR steps yet (no room of that type has a chain to copy). Set one chain for that room type in Dependency Master.
+        </p>
+      )}
+    </div>
+  );
+};
 
 // ── Plot Layout (plotted projects) ──────────────────────────────────────────
 // The floor-driven step above cannot describe a plotted block: there are no
@@ -710,6 +763,21 @@ const CrmProjectAutoSetup: React.FC = () => {
   // Whole-project wording only: plotted when every block is plots, or when
   // there are no blocks yet and the project's type has no floors.
   const isPlotted = blocks.length ? !hasTowers : (status?.projectType ? !status.projectType.HasFloors : false);
+  // Whether the type also builds on its plots (Plotted + Villa) — from the
+  // type's SellsConstruction flag, never its name.
+  const buildsVillas = !!status?.projectType?.SellsConstruction;
+  // Where a plotted project's land and villas stand, for the progress and the
+  // summary below. Only fetched once the project has plot blocks.
+  const { data: plotSummary } = useQuery<PlotSummary>({
+    queryKey: ["plot-summary", projectId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/projects/${projectId}/plot-summary`);
+      if (!r.ok) throw new Error("Could not load plot summary");
+      return r.json();
+    },
+    enabled: !!projectId && hasPlots,
+    staleTime: 15_000,
+  });
 
   const step1Done = blocks.length > 0;
   const step2Done = floors.length > 0;
@@ -1213,7 +1281,32 @@ const CrmProjectAutoSetup: React.FC = () => {
         {/* Progress across the three setup sections. */}
         {projectId && status && (() => {
           const generatedUnits = floors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
+          // A plotted project has no floors: its progress is blocks -> plots
+          // (-> villas when the type builds on them), not blocks -> floors -> units.
+          if (isPlotted) {
+            const ps = plotSummary;
+            const plotsDone = !!ps && ps.Plots > 0;
+            const steps = [
+              { label: "Blocks", detail: step1Done ? `${blocks.length} block${blocks.length === 1 ? "" : "s"} created` : "Create the project's blocks", done: step1Done, active: !step1Done },
+              { label: "Plots", detail: plotsDone ? `${ps!.Plots} plots · ${ps!.Sold} sold · ${ps!.Available} available` : "Lay out the plots", done: plotsDone, active: step1Done && !plotsDone },
+            ];
+            if (buildsVillas) {
+              const villasDone = !!ps && ps.Villas > 0 && ps.VillaRoomsWithoutDpr === 0;
+              steps.push({
+                label: "Villas",
+                detail: ps && ps.Villas > 0 ? `${ps.Villas} built · ${ps.VillasWithDpr} on DPR` : "Convert plots to villas in Plot Master",
+                done: villasDone, active: plotsDone && !villasDone,
+              });
+            }
+            return (
+              <div className="space-y-3">
+                <SetupProgress steps={steps} />
+                {ps && <PlotSummaryPanel s={ps} buildsVillas={buildsVillas} />}
+              </div>
+            );
+          }
           return (
+            <>
             <SetupProgress
               steps={[
                 { label: "Blocks", detail: step1Done ? `${blocks.length} block${blocks.length === 1 ? "" : "s"} created` : "Create the project's blocks", done: step1Done, active: !step1Done },
@@ -1221,6 +1314,9 @@ const CrmProjectAutoSetup: React.FC = () => {
                 { label: "Units", detail: generatedUnits ? `${generatedUnits} unit${generatedUnits === 1 ? "" : "s"} generated` : "Define unit types & generate", done: step2Done && generatedUnits > 0 && !floors.some((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0), active: step2Done },
               ]}
             />
+            {/* A mixed township (towers + plot blocks) shows its land too. */}
+            {hasPlots && plotSummary && <div className="mt-3"><PlotSummaryPanel s={plotSummary} buildsVillas={buildsVillas} /></div>}
+            </>
           );
         })()}
 

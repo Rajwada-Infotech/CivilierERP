@@ -58,7 +58,7 @@ router.get("/activities", async (req, res) => {
         um.UnitName AS flatName, rm.RoomName AS roomName,
         CONCAT(
           dm.Alias, ' — ', am.activity_name, ' (',
-          ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > Plot ' END, dm.Floor, ' > ',
+          ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor, ' > ',
           ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—'), ')'
         ) AS label,
         (SELECT COUNT(*) FROM dbo.WorkerActivityRoster war WHERE war.DependencyMasterActivityId = dma.Id AND war.IsActive = 1) AS rosterCount
