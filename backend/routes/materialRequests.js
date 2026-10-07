@@ -839,6 +839,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       Reason,
       Remarks,
       DocTypeId: clientDocTypeId,
+      SourceWOId: clientSourceWOId,
       items = [],
     } = req.body;
 
@@ -847,6 +848,15 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       return res.status(400).json({ error: "Reason is required" });
     if (!items.length)
       return res.status(400).json({ error: "At least one item required" });
+
+    // Raised from an approved Work Order: the link is checked here, not trusted from the client.
+    let sourceWO = null;
+    if (clientSourceWOId != null && clientSourceWOId !== "") {
+      const woId = parseInt(clientSourceWOId, 10);
+      if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid SourceWOId" });
+      sourceWO = await loadWorkOrderForMR(req, res, pool, woId);
+      if (!sourceWO) return;
+    }
 
     if (RequiredByDate) {
       const minDate = await computeMinRequiredByDate(
@@ -906,13 +916,15 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
         .input("DocTypeId", sql.Int, dtId || null)
         .input("DocNo", sql.NVarChar(50), lockedDocNo || null)
+        .input("SourceWOId", sql.Int, sourceWO ? sourceWO.Id : null)
+        .input("SourceWODocNo", sql.NVarChar(100), sourceWO ? sourceWO.woNo : null)
         .input("CreatedBy", sql.NVarChar(200), user).query(`
           INSERT INTO dbo.MaterialRequests
             (CompanyId, ProjectId, FinYearId, RequestDate, RequiredByDate,
-             Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy)
+             Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy${sourceWO ? ", SourceWOId, SourceWODocNo" : ""})
           OUTPUT INSERTED.MRId
           VALUES (@CompanyId, @ProjectId, @FinYearId, @RequestDate, @RequiredByDate,
-                  @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy)
+                  @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy${sourceWO ? ", @SourceWOId, @SourceWODocNo" : ""})
         `);
 
       newId = insertHdr.recordset[0].MRId;
@@ -988,51 +1000,58 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
   }
 });
 
-// ── POST /from-work-order/:woId ───────────────────────────────────────────────
-// Raises a Material Request for the materials of an APPROVED Work Order. One line per item
-// (+ unit) with the quantities summed across the WO's activities. The MR then follows the
-// normal flow (approval -> quotation if applicable -> PO -> GRN -> invoice) and carries
-// SourceWOId / SourceWODocNo so the document chain starts at the Work Order. One live MR per
-// Work Order: a second request is refused (409) while the first is not Rejected/Cancelled.
+// ── Material Request raised from an approved Work Order ───────────────────────
+// The Work Order page opens the normal Material Request form pre-filled from GET
+// /from-work-order/:woId/prefill (items summed per item + unit); the user can change anything, and
+// POST / then stores SourceWOId / SourceWODocNo so the document chain starts at the Work Order.
+// One live MR per Work Order: while the first is not Rejected/Cancelled a second is refused (409).
 const hasSourceWO = makeColumnProbe("dbo.MaterialRequests", "SourceWOId");
 
-router.post("/from-work-order/:woId", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
-  const user = requireUser(req, res);
-  if (!user) return;
+// Loads the approved Work Order a Material Request may be raised from. On any problem it has already
+// answered the request and returns null.
+async function loadWorkOrderForMR(req, res, pool, woId) {
+  if (!(await hasSourceWO(pool))) {
+    res.status(503).json({ error: "Material Requests from Work Orders need migration 545 — ask an administrator to run the database migrations." });
+    return null;
+  }
+  const wo = (await pool.request().input("id", sql.Int, woId).query(`
+    SELECT Id, DocumentNumber, DocNo, Status, CompanyId, ProjectId
+    FROM dbo.WorkOrderHeader WHERE Id = @id
+  `)).recordset[0];
+  if (!wo) {
+    res.status(404).json({ error: "Work order not found" });
+    return null;
+  }
+  if (!assertProjectAllowed(req, res, wo.ProjectId)) return null;
+  if (wo.Status !== "Approved") {
+    res.status(400).json({ error: "A Material Request can only be raised from an approved work order." });
+    return null;
+  }
+  const existing = (await pool.request().input("id", sql.Int, woId).query(`
+    SELECT TOP 1 MRId, DocNo, Status FROM dbo.MaterialRequests
+    WHERE SourceWOId = @id AND Status NOT IN ('Rejected', 'Cancelled')
+    ORDER BY MRId DESC
+  `)).recordset[0];
+  if (existing) {
+    res.status(409).json({
+      error: `Material Request ${existing.DocNo || "#" + existing.MRId} already exists for this work order.`,
+      mrId: existing.MRId,
+      docNo: existing.DocNo,
+      status: existing.Status,
+    });
+    return null;
+  }
+  return { ...wo, woNo: wo.DocNo || wo.DocumentNumber || `WO-${woId}` };
+}
+
+router.get("/from-work-order/:woId/prefill", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
   const woId = parseInt(req.params.woId, 10);
   if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid work order id" });
-
   try {
     const pool = getPool();
     await ensureTablesExist(pool);
-    if (!(await hasSourceWO(pool))) {
-      return res.status(503).json({ error: "Material Requests from Work Orders need migration 545 — ask an administrator to run the database migrations." });
-    }
-
-    const wo = (await pool.request().input("id", sql.Int, woId).query(`
-      SELECT Id, DocumentNumber, DocNo, Status, CompanyId, ProjectId
-      FROM dbo.WorkOrderHeader WHERE Id = @id
-    `)).recordset[0];
-    if (!wo) return res.status(404).json({ error: "Work order not found" });
-    if (!assertProjectAllowed(req, res, wo.ProjectId)) return;
-    if (wo.Status !== "Approved") {
-      return res.status(400).json({ error: "A Material Request can only be raised from an approved work order." });
-    }
-    const woNo = wo.DocNo || wo.DocumentNumber || `WO-${woId}`;
-
-    const existing = (await pool.request().input("id", sql.Int, woId).query(`
-      SELECT TOP 1 MRId, DocNo, Status FROM dbo.MaterialRequests
-      WHERE SourceWOId = @id AND Status NOT IN ('Rejected', 'Cancelled')
-      ORDER BY MRId DESC
-    `)).recordset[0];
-    if (existing) {
-      return res.status(409).json({
-        error: `Material Request ${existing.DocNo || "#" + existing.MRId} already exists for this work order.`,
-        mrId: existing.MRId,
-        docNo: existing.DocNo,
-        status: existing.Status,
-      });
-    }
+    const wo = await loadWorkOrderForMR(req, res, pool, woId);
+    if (!wo) return;
 
     const mats = (await pool.request().input("id", sql.Int, woId).query(`
       SELECT m.ItemId, MAX(img.M_Name) AS ItemName, uom.UOMCode, SUM(ISNULL(m.Quantity, 0)) AS Quantity
@@ -1049,90 +1068,20 @@ router.post("/from-work-order/:woId", authenticateToken, requirePageRight("mater
       return res.status(400).json({ error: "This work order has no material items to request." });
     }
 
-    let dtId = null;
-    try {
-      dtId = await resolveDocTypeId(pool, sql, "REQ");
-    } catch {
-      /* no MR doc type — proceed without numbering */
-    }
-    let lockedDocNo = null;
-    if (dtId) {
-      try {
-        lockedDocNo = await lockNextDocNumber(pool, sql, {
-          docTypeId: dtId,
-          tableName: "MaterialRequests",
-          docNoColumn: "DocNo",
-          issuedBy: user,
-        });
-      } catch {
-        lockedDocNo = null;
-      }
-    }
-
-    const today = new Date();
-    const tx = pool.transaction();
-    await tx.begin();
-    let newId;
-    try {
-      const insertHdr = await tx
-        .request()
-        .input("CompanyId", sql.Int, wo.CompanyId || null)
-        .input("ProjectId", sql.Int, wo.ProjectId || null)
-        .input("FinYearId", sql.Int, await resolveFinYearId(pool, null, today))
-        .input("RequestDate", sql.Date, today)
-        .input("Reason", sql.NVarChar(sql.MAX), `Materials for Work Order ${woNo}`)
-        .input("Remarks", sql.NVarChar(sql.MAX), `Raised from approved Work Order ${woNo}`)
-        .input("DocTypeId", sql.Int, dtId || null)
-        .input("DocNo", sql.NVarChar(50), lockedDocNo || null)
-        .input("SourceWOId", sql.Int, woId)
-        .input("SourceWODocNo", sql.NVarChar(100), woNo)
-        .input("CreatedBy", sql.NVarChar(200), user).query(`
-          INSERT INTO dbo.MaterialRequests
-            (CompanyId, ProjectId, FinYearId, RequestDate, Priority, Reason, Remarks, Status,
-             DocTypeId, DocNo, SourceWOId, SourceWODocNo, CreatedBy, UpdatedBy)
-          OUTPUT INSERTED.MRId
-          VALUES (@CompanyId, @ProjectId, @FinYearId, @RequestDate, 'Normal', @Reason, @Remarks, 'Draft',
-                  @DocTypeId, @DocNo, @SourceWOId, @SourceWODocNo, @CreatedBy, @CreatedBy)
-        `);
-      newId = insertHdr.recordset[0].MRId;
-
-      for (const m of mats) {
-        await tx
-          .request()
-          .input("MRId", sql.Int, newId)
-          .input("ItemId", sql.NVarChar(50), String(m.ItemId))
-          .input("ItemName", sql.NVarChar(200), m.ItemName || null)
-          .input("UOMCode", sql.NVarChar(20), m.UOMCode || null)
-          .input("Quantity", sql.Decimal(18, 4), parseFloat(m.Quantity) || 0).query(`
-            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity)
-            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity)
-          `);
-      }
-      await tx.commit();
-    } catch (txErr) {
-      try {
-        await tx.rollback();
-      } catch {
-        /* best-effort — the original error is what propagates */
-      }
-      throw txErr;
-    }
-
-    if (lockedDocNo) {
-      await backPatchRecordId(pool, sql, lockedDocNo, "MaterialRequests", newId);
-    }
-    await bumpCacheVersion("material-requests");
-
-    // Same as a hand-made MR: Draft -> Pending straight away, then the usual approval.
-    try {
-      await transition("material-requests", newId, "Pending", req.user?.email || user, req.user?.role);
-    } catch (submitErr) {
-      console.warn("MR auto-submit failed (non-fatal):", submitErr.message);
-    }
-
-    const created = (await pool.request().input("id", sql.Int, newId)
-      .query("SELECT DocNo, Status FROM dbo.MaterialRequests WHERE MRId = @id")).recordset[0];
-    res.status(201).json({ MRId: newId, DocNo: created?.DocNo, Status: created?.Status, itemCount: mats.length });
+    res.json({
+      WOId: woId,
+      WODocNo: wo.woNo,
+      CompanyId: wo.CompanyId || null,
+      ProjectId: wo.ProjectId || null,
+      Reason: `Materials for Work Order ${wo.woNo}`,
+      Remarks: `Raised from approved Work Order ${wo.woNo}`,
+      items: mats.map((m) => ({
+        ItemId: String(m.ItemId),
+        ItemName: m.ItemName || null,
+        UOMCode: m.UOMCode || null,
+        Quantity: parseFloat(m.Quantity) || 0,
+      })),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
