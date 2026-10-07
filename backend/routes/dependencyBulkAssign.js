@@ -4,11 +4,13 @@
  *
  *   POST /api/dependency-bulk-assign/preview   (counts only — writes nothing)
  *   POST /api/dependency-bulk-assign/apply
- *   body: { projectId, towerId?, engineerIds?, qcUserIds?, approvalLevels? }
+ *   body: { projectId, towerId?, engineerIds?, qcUserIds?, approvalLevels?, overwrite? }
  *
- * "Fill empty only": a field that an activity already has (any engineers, any QC
- * reviewers, any approval levels) is NEVER overwritten, so nobody's existing
- * allocation changes. Cancelled and Approved activities are skipped.
+ * By default it is "fill empty only": a field that an activity already has (any
+ * engineers, any QC reviewers, any approval levels) is NOT overwritten. With
+ * `overwrite: true` the chosen fields REPLACE what the activity has (only the
+ * fields that were chosen; the others are left alone). Cancelled and Approved
+ * activities are always skipped.
  *
  * Performance: everything is set-based. Preview is ONE aggregate query that
  * returns counts only; apply is ONE batch of a few INSERT/UPDATE ... SELECT
@@ -64,7 +66,7 @@ function parseRequest(body) {
   if (!engineerIds.length && !qcUserIds.length && !approvalLevels.length) {
     return { error: "Choose at least one of Engineers, Quality Check or Approval Setup to apply." };
   }
-  return { projectId, towerId, engineerIds, qcUserIds, approvalLevels };
+  return { projectId, towerId, engineerIds, qcUserIds, approvalLevels, overwrite: body?.overwrite === true };
 }
 
 // Activities (rungs) of the chosen project / block. Only active chains.
@@ -79,12 +81,13 @@ function buildPreviewSql(p) {
   const wantEng = p.engineerIds.length > 0 ? 1 : 0;
   const wantQc = p.qcUserIds.length > 0 ? 1 : 0;
   const wantAppr = p.approvalLevels.length > 0 ? 1 : 0;
+  const ow = !!p.overwrite;
   return `
     SELECT
       COUNT(*)                                              AS total,
       SUM(f.Skipped)                                        AS skipped,
       SUM(1 - f.Skipped)                                    AS eligible,
-      SUM(CASE WHEN f.Skipped = 0 AND ((${wantEng} = 1 AND f.NoEng = 1) OR (${wantQc} = 1 AND f.NoQc = 1) OR (${wantAppr} = 1 AND f.NoAppr = 1)) THEN 1 ELSE 0 END) AS willChange,
+      SUM(CASE WHEN f.Skipped = 0 AND ((${wantEng} = 1 AND ${ow ? "1 = 1" : "f.NoEng = 1"}) OR (${wantQc} = 1 AND ${ow ? "1 = 1" : "f.NoQc = 1"}) OR (${wantAppr} = 1 AND ${ow ? "1 = 1" : "f.NoAppr = 1"})) THEN 1 ELSE 0 END) AS willChange,
       SUM(CASE WHEN f.Skipped = 0 AND ${wantEng} = 1 AND f.NoEng = 1 THEN 1 ELSE 0 END)  AS engFill,
       SUM(CASE WHEN f.Skipped = 0 AND ${wantEng} = 1 AND f.NoEng = 0 THEN 1 ELSE 0 END)  AS engSet,
       SUM(CASE WHEN f.Skipped = 0 AND ${wantQc} = 1 AND f.NoQc = 1 THEN 1 ELSE 0 END)    AS qcFill,
@@ -107,14 +110,20 @@ function buildPreviewSql(p) {
 
 function summaryFrom(p, row) {
   const n = (v) => Number(v || 0);
+  // Overwrite: activities that already have the field are replaced, not left alone.
+  const fieldCounts = (req, requested, fill, set) =>
+    req.overwrite
+      ? { requested, willFill: n(fill), alreadySet: 0, willReplace: n(set) }
+      : { requested, willFill: n(fill), alreadySet: n(set), willReplace: 0 };
   return {
     totalActivities: n(row.total),
     skippedCancelledOrApproved: n(row.skipped),
     eligible: n(row.eligible),
     willChange: n(row.willChange),
-    engineers: { requested: p.engineerIds.length > 0, willFill: n(row.engFill), alreadySet: n(row.engSet) },
-    qc: { requested: p.qcUserIds.length > 0, willFill: n(row.qcFill), alreadySet: n(row.qcSet) },
-    approval: { requested: p.approvalLevels.length > 0, willFill: n(row.apprFill), alreadySet: n(row.apprSet) },
+    overwrite: !!p.overwrite,
+    engineers: fieldCounts(p, p.engineerIds.length > 0, row.engFill, row.engSet),
+    qc: fieldCounts(p, p.qcUserIds.length > 0, row.qcFill, row.qcSet),
+    approval: fieldCounts(p, p.approvalLevels.length > 0, row.apprFill, row.apprSet),
   };
 }
 
@@ -138,6 +147,7 @@ function buildApplyBatch(p) {
   const wantEng = p.engineerIds.length > 0;
   const wantQc = p.qcUserIds.length > 0;
   const wantAppr = p.approvalLevels.length > 0;
+  const ow = !!p.overwrite;
   const live = `d.IsCurrent = 1 AND ISNULL(d.Status, '') NOT IN ('CANCELLED', 'APPROVED')`;
   const parts = [];
 
@@ -158,9 +168,9 @@ function buildApplyBatch(p) {
     SELECT x.AssignmentId, x.NeedEng, x.NeedQc, x.NeedAppr, 0
     FROM (
       SELECT d.Id AS AssignmentId,
-        ${wantEng ? "CASE WHEN NOT EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer e WHERE e.AssignmentId = d.Id) THEN 1 ELSE 0 END" : "0"} AS NeedEng,
-        ${wantQc ? "CASE WHEN NOT EXISTS (SELECT 1 FROM dbo.DependencyActivityQcAssignee q WHERE q.AssignmentId = d.Id) THEN 1 ELSE 0 END" : "0"} AS NeedQc,
-        ${wantAppr ? `CASE WHEN ${NO_LEVELS} THEN 1 ELSE 0 END` : "0"} AS NeedAppr
+        ${wantEng ? (ow ? "1" : "CASE WHEN NOT EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer e WHERE e.AssignmentId = d.Id) THEN 1 ELSE 0 END") : "0"} AS NeedEng,
+        ${wantQc ? (ow ? "1" : "CASE WHEN NOT EXISTS (SELECT 1 FROM dbo.DependencyActivityQcAssignee q WHERE q.AssignmentId = d.Id) THEN 1 ELSE 0 END") : "0"} AS NeedQc,
+        ${wantAppr ? (ow ? "1" : `CASE WHEN ${NO_LEVELS} THEN 1 ELSE 0 END`) : "0"} AS NeedAppr
       FROM dbo.DependencyActivityAssignment d
       JOIN #scope s ON s.RungId = d.DependencyMasterActivityId
       WHERE ${live}
@@ -186,7 +196,7 @@ function buildApplyBatch(p) {
     const sets = [];
     const conds = [];
     if (wantAppr) {
-      sets.push(`d.ApprovalLevelsJson = CASE WHEN t.NeedAppr = 1 AND ${NO_LEVELS} THEN @levels ELSE d.ApprovalLevelsJson END`);
+      sets.push(`d.ApprovalLevelsJson = CASE WHEN t.NeedAppr = 1${ow ? "" : ` AND ${NO_LEVELS}`} THEN @levels ELSE d.ApprovalLevelsJson END`);
       conds.push("t.NeedAppr = 1");
     }
     if (wantEng) {
@@ -204,6 +214,13 @@ function buildApplyBatch(p) {
   }
 
   if (wantEng) {
+    // Overwrite: drop the previous engineers of the activities being replaced first.
+    if (ow) {
+      parts.push(`
+    DELETE e FROM dbo.DependencyActivityEngineer e
+    JOIN #t t ON t.AssignmentId = e.AssignmentId
+    WHERE t.NeedEng = 1 AND t.IsNew = 0;`);
+    }
     parts.push(`
     INSERT INTO dbo.DependencyActivityEngineer (AssignmentId, EngineerId)
     SELECT t.AssignmentId, v.id
@@ -215,6 +232,12 @@ function buildApplyBatch(p) {
   }
 
   if (wantQc) {
+    if (ow) {
+      parts.push(`
+    DELETE q FROM dbo.DependencyActivityQcAssignee q
+    JOIN #t t ON t.AssignmentId = q.AssignmentId
+    WHERE t.NeedQc = 1 AND t.IsNew = 0;`);
+    }
     parts.push(`
     INSERT INTO dbo.DependencyActivityQcAssignee (AssignmentId, QcUserId)
     SELECT t.AssignmentId, v.id

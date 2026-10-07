@@ -10,6 +10,8 @@ export interface BulkAssignRequest {
   engineerIds: number[];
   qcUserIds: number[];
   approvalLevels: ApprovalLevel[];
+  /** Replace what an activity already has (for the chosen fields) instead of only filling empty ones. */
+  overwrite?: boolean;
 }
 
 interface FieldCounts {
@@ -18,6 +20,8 @@ interface FieldCounts {
   willFill: number;
   /** Activities that already have it and are left alone. */
   alreadySet: number;
+  /** Overwrite mode: activities that already have it and will be replaced. */
+  willReplace: number;
 }
 
 export interface BulkAssignSummary {
@@ -25,6 +29,7 @@ export interface BulkAssignSummary {
   skippedCancelledOrApproved: number;
   eligible: number;
   willChange: number;
+  overwrite: boolean;
   engineers: FieldCounts;
   qc: FieldCounts;
   approval: FieldCounts;
