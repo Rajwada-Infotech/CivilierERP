@@ -2370,6 +2370,8 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
     select:is(.w-full, [class*="w-full"]):not([aria-hidden="true"]) { display: flex; }
     /* our own chevron is drawn beside these, so hide the built-in one */
     select.appearance-none::picker-icon { display: none; }
+    /* selects that paint their own arrow as a background image (wo-/wd-select-arrow) */
+    select[class*="select-arrow"]::picker-icon { display: none; }
     :has(> select):has(> :is(.lucide-chevron-down, .lucide-chevrons-up-down), > :is(span, i, .absolute, .pointer-events-none):not(select) > :is(.lucide-chevron-down, .lucide-chevrons-up-down)) > select::picker-icon {
         display: none;
     }
@@ -2431,4 +2433,41 @@ select[aria-hidden="true"] {
     display: block;
     min-height: 0 !important;
     padding: 0 !important;
+}
+
+/* Every box that contains a table may shrink to its container (grid/flex items
+   default to min-width:auto and grow to the table's width, so the table got
+   clipped instead of scrolling inside its own scroll box). */
+:is(main, [role="dialog"], [role="alertdialog"], .fixed) :has(table):not(table, thead, tbody, tfoot, tr, td, th, table *) {
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* Radix ScrollArea: its inner wrapper is display:table / min-width:100%, which
+   stretches to the widest child — tables inside then can't scroll sideways and
+   get clipped. Make it a normal block so each table scrolls in its own box. */
+[data-radix-scroll-area-viewport] > div {
+    display: block !important;
+    min-width: 0 !important;
+}
+/* DataTable search/toolbar stays pinned while rows scroll inside a dialog or scroll area. */
+:is([data-radix-scroll-area-viewport], [role="dialog"], .fixed.inset-0) .dt-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: hsl(var(--card));
+}
+[data-theme="glass"] :is([data-radix-scroll-area-viewport], [role="dialog"], .fixed.inset-0) .dt-toolbar {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 252, 0.93)) !important;
+    backdrop-filter: blur(16px);
+}
+
+/* Glass: portal panels positioned with an inline `position: fixed` style
+   (CompanyFilterCombo and similar custom pickers) are dense frosted glass too. */
+[data-theme="glass"] :is(.bg-card, .bg-popover, .bg-background, [class*="bg-card/"], [class*="bg-popover/"])[style*="position: fixed"]:not(.inset-0) {
+    background: var(--glass-grain, none), linear-gradient(150deg, rgba(250, 252, 255, 0.97), rgba(238, 243, 250, 0.95)) !important;
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 24px 54px -14px rgba(15, 40, 80, 0.35), inset 0 1px 0 #fff !important;
 }
