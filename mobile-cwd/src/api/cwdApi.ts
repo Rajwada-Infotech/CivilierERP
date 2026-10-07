@@ -292,6 +292,8 @@ export interface CheckpointUpdate {
   note: string | null;
   createdBy: string | null;
   createdAt: string;
+  /** HH:mm the update was last logged (server clock). */
+  loggedTime?: string | null;
 }
 
 export const getCheckpointUpdates = (checkpointId: number): Promise<CheckpointUpdate[]> =>
