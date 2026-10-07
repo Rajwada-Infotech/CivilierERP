@@ -257,10 +257,23 @@ export default function WorkTransfer() {
                         </td>
                       </tr>
                     ) : (
-                      visible.map((c) => {
+                      visible.map((c, i) => {
                         const meta = ASSIGNMENT_STATUS_META[c.status];
+                        // Rows arrive sorted project by project; a header marks where each project starts.
+                        const newProject = i === 0 || visible[i - 1].projectId !== c.projectId;
                         return (
-                          <tr key={c.assignmentId} className="hover:bg-muted/20">
+                          <React.Fragment key={c.assignmentId}>
+                          {newProject && (
+                            <tr className="bg-muted/40">
+                              <td colSpan={7} className="px-4 py-1.5 text-[0.6875rem] font-heading font-semibold uppercase tracking-wider text-foreground">
+                                {c.projectName || "No project"}
+                                <span className="ml-2 font-normal normal-case tracking-normal text-muted-foreground">
+                                  {visible.filter((v) => v.projectId === c.projectId).length} loaded
+                                </span>
+                              </td>
+                            </tr>
+                          )}
+                          <tr className="hover:bg-muted/20">
                             <td className="px-4 py-3">
                               <Checkbox
                                 checked={selected.has(c.assignmentId)}
@@ -282,6 +295,7 @@ export default function WorkTransfer() {
                             <td className="px-4 py-3 text-xs">{Math.round(c.progressPercent ?? 0)}%</td>
                             <td className="px-4 py-3 text-xs whitespace-nowrap">{fmtDate(c.endDate)}</td>
                           </tr>
+                          </React.Fragment>
                         );
                       })
                     )}
