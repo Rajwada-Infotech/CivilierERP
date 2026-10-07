@@ -198,10 +198,9 @@ const syncBoqActivities = async (
 // ── GET /  (List with Pagination) ────────────────────────────────────────────
 router.get("/", cache("boq", 300), async (req, res) => {
   try {
+    // companyId is an optional narrowing — without it the list spans every company (still within the
+    // caller's project scope).
     const companyId = parseInt(req.query.companyId, 10) || null;
-    if (!companyId) {
-      return res.status(400).json({ error: "companyId is required" });
-    }
 
     const pool = getPool();
     const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -209,8 +208,8 @@ router.get("/", cache("boq", 300), async (req, res) => {
     const offset = (page - 1) * limit;
     const search = (req.query.search || "").toString().trim();
     const status = (req.query.status || "").toString().trim();
-    // Always scope to the requested company — no cross-company list allowed
-    const where = ["b.CompanyId = @companyId"];
+    const where = [];
+    if (companyId) where.push("b.CompanyId = @companyId");
     if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
 
     if (search) {
@@ -227,9 +226,9 @@ router.get("/", cache("boq", 300), async (req, res) => {
       where.push("b.Status = @status");
     }
 
-    const whereSql = `WHERE ${where.join(" AND ")}`;
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const bindFilters = (request) => {
-      request.input("companyId", sql.Int, companyId);
+      if (companyId) request.input("companyId", sql.Int, companyId);
       if (search) request.input("search", sql.NVarChar(100), `%${search}%`);
       if (status && status !== "All") {
         request.input("status", sql.NVarChar(50), status);
