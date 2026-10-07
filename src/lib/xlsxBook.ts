@@ -252,3 +252,31 @@ export async function readWorkbook(buf: ArrayBuffer): Promise<Record<string, str
   }
   return result;
 }
+
+// ─── Dates ───────────────────────────────────────────────────────────────────
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const isoOk = (y: number, mo: number, d: number) => {
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d
+    ? `${y}-${pad(mo)}-${pad(d)}`
+    : null;
+};
+
+/** Accepts YYYY-MM-DD, DD/MM/YYYY (also - or .), or an Excel date serial. */
+export const parseSheetDate = (raw: string): string | null => {
+  const s = String(raw ?? "").trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return isoOk(+m[1], +m[2], +m[3]);
+  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  if (m) return isoOk(+m[3], +m[2], +m[1]);
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const serial = Math.floor(Number(s));
+    if (serial > 20000 && serial < 80000) {
+      const dt = new Date(Date.UTC(1899, 11, 30) + serial * 86_400_000);
+      return isoOk(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+    }
+  }
+  return null;
+};
+

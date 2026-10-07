@@ -6,7 +6,7 @@
 // the manual form posts to POST /api/boq (mirrors buildPayload in BOQ.tsx), so an
 // imported BOQ is stored — and shows up, calculates and prints — exactly like a
 // hand-keyed one. One invalid cell blocks the whole import: nothing partial is created.
-import { buildWorkbook, downloadBlob, readWorkbook, type XlsxCell, type XlsxSheet } from "@/lib/xlsxBook";
+import { buildWorkbook, downloadBlob, parseSheetDate as parseBoqDate, readWorkbook, type XlsxCell, type XlsxSheet } from "@/lib/xlsxBook";
 
 export interface BoqImportMasters {
   companies: { id: number; label?: string }[];
@@ -191,31 +191,6 @@ const toNumber = (v: string): number => {
   const s = String(v ?? "").replace(/[,₹\s]/g, "");
   if (s === "") return NaN;
   return Number(s);
-};
-
-const pad = (n: number) => String(n).padStart(2, "0");
-const isoOk = (y: number, mo: number, d: number) => {
-  const dt = new Date(Date.UTC(y, mo - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d
-    ? `${y}-${pad(mo)}-${pad(d)}`
-    : null;
-};
-
-/** Accepts YYYY-MM-DD, DD/MM/YYYY (also - or .), or an Excel date serial. */
-export const parseBoqDate = (raw: string): string | null => {
-  const s = String(raw ?? "").trim();
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return isoOk(+m[1], +m[2], +m[3]);
-  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
-  if (m) return isoOk(+m[3], +m[2], +m[1]);
-  if (/^\d+(\.\d+)?$/.test(s)) {
-    const serial = Math.floor(Number(s));
-    if (serial > 20000 && serial < 80000) {
-      const dt = new Date(Date.UTC(1899, 11, 30) + serial * 86_400_000);
-      return isoOk(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
-    }
-  }
-  return null;
 };
 
 type Table = { rowNo: number; cells: Record<string, string> }[];
