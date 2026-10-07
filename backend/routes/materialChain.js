@@ -87,7 +87,7 @@ async function getPOsForQT(pool, qtId) {
 
 async function getWO(pool, id) {
   const r = await pool.request().input("id", sql.Int, id).query(`
-    SELECT Id AS id, DocNo, DocumentNumber, DocDate, Status, ProjectId
+    SELECT Id AS id, DocNo, DocumentNumber, DocumentDate AS DocDate, Status, ProjectId
     FROM dbo.WorkOrderHeader
     WHERE Id = @id
   `);
