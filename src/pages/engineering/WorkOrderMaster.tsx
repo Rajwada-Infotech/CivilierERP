@@ -83,6 +83,7 @@ import {
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { filterProjectsByCompany, projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 
 // ─── WO Chain Status Hook ─────────────────────────────────────────────────────
 interface WOChainStatus {
@@ -3549,7 +3550,10 @@ const WorkOrderEditPanel: React.FC<{
                 {renderSelect(
                   "companyId",
                   form.companyId,
-                  (v) => setField("companyId", v),
+                  (v) => {
+                    setField("companyId", v);
+                    setFormState((p) => p.projectId && !projectBelongsToCompany((projects as ProjectCompanyLike[]).find((x) => String((x as any).id) === p.projectId) ?? {}, v) ? { ...p, projectId: "" } : p);
+                    },
                   companies,
                   "Select company",
                   errors.companyId ?? false,
@@ -3569,7 +3573,7 @@ const WorkOrderEditPanel: React.FC<{
                   "projectId",
                   form.projectId,
                   (v) => setField("projectId", v),
-                  projects,
+                  filterProjectsByCompany(projects as ProjectCompanyLike[], form.companyId) as unknown as DropdownOption[],
                   "Select project",
                   errors.projectId ?? false,
                 )}
@@ -4666,7 +4670,10 @@ const WorkOrderMaster: React.FC = () => {
                       {renderSelect(
                         "companyId",
                         form.companyId,
-                        (v) => setField("companyId", v),
+                        (v) => {
+                          setField("companyId", v);
+                          setForm((p) => p.projectId && !projectBelongsToCompany((projects as ProjectCompanyLike[]).find((x) => String((x as any).id) === p.projectId) ?? {}, v) ? { ...p, projectId: "" } : p);
+                          },
                         companies,
                         "Select company",
                         errors.companyId ?? false,
@@ -4688,7 +4695,7 @@ const WorkOrderMaster: React.FC = () => {
                         "projectId",
                         form.projectId,
                         (v) => setField("projectId", v),
-                        projects,
+                        filterProjectsByCompany(projects as ProjectCompanyLike[], form.companyId) as unknown as DropdownOption[],
                         "Select project",
                         errors.projectId ?? false,
                       )}
