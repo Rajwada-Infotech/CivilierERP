@@ -27,6 +27,7 @@
     "expo-secure-store": "~57.0.3",
     "expo-sharing": "~57.0.18",
     "expo-status-bar": "~57.0.1",
+    "expo-updates": "~57.0.24",
     "lucide-react-native": "^1.24.0",
     "nativewind": "^4.2.6",
     "react": "19.2.3",

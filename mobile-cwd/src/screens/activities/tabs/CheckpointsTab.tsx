@@ -37,7 +37,7 @@ const fmtTime = (hhmm: string) => {
 const addDays = (s: string, n: number) => { const d = fromYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
 const diffDays = (a: string, b: string) => Math.round((fromYmd(b).getTime() - fromYmd(a).getTime()) / 86_400_000);
 
-function DailyUpdates({ checkpointId, startDate, canEdit }: { checkpointId: number; startDate: string; canEdit: boolean }) {
+function DailyUpdates({ checkpointId, canEdit }: { checkpointId: number; canEdit: boolean }) {
   const qc = useQueryClient();
   const today = useMemo(() => todayYmd(), []);
   const [date, setDate] = useState(today);
@@ -178,7 +178,7 @@ export function CheckpointsTab({ rungId, canEdit, onChanged }: { rungId: number;
                   </View>
                 </View>
               </View>
-              {cp.isDaily && cp.id != null && <DailyUpdates checkpointId={cp.id} startDate={startDate} canEdit={canEdit} />}
+              {cp.isDaily && cp.id != null && <DailyUpdates checkpointId={cp.id} canEdit={canEdit} />}
             </View>
           </Blink>
         );

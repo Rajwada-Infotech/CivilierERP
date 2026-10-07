@@ -137,9 +137,15 @@ export default function WorkTransferScreen() {
     </View>
   );
 
-  const renderItem = ({ item: c }: { item: TransferCandidate }) => {
+  const renderItem = ({ item: c, index }: { item: TransferCandidate; index: number }) => {
     const on = selected.has(c.assignmentId);
+    // Rows arrive sorted project by project; a header marks where each project starts.
+    const newProject = index === 0 || visible[index - 1]?.projectId !== c.projectId;
     return (
+      <View>
+      {newProject && (
+        <Text style={{ fontSize: 11, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.6, marginTop: index === 0 ? 0 : 10, marginBottom: 6 }}>{c.projectName || "No project"}</Text>
+      )}
       <TouchableOpacity
         activeOpacity={0.7}
         disabled={!rights.canEdit}
@@ -154,10 +160,11 @@ export default function WorkTransferScreen() {
             <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{c.activityName}</Text>
             <StatusPill status={c.status} />
           </View>
-          <Text numberOfLines={2} style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>{[c.projectName, c.scopePath].filter(Boolean).join(" · ")}</Text>
+          <Text numberOfLines={2} style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>{c.scopePath}</Text>
           <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.medium }}>{Math.round(c.progressPercent ?? 0)}% · ends {fmtDate(c.endDate)}{c.engineerNames ? ` · ${c.engineerNames}` : ""}</Text>
         </View>
       </TouchableOpacity>
+      </View>
     );
   };
 
