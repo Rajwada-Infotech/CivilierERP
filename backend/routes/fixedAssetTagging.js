@@ -244,6 +244,7 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
         t.ProjectId, pr.name AS ProjectName,
         t.GodownId, gd.GodownName,
         t.AssetId, fa.AssetName, fa.AssetCategory, fa.AssetCode,
+        fa.SourceType AS StockSource,
         CASE
           WHEN t.FAItemCode IS NULL THEN NULL
           WHEN EXISTS (

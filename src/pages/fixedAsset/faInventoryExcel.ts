@@ -30,6 +30,7 @@ export interface FaImportFileRow {
   ItemName: string;
   Date: string;
   Quantity: string;
+  Rate: string;
   Remarks: string;
 }
 
@@ -45,6 +46,7 @@ const COLUMN_ALIASES: Record<keyof Omit<FaImportFileRow, "rowNo">, string[]> = {
   ItemName: ["itemname", "item", "assetname"],
   Date: ["date", "taggingdate", "docdate"],
   Quantity: ["quantity", "qty"],
+  Rate: ["rate", "unitrate", "rateperunit", "cost", "unitcost"],
   Remarks: ["remarks", "remark", "notes"],
 };
 
@@ -89,11 +91,12 @@ export async function downloadFaInventoryTemplate(mode: FaImportMode, m: FaImpor
     req("Item Name *"),
     req("Date *"),
     ...(bulk ? [req("Quantity *")] : []),
+    opt("Rate (₹ per unit)"),
     opt("Remarks"),
   ];
   const inventory: XlsxSheet = {
     name: SHEET,
-    widths: bulk ? [26, 26, 26, 18, 32, 14, 12, 36] : [26, 26, 26, 18, 32, 14, 36],
+    widths: bulk ? [26, 26, 26, 18, 32, 14, 12, 18, 36] : [26, 26, 26, 18, 32, 14, 18, 36],
     freezeBelowRow: 2,
     rows: [head],
     lists: [
@@ -117,22 +120,22 @@ export async function downloadFaInventoryTemplate(mode: FaImportMode, m: FaImpor
       [{ v: "What an entry is", s: "label" }],
       note(
         bulk
-          ? "Each row tags received Fixed Asset stock: the Quantity on the row becomes that many FA Item Codes (one per unit). The stock must already be received at the Godown (GRN / Inventory Import) and not yet tagged."
-          : "Each row tags exactly ONE unit of received Fixed Asset stock (there is no Quantity column — list a unit per row). The stock must already be received at the Godown (GRN / Inventory Import) and not yet tagged.",
+          ? "Each row adds Fixed Asset stock straight into the Godown — no GRN and no existing stock needed — and then generates that many FA Item Codes (one per unit) through the normal FA tagging. The entry is marked “Imported Stock / Without GRN”."
+          : "Each row adds exactly ONE unit of Fixed Asset stock straight into the Godown (there is no Quantity column — list a unit per row) — no GRN and no existing stock needed — and generates its FA Item Code through the normal FA tagging. The entry is marked “Imported Stock / Without GRN”.",
       ),
       [{ v: "Required columns (dark orange headers)", s: "label" }],
       note("Company · Project · Godown · Item Code · Item Name · Date" + (bulk ? " · Quantity" : "")),
-      note("Remarks is optional."),
+      note("Rate (₹ per unit) and Remarks are optional. Rate becomes the asset's purchase cost."),
       [{ v: "Rules checked on import", s: "label" }],
       note("• Company, Project (of that company) and Godown must exist in the masters — use the dropdowns or the Masters sheet."),
       note("• The item must exist in the Item Master (Item Code and Item Name must belong to the same item). If only one is given, that one is used."),
       note("• Only items whose Type of Item = Fixed Asset are accepted; any other item is rejected with its type shown."),
-      note("• There must be untagged stock of the item at the Godown; the Quantity of all rows for the same item and Godown can't exceed it."),
+      note("• The Godown does not need to hold the item already — the imported quantity is added to its stock. No GRN number is required or created."),
       note("• Date: YYYY-MM-DD or DD/MM/YYYY, inside a configured Financial Year." + (bulk ? " Quantity: a whole number above 0." : "")),
       note("• Rows with problems are shown with the reason and are not imported; valid rows can still be imported."),
       note(""),
       [{ v: "Example", s: "label" }],
-      note(bulk ? "Rajwada | Rajwada 2 | Main Store | CAM-01 | Camera | 2026-10-06 | 3 | Site CCTV" : "Rajwada | Rajwada 2 | Main Store | CAM-01 | Camera | 2026-10-06 | Site CCTV"),
+      note(bulk ? "Rajwada | Rajwada 2 | Main Store | CAM-01 | Camera | 2026-10-06 | 3 | 18500 | Site CCTV" : "Rajwada | Rajwada 2 | Main Store | CAM-01 | Camera | 2026-10-06 | 18500 | Site CCTV"),
     ],
   };
 
@@ -191,6 +194,7 @@ export async function readFaImportFile(file: File): Promise<FaImportFileRow[]> {
       ItemName: get("ItemName"),
       Date: get("Date"),
       Quantity: get("Quantity"),
+      Rate: get("Rate"),
       Remarks: get("Remarks"),
     });
   }
