@@ -5,10 +5,16 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { ebResolvedProjectSql, projectAllowed } = require("../services/projectScope");
+const { makeColumnProbe } = require("../services/columnProbe");
+
+// dbo.MaterialRequests.SourceWOId arrives with migration 545; until then there is simply no Work Order link.
+const hasMRSourceWO = makeColumnProbe("dbo.MaterialRequests", "SourceWOId");
 
 // The project the starting document of a chain belongs to, so a restricted user
 // can't walk the chain of a document from a project they can't see.
 const ROOT_PROJECT_SQL = {
+  wo: "SELECT ProjectId FROM dbo.WorkOrderHeader WHERE Id = @id",
+  qt: "SELECT ProjectId FROM dbo.Quotations WHERE QuotationId = @id",
   mr: "SELECT ProjectId FROM dbo.MaterialRequests WHERE MRId = @id",
   po: "SELECT ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id",
   grn: "SELECT p.ProjectId FROM dbo.GoodsReceiptNotes g JOIN dbo.PurchaseOrders p ON p.PurchaseOrderID = g.POID WHERE g.GRNID = @id",
@@ -16,19 +22,21 @@ const ROOT_PROJECT_SQL = {
   expense: `SELECT ${ebResolvedProjectSql("eb")} AS ProjectId FROM dbo.ExpenseBooking eb WHERE eb.Eid = @id`,
 };
 
-// Resolves the full document chain (Material Request → Purchase Order →
-// GRN → Invoice/Expense Booking) around any one document in that chain, so
+// Resolves the full document chain (Work Order → Material Request → Quotation →
+// Purchase Order → GRN → Invoice/Expense Booking) around any one document in that chain, so
 // every preview can show "where this came from" and "what was generated
 // from this" with enough info to render a clickable nav link.
 //
 // Each chain node: { docType, id, docNo, date, status, label, extra }
-// `docType` is one of "mr" | "po" | "grn" | "expense" — the frontend maps
+// `docType` is one of "wo" | "mr" | "qt" | "po" | "vio" | "grn" | "expense" — the frontend maps
 // that to a route + ?view=<id> deep link.
 
 async function getMR(pool, id) {
+  const withWO = await hasMRSourceWO(pool);
   const r = await pool.request().input("id", sql.Int, id).query(`
     SELECT mr.MRId AS id, mr.DocNo, mr.RequestDate, mr.Status, mr.CreatedBy,
-           mr.ProjectId, pr.name AS ProjectName
+           mr.ProjectId, pr.name AS ProjectName,
+           ${withWO ? "mr.SourceWOId, mr.SourceWODocNo" : "CAST(NULL AS INT) AS SourceWOId, CAST(NULL AS NVARCHAR(100)) AS SourceWODocNo"}
     FROM dbo.MaterialRequests mr
     LEFT JOIN dbo.enterprise pr ON pr.id = mr.ProjectId
     WHERE mr.MRId = @id
@@ -36,11 +44,76 @@ async function getMR(pool, id) {
   return r.recordset[0] || null;
 }
 
+// POs raised straight from the MR, plus POs raised from one of the MR's quotations.
 async function getPOsForMR(pool, mrId) {
   const r = await pool.request().input("mrId", sql.Int, mrId).query(`
     SELECT PurchaseOrderID AS id, PurchaseOrderNo, DocNo, PODate, Status
     FROM dbo.PurchaseOrders
     WHERE SourceMRId = @mrId
+       OR SourceQTId IN (SELECT QuotationId FROM dbo.Quotations WHERE SourceMRId = @mrId)
+    ORDER BY PurchaseOrderID
+  `);
+  return r.recordset;
+}
+
+async function getQTsForMR(pool, mrId) {
+  const r = await pool.request().input("mrId", sql.Int, mrId).query(`
+    SELECT QuotationId AS id, DocNo, DocDate, Status, SourceMRId
+    FROM dbo.Quotations
+    WHERE SourceMRId = @mrId
+    ORDER BY QuotationId
+  `);
+  return r.recordset;
+}
+
+async function getQT(pool, id) {
+  const r = await pool.request().input("id", sql.Int, id).query(`
+    SELECT QuotationId AS id, DocNo, DocDate, Status, SourceMRId
+    FROM dbo.Quotations
+    WHERE QuotationId = @id
+  `);
+  return r.recordset[0] || null;
+}
+
+async function getPOsForQT(pool, qtId) {
+  const r = await pool.request().input("qtId", sql.Int, qtId).query(`
+    SELECT PurchaseOrderID AS id, PurchaseOrderNo, DocNo, PODate, Status
+    FROM dbo.PurchaseOrders
+    WHERE SourceQTId = @qtId
+    ORDER BY PurchaseOrderID
+  `);
+  return r.recordset;
+}
+
+async function getWO(pool, id) {
+  const r = await pool.request().input("id", sql.Int, id).query(`
+    SELECT Id AS id, DocNo, DocumentNumber, DocDate, Status, ProjectId
+    FROM dbo.WorkOrderHeader
+    WHERE Id = @id
+  `);
+  return r.recordset[0] || null;
+}
+
+async function getMRsForWO(pool, woId) {
+  if (!(await hasMRSourceWO(pool))) return [];
+  const r = await pool.request().input("woId", sql.Int, woId).query(`
+    SELECT mr.MRId AS id, mr.DocNo, mr.RequestDate, mr.Status, mr.CreatedBy,
+           mr.ProjectId, pr.name AS ProjectName, mr.SourceWOId, mr.SourceWODocNo
+    FROM dbo.MaterialRequests mr
+    LEFT JOIN dbo.enterprise pr ON pr.id = mr.ProjectId
+    WHERE mr.SourceWOId = @woId
+    ORDER BY mr.MRId
+  `);
+  return r.recordset;
+}
+
+// POs created straight from a Work Order (the retired "Create Material PO" button / auto WO-PO) carry
+// SourceWOId but no MR, so they hang directly off the Work Order.
+async function getLegacyPOsForWO(pool, woId) {
+  const r = await pool.request().input("woId", sql.Int, woId).query(`
+    SELECT PurchaseOrderID AS id, PurchaseOrderNo, DocNo, PODate, Status
+    FROM dbo.PurchaseOrders
+    WHERE SourceWOId = @woId AND SourceMRId IS NULL AND SourceQTId IS NULL
     ORDER BY PurchaseOrderID
   `);
   return r.recordset;
@@ -49,7 +122,7 @@ async function getPOsForMR(pool, mrId) {
 async function getPO(pool, id) {
   const r = await pool.request().input("id", sql.Int, id).query(`
     SELECT po.PurchaseOrderID AS id, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status,
-           po.SourceMRId, po.SourceMRDocNo, po.SourceQTId, po.SourceQTDocNo,
+           po.SourceMRId, po.SourceMRDocNo, po.SourceQTId, po.SourceQTDocNo, po.SourceWOId,
            po.SupplierID, ahm.LHeadName AS SupplierName
     FROM dbo.PurchaseOrders po
     LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
@@ -140,6 +213,29 @@ async function getExpense(pool, id) {
   return r.recordset[0] || null;
 }
 
+function woNode(wo) {
+  return {
+    docType: "wo",
+    id: wo.id,
+    docNo: wo.DocNo || wo.DocumentNumber,
+    date: wo.DocDate ? String(wo.DocDate).slice(0, 10) : null,
+    status: wo.Status,
+    label: "Work Order",
+    extra: {},
+  };
+}
+function qtNode(qt) {
+  return {
+    docType: "qt",
+    id: qt.id,
+    docNo: qt.DocNo,
+    date: qt.DocDate ? String(qt.DocDate).slice(0, 10) : null,
+    status: qt.Status,
+    label: "Quotation",
+    extra: {},
+  };
+}
+
 function mrNode(mr) {
   return {
     docType: "mr",
@@ -196,6 +292,53 @@ function expenseNode(eb) {
   };
 }
 
+// Everything upstream of a PO, in document order: Work Order -> Material Request -> Quotation.
+async function upstreamOfPO(pool, po) {
+  const out = [];
+  const mr = await getEffectiveMR(pool, po);
+  const woId = (mr && mr.SourceWOId) || po.SourceWOId || null;
+  if (woId) {
+    const wo = await getWO(pool, woId);
+    if (wo) out.push(woNode(wo));
+  }
+  if (mr) out.push(mrNode(mr));
+  if (po.SourceQTId) {
+    const qt = await getQT(pool, po.SourceQTId);
+    if (qt) out.push(qtNode(qt));
+  }
+  return out;
+}
+
+// Everything downstream of a Work Order: its MRs, their quotations and POs, and each PO's GRNs / vehicle
+// entries / invoices - one flat, de-duplicated list in document-stage order.
+async function downstreamOfWO(pool, woId) {
+  const mrs = await getMRsForWO(pool, woId);
+  const qts = [];
+  const pos = [...(await getLegacyPOsForWO(pool, woId))];
+  for (const mr of mrs) {
+    qts.push(...(await getQTsForMR(pool, mr.id)));
+    pos.push(...(await getPOsForMR(pool, mr.id)));
+  }
+  const seenPO = new Set();
+  const uniquePOs = pos.filter((p) => (seenPO.has(p.id) ? false : (seenPO.add(p.id), true)));
+  const vios = [];
+  const grns = [];
+  for (const po of uniquePOs) {
+    vios.push(...(await getVIOsForPO(pool, po.id)));
+    grns.push(...(await getGRNsForPO(pool, po.id)));
+  }
+  const expenses = [];
+  for (const grn of grns) expenses.push(...(await getExpensesForGRN(pool, grn.id)));
+  return [
+    ...mrs.map(mrNode),
+    ...qts.map(qtNode),
+    ...uniquePOs.map(poNode),
+    ...vios.map(vioNode),
+    ...grns.map(grnNode),
+    ...expenses.map(expenseNode),
+  ];
+}
+
 router.get("/:type/:id", authMiddleware, async (req, res) => {
   const { type } = req.params;
   const id = parseInt(req.params.id, 10);
@@ -213,18 +356,43 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
     let upstream = [];
     let downstream = [];
 
-    if (type === "mr") {
+    if (type === "wo") {
+      const wo = await getWO(pool, id);
+      if (!wo) return res.status(404).json({ error: "Work Order not found" });
+      current = woNode(wo);
+      downstream = await downstreamOfWO(pool, id);
+    } else if (type === "mr") {
       const mr = await getMR(pool, id);
       if (!mr) return res.status(404).json({ error: "Material Request not found" });
       current = mrNode(mr);
+      if (mr.SourceWOId) {
+        const wo = await getWO(pool, mr.SourceWOId);
+        if (wo) upstream.push(woNode(wo));
+      }
+      const qts = await getQTsForMR(pool, id);
       const pos = await getPOsForMR(pool, id);
+      downstream = [...qts.map(qtNode), ...pos.map(poNode)];
+    } else if (type === "qt") {
+      const qt = await getQT(pool, id);
+      if (!qt) return res.status(404).json({ error: "Quotation not found" });
+      current = qtNode(qt);
+      if (qt.SourceMRId) {
+        const mr = await getMR(pool, qt.SourceMRId);
+        if (mr) {
+          if (mr.SourceWOId) {
+            const wo = await getWO(pool, mr.SourceWOId);
+            if (wo) upstream.push(woNode(wo));
+          }
+          upstream.push(mrNode(mr));
+        }
+      }
+      const pos = await getPOsForQT(pool, id);
       downstream = pos.map(poNode);
     } else if (type === "po") {
       const po = await getPO(pool, id);
       if (!po) return res.status(404).json({ error: "Purchase Order not found" });
       current = poNode(po);
-      const mr = await getEffectiveMR(pool, po);
-      if (mr) upstream.push(mrNode(mr));
+      upstream = await upstreamOfPO(pool, po);
       const vios = await getVIOsForPO(pool, id);
       const grns = await getGRNsForPO(pool, id);
       downstream = [...vios.map(vioNode), ...grns.map(grnNode)];
@@ -235,9 +403,7 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
       if (vio.POID) {
         const po = await getPO(pool, vio.POID);
         if (po) {
-          upstream.push(poNode(po));
-          const mr = await getEffectiveMR(pool, po);
-          if (mr) upstream.unshift(mrNode(mr));
+          upstream = [...(await upstreamOfPO(pool, po)), poNode(po)];
         }
       }
     } else if (type === "grn") {
@@ -247,9 +413,7 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
       if (grn.POID) {
         const po = await getPO(pool, grn.POID);
         if (po) {
-          upstream.push(poNode(po));
-          const mr = await getEffectiveMR(pool, po);
-          if (mr) upstream.unshift(mrNode(mr));
+          upstream = [...(await upstreamOfPO(pool, po)), poNode(po)];
         }
       }
       const expenses = await getExpensesForGRN(pool, id);
@@ -264,23 +428,15 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
           upstream.push(grnNode(grn));
           if (grn.POID) {
             const po = await getPO(pool, grn.POID);
-            if (po) {
-              upstream.unshift(poNode(po));
-              const mr = await getEffectiveMR(pool, po);
-              if (mr) upstream.unshift(mrNode(mr));
-            }
+            if (po) upstream = [...(await upstreamOfPO(pool, po)), poNode(po), grnNode(grn)];
           }
         }
       } else if ((eb.ESourceType === "PO" || eb.ESourceType === "WO_PO") && eb.ESourceId) {
         const po = await getPO(pool, parseInt(eb.ESourceId, 10));
-        if (po) {
-          upstream.push(poNode(po));
-          const mr = await getEffectiveMR(pool, po);
-          if (mr) upstream.unshift(mrNode(mr));
-        }
+        if (po) upstream = [...(await upstreamOfPO(pool, po)), poNode(po)];
       }
     } else {
-      return res.status(400).json({ error: "type must be one of mr, po, vio, grn, expense" });
+      return res.status(400).json({ error: "type must be one of wo, mr, qt, po, vio, grn, expense" });
     }
 
     res.json({ current, upstream, downstream });
