@@ -394,6 +394,8 @@ const CrmPlotMaster: React.FC = () => {
   const [builtVillaType, setBuiltVillaType] = useState("");
   const [settingVillaType, setSettingVillaType] = useState(false);
   const [changingType, setChangingType] = useState(false);
+  // Take the chosen type's areas too (unsold villas only — checked on the server).
+  const [takeAreas, setTakeAreas] = useState(true);
   const { data: detailVillaTypes = [] } = useQuery({
     queryKey: [...villaTypesKey(detailPlot?.ProjectId), "active"],
     queryFn: () => fetchVillaTypes(detailPlot!.ProjectId),
@@ -406,12 +408,12 @@ const CrmPlotMaster: React.FC = () => {
     setSettingVillaType(true);
     try {
       const response = await fetchWithAuth(`${SETUP_API}/villas/${plot.ConvertedUnitId}/villa-type`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ VillaTypeId: Number(builtVillaType) }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ VillaTypeId: Number(builtVillaType), TakeAreas: takeAreas }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Could not set the villa type");
       const missing = body.roomsWithoutSteps?.length ? ` · ${body.roomsWithoutSteps.length} room(s) have no DPR steps yet — set those room types in Dependency Master` : "";
-      toast.success(`${type?.Code} applied: ${body.rooms} rooms${missing}`);
+      toast.success(`${type?.Code} applied: ${body.rooms} rooms${body.areasTaken ? ", areas updated" : ""}${missing}`);
       setBuiltVillaType("");
       await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
       await queryClient.invalidateQueries({ queryKey: ["villa-types"] });
@@ -484,9 +486,15 @@ const CrmPlotMaster: React.FC = () => {
         </div>
         <div className="min-w-0">
           <span className="block truncate text-xs text-muted-foreground">
-            {plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "Area pending"}{plot.IsCornerPlot ? " · Corner" : ""}{plot.Facing ? ` · ${plot.Facing}` : ""}{plot.PlannedVillaTypeCode ? ` · ${plot.PlannedVillaTypeCode}` : ""}
+            {plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "Area pending"}{plot.IsCornerPlot ? " · Corner" : ""}{plot.Facing ? ` · ${plot.Facing}` : ""}
+            {/* Built: the villa's own type. Not yet built: the type planned on it. */}
+            {plot.ConvertedUnitId
+              ? (plot.ConvertedVillaTypeCode ? ` · ${plot.ConvertedVillaTypeCode}` : " · type not set")
+              : plot.PlannedVillaTypeCode ? ` · plans ${plot.PlannedVillaTypeCode}` : ""}
           </span>
-          <span className="mt-0.5 block truncate text-[0.6875rem]">{status.label}</span>
+          <span className="mt-0.5 block truncate text-[0.6875rem]" title={plot.ConvertedUnitName || undefined}>
+            {plot.ConvertedUnitId ? `${status.label} · ${(plot.ConvertedUnitName || "").split("/").pop()}` : status.label}
+          </span>
         </div>
       </div>
     );
@@ -1020,7 +1028,17 @@ const CrmPlotMaster: React.FC = () => {
                         </button>
                         <button type="button" onClick={() => { setChangingType(false); setBuiltVillaType(""); }} className="px-3 h-9 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
                       </div>
-                      <p className="text-[0.6875rem] text-muted-foreground">Its rooms are rebuilt floor by floor from the type's plan, with their DPR steps. Only while no DPR work has started; the villa keeps its areas and price.</p>
+                      {(() => {
+                        const pick = detailVillaTypes.find((t) => String(t.Id) === builtVillaType);
+                        const differs = !!pick && Number(pick.BuiltUpAreaSqFt) !== Number(detailPlot.ConvertedBuiltUpAreaSqFt || 0);
+                        return pick && differs ? (
+                          <label className="flex items-start gap-2 text-sm">
+                            <input type="checkbox" className="mt-0.5" checked={takeAreas} onChange={(e) => setTakeAreas(e.target.checked)} />
+                            <span>Also take {pick.Code}'s areas — built-up {Number(pick.BuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft{pick.SuperBuiltUpAreaSqFt ? `, super built-up ${Number(pick.SuperBuiltUpAreaSqFt).toLocaleString("en-IN")}` : ""} (now {Number(detailPlot.ConvertedBuiltUpAreaSqFt || 0).toLocaleString("en-IN")}). Not allowed once the villa is booked.</span>
+                          </label>
+                        ) : null;
+                      })()}
+                      <p className="text-[0.6875rem] text-muted-foreground">Its rooms are rebuilt floor by floor from the type's plan, with their DPR steps. Only while no DPR work has started.</p>
                       {detailVillaTypes.length === 0 && <p className="text-xs text-muted-foreground">No active villa types in this project — add or restore them in Villa types.</p>}
                     </>
                   )}

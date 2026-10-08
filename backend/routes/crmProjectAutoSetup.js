@@ -2569,8 +2569,18 @@ router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-set
              WHERE d.FlatId = @u AND d.IsActive = 1 AND a.Status = N'PENDING'`);
     await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
     await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1 AND RoomCategoryId IS NOT NULL");
-    // 2. The type and its own layout; the villa's areas stay as built.
+    // 2. The type and its own layout. Its areas too when asked — never once
+    //    the villa is sold, so an agreed price can't move under the buyer.
     await q("UPDATE dbo.UnitMaster SET VillaTypeId = @vt, LayoutTypeId = (SELECT LayoutTypeId FROM dbo.VillaTypeMaster WHERE Id = @vt), UpdatedAt = SYSDATETIME() WHERE Id = @u");
+    let areasTaken = false;
+    if (req.body?.TakeAreas === true) {
+      const sold = (await q(`SELECT TOP 1 BookingNo FROM dbo.CrmBooking WHERE UnitId = @u AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}`)).recordset[0];
+      if (sold) return fail(409, `${unit.UnitName} is booked (${sold.BookingNo}) — its areas can't change now. Change the type without taking its areas.`);
+      await q(`UPDATE u SET BuiltUpAreaSqFt = v.BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt = v.SuperBuiltUpAreaSqFt,
+                 AreaSqFt = COALESCE(v.SuperBuiltUpAreaSqFt, v.BuiltUpAreaSqFt)
+               FROM dbo.UnitMaster u JOIN dbo.VillaTypeMaster v ON v.Id = @vt WHERE u.Id = @u`);
+      areasTaken = true;
+    }
     await tx.request().input("u", sql.Int, unitId).input("l", sql.NVarChar(50), vt.LayoutLabel).query("UPDATE dbo.UnitMaster SET UnitType = @l WHERE Id = @u");
     // 3. Rooms from the plan (an inactive room of the same category comes back first), then their floors.
     const sync = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
@@ -2611,7 +2621,7 @@ router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-set
     await logAudit({ module: "PlotConversion", recordId: unitId, recordNo: unit.UnitName, action: "VillaTypeSet",
       changedBy: req.user?.userId ?? null,
       notes: `${unit.UnitName} -> ${vt.Code} ${vt.Name}; ${rooms} room(s); ${revived.recordset.length} chain(s) kept, ${dpr.created} new${dpr.skipped.length ? `; no steps yet for ${dpr.skipped.join(", ")}` : ""}` }).catch(() => {});
-    res.json({ success: true, rooms, chainsKept: revived.recordset.length, chainsCreated: dpr.created, roomsWithoutSteps: dpr.skipped, created: sync.created });
+    res.json({ success: true, rooms, chainsKept: revived.recordset.length, chainsCreated: dpr.created, roomsWithoutSteps: dpr.skipped, created: sync.created, areasTaken });
   } catch (e) {
     try { await tx.rollback(); } catch (_) { /* already rolled back */ }
     console.error("[auto-setup] POST villa-type:", e.message);
