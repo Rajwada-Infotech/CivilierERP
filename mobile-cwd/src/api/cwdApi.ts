@@ -92,6 +92,10 @@ export interface ActivityAssignment {
   alias?: string | null;
   workType?: "INTERNAL" | "EXTERNAL" | string;
   projectId?: number | null;
+  towerName?: string | null;
+  floor?: string | null;
+  flatName?: string | null;
+  roomId?: number | null;
   roomName?: string | null;
   /** Latest Quality Check decision, if any. */
   qcStatus?: "APPROVED" | "REWORK" | null;
@@ -143,7 +147,7 @@ export interface RungCheckpoint {
 export interface RungDetail {
   rungId: number;
   daysOfCompletion?: number | null;
-  candidateItems: { itemId: string; itemName: string; uom: string | null }[];
+  candidateItems: { itemId: string; itemName: string; itemCode?: string | null; uom: string | null }[];
   assignment: {
     engineerIds: number[];
     qcUserIds: number[];
@@ -164,6 +168,23 @@ export interface RungDetail {
     qcStatus?: { decision: "APPROVED" | "REWORK"; qcBy: string | null } | null;
   } | null;
 }
+
+// ── Room blueprint (the reference drawing) + this activity's markup on it ─────────────────────────
+export interface RoomBlueprint { fileName: string; mimeType: string; dataBase64: string }
+export interface BlueprintAnnotation { thumbnailBase64: string | null; version: number; updatedBy: string | null; updatedAt: string | null }
+
+/** null when no blueprint has been uploaded for the room. */
+export const getRoomBlueprint = async (roomId: number): Promise<RoomBlueprint | null> => {
+  const res = await fetchWithAuth(`/api/room-master/${roomId}/blueprint`);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: string }).error || "Could not load the blueprint");
+  }
+  return res.json();
+};
+export const getBlueprintAnnotation = (rungId: number, roomId: number, context: "allocation" | "reporting" = "allocation"): Promise<BlueprintAnnotation | null> =>
+  getJson(`/api/dependency-activity-assignment/${rungId}/blueprint-annotation?roomId=${roomId}&context=${context}`, "Could not load the blueprint markup");
 
 export const getRungDetail = (rungId: number): Promise<RungDetail> =>
   getJson(`/api/dependency-activity-assignment/${rungId}`, "Failed to load the activity");
@@ -400,6 +421,8 @@ export interface AttendanceRow {
   workerName: string;
   skillType: string;
   contractorName: string | null;
+  /** null = never saved for this day (the "Present" shown is only a default). */
+  attendanceId?: number | null;
   status: AttendanceStatus | null;
 }
 export interface WorkerResult { id: number; name: string; skillType: string; contractorName: string | null }
@@ -414,6 +437,83 @@ export const addToRoster = (rungId: number, workerIds: number[]) =>
   send("POST", `/api/worker-attendance/roster/${rungId}`, { workerIds }, "Failed to add workers");
 export const searchWorkers = (search: string): Promise<WorkerResult[]> =>
   getJson(`/api/worker-attendance/workers${search ? `?search=${encodeURIComponent(search)}` : ""}`, "Failed to search workers");
+
+// Attendance page (same endpoints as the web's src/api/workerAttendanceApi.ts + enterpriseApi.ts).
+export interface AttendanceActivityOption {
+  rungId: number;
+  sequenceNo: number;
+  activityName: string;
+  alias: string;
+  projectId: number;
+  towerName: string | null;
+  floor: string | null;
+  flatName: string | null;
+  roomName: string | null;
+  label: string;
+  rosterCount: number;
+}
+export interface AttendanceReportRow {
+  id: number;
+  date: string;
+  status: AttendanceStatus;
+  workerId: number;
+  workerName: string;
+  contractorName: string | null;
+  activityId: number;
+  activityLabel: string;
+  projectName: string | null;
+}
+export interface WorkerCalendar {
+  worker: { id: number; name: string; companyName: string | null };
+  days: { id: number; date: string; status: AttendanceStatus; remarks: string | null; activityLabel: string | null; projectName: string | null }[];
+}
+
+export const getEnterpriseCompanies = (): Promise<{ id: number; label: string }[]> =>
+  getJson("/api/enterprises/options?business_type=C", "Failed to load companies");
+/** Projects, optionally only those belonging/tagged to one company (server-side, incl. ProjectCompanies tags). */
+export const getEnterpriseProjects = (companyId?: number | null): Promise<{ id: number; label: string }[]> =>
+  getJson(`/api/enterprises/options?business_type=P${companyId ? `&enterprise_id=${companyId}` : ""}`, "Failed to load projects");
+/** Contractor account heads — for registering a new worker. */
+export const getContractorOptions = async (): Promise<{ id: number; label: string }[]> => {
+  const body = await getJson<unknown>("/api/account-head/options?type=C", "Failed to load contractors").catch(() => []);
+  return Array.isArray(body) ? body : [];
+};
+export const createWorker = (payload: { name: string; contractorId: number; aadhaarNo: string }): Promise<{ id: number; existed: boolean }> =>
+  send("POST", "/api/worker-attendance/workers", payload, "Failed to register the worker");
+export const getAttendanceActivities = (projectId: number): Promise<AttendanceActivityOption[]> =>
+  getJson(`/api/worker-attendance/activities?projectId=${projectId}`, "Failed to load activities");
+export const getAttendanceReport = (f: { companyId?: number; projectId?: number; dateFrom?: string } = {}): Promise<AttendanceReportRow[]> => {
+  const qs = new URLSearchParams();
+  if (f.companyId) qs.set("companyId", String(f.companyId));
+  if (f.projectId) qs.set("projectId", String(f.projectId));
+  if (f.dateFrom) qs.set("dateFrom", f.dateFrom);
+  return getJson(`/api/worker-attendance/report?${qs}`, "Failed to load the attendance log");
+};
+export const getWorkerCalendar = (workerId: number, month: string): Promise<WorkerCalendar> =>
+  getJson(`/api/worker-attendance/workers/${workerId}/calendar?month=${month}`, "Failed to load the attendance record");
+
+// ── Amendment (activities sent back for rework) ──────────────────────────────────────────────────
+
+export interface AmendmentRecord {
+  assignmentId: number;
+  rungId: number;
+  attemptNo: number;
+  status: AssignmentStatus;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
+  updatedAt: string;
+  sequenceNo: number;
+  activityName: string;
+  alias: string;
+  workType: "INTERNAL" | "EXTERNAL";
+  projectName: string | null;
+  scopePath: string;
+  engineerNames: string | null;
+  currentStatus: AssignmentStatus | null;
+  currentAttemptNo: number | null;
+}
+export const getAmendments = (): Promise<AmendmentRecord[]> =>
+  getJson("/api/dependency-activity-assignment/amendments", "Failed to load amendments");
 
 // ── Comments ─────────────────────────────────────────────────────────────────────────────────────
 
