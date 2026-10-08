@@ -120,6 +120,21 @@ describe("creating an item", () => {
   });
 });
 
+describe("names are saved without stray spaces", () => {
+  test("a create with a spaced name and code is stored tidy, and the code is checked tidy", async () => {
+    const res = await request(await app())
+      .post("/api/item-master")
+      .set("Authorization", `Bearer ${token()}`)
+      .send({ ...body("  WC1 "), M_Name: "  White   Cement  " });
+    expect(res.status).toBe(201);
+    const insert = mockQueries.find((q) => /INSERT INTO dbo\.Item_Master_Group/i.test(q.text));
+    expect(insert.inputs.M_Name).toBe("White Cement");
+    expect(insert.inputs.M_code).toBe("WC1");
+    const check = mockQueries.find((q) => /SELECT TOP 1 M_Id, M_Name/i.test(q.text));
+    expect(check.inputs.code).toBe("WC1");
+  });
+});
+
 describe("editing an item", () => {
   test("changing to a code another item uses is refused", async () => {
     mockClash = { M_Id: "x", M_Name: "Grey Cement" };
