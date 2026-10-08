@@ -4,6 +4,7 @@
 // which this was extracted from), reused here so Work Allocation and
 // Reporting present the exact same location hierarchy instead of each
 // page having its own flat, single-level "group by chain" list.
+import { storeyDisplay, storeyRank as sharedStoreyRank } from "@/lib/floorLabel";
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, FolderTree, Building, Layers, Home, DoorOpen, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 
@@ -41,8 +42,9 @@ const LEVELS = [
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const floorRank = (f: string) => (f === "G" ? -1 : Number.isFinite(Number(f)) ? Number(f) : Number.MAX_SAFE_INTEGER);
 // A villa's own floors, inside the unit (the reverse of a tower).
-const storeyRank = (s: string) => (s === "G" ? -1 : Number.isFinite(Number(s)) ? Number(s) : Number.MAX_SAFE_INTEGER);
-const storeyLabel = (s: string) => (s === "G" ? "Ground floor" : Number.isFinite(Number(s)) ? `Floor ${s}` : s);
+// A villa room's own floor: shared naming/order (src/lib/floorLabel.ts).
+const storeyRank = sharedStoreyRank;
+const storeyLabel = storeyDisplay;
 // A villa in a plotted block has no floor; its chains carry the plot label instead.
 const floorLabel = (f: string) => (!f ? "No floor" : f === "G" ? "Ground Floor" : Number.isFinite(Number(f)) ? `Floor ${f}` : f);
 

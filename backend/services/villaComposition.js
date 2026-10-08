@@ -11,8 +11,11 @@
 const { sql } = require("../db");
 
 // "G" first, then numbered floors, then anything else (e.g. "Roof") last.
+// Floors inside a villa, bottom to top: Basement (B), Ground (G), 1, 2 …, then
+// named floors such as Roof / Terrace above the numbered ones.
 function storeyOrder(storey) {
   const s = String(storey || "").trim().toUpperCase();
+  if (s === "B") return -1;
   if (s === "G") return 0;
   const n = parseInt(s, 10);
   return Number.isFinite(n) && String(n) === s ? n : 1000;
@@ -20,7 +23,8 @@ function storeyOrder(storey) {
 
 function normaliseStorey(storey) {
   const s = String(storey || "").trim();
-  return s.toUpperCase() === "G" ? "G" : s;
+  const u = s.toUpperCase();
+  return u === "G" || u === "B" ? u : s;
 }
 
 class VillaPlanError extends Error {

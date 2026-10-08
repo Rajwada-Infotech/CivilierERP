@@ -60,7 +60,7 @@ router.get("/", cache("room-master", 300), async (req, res) => {
       ${where}
       -- A villa's rooms run floor by floor (G, 1, 2, …) before name order.
       ORDER BY ep.name, b.BlockName, u.UnitName,
-        CASE WHEN r.Storey IS NULL THEN -1 WHEN r.Storey = 'G' THEN 0 ELSE ISNULL(TRY_CAST(r.Storey AS INT), 999) END,
+        CASE WHEN r.Storey IS NULL THEN -2 WHEN r.Storey = 'B' THEN -1 WHEN r.Storey = 'G' THEN 0 ELSE ISNULL(TRY_CAST(r.Storey AS INT), 999) END,
         r.RoomName
     `);
     res.json(result.recordset);

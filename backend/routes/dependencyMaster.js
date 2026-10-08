@@ -129,7 +129,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
         SELECT
           rm.Id AS id,
           -- a villa room carries its own floor inside the villa
-          CONCAT(CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') ELSE '' END, rm.RoomName) AS label,
+          CONCAT(CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, rm.RoomName) AS label,
           dm.Alias AS linkedAlias
         FROM dbo.RoomMaster rm
         LEFT JOIN dbo.DependencyMaster dm
@@ -137,7 +137,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
         WHERE rm.UnitId = @FlatId AND rm.IsActive = 1
           -- a villa's rooms carry no floor; its "floor" here is its plot label
           AND (rm.Floor = @Floor OR (rm.Floor IS NULL AND EXISTS (SELECT 1 FROM dbo.UnitMaster u WHERE u.Id = rm.UnitId AND u.FloorNo IS NULL)))
-        ORDER BY CASE WHEN rm.Storey IS NULL THEN -1 WHEN rm.Storey = 'G' THEN 0 ELSE ISNULL(TRY_CAST(rm.Storey AS INT), 999) END, rm.RoomName
+        ORDER BY CASE WHEN rm.Storey IS NULL THEN -2 WHEN rm.Storey = 'B' THEN -1 WHEN rm.Storey = 'G' THEN 0 ELSE ISNULL(TRY_CAST(rm.Storey AS INT), 999) END, rm.RoomName
       `);
       return res.json(r.recordset);
     }
@@ -171,7 +171,7 @@ router.get("/", authMiddleware, async (req, res) => {
         CONCAT(
           ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
           ' > ', ISNULL(um.UnitName, '—'), ' > ',
-            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
         ) AS scopePath
       FROM dbo.DependencyMaster dm
       LEFT JOIN dbo.enterprise   ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'

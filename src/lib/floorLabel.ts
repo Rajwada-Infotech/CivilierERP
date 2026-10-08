@@ -20,9 +20,24 @@ export const floorDisplay = (floorNo: string | number | null | undefined): strin
 export const chainFloorDisplay = (f: string | null | undefined): string =>
   !f ? "—" : /^plot\b/i.test(f) ? f : f === "G" ? "Ground floor" : `Floor ${f}`;
 
-// RoomMaster.Storey — a villa room's own floor inside the villa ("G", "1", "2").
-export const storeyDisplay = (s: string | null | undefined): string =>
-  !s ? "" : s.toUpperCase() === "G" ? "Ground floor" : /^\d+$/.test(s) ? `Floor ${s}` : s;
+// RoomMaster.Storey — a villa room's own floor inside the villa: "B"
+// (basement), "G", "1", "2" …, or a named floor such as "Roof" / "Terrace".
+export const storeyDisplay = (s: string | null | undefined): string => {
+  if (!s) return "";
+  const u = s.toUpperCase();
+  if (u === "B") return "Basement";
+  if (u === "G") return "Ground floor";
+  if (/^\d+$/.test(s)) return `Floor ${s}`;
+  return u === "ROOF" ? "Roof terrace" : s;
+};
+
+// Bottom-to-top order of those floors (same as services/villaComposition.js).
+export const storeyRank = (s: string | null | undefined): number => {
+  const u = String(s ?? "").toUpperCase();
+  if (u === "B") return -1;
+  if (u === "G") return 0;
+  return /^\d+$/.test(u) ? Number(u) : 1000;
+};
 
 // Room name with its villa floor when it has one: "Floor 1 · Bedroom 3".
 export const roomDisplay = (name: string | null | undefined, storey?: string | null): string =>

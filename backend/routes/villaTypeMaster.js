@@ -46,7 +46,11 @@ const SELECT = `
   SELECT v.Id, v.ProjectId, v.Code, v.Name, v.LayoutTypeId, l.Label AS LayoutLabel,
          v.BaseLandAreaSqFt, v.BuiltUpAreaSqFt, v.SuperBuiltUpAreaSqFt, v.SortOrder, v.IsActive,
          (SELECT COUNT(*) FROM dbo.PlotMaster p WHERE p.PlannedVillaTypeId = v.Id AND p.IsActive = 1) AS PlotCount,
-         (SELECT COUNT(*) FROM dbo.UnitMaster u WHERE u.VillaTypeId = v.Id AND u.IsActive = 1) AS VillaCount
+         (SELECT COUNT(*) FROM dbo.UnitMaster u WHERE u.VillaTypeId = v.Id AND u.IsActive = 1) AS VillaCount,
+         -- the floor plan (migration 539): when set, the type's layout is its own, built from it
+         CAST(CASE WHEN l.OwnerVillaTypeId = v.Id THEN 1 ELSE 0 END AS BIT) AS HasFloorPlan,
+         (SELECT ISNULL(SUM(rp.Quantity), 0) FROM dbo.VillaTypeRoomPlan rp WHERE rp.VillaTypeId = v.Id) AS PlanRoomCount,
+         (SELECT COUNT(DISTINCT rp.Storey) FROM dbo.VillaTypeRoomPlan rp WHERE rp.VillaTypeId = v.Id) AS PlanFloorCount
   FROM dbo.VillaTypeMaster v
   LEFT JOIN dbo.RoomLayoutType l ON l.Id = v.LayoutTypeId
 `;
@@ -118,6 +122,13 @@ router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
     const projectId = cur.recordset[0].ProjectId;
     const layoutError = await checkLayout(pool, v.layoutTypeId);
     if (layoutError) return res.status(400).json({ error: layoutError });
+    // A type with a floor plan owns its layout (built from the plan); a
+    // different layout here would leave its rooms out of step with the plan.
+    const owned = (await pool.request().input("id", sql.Int, id).query(
+      "SELECT TOP 1 l.Id FROM dbo.VillaTypeMaster v JOIN dbo.RoomLayoutType l ON l.Id = v.LayoutTypeId AND l.OwnerVillaTypeId = v.Id WHERE v.Id = @id")).recordset[0];
+    if (owned && v.layoutTypeId !== owned.Id) {
+      return res.status(400).json({ error: "This villa type's rooms come from its floor plan — change them with Rooms, not the layout." });
+    }
     if (wantsActive && await codeTaken(pool, projectId, v.code, id)) return res.status(409).json({ error: `Villa type "${v.code}" already exists in this project` });
     if (!wantsActive) {
       const used = await pool.request().input("id", sql.Int, id)
@@ -157,6 +168,26 @@ router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   } catch (e) {
     console.error("[villa-type-master] DELETE:", e.message);
     res.status(500).json({ error: "Failed to remove the villa type" });
+  }
+});
+
+// GET /dpr-ready-categories?projectId= — room types that already have a DPR
+// step list (an active chain with steps), this project's first. A room of any
+// other type gets no DPR steps when a villa is built, so the plan editor
+// flags it before the plan is saved.
+router.get("/dpr-ready-categories", requirePageRight(PAGE, "view"), async (req, res) => {
+  const projectId = parseId(req.query.projectId);
+  try {
+    const r = await getPool().request().input("p", sql.Int, projectId).query(`
+      SELECT r.RoomCategoryId AS categoryId, MAX(CASE WHEN d.ProjectId = @p THEN 1 ELSE 0 END) AS inProject
+      FROM dbo.DependencyMaster d JOIN dbo.RoomMaster r ON r.Id = d.RoomId
+      WHERE d.IsActive = 1 AND r.RoomCategoryId IS NOT NULL
+        AND EXISTS (SELECT 1 FROM dbo.DependencyMasterActivity x WHERE x.DependencyMasterId = d.Id)
+      GROUP BY r.RoomCategoryId`);
+    res.json(r.recordset);
+  } catch (e) {
+    console.error("[villa-type-master] GET dpr-ready-categories:", e.message);
+    res.status(500).json({ error: "Failed to load DPR readiness" });
   }
 });
 

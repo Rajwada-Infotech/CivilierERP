@@ -1,3 +1,4 @@
+import { storeyDisplay, storeyRank as sharedStoreyRank } from "@/lib/floorLabel";
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invalidateRoomData } from "@/lib/roomQueries";
@@ -185,8 +186,8 @@ type UnitOption = {
 };
 
 // A villa's own floors (RoomMaster.Storey): Ground, then 1, 2 …, then named ones.
-const storeyRank = (s: string) => (s === "G" ? -1 : /^\d+$/.test(s) ? Number(s) : Number.MAX_SAFE_INTEGER);
-const storeyName = (s: string) => (s === "G" ? "Ground" : /^\d+$/.test(s) ? `Floor ${s}` : s);
+const storeyRank = sharedStoreyRank;
+const storeyName = storeyDisplay;
 // Villa rooms bottom floor first; rooms without a villa floor keep their order.
 const byStorey = (a: Record<string, unknown>, b: Record<string, unknown>) =>
   a.storey && b.storey ? storeyRank(String(a.storey)) - storeyRank(String(b.storey)) : 0;
