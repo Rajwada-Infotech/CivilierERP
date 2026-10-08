@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Cpu, Tag, Setting2, ArrowSwapHorizontal } from "iconsax-react";
-import { Boxes, AlertCircle, PlayCircle, Wallet, ChevronRight } from "lucide-react";
+import { Boxes, AlertCircle, PlayCircle, Wallet, ChevronRight, Upload, UserCheck, ShieldCheck, Wrench, Calculator, Printer, PieChart } from "lucide-react";
 import { GlassShell, GlassCard, GlassSection } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getFixedAssets, type FixedAssetListItem } from "@/api/fixedAssetApi";
@@ -66,6 +66,30 @@ function QuickLinkCard({
   );
 }
 
+const STATUS_COLOR: Record<string, string> = {
+  Active: "#10b981",
+  Pending: "#f59e0b",
+  Assigned: "#3b82f6",
+  "In Repair": "#f97316",
+  Maintenance: "#f97316",
+  Disposed: "#ef4444",
+  Inactive: "#64748b",
+};
+
+// Every page of the module (same routes as the Fixed Asset sidebar).
+const QUICK_LINKS: { icon: React.ElementType; title: string; desc: string; path: string }[] = [
+  { icon: Cpu, title: "Fixed Asset Depreciation Tag", desc: "Browse & manage the full asset register", path: "/fixed-asset/record" },
+  { icon: Tag, title: "FA Inventory", desc: "Tag received stock, track untagged qty", path: "/fixed-asset/tagging" },
+  { icon: Printer, title: "FA Code Stickers", desc: "Print asset code labels", path: "/fixed-asset/depreciation-tag-stickers" },
+  { icon: Upload, title: "Inventory Import", desc: "Bulk-load assets from a spreadsheet", path: "/fixed-asset/inventory-import" },
+  { icon: UserCheck, title: "Assignment", desc: "Assign assets to users", path: "/fixed-asset/assignment" },
+  { icon: ArrowSwapHorizontal, title: "User-Wise Asset Transfer", desc: "Move assets between users, project-wise", path: "/fixed-asset/transfer" },
+  { icon: ShieldCheck, title: "Owner & Quality Checking", desc: "Owner confirmation & condition checks", path: "/fixed-asset/quality-check" },
+  { icon: Wrench, title: "FA Maintenance & Repair", desc: "Log servicing and repairs", path: "/fixed-asset/maintenance" },
+  { icon: Calculator, title: "Depreciation Generate", desc: "Post a month's depreciation per project", path: "/fixed-asset/depreciation-generate" },
+  { icon: Setting2, title: "Depreciation Setup", desc: "Category-wise depreciation rates", path: "/fixed-asset/depreciation-setup" },
+];
+
 export default function FixedAssetDashboard() {
   usePageRights("fixed-asset-dashboard");
   const navigate = useNavigate();
@@ -80,6 +104,10 @@ export default function FixedAssetDashboard() {
     total: live.length,
     pending: live.filter((a) => a.AssetStatus === "Pending").length,
     active: live.filter((a) => a.AssetStatus === "Active").length,
+    // Every AssetStatus present, for the breakdown bar (display only).
+    byStatus: Object.entries(
+      live.reduce<Record<string, number>>((m, a) => { const k = a.AssetStatus || "Unknown"; m[k] = (m[k] || 0) + 1; return m; }, {}),
+    ).sort((a, b) => b[1] - a[1]),
     bookValue: live.reduce(
       (s, a) =>
         s +
@@ -117,32 +145,34 @@ export default function FixedAssetDashboard() {
           />
         </div>
 
+        {/* ── Where the portfolio stands ── */}
+        {!isLoading && stats.total > 0 && (
+          <GlassSection title="Status Breakdown" icon={PieChart} accentColor={ACCENT}>
+            <div className="rounded-xl border border-border bg-card/60 p-4">
+              <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+                {stats.byStatus.map(([k, n]) => (
+                  <div key={k} title={`${k}: ${n}`} style={{ width: `${(n / stats.total) * 100}%`, background: STATUS_COLOR[k] ?? "#94a3b8" }} />
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+                {stats.byStatus.map(([k, n]) => (
+                  <span key={k} className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_COLOR[k] ?? "#94a3b8" }} />
+                    {k}
+                    <span className="font-semibold tabular-nums text-foreground">{n}</span>
+                    <span className="tabular-nums">({Math.round((n / stats.total) * 100)}%)</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </GlassSection>
+        )}
+
         <GlassSection title="Quick Links" icon={Cpu} accentColor={ACCENT}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <QuickLinkCard
-              icon={Cpu}
-              title="Fixed Asset Record"
-              desc="Browse & manage the full asset register"
-              onClick={() => navigate("/fixed-asset/record")}
-            />
-            <QuickLinkCard
-              icon={Tag}
-              title="FA Inventory"
-              desc="Tag received stock, track untagged qty"
-              onClick={() => navigate("/fixed-asset/tagging")}
-            />
-            <QuickLinkCard
-              icon={ArrowSwapHorizontal}
-              title="User-Wise Asset Transfer"
-              desc="Move assets between users, project-wise"
-              onClick={() => navigate("/fixed-asset/transfer")}
-            />
-            <QuickLinkCard
-              icon={Setting2}
-              title="Depreciation Setup"
-              desc="Category-wise depreciation rates"
-              onClick={() => navigate("/fixed-asset/depreciation-setup")}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {QUICK_LINKS.map((l) => (
+              <QuickLinkCard key={l.path} icon={l.icon} title={l.title} desc={l.desc} onClick={() => navigate(l.path)} />
+            ))}
           </div>
         </GlassSection>
       </GlassShell>
