@@ -146,3 +146,47 @@ export const deleteIssue = async (id: number) => {
 // Legacy compatibility
 export const getCompanyOptions = getCompanies;
 export const getProjectOptions = getProjects;
+
+/** A work order that can be tagged on an issue: approved, same company + project, and a Material Request has been raised from it. */
+export interface IssueWorkOrder {
+  id: number;
+  docNo: string;
+  docDate: string | null;
+  contractorName: string | null;
+  mrDocNo: string | null;
+}
+
+export const getIssueWorkOrders = async (companyId: number, projectId: number): Promise<IssueWorkOrder[]> => {
+  const res = await fetchWithAuth(`${BASE}/work-orders?companyId=${companyId}&projectId=${projectId}`);
+  if (!res.ok) throw new Error("Failed to fetch work orders");
+  const data = await res.json().catch(() => []);
+  return Array.isArray(data) ? data : [];
+};
+
+export interface WorkOrderCompareRow {
+  itemId: string;
+  itemName: string | null;
+  uomCode: string | null;
+  uomName: string | null;
+  /** What the work order lists. 0 for something issued that the work order does not list. */
+  woQty: number;
+  /** Already issued by OTHER issues tagged to this work order. */
+  issuedQty: number;
+}
+
+export interface WorkOrderCompare {
+  woId: number;
+  docNo: string;
+  items: WorkOrderCompareRow[];
+}
+
+/** The work order's items against what other issues tagged to it have issued. `excludeIssueId` leaves the issue being edited out. */
+export const getWorkOrderCompare = async (woId: number, excludeIssueId?: number | null): Promise<WorkOrderCompare> => {
+  const q = excludeIssueId ? `?excludeIssueId=${excludeIssueId}` : "";
+  const res = await fetchWithAuth(`${BASE}/work-order-compare/${woId}${q}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to compare with the work order");
+  }
+  return res.json();
+};

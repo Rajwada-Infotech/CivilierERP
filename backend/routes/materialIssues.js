@@ -30,6 +30,7 @@ const { bumpCacheVersion } = require("../redis");
 const { transition, writeAuditLog } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { makeColumnProbe } = require("../services/columnProbe");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -326,6 +327,146 @@ router.get(
 );
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
+// ── Work Order tagging ─────────────────────────────────────────────────────────
+// An issue can be tagged with the Work Order whose materials it is issued against, so what the work order
+// listed can be compared with what is actually issued. Only approved Work Orders of the issue's own company
+// and project, from which a Material Request has been raised, can be picked.
+// dbo.MaterialIssues.SourceWOId / SourceWODocNo arrive with migration 547.
+const hasIssueSourceWO = makeColumnProbe("dbo.MaterialIssues", "SourceWOId");
+const hasMRSourceWO = makeColumnProbe("dbo.MaterialRequests", "SourceWOId");
+const LIVE_MR = "mr.Status NOT IN ('Rejected', 'Cancelled')";
+const DEAD_ISSUE = "('Rejected', 'Cancelled')";
+
+// Validates a work order for the given company / project. On any problem it has already answered the
+// request and returns null; on success { id, docNo }.
+async function resolveSourceWO(pool, res, woId, companyId, projectId) {
+  if (!(await hasIssueSourceWO(pool)) || !(await hasMRSourceWO(pool))) {
+    res.status(503).json({ error: "Tagging a work order needs migration 547 — ask an administrator to run the database migrations." });
+    return null;
+  }
+  const wo = (await pool.request().input("id", sql.Int, woId).query(`
+    SELECT Id, DocumentNumber, DocNo, Status, CompanyId, ProjectId FROM dbo.WorkOrderHeader WHERE Id = @id
+  `)).recordset[0];
+  if (!wo) {
+    res.status(404).json({ error: "Work order not found." });
+    return null;
+  }
+  if (Number(wo.CompanyId) !== Number(companyId) || Number(wo.ProjectId) !== Number(projectId)) {
+    res.status(400).json({ error: "That work order belongs to a different company or project than this issue." });
+    return null;
+  }
+  if (wo.Status !== "Approved") {
+    res.status(400).json({ error: "Only an approved work order can be tagged." });
+    return null;
+  }
+  const mr = (await pool.request().input("id", sql.Int, woId).query(
+    `SELECT TOP 1 mr.MRId FROM dbo.MaterialRequests mr WHERE mr.SourceWOId = @id AND ${LIVE_MR}`,
+  )).recordset[0];
+  if (!mr) {
+    res.status(400).json({ error: "No Material Request has been raised from this work order yet." });
+    return null;
+  }
+  return { id: woId, docNo: wo.DocNo || wo.DocumentNumber || `WO-${woId}` };
+}
+
+// GET /work-orders?companyId=&projectId= — the work orders that can be tagged, newest first.
+router.get("/work-orders", authenticateToken, async (req, res) => {
+  const companyId = parseInt(req.query.companyId, 10);
+  const projectId = parseInt(req.query.projectId, 10);
+  if (!Number.isFinite(companyId) || !Number.isFinite(projectId)) return res.json([]);
+  try {
+    const pool = getPool();
+    if (!(await hasMRSourceWO(pool))) return res.json([]);
+    const r = await pool
+      .request()
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .query(`
+        SELECT wh.Id AS id,
+               COALESCE(wh.DocNo, wh.DocumentNumber) AS docNo,
+               wh.DocumentDate AS docDate,
+               ahm.LHeadName AS contractorName,
+               (SELECT TOP 1 mr.DocNo FROM dbo.MaterialRequests mr
+                WHERE mr.SourceWOId = wh.Id AND ${LIVE_MR} ORDER BY mr.MRId DESC) AS mrDocNo
+        FROM dbo.WorkOrderHeader wh
+        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = wh.ContractorId
+        WHERE wh.Status = 'Approved'
+          AND wh.CompanyId = @companyId AND wh.ProjectId = @projectId${projectPredicate(req.projectScope, "wh.ProjectId")}
+          AND EXISTS (SELECT 1 FROM dbo.MaterialRequests mr WHERE mr.SourceWOId = wh.Id AND ${LIVE_MR})
+        ORDER BY wh.DocumentDate DESC, wh.Id DESC
+      `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[material-issues] work-orders error:", err.message);
+    res.status(500).json({ error: "Failed to load work orders" });
+  }
+});
+
+// GET /work-order-compare/:woId?excludeIssueId= — what the work order listed vs what other issues
+// tagged to it have already issued, per item + unit. (The issue being edited is left out via
+// excludeIssueId, so the screen can add the lines currently in the cart itself.)
+router.get("/work-order-compare/:woId", authenticateToken, async (req, res) => {
+  const woId = parseInt(req.params.woId, 10);
+  if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid work order id" });
+  const excludeIssueId = parseInt(req.query.excludeIssueId, 10);
+  try {
+    const pool = getPool();
+    const wo = (await pool.request().input("id", sql.Int, woId).query(`
+      SELECT Id, DocumentNumber, DocNo, CompanyId, ProjectId FROM dbo.WorkOrderHeader WHERE Id = @id
+    `)).recordset[0];
+    if (!wo) return res.status(404).json({ error: "Work order not found." });
+    if (!assertProjectAllowed(req, res, wo.ProjectId)) return;
+
+    const listed = (await pool.request().input("id", sql.Int, woId).query(`
+      SELECT CONVERT(NVARCHAR(100), m.ItemId) AS itemId, MAX(img.M_Name) AS itemName,
+             uom.UOMCode AS uomCode, MAX(uom.UOMName) AS uomName, SUM(ISNULL(m.Quantity, 0)) AS qty
+      FROM dbo.WorkOrderActivityMaterials m
+      JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
+      LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = m.ItemId
+      LEFT JOIN dbo.UOMMaster uom ON uom.Id = m.UOMId
+      WHERE a.WorkOrderHeaderId = @id AND m.ItemId IS NOT NULL
+      GROUP BY m.ItemId, uom.UOMCode
+    `)).recordset;
+
+    let issued = [];
+    if (await hasIssueSourceWO(pool)) {
+      const q = pool.request().input("id", sql.Int, woId);
+      if (Number.isFinite(excludeIssueId)) q.input("exclude", sql.Int, excludeIssueId);
+      issued = (await q.query(`
+        SELECT mii.ItemId AS itemId, MAX(img.M_Name) AS itemName,
+               mii.UOMCode AS uomCode, MAX(uom.UOMName) AS uomName, SUM(mii.Quantity) AS qty
+        FROM dbo.MaterialIssues mi
+        JOIN dbo.MaterialIssueItems mii ON mii.IssueId = mi.IssueId
+        LEFT JOIN dbo.Item_Master_Group img ON CONVERT(NVARCHAR(100), img.M_Id) = mii.ItemId
+        LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = mii.UOMCode
+        WHERE mi.SourceWOId = @id AND mi.Status NOT IN ${DEAD_ISSUE}
+          ${Number.isFinite(excludeIssueId) ? "AND mi.IssueId <> @exclude" : ""}
+        GROUP BY mii.ItemId, mii.UOMCode
+      `)).recordset;
+    }
+
+    const rows = new Map();
+    const keyOf = (r) => `${String(r.itemId).toLowerCase()}|${r.uomCode || ""}`;
+    for (const r of listed) {
+      rows.set(keyOf(r), { itemId: r.itemId, itemName: r.itemName, uomCode: r.uomCode, uomName: r.uomName, woQty: Number(r.qty) || 0, issuedQty: 0 });
+    }
+    for (const r of issued) {
+      const k = keyOf(r);
+      const row = rows.get(k) || { itemId: r.itemId, itemName: r.itemName, uomCode: r.uomCode, uomName: r.uomName, woQty: 0, issuedQty: 0 };
+      row.issuedQty += Number(r.qty) || 0;
+      rows.set(k, row);
+    }
+    res.json({
+      woId,
+      docNo: wo.DocNo || wo.DocumentNumber,
+      items: [...rows.values()].sort((a, b) => String(a.itemName || "").localeCompare(String(b.itemName || ""))),
+    });
+  } catch (err) {
+    console.error("[material-issues] work-order-compare error:", err.message);
+    res.status(500).json({ error: "Failed to compare with the work order" });
+  }
+});
+
 router.get("/:id", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
@@ -337,7 +478,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const colCheck = await colCheckReq.query(`
       SELECT name FROM sys.columns
       WHERE object_id = OBJECT_ID('dbo.MaterialIssues')
-        AND name IN ('IssuedTo','CostCenter','Purpose','BlockId','FloorNo')
+        AND name IN ('IssuedTo','CostCenter','Purpose','BlockId','FloorNo','SourceWOId','SourceWODocNo')
     `);
     const extraCols = colCheck.recordset.map((r) => r.name);
     const issuedToCol   = extraCols.includes("IssuedTo")   ? "mi.IssuedTo,"   : "NULL AS IssuedTo,";
@@ -345,6 +486,9 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const purposeCol    = extraCols.includes("Purpose")     ? "mi.Purpose,"    : "NULL AS Purpose,";
     const blockIdCol    = extraCols.includes("BlockId")     ? "mi.BlockId,"    : "NULL AS BlockId,";
     const floorNoCol    = extraCols.includes("FloorNo")     ? "mi.FloorNo,"    : "NULL AS FloorNo,";
+    const sourceWOCol = extraCols.includes("SourceWOId") && extraCols.includes("SourceWODocNo")
+      ? "mi.SourceWOId, mi.SourceWODocNo,"
+      : "NULL AS SourceWOId, NULL AS SourceWODocNo,";
     const blockJoin = extraCols.includes("BlockId")
       ? "LEFT JOIN dbo.BlockMaster bm ON bm.Id = mi.BlockId"
       : "";
@@ -363,6 +507,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
         ${purposeCol}
         ${blockIdCol}
         ${floorNoCol}
+        ${sourceWOCol}
         ${blockNameCol}
         c.name   AS CompanyName,
         p.name   AS ProjectName,
@@ -439,6 +584,7 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
       BlockId = null,
       FloorNo = null,
       DocTypeId: clientDocTypeId = null,
+      SourceWOId = null,
     } = req.body;
 
     // CompanyId, ProjectId, Date and Reason are NOT NULL columns with no
@@ -477,6 +623,15 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
     // correct `req.user?.userId ?? req.user?.id` pattern.
     const userId = req.user?.userId ?? req.user?.id ?? null;
     const issuedBy = req.user?.email || null;
+
+    // Optional work-order tag (checked against this issue's own company / project).
+    let sourceWO = null;
+    if (SourceWOId != null && SourceWOId !== "") {
+      const woId = parseInt(SourceWOId, 10);
+      if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid SourceWOId" });
+      sourceWO = await resolveSourceWO(pool, res, woId, CompanyId, ProjectId);
+      if (!sourceWO) return;
+    }
 
     // Resolve the godown: use the one sent from the client, else fall back to main godown
     const resolvedGodownId = GodownId
@@ -590,6 +745,16 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
       newRecord = headerResult.recordset[0];
       issueId = newRecord.IssueId;
 
+      if (sourceWO) {
+        await tx
+          .request()
+          .input("IssueId", sql.Int, issueId)
+          .input("woId", sql.Int, sourceWO.id)
+          .input("woNo", sql.NVarChar(100), sourceWO.docNo)
+          .query("UPDATE dbo.MaterialIssues SET SourceWOId = @woId, SourceWODocNo = @woNo WHERE IssueId = @IssueId");
+        newRecord = { ...newRecord, SourceWOId: sourceWO.id, SourceWODocNo: sourceWO.docNo };
+      }
+
       for (const it of items) {
         const qty = Number(it.Quantity);
         const itemId = String(it.ItemId);
@@ -685,6 +850,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       Purpose = null,
       BlockId = null,
       FloorNo = null,
+      SourceWOId = null,
     } = req.body;
 
     // Same NOT NULL columns as POST / — this UPDATE overwrites them
@@ -736,9 +902,28 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       ? parseInt(GodownId, 10)
       : await resolveMainGodownId(pool);
 
+    // Work-order tag: set, changed or cleared with the rest of the form (checked against this issue's
+    // company / project). Before migration 547 an issue simply has no tag to clear.
+    let sourceWO = null;
+    const woTagColumn = await hasIssueSourceWO(pool);
+    if (SourceWOId != null && SourceWOId !== "") {
+      const woId = parseInt(SourceWOId, 10);
+      if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid SourceWOId" });
+      sourceWO = await resolveSourceWO(pool, res, woId, CompanyId, ProjectId);
+      if (!sourceWO) return;
+    }
+
     const tx = new sql.Transaction(pool);
     await tx.begin();
     try {
+      if (woTagColumn) {
+        await tx
+          .request()
+          .input("Id", sql.Int, id)
+          .input("woId", sql.Int, sourceWO ? sourceWO.id : null)
+          .input("woNo", sql.NVarChar(100), sourceWO ? sourceWO.docNo : null)
+          .query("UPDATE dbo.MaterialIssues SET SourceWOId = @woId, SourceWODocNo = @woNo WHERE IssueId = @Id");
+      }
       await tx
         .request()
         .input("Id", sql.Int, id)
