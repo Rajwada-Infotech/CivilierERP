@@ -173,7 +173,12 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
     const blockId = parseInt(req.query.blockId, 10);
 
     const request = pool.request().input("pid", sql.Int, projectId);
-    let where = "u.ProjectId = @pid";
+    // Land rows (a plot kept as a unit) are shown once, in the Plots section
+    // from /plots, never again as units; a villa retired by "undo convert"
+    // (inactive, renamed "~undone <id>") is history, not inventory.
+    let where = `u.ProjectId = @pid
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)
+      AND NOT (u.IsActive = 0 AND u.UnitName LIKE N'%~undone%')`;
     if (Number.isFinite(blockId)) {
       request.input("bid", sql.Int, blockId);
       where += " AND u.BlockId = @bid";
@@ -183,6 +188,8 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
     const result = await request.query(`
       SELECT
         u.Id, u.UnitName, u.FloorNo, u.BlockId, blk.BlockName, u.IsActive AS UnitIsActive,
+        -- a villa built on a plot: no tower floor, grouped as "Villas"
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id AND pl.IsActive = 1) THEN 1 ELSE 0 END AS BIT) AS IsVilla,
         u.AreaSqFt,
         -- The unit's kind as named in the kind master, and whether it's
         -- commercial — so the matrix can tell shops/offices from flats.

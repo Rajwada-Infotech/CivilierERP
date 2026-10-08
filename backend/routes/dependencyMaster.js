@@ -170,7 +170,8 @@ router.get("/", authMiddleware, async (req, res) => {
         -- the client shouldn't have to join 4 names together itself.
         CONCAT(
           ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
-          ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+          ' > ', ISNULL(um.UnitName, '—'), ' > ',
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
         ) AS scopePath
       FROM dbo.DependencyMaster dm
       LEFT JOIN dbo.enterprise   ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'

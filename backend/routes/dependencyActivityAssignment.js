@@ -295,7 +295,8 @@ router.get(
         dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
         CONCAT(
           ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
-          ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+          ' > ', ISNULL(um.UnitName, '—'), ' > ',
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
         ) AS scopePath,
         (
           SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
@@ -521,7 +522,8 @@ router.get(
           dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
           CONCAT(
             ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
-            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+            ' > ', ISNULL(um.UnitName, '—'), ' > ',
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
           ) AS scopePath,
           (
             SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
@@ -588,7 +590,8 @@ router.get(
           dm.ProjectId AS projectId, ep.name AS projectName,
           CONCAT(
             ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
-            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+            ' > ', ISNULL(um.UnitName, '—'), ' > ',
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
           ) AS scopePath,
           (
             SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)

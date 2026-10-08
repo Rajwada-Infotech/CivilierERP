@@ -907,6 +907,8 @@ const CrmApplication: React.FC = () => {
     // silently vanished from the list.
     return (units as any[]).filter((u: any) =>
       String(u.ProjectId) === form.ProjectId
+      // land is sold as a plot (the plot picker), never as a unit
+      && !u.IsLand
       && (!(u.LockBookingNo || u.LockHoldId) || String(u.Id) === form.PreferredUnitIds[0])
     );
   }, [units, form.ProjectId, form.PreferredUnitIds[0]]);
