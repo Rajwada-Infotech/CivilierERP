@@ -2046,6 +2046,17 @@ router.put("/:id/reject", async (req, res) => {
       note || null,
       req.user?.userId ?? req.user?.id ?? null,
     );
+    // A refund's payout voucher turned down by Finance sends the refund back
+    // to CRM with Finance's note (and frees it to raise a fresh voucher) —
+    // otherwise it sat 'with Finance' forever on a dead voucher.
+    const refundId = src.recordset[0]?.SourceCrmRefundId;
+    if (refundId && result?.newStatus === "Rejected") {
+      await pool.request().input("rid", sql.Int, refundId).input("np", sql.Int, id)
+        .input("n", sql.NVarChar(500), `[Finance] ${note || "Payout voucher rejected"}`.slice(0, 500))
+        .query(`UPDATE dbo.CrmRefund SET Status = 'Pending', FinanceNewPaymentId = NULL, RejectionNote = @n, UpdatedAt = SYSDATETIME()
+                WHERE Id = @rid AND FinanceNewPaymentId = @np AND Status IN ('FinanceApproved', 'FinancePending')`);
+      await bumpCacheVersion("crm-refunds");
+    }
     await Promise.all([
       bumpCacheVersion("new-payment"),
       bumpCacheVersion("brs"),

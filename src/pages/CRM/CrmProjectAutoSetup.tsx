@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
@@ -172,7 +172,24 @@ const SetupProgress: React.FC<{ steps: { label: string; detail: string; done: bo
 // not floors and units: plots by where they stand, then — for a type that
 // builds on its plots — villa types (each needs a room layout before a plot
 // can be converted) and villas on DPR. Every figure links to where it's acted on.
-const PlotSummaryPanel: React.FC<{ s: PlotSummary; buildsVillas: boolean }> = ({ s, buildsVillas }) => {
+const PlotSummaryPanel: React.FC<{ s: PlotSummary; buildsVillas: boolean; projectId?: string | number | null }> = ({ s, buildsVillas, projectId }) => {
+  const qc = useQueryClient();
+  const [filling, setFilling] = React.useState(false);
+  // Villa rooms built before their room type had a DPR step list get one now.
+  const fillDpr = async () => {
+    if (!projectId) return;
+    setFilling(true);
+    try {
+      const r = await fetchWithAuth(`/api/crm/project-auto-setup/projects/${projectId}/villas/fill-dpr`, { method: "POST" });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Could not add the DPR steps");
+      if (body.chainsCreated) toast.success(`${body.chainsCreated} villa room(s) given DPR steps`);
+      if (body.stillWithoutSteps?.length) toast.warning(`Still no step list for: ${body.stillWithoutSteps.join(", ")} — set one chain for each in Dependency Master, then run this again.`);
+      if (!body.chainsCreated && !body.stillWithoutSteps?.length) toast.info("Every villa room already has DPR steps");
+      if (body.failed?.length) toast.error(body.failed.join("; "));
+      await qc.invalidateQueries({ queryKey: ["plot-summary"] });
+    } catch (e: any) { toast.error(e.message); } finally { setFilling(false); }
+  };
   const tile = (label: string, value: number, tone = "text-foreground", hint?: string) => (
     <div className="rounded-lg border border-border bg-card px-3 py-2.5 min-w-0">
       <div className={`text-lg font-heading font-semibold tabular-nums ${tone}`}>{value.toLocaleString("en-IN")}</div>
@@ -207,7 +224,10 @@ const PlotSummaryPanel: React.FC<{ s: PlotSummary; buildsVillas: boolean }> = ({
       )}
       {buildsVillas && s.VillaRoomsWithoutDpr > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          {s.VillaRoomsWithoutDpr} villa room{s.VillaRoomsWithoutDpr === 1 ? " has" : "s have"} no DPR steps yet (no room of that type has a chain to copy). Set one chain for that room type in Dependency Master.
+          {s.VillaRoomsWithoutDpr} villa room{s.VillaRoomsWithoutDpr === 1 ? " has" : "s have"} no DPR steps yet (no room of that type had a chain to copy). Set one chain for that room type in Dependency Master, then{" "}
+          <button type="button" onClick={fillDpr} disabled={filling || !projectId} className="font-semibold underline underline-offset-2 hover:no-underline disabled:opacity-50">
+            {filling ? "adding steps…" : "give them DPR steps now"}
+          </button>.
         </p>
       )}
     </div>
@@ -1301,7 +1321,7 @@ const CrmProjectAutoSetup: React.FC = () => {
             return (
               <div className="space-y-3">
                 <SetupProgress steps={steps} />
-                {ps && <PlotSummaryPanel s={ps} buildsVillas={buildsVillas} />}
+                {ps && <PlotSummaryPanel s={ps} buildsVillas={buildsVillas} projectId={projectId} />}
               </div>
             );
           }
@@ -1315,7 +1335,7 @@ const CrmProjectAutoSetup: React.FC = () => {
               ]}
             />
             {/* A mixed township (towers + plot blocks) shows its land too. */}
-            {hasPlots && plotSummary && <div className="mt-3"><PlotSummaryPanel s={plotSummary} buildsVillas={buildsVillas} /></div>}
+            {hasPlots && plotSummary && <div className="mt-3"><PlotSummaryPanel s={plotSummary} buildsVillas={buildsVillas} projectId={projectId} /></div>}
             </>
           );
         })()}

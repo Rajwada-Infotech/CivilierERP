@@ -1,3 +1,4 @@
+import { chainFloorDisplay } from "@/lib/floorLabel";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -99,7 +100,7 @@ export function useScopeCascade(initial?: Partial<ScopeSelection>, excludeDepend
     const parts = [
       find(projectsQ.data, selection.projectId),
       find(towersQ.data, selection.towerId),
-      selection.floor ? `Floor ${selection.floor}` : null,
+      selection.floor ? chainFloorDisplay(selection.floor) : null,
       find(flatsQ.data, selection.flatId),
       find(roomsQ.data, selection.roomId),
     ].filter(Boolean);

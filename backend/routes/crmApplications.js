@@ -121,7 +121,7 @@ const APP_SELECT = `
     -- this guard. Stage being derived fresh from the live Booking row on
     -- every query is exactly what makes it safe regardless of that history.
     CASE
-      WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 'Converted'
+      WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired') THEN 'Converted'
       WHEN a.Status IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}') THEN 'NotConverted'
       ELSE 'InProcess'
     END AS Stage,
@@ -140,7 +140,7 @@ const APP_SELECT = `
     -- whatever its Status happens to read.
     CASE
       WHEN a.Status NOT IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}', 'Expired') AND bk.Id IS NULL AND a.PreferredUnitId IS NOT NULL AND (
-        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred') AND ob.ApplicationId <> a.Id)
+        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred') AND ob.ApplicationId <> a.Id)
         OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold oh WHERE oh.EntityType = 'Unit' AND oh.EntityId = a.PreferredUnitId AND oh.Status = '${CrmStatus.ACTIVE}' AND oh.HoldUntil >= SYSDATETIME() AND oh.ApplicationId <> a.Id)
       ) THEN 1 ELSE 0
     END AS UnitUnavailableForBooking
@@ -535,8 +535,11 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       unitName = preferredPlotIds.map((plotId) => selectedPlots.find((plot) => plot.Id === plotId)?.PlotName).filter(Boolean).join(", ");
     } else if (b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "") {
       const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
-        .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+        .query(`SELECT UnitName,
+                  CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = UnitKind AND k.IsLand = 1) THEN 1 ELSE 0 END AS IsLand
+                FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1`);
       if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
+      if (unit.recordset[0].IsLand) return res.status(400).json({ error: "This is land — choose it from the plot list, not as a unit." });
       unitName = unit.recordset[0].UnitName;
     }
 
@@ -1100,7 +1103,7 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     // for the rare case of an Approved Application with an active Booking
     // where someone hits this endpoint directly.
     const activeBooking = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
+      .query("SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired')");
     if (activeBooking.recordset.length) {
       const bk = activeBooking.recordset[0];
       return res.status(400).json({
@@ -1152,7 +1155,7 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     const activeBooking = await pool.request().input("id", sql.Int, id).query(`
       SELECT TOP 1 Id, BookingNo, Status
       FROM dbo.CrmBooking
-      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')
+      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired')
     `);
     if (activeBooking.recordset.length) {
       const b = activeBooking.recordset[0];
@@ -1184,10 +1187,9 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     await releaseAllHoldsForApplication(pool, id, actor);
     await releaseAllParkingForApplication(pool, id);
 
-    await pool.request().input("aid", sql.Int, id).query(`
-      UPDATE dbo.CrmApplicationPlot SET Status = N'Cancelled'
-      WHERE ApplicationId = @aid AND Status = N'Active'
-    `);
+    // Its unit and plot lines both — leaving the unit line Active kept the
+    // flat or villa from ever being applied for again.
+    await require("../services/crmApplicationWorkflow").releaseApplicationLines(pool, id);
 
     await pool.request()
       .input("id", sql.Int, id)

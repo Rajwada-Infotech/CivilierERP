@@ -155,7 +155,7 @@ export const MODULE_CONFIG: Record<
     color: "text-orange-600 bg-orange-600/10",
     navPath: "/payments",
     apiEndpoint: "/api/new-payment",
-    label: "CRM Refund Payments",
+    label: "Refund payment",
   },
   "goods-receipt": {
     icon: Truck,
@@ -489,6 +489,7 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "debit-note": "material",
 
   payments: "finance",
+  "crm-refund-payment": "finance",
   "received-payment": "finance",
   "journal-voucher": "finance",
   "fund-transfer": "finance",
@@ -509,10 +510,11 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "crm-noc": "sales",
   "crm-booking-amendment": "sales",
   "crm-refunds": "sales",
-  "crm-refunds-finance": "sales",
 };
 
 export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
+// Modules listed inside another module's group in the inbox.
+const DISPLAY_GROUP: Record<string, string> = { "crm-refund-payment": "payments" };
 
 // Within a category, MODULE_CATEGORY's own declaration order above doubles
 // as the module display order — e.g. Material Requests before Purchase
@@ -1558,8 +1560,11 @@ const ApprovalInbox: React.FC = () => {
                       // fixes that module's position in the list.
                       const byModule = new Map<string, InboxItem[]>();
                       for (const item of catItems) {
-                        if (!byModule.has(item.Module)) byModule.set(item.Module, []);
-                        byModule.get(item.Module)!.push(item);
+                        // A refund payout IS a payment: it is listed under
+                        // Payments (it still approves through its own rule).
+                        const key = DISPLAY_GROUP[item.Module] ?? item.Module;
+                        if (!byModule.has(key)) byModule.set(key, []);
+                        byModule.get(key)!.push(item);
                       }
                       return Array.from(byModule.entries()).map(([mod, modItems]) => {
                         const groupKey = `${cat}:${mod}`;

@@ -238,6 +238,70 @@ function crmProjectGuards(router, idSql = null) {
   });
 }
 
+// Setup / plot / villa routers address a project through many inputs — a
+// project, block, floor, plot, unit or villa-type id in the path, query or
+// body. One guard for all of them: each id given is resolved to its project
+// and a restricted user is refused anything outside their projects.
+const SCOPE_SQL = {
+  project: null,
+  block: "SELECT ProjectId FROM dbo.BlockMaster WHERE Id = @id",
+  floor: "SELECT ProjectId FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id",
+  plot: "SELECT ProjectId FROM dbo.PlotMaster WHERE Id = @id",
+  unit: "SELECT ProjectId FROM dbo.UnitMaster WHERE Id = @id",
+  villaType: "SELECT ProjectId FROM dbo.VillaTypeMaster WHERE Id = @id",
+};
+async function projectsOf(kind, ids) {
+  const list = [...new Set(ids.map((v) => parseInt(v, 10)).filter(Number.isFinite))];
+  if (!list.length) return [];
+  if (kind === "project") return list;
+  const out = [];
+  for (const id of list) {
+    const r = await getPool().request().input("id", sql.Int, id).query(SCOPE_SQL[kind]);
+    if (r.recordset.length) out.push(r.recordset[0].ProjectId);
+  }
+  return out;
+}
+async function refuseOutOfScope(req, res, kind, ids) {
+  for (const pid of await projectsOf(kind, ids)) {
+    if (!projectAllowed(req.projectScope, pid)) { res.status(403).json({ error: "You don't have access to this project." }); return true; }
+  }
+  return false;
+}
+/**
+ * Wires the guard onto a router:
+ *   params: route param name -> kind, e.g. { projectId: "project", blockId: "block" }
+ *   idPaths: for a generic ":id", [path prefix, kind] pairs, first match wins
+ *            (e.g. [["/blocks", "block"], ["/floors", "floor"]]); unmatched = no check
+ * plus every project / block / floor / plot / unit / villa-type id in the
+ * query or body.
+ */
+function setupScopeGuard(router, { params = {}, idPaths = [] } = {}) {
+  const BODY = { ProjectId: "project", projectId: "project", BlockId: "block", blockId: "block",
+    FloorId: "floor", PlotId: "plot", PlotIds: "plot", UnitId: "unit", VillaTypeId: "villaType" };
+  const wrap = (pick) => async (req, res, next, value) => {
+    if (!req.projectScope) return next(); // unrestricted user
+    try {
+      const kind = pick(req);
+      if (kind && await refuseOutOfScope(req, res, kind, [value])) return;
+      next();
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  };
+  for (const [name, kind] of Object.entries(params)) router.param(name, wrap(() => kind));
+  if (idPaths.length) router.param("id", wrap((req) => idPaths.find(([prefix]) => req.path.startsWith(prefix))?.[1] || null));
+  router.use(async (req, res, next) => {
+    if (!req.projectScope) return next();
+    try {
+      for (const src of [req.query || {}, req.body || {}]) {
+        for (const [field, kind] of Object.entries(BODY)) {
+          const v = src[field];
+          if (v == null || v === "") continue;
+          if (await refuseOutOfScope(req, res, kind, Array.isArray(v) ? v : [v])) return;
+        }
+      }
+      next();
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+}
 // A customer can span projects: a restricted user may open one only when at
 // least one of the customer's applications is inside their projects.
 async function crmCustomerGuard(req, res, next, value) {
@@ -258,6 +322,7 @@ async function crmCustomerGuard(req, res, next, value) {
 }
 
 module.exports = {
+  setupScopeGuard,
   crmProjectGuards,
   crmViaBookingSql,
   crmCustomerGuard,

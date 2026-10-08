@@ -714,6 +714,8 @@ const CrmApplication: React.FC = () => {
   // anything already visited.
   const [maxStepReached, setMaxStepReached] = useState(1);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  // Plot or villa/unit, when the project sells both (see saleKind below).
+  const [saleKindChoice, setSaleKindChoice] = useState<"plot" | "unit" | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadingApplication, setLoadingApplication] = useState(false);
   const [hasBooking, setHasBooking] = useState(false);
@@ -907,6 +909,8 @@ const CrmApplication: React.FC = () => {
     // silently vanished from the list.
     return (units as any[]).filter((u: any) =>
       String(u.ProjectId) === form.ProjectId
+      // land is sold as a plot (the plot picker), never as a unit
+      && !u.IsLand
       && (!(u.LockBookingNo || u.LockHoldId) || String(u.Id) === form.PreferredUnitIds[0])
     );
   }, [units, form.ProjectId, form.PreferredUnitIds[0]]);
@@ -920,8 +924,8 @@ const CrmApplication: React.FC = () => {
   );
   const blocksForProject = useMemo(() => {
     const map = new Map<string, string>();
-    const inventory = plotsForProject.length || form.PreferredPlotIds.length ? plotsForProject : unitsForProject;
-    inventory.forEach((u: any) => { if (u.BlockId) map.set(String(u.BlockId), u.BlockName); });
+    // Blocks holding anything for sale — plots and constructed units alike.
+    [...plotsForProject, ...unitsForProject].forEach((u: any) => { if (u.BlockId) map.set(String(u.BlockId), u.BlockName); });
     return Array.from(map, ([Id, Name]) => ({ Id, Name }));
   }, [unitsForProject, plotsForProject, form.PreferredPlotIds.length]);
   const unitsForBlock = useMemo(() => {
@@ -1050,7 +1054,20 @@ const CrmApplication: React.FC = () => {
   // anymore; see the comment on APPLICATION_TRANSITIONS in
   // crmApplicationWorkflow.js for why Cancel-and-redo isn't the answer
   // either at that point.
-  const isPlottedProject = plotsForProject.length > 0;
+  // What this sale is, from what the project actually has for sale: plots
+  // (land), constructed units (flats, villas), or both — a plotted project
+  // with converted villas sells either. An existing pick decides the mode;
+  // otherwise the user chooses, defaulting to what the project has.
+  const projectHasPlots = plotsForProject.length > 0 || form.PreferredPlotIds.length > 0;
+  const projectHasUnits = unitsForProject.length > 0 || form.PreferredUnitIds.length > 0;
+  const saleKind: "plot" | "unit" =
+    form.PreferredPlotIds.length ? "plot"
+    : form.PreferredUnitIds.length ? "unit"
+    : saleKindChoice === "unit" && projectHasUnits ? "unit"
+    : saleKindChoice === "plot" && projectHasPlots ? "plot"
+    : projectHasPlots ? "plot" : "unit";
+  const canChooseSaleKind = projectHasPlots && projectHasUnits;
+  const isPlottedProject = saleKind === "plot";
 
   const canEditUnitSelection = wizardAppStatus === null || wizardAppStatus === CrmStatus.DRAFT || wizardAppStatus === CrmStatus.PENDING || wizardAppStatus === CrmStatus.REJECTED;
 
@@ -2193,6 +2210,7 @@ const CrmApplication: React.FC = () => {
                         value={form.ProjectId}
                         disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(v) => {
+                          setSaleKindChoice(null); // a new project starts from what it sells
                           setForm((f) => ({ ...f, ProjectId: v, BlockId: "", FloorNo: "", PreferredUnitIds: [], PreferredPlotIds: [], PaymentPlanId: "" }));
                         }}
                         placeholder="Select project"
@@ -2211,7 +2229,26 @@ const CrmApplication: React.FC = () => {
                         {blocksForProject.map((b) => <option key={b.Id} value={b.Id}>{b.Name}</option>)}
                       </select>
                     </div>
-                    {!isPlottedProject && <div>
+                    {canChooseSaleKind && (
+                      <div className="col-span-2">
+                        <label className={labelCls}>Selling</label>
+                        <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/30">
+                          {([["plot", "Plot (land)"], ["unit", "Villa / unit"]] as const).map(([k, label]) => (
+                            <button key={k} type="button"
+                              disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
+                              onClick={() => {
+                                if (saleKind === k) return;
+                                setSaleKindChoice(k);
+                                setForm((f) => ({ ...f, PreferredUnitIds: [], PreferredPlotIds: [], FloorNo: "", PaymentPlanId: "" }));
+                              }}
+                              className={`px-3 h-8 text-xs font-semibold rounded-md transition-colors disabled:opacity-50 ${saleKind === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {!isPlottedProject && floorsForBlock.length > 0 && <div>
                       <label className={labelCls}>Floor</label>
                       <select value={form.FloorNo} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
@@ -2223,7 +2260,7 @@ const CrmApplication: React.FC = () => {
                       </select>
                     </div>}
                     <div className="col-span-2">
-                      <label className={labelCls}>{isPlottedProject ? "Plots" : "Unit"} *</label>
+                      <label className={labelCls}>{isPlottedProject ? "Plots" : canChooseSaleKind ? "Villa / unit" : "Unit"} *</label>
                       {isPlottedProject ? (
                           <div className={unitLocked || !canEditUnitSelection ? "pointer-events-none opacity-50" : ""}>
                           <MultiSelectDropdown
@@ -2264,7 +2301,7 @@ const CrmApplication: React.FC = () => {
                             </SelectTrigger>
                             <SelectContent>
                               {(unitsForProject as any[]).map((u: any) => (
-                                <SelectItem key={u.Id} value={String(u.Id)}>{u.UnitName} {u.AreaSqFt ? `(${u.AreaSqFt} sq.ft)` : ""}</SelectItem>
+                                <SelectItem key={u.Id} value={String(u.Id)}>{u.UnitName}{u.VillaTypeCode ? ` · ${u.VillaTypeCode}` : ""} {u.AreaSqFt ? `(${Number(u.AreaSqFt).toLocaleString("en-IN")} sq.ft)` : ""}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>

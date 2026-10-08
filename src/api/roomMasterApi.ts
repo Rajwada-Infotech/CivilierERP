@@ -7,6 +7,8 @@ export interface RoomMasterRow {
   RoomName: string;
   UnitId: number;
   IsActive: boolean;
+  // A villa room's floor inside the villa ("G", "1", …); null for a flat.
+  Storey?: string | null;
 }
 
 // Real dbo.RoomMaster rows tagged to this unit in Flat Master — activeOnly

@@ -18,6 +18,7 @@ import {
 
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const API = "/api/crm/payments";
 
@@ -534,7 +535,8 @@ export default function CrmOnAccount() {
         )}
 
         {/* ── Filter panel ──────────────────────────────────────────────────── */}
-        <div className="rounded-xl border border-border bg-card/40 px-3 py-2.5">
+        <div className="rounded-xl border border-border bg-card/40 px-3 py-2.5 space-y-2">
+          {/* Row 1: search + status + mode + dates + buttons */}
           <div className="flex flex-wrap gap-2 items-center">
             <div className="relative flex-1 min-w-52">
               <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -544,29 +546,35 @@ export default function CrmOnAccount() {
                 className="w-full h-8 pl-8 pr-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
 
-            <select value={status} onChange={(e) => setStatus(e.target.value)}
-              className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary">
-              <option value="">All Status</option>
-              <option value="Unapplied">Unapplied</option>
-              <option value="PartiallyApplied">Partial</option>
-              <option value="Applied">Applied</option>
-            </select>
+            <Select value={status || "__all__"} onValueChange={(v) => setStatus(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-sm w-32">
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Status</SelectItem>
+                <SelectItem value="Unapplied">Unapplied</SelectItem>
+                <SelectItem value="PartiallyApplied">Partial</SelectItem>
+                <SelectItem value="Applied">Applied</SelectItem>
+              </SelectContent>
+            </Select>
 
-            <select value={mode} onChange={(e) => setMode(e.target.value)}
-              className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary">
-              <option value="">All Modes</option>
-              {["Cash","Cheque","NEFT","RTGS","UPI","IMPS","Online"].map((m) => <option key={m}>{m}</option>)}
-            </select>
+            <Select value={mode || "__all__"} onValueChange={(v) => setMode(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8 text-sm w-32">
+                <SelectValue placeholder="All Modes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Modes</SelectItem>
+                {["Cash","Cheque","NEFT","RTGS","UPI","IMPS","Online"].map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+              </SelectContent>
+            </Select>
 
             <DateInput value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-              className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+              className="h-8 w-36 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             <DateInput value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-              className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-
-            <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
+              className="h-8 w-36 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
 
             <button onClick={runSearch}
-              className="h-8 flex items-center gap-1.5 px-3 rounded-lg btn-module text-white text-sm hover:shadow-lg ">
+              className="h-8 flex items-center gap-1.5 px-3 rounded-lg btn-module text-white text-sm hover:shadow-lg">
               <Filter size={12} />Search
             </button>
             {hasFilters && (
@@ -576,6 +584,9 @@ export default function CrmOnAccount() {
               </button>
             )}
           </div>
+
+          {/* Row 2: company / project / block */}
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
         </div>
 
         {/* ── Bank-statement ledger ─────────────────────────────────────────── */}
@@ -614,15 +625,16 @@ export default function CrmOnAccount() {
                   const pct   = d.Amount > 0 ? (d.AppliedAmount / d.Amount) * 100 : 0;
                   const cls   = modeColor[d.PaymentMode || ""] || "bg-muted/50 text-muted-foreground";
                   const accent = statusAccent[d.Status];
+                  const isApplied = d.Status === "Applied";
                   return (
                     <React.Fragment key={d.Id}>
                       <tr onClick={() => toggle(d.Id)}
-                        className="hover:bg-muted/20 cursor-pointer transition-colors">
+                        className={`cursor-pointer transition-colors ${isApplied ? "opacity-70 bg-muted/10 hover:opacity-100 hover:bg-muted/20" : "hover:bg-muted/20"}`}>
 
                         {/* expand toggle + status accent bar */}
                         <td className="pl-0 pr-0.5 text-center text-muted-foreground relative">
-                          <div className="absolute left-0 top-0 bottom-0 w-0.5" style={{ background: accent }} />
-                          <span className="pl-1.5">{isExp ? <ChevronDown size={12} /> : <CRight size={12} />}</span>
+                          <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: accent }} />
+                          <span className="pl-2">{isExp ? <ChevronDown size={12} /> : <CRight size={12} />}</span>
                         </td>
 
                         {/* Date */}
