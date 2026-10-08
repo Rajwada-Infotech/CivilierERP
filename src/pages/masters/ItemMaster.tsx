@@ -39,6 +39,8 @@ import { getItemGroups } from "@/api/itemGroupApi";
 import { getUomList } from "@/api/uomApi";
 import { getHsn } from "@/api/hsnApi";
 import { usePageRights } from "@/hooks/usePageRights";
+import { DuplicateShortCodesPanel } from "./DuplicateShortCodesPanel";
+import { suggestFreeShortCode } from "./itemShortCodes";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
   Dialog,
@@ -633,6 +635,19 @@ const ItemMaster: React.FC = () => {
     } finally {
       setLoadingAlternateUoms(false);
     }
+  };
+
+  // From the "duplicate short codes" list: opens the item in the form with a free short code already filled
+  // in (A → A2), for the person to accept or change before saving.
+  const handleRenameDuplicate = async (id: string) => {
+    const row = data.find((r) => r._id === id);
+    if (!row) return;
+    const suggestion = suggestFreeShortCode(row.shortCode, data);
+    await handleEdit(id);
+    setFormState((prev) => ({ ...prev, shortCode: suggestion }));
+    toast.info(
+      `"${row.shortCode}" is shared with another item. "${suggestion}" is filled in — change it if you like, then save.`,
+    );
   };
 
   const handleDelete = async (id: string) => {
@@ -1594,6 +1609,9 @@ const ItemMaster: React.FC = () => {
           </div>
         </div>
         )}
+
+        {/* ── Short codes used by more than one item ── */}
+        <DuplicateShortCodesPanel items={data} canEdit={rights.canEdit} onRename={handleRenameDuplicate} />
 
         {/* ── Table ── */}
         <div className="rounded-xl border border-border bg-card p-4">

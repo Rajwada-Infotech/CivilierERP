@@ -49,6 +49,7 @@ import {
   type SalesSummaryData,
 } from "@/api/homeDashboardApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { LazyWhenVisible } from "@/components/LazyWhenVisible";
 import { getModuleRanking } from "@/api/homeWidgetsApi";
 import { moduleOfPath } from "@/lib/moduleOfPath";
 import { getFixedAssets } from "@/api/fixedAssetApi";
@@ -2185,7 +2186,11 @@ export default function HomePage() {
             {/* ── Project Network (map-style panel) + remaining key numbers ── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
               <Bento title="Project Network" icon={Building2} accent="#7c3aed" className="lg:col-span-2" delay={0.3}>
-                <ProjectNetworkMap projects={projectList} total={eng?.projects?.total ?? projectList.length} />
+                {/* Below the first screen and the heaviest panel on the page (force layout + ~50 animated lines):
+                    built only when it is about to be scrolled to, so it no longer competes with the first paint. */}
+                <LazyWhenVisible minHeight={400}>
+                  <ProjectNetworkMap projects={projectList} total={eng?.projects?.total ?? projectList.length} />
+                </LazyWhenVisible>
               </Bento>
 
               <Bento title="More key numbers" icon={Database} accent="#6366f1" delay={0.35}>
