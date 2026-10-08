@@ -77,7 +77,7 @@ beforeEach(() => {
 });
 
 describe("every report answers a page the Reports screen can walk through", () => {
-  test.each(["activity-status", "overdue", "engineer-workload", "quality-checks", "daily-updates"])("%s", async (name) => {
+  test.each(["activity-status", "overdue", "engineer-workload", "quality-checks", "daily-updates", "daily-reports"])("%s", async (name) => {
     const res = await get(`${name}?page=2&limit=500`);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ total: 1200, page: 2, totalPages: 3 });
@@ -147,6 +147,19 @@ describe("filters", () => {
     expect(q.text).not.toMatch(/cu\.Photo AS/); // the photo itself is never pulled into a report
   });
 
+  test("daily reports: progress made is worked out over the whole logbook, then the date range is applied", async () => {
+    await get("daily-reports?projectId=3&dateFrom=2026-10-07&dateTo=2026-10-08");
+    const q = rowsQuery();
+    expect(q.text).toMatch(/LAG\(l\.ProgressPercent\) OVER \(PARTITION BY l\.DependencyMasterActivityId ORDER BY l\.LogDate\)/);
+    expect(q.text).toMatch(/dl\.LogDate >= @dateFrom/);
+    expect(q.text).toMatch(/dl\.LogDate <= @dateTo/);
+    expect(q.text).toMatch(/dm\.ProjectId IN \(3\)/);
+    // the date filter is outside the LAG subquery, so the first day in a range still has its true progress made
+    expect(q.text.indexOf("LAG(")).toBeLessThan(q.text.indexOf("dl.LogDate >= @dateFrom"));
+    expect(q.text).toMatch(/ORDER BY ep\.name, dl\.LogDate DESC/);
+    expect(q.text).toMatch(/daa\.IsCurrent = 1/);
+  });
+
   test("engineer workload groups per engineer and leaves cancelled work out", async () => {
     await get("engineer-workload?projectId=3");
     const q = rowsQuery();
@@ -158,7 +171,7 @@ describe("filters", () => {
 
 describe("several projects at once", () => {
   test("a comma-separated list becomes one IN list on every report", async () => {
-    for (const name of ["activity-status", "overdue", "engineer-workload", "quality-checks", "daily-updates"]) {
+    for (const name of ["activity-status", "overdue", "engineer-workload", "quality-checks", "daily-updates", "daily-reports"]) {
       mockQueries = [];
       await get(`${name}?projectId=4,7,9`);
       expect(rowsQuery().text).toMatch(/dm\.ProjectId IN \(4,7,9\)/);

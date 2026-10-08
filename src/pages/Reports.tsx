@@ -70,6 +70,7 @@ import {
   ShieldCheck,
   Camera,
   UserCog,
+  CalendarDays,
 } from "lucide-react";
 import { DateInput } from "@/components/ui/date-input";
 
@@ -172,6 +173,7 @@ const CWD_INLINE_PROJECT_REPORTS = new Set([
   "cwd-engineer-workload",
   "cwd-quality-checks",
   "cwd-daily-updates",
+  "cwd-daily-reports",
 ]);
 
 // Civil Work DPR report cells.
@@ -1348,6 +1350,34 @@ const ALL_REPORTS: ReportDef[] = [
     ],
   },
   {
+    id: "cwd-daily-reports",
+    label: "Daily Reports",
+    description: "Which work was done where on each day, project wise, with the progress made that day (date range = report date)",
+    icon: CalendarDays,
+    color: "#0ea5e9",
+    apiPath: "/api/civilworkdpr-reports/daily-reports",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: null,
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Project", accessor: (r) => (r.projectName ?? "—") as string },
+      { header: "Date", accessor: (r) => cwdDate(r.logDate) },
+      { header: "Location", accessor: (r) => (r.location ?? "—") as string },
+      { header: "Activity", accessor: (r) => (r.activityName ?? "—") as string },
+      { header: "Engineers", accessor: (r) => (r.engineers ?? "—") as string },
+      { header: "Done That Day", accessor: (r) => (r.progressMade == null ? "—" : `${Number(r.progressMade) > 0 ? "+" : ""}${Number(r.progressMade)}%`) },
+      { header: "Progress Reached", accessor: (r) => cwdPercent(r.progressPercent) },
+      { header: "Status", accessor: (r) => cwdStatusLabel(r.status) },
+      { header: "Logged By", accessor: (r) => (r.loggedBy ?? "—") as string },
+      { header: "Remarks", accessor: (r) => (r.remarks ?? "—") as string },
+    ],
+  },
+  {
     id: "cwd-daily-updates",
     label: "Daily Checkpoint Updates",
     description: "Daily photo updates per checkpoint, with the time logged in IST (date range = update date)",
@@ -2341,6 +2371,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "cwd-overdue",
       "cwd-engineer-workload",
       "cwd-quality-checks",
+      "cwd-daily-reports",
       "cwd-daily-updates",
       "worker-attendance",
       "cwd-daily-labour",

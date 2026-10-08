@@ -147,6 +147,16 @@ router.post("/login", async (req, res) => {
     // FIXED: Normalize role
     const normalizedRole = normalizeRole(user.roleName);
 
+    // Maintenance mode: only a super admin may sign in.
+    {
+      const { getMaintenanceState } = require("../services/maintenanceMode");
+      const { maintenanceBody, isSuperAdmin } = require("../middleware/maintenanceGate");
+      const maintenance = await getMaintenanceState();
+      if (maintenance.active && !isSuperAdmin(normalizedRole)) {
+        return res.status(503).json(maintenanceBody(maintenance));
+      }
+    }
+
     const token = jwt.sign(
       {
         userId: user.id,
