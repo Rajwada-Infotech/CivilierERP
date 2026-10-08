@@ -18,7 +18,7 @@ import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { parseSheetDate } from "@/lib/xlsxBook";
 import { createInventoryImport } from "@/api/fixedAssetInventoryImportApi";
-import { downloadFaInventoryTemplate, readFaImportFile } from "./faInventoryExcel";
+import { downloadFaInventoryTemplate, readFaImportFile, sameName } from "./faInventoryExcel";
 import {
   getEligibleAssetItems, getPendingBatches, deletePendingBatch, getFixedAssetTaggings, createFixedAssetTagging,
   updateFixedAssetTagging, deleteFixedAssetTagging,
@@ -435,12 +435,12 @@ export default function FixedAssetTagging() {
           continue;
         }
 
-        const company = companyList.find((c) => c.label.toLowerCase() === companyName.toLowerCase());
+        const company = companyList.find((c) => sameName(c.label, companyName));
         if (!company) { row.message = `Company "${companyName}" not found`; results.push(row); continue; }
         row.companyId = company.id;
         row.companyLabel = company.label;
 
-        const project = projectList.find((p) => p.company_id === company.id && p.label.toLowerCase() === projectName.toLowerCase());
+        const project = projectList.find((p) => p.company_id === company.id && sameName(p.label, projectName));
         if (!project) { row.message = `Project "${projectName}" not found under ${company.label}`; results.push(row); continue; }
         row.projectId = project.id;
         row.projectLabel = project.label;
@@ -448,7 +448,7 @@ export default function FixedAssetTagging() {
         const godown = godownList.find((g) =>
           g.EnterpriseID === company.id &&
           (g.ProjectID === project.id || g.ProjectID == null) &&
-          g.GodownName.toLowerCase() === godownName.toLowerCase()
+          sameName(g.GodownName, godownName)
         );
         if (!godown) { row.message = `Godown "${godownName}" not found for this company/project`; results.push(row); continue; }
         row.godownId = godown.GodownID;
