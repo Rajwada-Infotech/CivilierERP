@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import { Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -55,8 +55,12 @@ export function CrmListToolbar({ tabs, status, onStatus, searchValue, onSearch, 
             </button>
           )}
         </div>
-        {children}
       </div>
+      {children && (
+        <div className="w-full mt-1 flex justify-end">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

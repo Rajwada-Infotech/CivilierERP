@@ -231,16 +231,18 @@ const CrmCancellations: React.FC = () => {
         </div>
       }
     >
-      <div className="flex gap-3 flex-wrap items-center mb-3">
-        <div className="relative flex-1 min-w-48">
+      <div className="space-y-2 mb-3">
+          <div className="flex gap-3 flex-wrap items-center">
+            <div className="relative flex-1 min-w-48">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
             placeholder="Search customer, booking, cancellation no... (Enter to search)"
             className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-      </div>
+          </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+        </div>
 
       <DataTable
         data={cancellations}

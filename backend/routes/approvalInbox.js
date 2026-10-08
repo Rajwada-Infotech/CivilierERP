@@ -385,7 +385,7 @@ function buildInboxQueries(module, projectScope = null) {
       queries.push(`
         SELECT
           'crm-refund-payment'                 AS Module,
-          'CRM Refund Payment'                 AS ModuleLabel,
+          'Refund payment'                     AS ModuleLabel,
           CAST(PPaymentID AS NVARCHAR)         AS RecordId,
           ISNULL(DocNo, PPaymentName)          AS Reference,
           PDate                                AS RecordDate,
@@ -1279,38 +1279,10 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
-    // Second, separate approval tier — same gap as crm-refunds above but for
-    // the Finance-side step (PUT /:id/finance-approve in crmRefunds.js),
-    // which only ever ran from CrmRefunds.tsx's own inline "Finance Approve"
-    // button. Kept as its own module (not folded into crm-refunds) because
-    // it's a genuinely different gate — CRM checker vs. Finance — exactly
-    // like crm-agreement-date is split out from crm-agreements.
-    if (!module || module === "crm-refunds-finance") {
-      queries.push(`
-        SELECT
-          'crm-refunds-finance'                  AS Module,
-          'CRM Refund (Finance)'                 AS ModuleLabel,
-          CAST(r.Id AS NVARCHAR)                 AS RecordId,
-          r.RefundNo                             AS Reference,
-          r.CreatedAt                            AS RecordDate,
-          r.Status,
-          CAST(NULL AS NVARCHAR)                 AS ContractorName,
-          cu.CustomerName                        AS SupplierName,
-          r.NetAmount                            AS Amount,
-          ${NULL_EXTRA}
-          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
-          ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
-          ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
-          ''                                      AS RejectedBy,
-          ISNULL(CAST(r.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
-          ISNULL(r.UpdatedAt, r.CreatedAt)        AS LastModified
-        FROM dbo.CrmRefund r
-        JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
-        LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
-        LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
-        WHERE r.Status = 'FinancePending'
-      `);
-    }
+    // A refund has ONE Finance step: CRM approval raises its payout voucher,
+    // which Finance approves in Payments (module crm-refund-payment above).
+    // The separate 'crm-refunds-finance' tier listed here before was a second
+    // Finance sign-off on the same money, so it is no longer shown.
 
     // Civil Work DPR's per-assignment Approval Setup — an activity that's
     // Completed and already passed Quality Check, now waiting on whichever
