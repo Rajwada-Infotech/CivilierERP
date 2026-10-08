@@ -655,16 +655,20 @@ router.get("/inventory-status", requirePageRight("crm-bookings", "view"), async 
     const result = await req0.query(`
       SELECT
         ep.name AS ProjectName,
-        COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind)) AS UnitType,
+        t.UnitType,
         COUNT(u.Id) AS TotalUnits,
-        SUM(CASE WHEN bk.Id IS NOT NULL THEN 1 ELSE 0 END) AS BookedUnits,
-        SUM(CASE WHEN bk.Id IS NULL THEN 1 ELSE 0 END) AS AvailableUnits
+        SUM(bk.Booked) AS BookedUnits,
+        SUM(1 - bk.Booked) AS AvailableUnits
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise ep ON ep.id = u.ProjectId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}', 'Expired','Transferred')
+      -- SQL Server can't GROUP BY a subquery: resolve the type name first.
+      OUTER APPLY (SELECT COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind)) AS UnitType) t
+      -- one flag per unit, so a unit is never counted twice
+      OUTER APPLY (SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.UnitId = u.Id AND b.IsActive = 1
+        AND b.Status NOT IN ${DEAD_BOOKING_SQL}) THEN 1 ELSE 0 END AS Booked) bk
       WHERE ${conds.join(" AND ")}
-      GROUP BY ep.name, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind))
-      ORDER BY ep.name, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind))
+      GROUP BY ep.name, t.UnitType
+      ORDER BY ep.name, t.UnitType
     `);
     res.json(result.recordset);
   } catch (err) { res.status(500).json({ error: err.message }); }
