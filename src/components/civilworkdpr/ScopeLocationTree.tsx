@@ -136,15 +136,11 @@ export function ScopeLocationTree<T extends ScopeLocatable>({
   // default flex-item min-width is `auto` (grow-to-fit-content), so
   // without it a wide descendant keeps demanding its full natural width
   // all the way up the tree regardless of any indentation.
-  const INDENT = 14;
-  // Capped at 3 levels' worth — Project>Block>Floor>Unit>Room is 5 deep, and
-  // indenting every level the full amount (12 + 5*14 = 82px) ate almost a
-  // quarter of a 375px phone screen before the actual activity content even
-  // started, which is what made everything below it look so cramped. Depths
-  // past the cap reuse the same indent; the icon/label/border-and-background
-  // per level still shows the hierarchy without needing more horizontal
-  // space for it.
-  const indentFor = (depth: number) => 12 + Math.min(depth, 3) * INDENT;
+  // Every level indents, so a villa's floors sit under the villa and its rooms
+  // under their floor (Project>Block>Plot>Villa>Floor>Room is 6 deep). The
+  // step scales with the screen — 16px on a desktop, ~7px on a 375px phone —
+  // so the deepest room still starts within ~55px on a phone.
+  const indentFor = (depth: number) => `calc(12px + ${Math.min(depth, 6)} * clamp(6px, 2vw, 16px))`;
   const renderNode = (node: TreeNode<T>, depth: number) => {
     const Level = LEVELS[node.level] ?? LEVELS[LEVELS.length - 1];
     const expanded = isOpen(node.key);
