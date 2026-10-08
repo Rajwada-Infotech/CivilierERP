@@ -162,6 +162,33 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// ─── Short code (M_code) is unique across items ───────────────────────────────
+// Case-insensitive and ignoring surrounding spaces, so "cem" and " CEM " clash. Item groups share the
+// table but are not items (no Parent_Id), so they are not part of this rule.
+const SHORT_CODE_MAX = 20;
+const normalizeShortCode = (v) => {
+  const code = v == null ? "" : String(v).trim();
+  return code || null;
+};
+
+async function findItemWithShortCode(pool, code, excludeId) {
+  const r = await pool
+    .request()
+    .input("code", sql.NVarChar(SHORT_CODE_MAX), code)
+    .input("excludeId", sql.UniqueIdentifier, excludeId || null)
+    .query(`
+      SELECT TOP 1 M_Id, M_Name
+      FROM dbo.Item_Master_Group
+      WHERE Parent_Id IS NOT NULL
+        AND UPPER(LTRIM(RTRIM(M_code))) = UPPER(@code)
+        AND (@excludeId IS NULL OR M_Id <> @excludeId)
+    `);
+  return r.recordset[0] || null;
+}
+
+const duplicateCodeMessage = (code, other) =>
+  `Short code "${code}" is already used by item "${other.M_Name}". Each item needs its own short code.`;
+
 // ─── POST create item ─────────────────────────────────────────────────────────
 router.post("/", requirePageRight("item-master", "create"), async (req, res) => {
   const {
@@ -190,8 +217,16 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
       .status(400)
       .json({ error: "Parent_Id (group) is required for items" });
 
+  const shortCode = normalizeShortCode(M_code);
+  if (shortCode && shortCode.length > SHORT_CODE_MAX)
+    return res.status(400).json({ error: `Short code can be at most ${SHORT_CODE_MAX} characters.` });
+
   try {
     const pool = getPool();
+    if (shortCode) {
+      const clash = await findItemWithShortCode(pool, shortCode, null);
+      if (clash) return res.status(409).json({ error: duplicateCodeMessage(shortCode, clash) });
+    }
     const { hasUOM, hasDS, hasGL, hasCC, hasDOS2 } = await getItemOptionalCols(pool);
 
     const req2 = pool
@@ -201,7 +236,7 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
       .input("M_Type", sql.NVarChar(50), M_Type || null)
       .input("M_BelongsTo", sql.UniqueIdentifier, M_BelongsTo || null) // ← UUID
       .input("M_Group", sql.NVarChar(200), M_Group || null) // ← Name
-      .input("M_code", sql.NVarChar(20), M_code || null) // ← short code
+      .input("M_code", sql.NVarChar(SHORT_CODE_MAX), shortCode) // ← short code
       .input("M_IdentityCode", sql.Bit, M_IdentityCode ? 1 : 0)
       .input("M_HSN", sql.NVarChar(20), M_HSN || null)
       .input("M_CGST", sql.Decimal(5, 2), M_CGST ?? null)
@@ -294,8 +329,25 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
 
   if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
 
+  const shortCode = normalizeShortCode(M_code);
+  if (shortCode && shortCode.length > SHORT_CODE_MAX)
+    return res.status(400).json({ error: `Short code can be at most ${SHORT_CODE_MAX} characters.` });
+
   try {
     const pool = getPool();
+    if (shortCode) {
+      // An item that already shares its code with another (from before this rule) can still be saved
+      // with that code untouched; changing it to a code another item uses is refused.
+      const current = await pool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .query("SELECT M_code FROM dbo.Item_Master_Group WHERE M_Id = @id");
+      const unchanged = (normalizeShortCode(current.recordset[0]?.M_code) || "").toUpperCase() === shortCode.toUpperCase();
+      if (!unchanged) {
+        const clash = await findItemWithShortCode(pool, shortCode, id);
+        if (clash) return res.status(409).json({ error: duplicateCodeMessage(shortCode, clash) });
+      }
+    }
     const { hasUOM, hasDS, hasGL, hasCC, hasDOS2 } = await getItemOptionalCols(pool);
 
     const req2 = pool
@@ -306,7 +358,7 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
       .input("M_Type", sql.NVarChar(50), M_Type || null)
       .input("M_BelongsTo", sql.UniqueIdentifier, M_BelongsTo || null) // ← UUID
       .input("M_Group", sql.NVarChar(200), M_Group || null) // ← Name
-      .input("M_code", sql.NVarChar(20), M_code || null) // ← short code
+      .input("M_code", sql.NVarChar(SHORT_CODE_MAX), shortCode) // ← short code
       .input("M_IdentityCode", sql.Bit, M_IdentityCode ? 1 : 0)
       .input("M_HSN", sql.NVarChar(20), M_HSN || null)
       .input("M_CGST", sql.Decimal(5, 2), M_CGST ?? null)
@@ -392,3 +444,4 @@ router.delete("/:id", requirePageRight("item-master", "delete"), async (req, res
 });
 
 module.exports = router;
+module.exports._test = { normalizeShortCode };
