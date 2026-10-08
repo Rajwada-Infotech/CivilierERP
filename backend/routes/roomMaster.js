@@ -46,6 +46,7 @@ router.get("/", cache("room-master", 300), async (req, res) => {
         r.RoomCategoryId,
         cat.Alias AS RoomCategoryAlias,
         r.Floor,
+        r.Storey,
         r.IsActive,
         r.BlueprintFileName,
         r.BlueprintMimeType,
@@ -101,7 +102,11 @@ router.get("/units", cache("room-master-units", 300), async (req, res) => {
         u.BlockId,
         b.BlockName,
         u.UnitType,
-        u.FloorNo
+        u.FloorNo,
+        -- Land (a plot kept as a unit row) never has rooms; a villa built on a
+        -- plot has no tower floor — its rooms sit on the villa's own floors.
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind AND k.IsLand = 1) THEN 1 ELSE 0 END AS BIT) AS IsLand,
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id AND pl.IsActive = 1) THEN 1 ELSE 0 END AS BIT) AS IsVilla
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster b ON b.Id = u.BlockId
       WHERE u.IsActive = 1

@@ -178,7 +178,18 @@ type UnitOption = {
   BlockName: string | null;
   UnitType: string | null;
   FloorNo: number | null;
+  /** Land kept as a unit row (a plot) — never has rooms. */
+  IsLand?: boolean;
+  /** A villa built on a plot — no tower floor; its rooms sit on the villa's own floors. */
+  IsVilla?: boolean;
 };
+
+// A villa's own floors (RoomMaster.Storey): Ground, then 1, 2 …, then named ones.
+const storeyRank = (s: string) => (s === "G" ? -1 : /^\d+$/.test(s) ? Number(s) : Number.MAX_SAFE_INTEGER);
+const storeyName = (s: string) => (s === "G" ? "Ground" : /^\d+$/.test(s) ? `Floor ${s}` : s);
+// Villa rooms bottom floor first; rooms without a villa floor keep their order.
+const byStorey = (a: Record<string, unknown>, b: Record<string, unknown>) =>
+  a.storey && b.storey ? storeyRank(String(a.storey)) - storeyRank(String(b.storey)) : 0;
 
 // 0 = Ground -> "G", otherwise the numbered floor, same convention
 // CrmProjectAutoSetupFloor.FloorLabel and the backend's own Floor-derivation
@@ -404,6 +415,8 @@ type UnitRoomGroup = {
   floorNo: number | null;
   bhkType: string | null;
   rooms: RecordWithId[];
+  /** Built on a plot: listed under the block's "Villas" row, not a floor. */
+  isVilla?: boolean;
 };
 
 // One collapsible level of the Room Records tree (Project / Block / Floor),
@@ -696,6 +709,8 @@ const RoomMaster: React.FC = () => {
       roomName: item.RoomName ?? "",
       roomCategoryId: item.RoomCategoryId ?? null,
       floor: item.Floor ?? "",
+      // A villa room's own floor inside the villa (G, 1, 2 …); "" for flats.
+      storey: item.Storey ?? "",
       isActive: Boolean(item.IsActive),
       blueprintFileName: item.BlueprintFileName ?? null,
       blueprintMimeType: item.BlueprintMimeType ?? null,
@@ -720,11 +735,14 @@ const RoomMaster: React.FC = () => {
     const map = new Map<string, UnitRoomGroup>();
     // Every active unit is a node — including one with no rooms yet, so a
     // unit that is out of sync with its layout is visible (0/7), not hidden.
+    // Land (plots kept as unit rows) never has rooms, so it isn't listed —
+    // unless a room somehow points at it (then the loop below still adds it).
     for (const u of allUnits) {
+      if (u.IsLand) continue;
       map.set(`u:${u.Id}`, {
         key: `u:${u.Id}`, unitId: String(u.Id), projectId: String(u.ProjectId), blockId: String(u.BlockId),
         projectName: projectName.get(String(u.ProjectId)) || "", blockName: u.BlockName || "", unitName: u.Name || "",
-        floorNo: u.FloorNo ?? null, bhkType: u.UnitType ?? null, rooms: [],
+        floorNo: u.FloorNo ?? null, bhkType: u.UnitType ?? null, rooms: [], isVilla: !!u.IsVilla,
       });
     }
     for (const r of mappedData) {
@@ -756,7 +774,8 @@ const RoomMaster: React.FC = () => {
       const p = projects.get(g.projectId)!;
       if (!p.blocks.has(g.blockId)) p.blocks.set(g.blockId, { key: `b:${g.projectId}-${g.blockId}`, name: g.blockName || "—", floors: new Map() });
       const b = p.blocks.get(g.blockId)!;
-      const fk = g.floorNo == null ? "none" : String(g.floorNo);
+      // A villa has no tower floor: villas get their own row in the block.
+      const fk = g.isVilla ? "villas" : g.floorNo == null ? "none" : String(g.floorNo);
       if (!b.floors.has(fk)) b.floors.set(fk, { key: `f:${g.projectId}-${g.blockId}-${fk}`, floorNo: g.floorNo, units: [] });
       b.floors.get(fk)!.units.push(g);
     }
@@ -1103,7 +1122,7 @@ const RoomMaster: React.FC = () => {
                         {(() => {
                           const pos = { projectId: Number(p.key.slice(2)), blockId: b.blockIdNum, floorNo: f.floorNo };
                           const types = typesOf(f.units);
-                          const floorLabelText = f.floorNo == null ? "No floor" : f.floorNo === 0 ? "Ground Floor" : `Floor ${f.floorNo}`;
+                          const floorLabelText = f.key.endsWith("-villas") ? "Villas" : f.floorNo == null ? "No floor" : f.floorNo === 0 ? "Ground Floor" : `Floor ${f.floorNo}`;
                           return (
                             <TreeRow depth={2} expanded={expandedUnits.has(f.key)} onToggle={() => toggleUnit(f.key)}
                               icon={<Layers size={13} className="text-amber-500 shrink-0" />}
@@ -1189,10 +1208,11 @@ const RoomMaster: React.FC = () => {
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {g.rooms.map((room) => (
+                                      {[...g.rooms].sort(byStorey).map((room) => (
                                         <tr key={room._id} className="border-b border-border last:border-0 hover:bg-muted/10">
                                           <td className="pr-3 py-2.5 font-medium text-foreground" style={{ paddingLeft: 16 + 4 * 20 + 8 }}>{room.roomName as string}</td>
-                                          <td className="px-3 py-2.5 text-muted-foreground">{(room.floor as string) || "—"}</td>
+                                          {/* A villa room's floor is the villa's own (Ground / 1 / 2); a flat's is the unit's. */}
+                                          <td className="px-3 py-2.5 text-muted-foreground">{room.storey ? storeyName(String(room.storey)) : (room.floor as string) || "—"}</td>
                                           <td className="px-3 py-2.5">
                                             {room.isActive ? (
                                               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
