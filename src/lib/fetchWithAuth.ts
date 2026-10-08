@@ -1,5 +1,6 @@
 ﻿import { apiUrl } from "./apiBase";
 import { toast } from "sonner";
+import { STABILISING_MESSAGE, isGatewayFailure } from "./gatewayFetch";
 
 // Exported so callers can distinguish auth/permission errors from network errors.
 export class ApiError extends Error {
@@ -20,6 +21,11 @@ export interface FetchWithAuthOptions extends RequestInit {
   // so future server-side middleware can also honour the flag.
   skipActivityLog?: boolean;
 }
+
+// A 502 / 504 from the gateway during a deploy: the browser's fetch is already wrapped (see gatewayFetch.ts) so
+// reads were retried and the "system is updating" banner is showing. If it is still down, fail with a plain
+// sentence instead of handing back the gateway's error page.
+export { STABILISING_MESSAGE };
 
 // Dedup key in sessionStorage — survives Vite HMR module re-evaluation
 // (unlike a plain `let`), is cleared when the tab closes, and is not
@@ -122,8 +128,9 @@ export async function fetchWithAuth(
   // it automatically so it can include the correct multipart boundary string.
   const isFormData = fetchOptions.body instanceof FormData;
 
+  const send = async (): Promise<Response> => {
   try {
-    response = await fetch(apiUrl(url), {
+    return await fetch(apiUrl(url), {
       ...fetchOptions,
       headers: {
         ...(!isFormData ? { "Content-Type": "application/json" } : {}),
@@ -150,6 +157,12 @@ export async function fetchWithAuth(
       console.error("Network error:", err);
     }
     throw new Error("Network error. Please check your connection.");
+  }
+  };
+
+  response = await send();
+  if (isGatewayFailure(response)) {
+    throw new ApiError(STABILISING_MESSAGE, response.status);
   }
 
   if (response.status === 401) {

@@ -11,6 +11,16 @@ import { buildWorkbook, downloadBlob, readWorkbook, type XlsxCell, type XlsxShee
 
 export type FaImportMode = "bulk" | "individual";
 
+/**
+ * Whether a name typed in the sheet is the same as a master's name: ignoring capitals, spaces at either end and
+ * repeated spaces. A master saved as "R..G OFFICE " (trailing space) is still "R..G OFFICE" to the person
+ * filling the sheet — the importer trims the sheet's value, so the stored one has to be trimmed too.
+ */
+export const sameName = (a: unknown, b: unknown): boolean => {
+  const norm = (v: unknown) => String(v ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  return norm(a) !== "" && norm(a) === norm(b);
+};
+
 export interface FaImportMasters {
   companies: { id: number; label: string }[];
   projects: { id: number; label: string; company_id: number | null }[];
