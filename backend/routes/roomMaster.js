@@ -150,7 +150,7 @@ router.get("/structure", cache("room-master-structure", 120), async (req, res) =
         f.Id, f.BlockId, f.FloorNo, f.FloorLabel,
         (SELECT COUNT(*) FROM dbo.UnitMaster u
          WHERE u.BlockId = f.BlockId AND u.IsActive = 1
-           AND ((f.FloorNo = -1 AND u.FloorNo IS NULL) OR (f.FloorNo <> -1 AND u.FloorNo = f.FloorNo))
+           AND ((f.FloorNo = -1 AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)) OR (f.FloorNo <> -1 AND u.FloorNo = f.FloorNo))
         ) AS UnitCount
       FROM dbo.CrmProjectAutoSetupFloor f
       WHERE f.ProjectId = @pid AND f.IsActive = 1
@@ -179,7 +179,7 @@ router.get("/floor-units/:floorId", async (req, res) => {
     const { BlockId, FloorNo } = floorRes.recordset[0];
 
     const request = pool.request().input("bid", sql.Int, BlockId);
-    const floorFilter = FloorNo === -1 ? "u.FloorNo IS NULL" : "u.FloorNo = @fno";
+    const floorFilter = FloorNo === -1 ? `u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)` : "u.FloorNo = @fno";
     if (FloorNo !== -1) request.input("fno", sql.Int, FloorNo);
 
     const result = await request.query(`

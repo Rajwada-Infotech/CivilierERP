@@ -235,7 +235,14 @@ const CrmPlotMaster: React.FC = () => {
     }
     // No kind is assumed here (kinds are master data): a single active kind is
     // pre-picked, otherwise the user chooses — the form already requires it.
-    if (!unitKind) { const usable = constructedAssetKinds.filter((kind) => !kind.IsLand && kind.IsActive !== false); if (usable.length === 1) setUnitKind(usable[0].Code); }
+    // A plot is built on as a villa: pre-pick the villa kind when the master has
+    // exactly one, else the only constructed kind; land kinds are never offered.
+    if (!unitKind) {
+      const usable = constructedAssetKinds.filter((kind) => !kind.IsLand && kind.IsActive !== false);
+      const villaKinds = usable.filter((kind) => /villa/i.test(`${kind.Code} ${kind.Name}`));
+      const pick = villaKinds.length === 1 ? villaKinds[0] : usable.length === 1 ? usable[0] : null;
+      if (pick) setUnitKind(pick.Code);
+    }
     setConvertOpen(true);
   };
 
@@ -780,7 +787,7 @@ const CrmPlotMaster: React.FC = () => {
                           );
                         })()}
                         <div><label className={label}>Asset kind</label>
-                          <Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div>
+                          <Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.filter((kind) => !kind.IsLand && kind.IsActive !== false).map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div>
                         <div className="sm:col-span-2"><label className={label}>Construction rate <span className="font-normal opacity-70">· Optional</span></label>
                           <div className="relative"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₹</span>
                             <input type="number" min="0" value={villaRate} onChange={(event) => setVillaRate(event.target.value)} placeholder="0" className={`${input} pl-7 pr-16 tabular-nums`} />

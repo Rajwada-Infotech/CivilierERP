@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Home, Pencil, Trash2, LayoutGrid } from "lucide-react";
+import { Home, Pencil, Trash2, LayoutGrid, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -50,6 +50,8 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
   const [planFor, setPlanFor] = useState<VillaType | null>(null);
   const [saving, setSaving] = useState(false);
   const [assignTo, setAssignTo] = useState("");
+  // Removed types stay out of the way unless asked for — they can be restored.
+  const [showRemoved, setShowRemoved] = useState(false);
 
   // Pick the starting project once, when the dialog opens. The parent rebuilds
   // `projects` on every render (and refetches in the background), so reacting
@@ -66,6 +68,8 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
     queryKey: [...villaTypesKey(projectId), "all"], queryFn: () => fetchVillaTypes(projectId, true), enabled: open && !!projectId,
   });
   const activeTypes = types.filter((t) => t.IsActive !== false);
+  const removedCount = types.length - activeTypes.length;
+  const shownTypes = showRemoved ? types : activeTypes;
   const canAssign = selectedPlotIds.length > 0 && selectedProjectId != null && String(selectedProjectId) === projectId;
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["villa-types"] });
@@ -95,6 +99,18 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Could not remove the villa type");
       toast.success("Villa type removed"); refresh();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const restore = async (type: VillaType) => {
+    try {
+      const response = await fetchWithAuth(`${VILLA_TYPE_API}/${type.Id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...type, IsActive: true }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not restore the villa type");
+      toast.success(`Villa type ${type.Code} restored`); refresh();
     } catch (e: any) { toast.error(e.message); }
   };
 
@@ -136,6 +152,12 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
         )}
         {projectId && (
           <>
+            {removedCount > 0 && (
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={showRemoved} onChange={(event) => setShowRemoved(event.target.checked)} />
+                Show removed types ({removedCount})
+              </label>
+            )}
             <div className="rounded-lg border border-border overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-muted-foreground text-xs">
@@ -152,10 +174,10 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
                   </tr>
                 </thead>
                 <tbody>
-                  {types.map((t) => (
+                  {shownTypes.map((t) => (
                     <tr key={t.Id} className={`border-t border-border ${t.IsActive === false ? "opacity-50" : ""}`}>
                       <td className="px-3 py-2 font-mono text-xs">{t.Code}</td>
-                      <td className="px-3 py-2">{t.Name}{t.IsActive === false && <span className="ml-2 text-[0.6875rem] text-muted-foreground">Inactive</span>}</td>
+                      <td className="px-3 py-2">{t.Name}{t.IsActive === false && <span className="ml-2 text-[0.6875rem] text-muted-foreground">Removed</span>}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{t.LayoutLabel || "—"}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{sqft(t.BaseLandAreaSqFt)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{sqft(t.BuiltUpAreaSqFt)}</td>
@@ -164,15 +186,24 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
                       <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{t.VillaCount ?? 0}</td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-1">
-                          <button onClick={() => setPlanFor(t)} disabled={t.IsActive === false} className="p-1.5 rounded hover:bg-muted disabled:opacity-35" title="Rooms by floor"><LayoutGrid size={14} /></button>
-                          <button onClick={() => setDraft({ ...t })} className="p-1.5 rounded hover:bg-muted" title="Edit"><Pencil size={14} /></button>
-                          <button onClick={() => remove(t)} disabled={t.IsActive === false} title="Remove (blocked while unconverted plots plan it)"
-                            className="p-1.5 rounded text-destructive hover:bg-destructive/10 disabled:opacity-35"><Trash2 size={14} /></button>
+                          {/* One state only: a type is in use, or removed (and can be restored). */}
+                          {t.IsActive === false ? (
+                            <button onClick={() => restore(t)} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-border text-xs font-medium hover:bg-muted" title="Bring this villa type back">
+                              <RotateCcw size={13} /> Restore
+                            </button>
+                          ) : (
+                            <>
+                              <button onClick={() => setPlanFor(t)} className="p-1.5 rounded hover:bg-muted" title="Rooms by floor"><LayoutGrid size={14} /></button>
+                              <button onClick={() => setDraft({ ...t })} className="p-1.5 rounded hover:bg-muted" title="Edit"><Pencil size={14} /></button>
+                              <button onClick={() => remove(t)} title="Remove (blocked while unconverted plots plan it)"
+                                className="p-1.5 rounded text-destructive hover:bg-destructive/10"><Trash2 size={14} /></button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
                   ))}
-                  {types.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-muted-foreground">No villa types for this project yet.</td></tr>}
+                  {shownTypes.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-muted-foreground">{removedCount > 0 ? `No active villa types — ${removedCount} removed (tick "Show removed types" to restore them).` : "No villa types for this project yet."}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -186,8 +217,8 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
               />
             )}
             <div className="grid gap-3 sm:grid-cols-4 items-end">
-              <div><label className="mb-1 block text-xs text-muted-foreground">Code *</label><input value={draft.Code || ""} maxLength={20} onChange={setField("Code")} placeholder="T4" className={`${fieldCls} font-mono`} /></div>
-              <div><label className="mb-1 block text-xs text-muted-foreground">Name *</label><input value={draft.Name || ""} maxLength={100} onChange={setField("Name")} placeholder="Villa Type 4" className={fieldCls} /></div>
+              <div><label className="mb-1 block text-xs text-muted-foreground">Code *</label><input value={draft.Code || ""} maxLength={20} onChange={setField("Code")} placeholder="e.g. T4" className={`${fieldCls} font-mono`} /></div>
+              <div><label className="mb-1 block text-xs text-muted-foreground">Name *</label><input value={draft.Name || ""} maxLength={100} onChange={setField("Name")} placeholder="e.g. Villa Type 4" className={fieldCls} /></div>
               <div><label className="mb-1 block text-xs text-muted-foreground">Room layout</label>
                 <select value={draft.LayoutTypeId ?? ""} onChange={setField("LayoutTypeId")} className={fieldCls}>
                   <option value="">Not set</option>
@@ -205,10 +236,7 @@ export function VillaTypesDialog({ open, onOpenChange, projects, initialProjectI
               </div>
             </div>
             {draft.Id != null && (
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={draft.IsActive !== false} onChange={(event) => setDraft((d) => ({ ...d, IsActive: event.target.checked }))} /> Active
-                <span className="text-xs text-muted-foreground">(changes apply to future conversions; villas already created keep their areas)</span>
-              </label>
+              <p className="text-xs text-muted-foreground">Editing {draft.Code}: changes apply to future conversions; villas already built keep their areas.</p>
             )}
             <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
               <div className="min-w-[220px]">

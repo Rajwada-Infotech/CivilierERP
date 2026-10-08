@@ -145,6 +145,8 @@ async function syncExistingStructure(pool, projectId) {
     FROM dbo.UnitMaster u
     JOIN dbo.BlockMaster b ON b.Id = u.BlockId
     WHERE b.ProjectId = @pid AND b.IsActive = 1 AND u.IsActive = 1 AND u.FloorNo IS NULL
+      -- land rows (plots kept as units) never sit on a floor; they aren't missing one
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)
     GROUP BY b.Id
   `);
   // Also collect blocks that HAD the bucket but now have no orphans (for cleanup).
@@ -431,7 +433,7 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
         (SELECT COUNT(*) FROM dbo.UnitMaster u
          WHERE u.BlockId = f.BlockId AND u.IsActive = 1
            AND (
-             (f.FloorNo = -1 AND u.FloorNo IS NULL)
+             (f.FloorNo = -1 AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1))
              OR
              (f.FloorNo <> -1 AND u.FloorNo = f.FloorNo)
            )
@@ -461,7 +463,7 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
       SELECT u.Id, u.UnitName, b.BlockName
       FROM dbo.UnitMaster u
       JOIN dbo.BlockMaster b ON b.Id = u.BlockId
-      WHERE b.ProjectId = @pid AND b.IsActive = 1 AND u.IsActive = 1 AND u.FloorNo IS NULL
+      WHERE b.ProjectId = @pid AND b.IsActive = 1 AND u.IsActive = 1 AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)
       ORDER BY b.BlockName, u.UnitName
     `);
 
@@ -1416,7 +1418,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
           LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
           LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Converted')
-          WHERE u.BlockId = @bid AND u.FloorNo IS NULL AND u.IsActive = 1
+          WHERE u.BlockId = @bid AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1) AND u.IsActive = 1
           ORDER BY u.UnitName
         `)
       : pool.request().input("bid", sql.Int, BlockId).input("fno", sql.Int, FloorNo).query(`
@@ -2290,8 +2292,10 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   try {
     const pool = getPool();
     const kind = await pool.request().input("kind", sql.NVarChar(20), unitKind)
-      .query("SELECT Code FROM dbo.CrmConstructedAssetKind WHERE Code = @kind AND IsActive = 1");
+      .query("SELECT Code, ISNULL(IsLand, 0) AS IsLand FROM dbo.CrmConstructedAssetKind WHERE Code = @kind AND IsActive = 1");
     if (!kind.recordset.length) return res.status(400).json({ error: "Select an active constructed asset kind" });
+    // What stands on a plot is a building, never land again.
+    if (kind.recordset[0].IsLand) return res.status(400).json({ error: "A plot is converted into a building — choose a constructed kind such as Villa, not land" });
     const resolvedType = await resolveUnitTypeInput(
       pool, villaType ? { LayoutTypeId: villaType.LayoutTypeId } : { UnitType: unitType }, { requireComposition: true },
     );
@@ -2415,7 +2419,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
       // floorless row (FloorNo = -1) — what makes them show in Room Master and
       // DPR pickers. Labelled with the asset kind's own name, e.g. "Villa".
       await tx.request().input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId).input("kind", sql.NVarChar(20), unitKind).query(`
-        DECLARE @n INT = (SELECT COUNT(*) FROM dbo.UnitMaster WHERE BlockId = @bid AND IsActive = 1 AND FloorNo IS NULL);
+        DECLARE @n INT = (SELECT COUNT(*) FROM dbo.UnitMaster u WHERE u.BlockId = @bid AND u.IsActive = 1 AND u.FloorNo IS NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1));
         IF EXISTS (SELECT 1 FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @bid AND FloorNo = -1 AND IsActive = 1)
           UPDATE dbo.CrmProjectAutoSetupFloor SET UnitCount = @n, HasUnits = 1, UpdatedAt = SYSDATETIME() WHERE BlockId = @bid AND FloorNo = -1 AND IsActive = 1;
         ELSE
