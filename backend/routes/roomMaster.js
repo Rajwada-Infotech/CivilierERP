@@ -58,7 +58,10 @@ router.get("/", cache("room-master", 300), async (req, res) => {
       LEFT JOIN dbo.UnitMaster   u ON u.Id  = r.UnitId
       LEFT JOIN dbo.RoomCategoryMaster cat ON cat.Id = r.RoomCategoryId
       ${where}
-      ORDER BY ep.name, b.BlockName, u.UnitName, r.RoomName
+      -- A villa's rooms run floor by floor (G, 1, 2, …) before name order.
+      ORDER BY ep.name, b.BlockName, u.UnitName,
+        CASE WHEN r.Storey IS NULL THEN -1 WHEN r.Storey = 'G' THEN 0 ELSE ISNULL(TRY_CAST(r.Storey AS INT), 999) END,
+        r.RoomName
     `);
     res.json(result.recordset);
   } catch (err) {

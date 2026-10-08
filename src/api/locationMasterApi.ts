@@ -38,6 +38,7 @@ export interface RoomRecord {
   UnitName: string | null;
   RoomName: string;
   Floor: string | null;
+  Storey?: string | null;
   IsActive: boolean;
 }
 

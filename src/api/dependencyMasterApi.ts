@@ -72,6 +72,7 @@ export interface DependencyMasterListRow {
   flatName: string | null;
   roomId: number;
   roomName: string | null;
+  storey?: string | null;
   createdAt: string;
   activityCount: number;
   /** Server-built "Tower > Floor N > Flat > Room" trail — ready to render. */

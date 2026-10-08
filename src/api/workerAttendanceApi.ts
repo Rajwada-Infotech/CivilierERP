@@ -26,6 +26,7 @@ export interface ActivityOption {
   floor: string | null;
   flatName: string | null;
   roomName: string | null;
+  storey?: string | null;
   label: string;
   rosterCount: number;
 }

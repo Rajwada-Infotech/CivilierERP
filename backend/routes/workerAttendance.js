@@ -55,11 +55,14 @@ router.get("/activities", async (req, res) => {
         dm.Id AS dependencyMasterId, dm.Alias AS alias,
         dm.ProjectId AS projectId,
         bm.BlockName AS towerName, dm.Floor AS floor,
-        um.UnitName AS flatName, rm.RoomName AS roomName,
+        um.UnitName AS flatName, rm.RoomName AS roomName, rm.Storey AS storey,
         CONCAT(
           dm.Alias, ' — ', am.activity_name, ' (',
           ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor, ' > ',
-          ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—'), ')'
+          ISNULL(um.UnitName, '—'), ' > ',
+          -- a villa room's own floor inside the villa
+          CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') ELSE '' END,
+          ISNULL(rm.RoomName, '—'), ')'
         ) AS label,
         (SELECT COUNT(*) FROM dbo.WorkerActivityRoster war WHERE war.DependencyMasterActivityId = dma.Id AND war.IsActive = 1) AS rosterCount
       FROM dbo.DependencyMasterActivity dma

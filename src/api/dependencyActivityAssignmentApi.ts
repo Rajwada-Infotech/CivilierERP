@@ -326,6 +326,7 @@ export interface ReportedAssignment {
   flatName: string | null;
   roomId: number | null;
   roomName: string | null;
+  storey?: string | null;
   scopePath: string;
   materials: { name: string; quantity: number; uom: string | null }[];
 }
@@ -370,6 +371,7 @@ export interface ScopeSummaryRoom {
   flatName: string | null;
   roomId: number | null;
   roomName: string | null;
+  storey?: string | null;
   activityCount: number;
 }
 export interface ActivityScopeSummary {
@@ -794,6 +796,7 @@ export interface AmendmentRecord {
   flatName: string | null;
   roomId: number | null;
   roomName: string | null;
+  storey?: string | null;
   scopePath: string;
   engineerNames: string | null;
   // The attempt that replaced this one — null only if the rung's current
