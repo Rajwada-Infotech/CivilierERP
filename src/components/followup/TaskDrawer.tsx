@@ -622,7 +622,12 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
       <SheetContent
         side="right"
         className="w-full sm:max-w-xl h-full flex flex-col p-0 gap-0"
-        onInteractOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => {
+          // Outside click closes the drawer, except clicks inside another layer
+          // opened from it (cancel dialog, dropdowns, pickers, toasts).
+          const t = e.target as HTMLElement | null;
+          if (t?.closest('[role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper], [data-sonner-toaster], .fixed.inset-0:not([data-state])')) e.preventDefault();
+        }}
       >
         {/* ── Header ── */}
         <SheetHeader className="px-5 py-4 pr-12 border-b border-border text-left space-y-2 shrink-0">

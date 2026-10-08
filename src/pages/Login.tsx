@@ -579,7 +579,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-x-hidden overflow-y-auto relative"
+    <div className="login-page min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-x-hidden overflow-y-auto relative"
       style={{ background: "#0d0a1a" }}>
 
       {/* Subtle full-page grid — no crane here */}
@@ -898,16 +898,16 @@ export default function Login() {
                       whileTap={{ scale: 0.97 }}
                       className="group relative flex flex-col items-start gap-2 rounded-xl p-3 text-left overflow-hidden transition-colors"
                       style={{
-                        background: "rgba(139,92,246,0.06)",
-                        border: "1px solid rgba(139,92,246,0.18)",
+                        background: "rgba(34,197,94,0.06)",
+                        border: "1px solid rgba(34,197,94,0.18)",
                       }}
                     >
                       <div className="flex items-center justify-between w-full">
                         <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0"
-                          style={{ background: "rgba(139,92,246,0.15)" }}>
-                          <Truck size={14} className="text-violet-300" />
+                          style={{ background: "rgba(34,197,94,0.15)" }}>
+                          <Truck size={14} className="text-emerald-400" />
                         </span>
-                        <ArrowUpRight size={13} className="text-white/20 group-hover:text-violet-300 transition-colors" />
+                        <ArrowUpRight size={13} className="text-white/20 group-hover:text-emerald-400 transition-colors" />
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/80">Supplier</p>
@@ -922,16 +922,16 @@ export default function Login() {
                       whileTap={{ scale: 0.97 }}
                       className="group relative flex flex-col items-start gap-2 rounded-xl p-3 text-left overflow-hidden transition-colors"
                       style={{
-                        background: "rgba(139,92,246,0.06)",
-                        border: "1px solid rgba(139,92,246,0.18)",
+                        background: "rgba(239,68,68,0.06)",
+                        border: "1px solid rgba(239,68,68,0.18)",
                       }}
                     >
                       <div className="flex items-center justify-between w-full">
                         <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0"
-                          style={{ background: "rgba(139,92,246,0.15)" }}>
-                          <Building2 size={14} className="text-violet-300" />
+                          style={{ background: "rgba(239,68,68,0.15)" }}>
+                          <Building2 size={14} className="text-red-400" />
                         </span>
-                        <ArrowUpRight size={13} className="text-white/20 group-hover:text-violet-300 transition-colors" />
+                        <ArrowUpRight size={13} className="text-white/20 group-hover:text-red-400 transition-colors" />
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/80">Customer</p>

@@ -86,7 +86,11 @@ async function autoTagBatch(pool, {
         .input("GodownId",  sql.Int,           godownId)
         .input("TaggedQty", sql.Decimal(18,3), 1)
         .input("FAItemCode",sql.NVarChar(200), code)
-        .input("Remarks",   sql.NVarChar(sql.MAX), `Auto-tagged on receipt — ${receiptLabel} ${sourceDocNo}`)
+        .input("Remarks",   sql.NVarChar(sql.MAX),
+          // Imported stock never had a GRN — don't present the import number as one.
+          receiptLabel === "IMPORT"
+            ? `Auto-tagged on receipt — Imported Stock / Without GRN (${sourceDocNo})`
+            : `Auto-tagged on receipt — ${receiptLabel} ${sourceDocNo}`)
         .input("CreatedBy", sql.NVarChar(200), userEmail || null)
         .query(`
           INSERT INTO dbo.FixedAssetTagging
@@ -279,7 +283,7 @@ async function autoTagPendingBatchesForProject(pool, projectId, userEmail) {
         assetId: b.AssetId, itemId: b.SourceItemId, itemName: b.AssetName, qty: Number(b.Quantity),
         companyId: b.CompanyId, projectId: b.ProjectId, godownId: b.GodownId,
         docDate: b.DocDate, sourceDocNo: b.SourceDocNo, userEmail,
-        receiptLabel: b.SourceType === "ICT" ? "ICT" : "GRN",
+        receiptLabel: b.SourceType === "ICT" ? "ICT" : b.SourceType === "IMPORT" ? "IMPORT" : "GRN",
       });
       tagged += res.tagged;
     } catch (err) {

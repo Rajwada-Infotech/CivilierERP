@@ -127,9 +127,10 @@ describe("preview", () => {
       skippedCancelledOrApproved: 2,
       eligible: 10,
       willChange: 7,
-      engineers: { requested: true, willFill: 7, alreadySet: 3 },
-      qc: { requested: true, willFill: 7, alreadySet: 3 },
-      approval: { requested: true, willFill: 7, alreadySet: 3 },
+      overwrite: false,
+      engineers: { requested: true, willFill: 7, alreadySet: 3, willReplace: 0 },
+      qc: { requested: true, willFill: 7, alreadySet: 3, willReplace: 0 },
+      approval: { requested: true, willFill: 7, alreadySet: 3, willReplace: 0 },
     });
     expect(mockDb.previewCalls).toHaveLength(1);
     expect(mockDb.tx.begun).toBe(0);
@@ -211,6 +212,39 @@ describe("apply", () => {
     expect(res.body.error).toMatch(/nothing was changed/i);
     expect(mockDb.tx).toEqual({ begun: 1, committed: 0, rolledBack: 1 });
     expect(invalidateAllThreads).not.toHaveBeenCalled();
+  });
+});
+
+describe("overwrite mode", () => {
+  const ow = { projectId: 5, towerId: null, engineerIds: [1, 2], qcUserIds: [3], approvalLevels: levels, overwrite: true };
+
+  it("only an explicit true turns it on", () => {
+    expect(router._test.parseRequest({ projectId: 5, engineerIds: [1], overwrite: "true" }).overwrite).toBe(false);
+    expect(router._test.parseRequest({ projectId: 5, engineerIds: [1], overwrite: true }).overwrite).toBe(true);
+    expect(router._test.parseRequest({ projectId: 5, engineerIds: [1] }).overwrite).toBe(false);
+  });
+
+  it("replaces engineers and QC (delete then insert) and the approval levels, for chosen fields only", () => {
+    const sqlText = buildApplyBatch(ow);
+    expect(sqlText).toMatch(/DELETE e FROM dbo\.DependencyActivityEngineer e\s+JOIN #t t[\s\S]*WHERE t\.NeedEng = 1 AND t\.IsNew = 0/);
+    expect(sqlText).toMatch(/DELETE q FROM dbo\.DependencyActivityQcAssignee q\s+JOIN #t t[\s\S]*WHERE t\.NeedQc = 1 AND t\.IsNew = 0/);
+    expect(sqlText).toContain("CASE WHEN t.NeedAppr = 1 THEN @levels ELSE d.ApprovalLevelsJson END");
+    const qcOnly = buildApplyBatch({ ...ow, engineerIds: [], approvalLevels: [] });
+    expect(qcOnly).not.toContain("DELETE e FROM");
+    expect(qcOnly).toContain("DELETE q FROM");
+  });
+
+  it("default mode never deletes", () => {
+    expect(buildApplyBatch({ ...ow, overwrite: false })).not.toMatch(/DELETE /);
+  });
+
+  it("still skips cancelled / approved activities", () => {
+    expect(buildApplyBatch(ow)).toContain("NOT IN ('CANCELLED', 'APPROVED')");
+  });
+
+  it("preview counts every eligible activity as changing", () => {
+    const sqlText = buildPreviewSql(ow);
+    expect(sqlText).toMatch(/\(1 = 1 AND 1 = 1\)/);
   });
 });
 

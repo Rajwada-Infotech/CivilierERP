@@ -11,6 +11,7 @@ const compression = require("compression");
 const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
+const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const authMiddleware = require("./middleware/auth");
 const { attachProjectScope } = require("./services/projectScope");
 const rateLimit = require("express-rate-limit");
@@ -253,6 +254,7 @@ const ALL_ROUTES = [
   { path: "/api/dependency", file: "./routes/dependency" },
   { path: "/api/dependency-master", file: "./routes/dependencyMaster" },
   { path: "/api/dependency-activity-assignment", file: "./routes/dependencyActivityAssignment" },
+  { path: "/api/civilworkdpr-reports", file: "./routes/civilWorkDprReports" },
   { path: "/api/depreciation-setup", file: "./routes/depreciationSetup" },
   { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
   { path: "/api/fixed-asset-tagging", file: "./routes/fixedAssetTagging" },
@@ -261,6 +263,7 @@ const ALL_ROUTES = [
   { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
   { path: "/api/fixed-asset-quality-check", file: "./routes/fixedAssetQualityCheck" },
   { path: "/api/fixed-asset-maintenance", file: "./routes/fixedAssetMaintenance" },
+  { path: "/api/fixed-asset-depreciation-generate", file: "./routes/fixedAssetDepreciationGenerate" },
   { path: "/api/home", file: "./routes/homeActivity" },
   { path: "/api/id-template-master", file: "./routes/idTemplateMaster" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
@@ -664,6 +667,7 @@ async function startServer() {
       logger.info(`[START] Server ready on port ${PORT}`);
       startCrmSlaEngine();
       startFollowupReminderEngine();
+      startAutoDepreciationEngine();
     });
 
     setupGracefulShutdown(server, worker);

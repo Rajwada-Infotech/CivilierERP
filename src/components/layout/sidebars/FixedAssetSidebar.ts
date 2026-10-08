@@ -1,4 +1,4 @@
-import { Cpu, Tag, ArrowSwapHorizontal, Import, UserTag, ShieldTick, Setting2, Barcode } from "iconsax-react";
+import { Cpu, Tag, ArrowSwapHorizontal, Import, UserTag, ShieldTick, Setting2, Barcode, Calculator } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const fixedAssetNavItems: NavItem[] = [
@@ -11,4 +11,5 @@ export const fixedAssetNavItems: NavItem[] = [
   { label: "User-Wise Asset Transfer", icon: ArrowSwapHorizontal, path: "/fixed-asset/transfer", pageKey: "asset-transfer" },
   { label: "Owner & Quality Checking", icon: ShieldTick, path: "/fixed-asset/quality-check", pageKey: "fixed-asset-quality-check" },
   { label: "FA Maintenance & Repair", icon: Setting2, path: "/fixed-asset/maintenance", pageKey: "fixed-asset-maintenance" },
+  { label: "Fixed Asset Depreciation Generate", icon: Calculator, path: "/fixed-asset/depreciation-generate", pageKey: "fixed-asset-depreciation-generate" },
 ];

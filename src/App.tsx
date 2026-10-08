@@ -3,6 +3,7 @@ import { RouteErrorBoundary } from "./components/ErrorBoundary";
 import { QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
 import { Toaster } from "sonner";
+import { SystemUpdateBanner } from "./components/SystemUpdateBanner";
 import {
   BrowserRouter as Router,
   Routes,
@@ -43,6 +44,7 @@ import { ActivityBrowserProvider } from "./contexts/ActivityBrowserContext";
 
 // Query Client
 import { queryClient } from "./lib/queryClient";
+import { useModuleUsageTracker } from "./hooks/useModuleUsageTracker";
 
 // ─── Page Skeleton (inline route-transition loader) ───────────────────────────
 function PageSkeleton() {
@@ -256,6 +258,7 @@ const FixedAssetAssignment = lazy(() => import("./pages/fixedAsset/FixedAssetAss
 const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
 const FixedAssetQualityCheck = lazy(() => import("./pages/fixedAsset/FixedAssetQualityCheck"));
 const FixedAssetMaintenance = lazy(() => import("./pages/fixedAsset/FixedAssetMaintenance"));
+const FixedAssetDepreciationGenerate = lazy(() => import("./pages/fixedAsset/FixedAssetDepreciationGenerate"));
 const IDTemplateMaster = lazy(() => import("./pages/fixedAsset/IDTemplateMaster"));
 const ShortClose = lazy(() => import("./pages/material/ShortClose"));
 const DepreciationSetup = lazy(() => import("./pages/fixedAsset/DepreciationSetup"));
@@ -537,6 +540,7 @@ function RequireRole({
 
 // ─── Admin Protected Route ────────────────────────────────────────────────────
 function ProtectedProviders({ children }: { children: React.ReactNode }) {
+  useModuleUsageTracker();
   return (
     <FinYearProvider>
       <HsnProvider>
@@ -1535,6 +1539,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="fixed-asset-maintenance">
             <FixedAssetMaintenance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/depreciation-generate"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-depreciation-generate">
+            <FixedAssetDepreciationGenerate />
           </ProtectedRoute>
         }
       />
@@ -2612,6 +2624,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" closeButton />
+      <SystemUpdateBanner />
       {/* ActivityBrowserProvider is always mounted so AuthSessionBridge is always inside it.
           The initialLoading gate moved inside the tree to avoid provider context being missing
           during hot-module-reload or React strict-mode double-renders. */}

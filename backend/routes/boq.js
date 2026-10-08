@@ -115,6 +115,8 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
     await transaction
       .request()
       .input("BoqID", sqlRef.Int, boqID)
+      .input("ActivityId", sqlRef.NVarChar(100), it.activityId || null)
+      .input("ActivityName", sqlRef.NVarChar(255), it.activityName ? String(it.activityName).substring(0, 255) : null)
       .input("ItemId", sqlRef.NVarChar(100), it.itemId || null)
       .input("ItemName", sqlRef.NVarChar(255), itemName)
       .input("ItemCode", sqlRef.NVarChar(50), it.itemCode || null)
@@ -127,10 +129,10 @@ const syncBoqItems = async (transaction, sqlRef, boqID, items, uomMap) => {
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
       .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqItems
-          (BoqID, ItemId, ItemName, ItemCode, Description,
+          (BoqID, ActivityId, ActivityName, ItemId, ItemName, ItemCode, Description,
            Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
         VALUES
-          (@BoqID, @ItemId, @ItemName, @ItemCode, @Description,
+          (@BoqID, @ActivityId, @ActivityName, @ItemId, @ItemName, @ItemCode, @Description,
            @Quantity, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
       `);
   }
@@ -172,6 +174,9 @@ const syncBoqActivities = async (
       .input("ActivityId", sqlRef.NVarChar(100), ac.activityId || null)
       .input("ActivityName", sqlRef.NVarChar(255), activityName)
       .input("ActivityCode", sqlRef.NVarChar(50), ac.activityCode || null)
+      .input("GroupId", sqlRef.NVarChar(100), ac.groupId || null)
+      .input("GroupName", sqlRef.NVarChar(255), ac.groupName ? String(ac.groupName).substring(0, 255) : null)
+      .input("Area", sqlRef.Decimal(18, 4), ac.area === "" || ac.area == null ? null : parseFloat(ac.area) || 0)
       .input("Description", sqlRef.NVarChar(sqlRef.MAX), ac.description || null)
       .input("Quantity", sqlRef.Decimal(18, 4), qty)
       .input("UomId", sqlRef.Int, uomId)
@@ -181,10 +186,10 @@ const syncBoqActivities = async (
       .input("LineAmount", sqlRef.Decimal(18, 2), amount)
       .input("SortOrder", sqlRef.Int, i).query(`
         INSERT INTO dbo.BoqActivities
-          (BoqID, ActivityId, ActivityName, ActivityCode, Description,
+          (BoqID, ActivityId, ActivityName, ActivityCode, GroupId, GroupName, Area, Description,
            Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder)
         VALUES
-          (@BoqID, @ActivityId, @ActivityName, @ActivityCode, @Description,
+          (@BoqID, @ActivityId, @ActivityName, @ActivityCode, @GroupId, @GroupName, @Area, @Description,
            @Quantity, @UomId, @UomName, @Rate, @TaxPct, @LineAmount, @SortOrder)
       `);
   }
@@ -193,10 +198,9 @@ const syncBoqActivities = async (
 // ── GET /  (List with Pagination) ────────────────────────────────────────────
 router.get("/", cache("boq", 300), async (req, res) => {
   try {
+    // companyId is an optional narrowing — without it the list spans every company (still within the
+    // caller's project scope).
     const companyId = parseInt(req.query.companyId, 10) || null;
-    if (!companyId) {
-      return res.status(400).json({ error: "companyId is required" });
-    }
 
     const pool = getPool();
     const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -204,8 +208,8 @@ router.get("/", cache("boq", 300), async (req, res) => {
     const offset = (page - 1) * limit;
     const search = (req.query.search || "").toString().trim();
     const status = (req.query.status || "").toString().trim();
-    // Always scope to the requested company — no cross-company list allowed
-    const where = ["b.CompanyId = @companyId"];
+    const where = [];
+    if (companyId) where.push("b.CompanyId = @companyId");
     if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
 
     if (search) {
@@ -222,9 +226,9 @@ router.get("/", cache("boq", 300), async (req, res) => {
       where.push("b.Status = @status");
     }
 
-    const whereSql = `WHERE ${where.join(" AND ")}`;
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const bindFilters = (request) => {
-      request.input("companyId", sql.Int, companyId);
+      if (companyId) request.input("companyId", sql.Int, companyId);
       if (search) request.input("search", sql.NVarChar(100), `%${search}%`);
       if (status && status !== "All") {
         request.input("status", sql.NVarChar(50), status);

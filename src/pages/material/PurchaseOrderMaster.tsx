@@ -1172,20 +1172,24 @@ const PurchaseOrderMaster: React.FC = () => {
       companyId: matchCompany?.id ?? prev.companyId,
       projectId: matchProject?.id ?? prev.projectId,
       remarks: mrPrefill.Remarks ?? prev.remarks,
+      // Raised from a work order whose lines all name one supplier: start with that supplier.
+      supplierId: mrPrefill.WorkOrderSupplierId ? String(mrPrefill.WorkOrderSupplierId) : prev.supplierId,
     }));
 
     const prefillLines: POLineItem[] = mrPrefill.items.map((it) => {
       const cgst = Number(it.M_CGST ?? 0);
       const sgst = Number(it.M_SGST ?? 0);
       const igst = Number(it.M_IGST ?? 0);
+      // The item's own GST rates win; the work order's GST % only fills in when the item master has none.
       const { cgstRate: cgstResolved, sgstRate: sgstResolved, igstRate: igstResolved, gstRate } =
-        resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
+        resolveLineGstSplit(cgst, sgst, igst, Number(it.WoGstRate ?? 0), isIntraState);
       // Default to what's actually still pending on this MR item, not the
       // original full requested qty — a second/third PO off the same MR
       // should only ever offer the remaining balance.
       const pendingQty = Number(it.PendingQty ?? it.Quantity ?? 1);
       const qty = pendingQty;
-      const rate = 0;
+      // From the work order this MR was raised from, when there is one; otherwise the buyer enters it.
+      const rate = Number(it.WoRate ?? 0);
       const taxAmount = (qty * rate * gstRate) / 100;
 
       // Resolve UOM: match UOMCode against master code, fallback to UOMName
@@ -1220,6 +1224,11 @@ const PurchaseOrderMaster: React.FC = () => {
 
     if (prefillLines.length > 0) setLineItems(prefillLines);
     setSourceMR({ id: mrPrefill.MRId, docNo: mrPrefill.DocNo });
+    if (mrPrefill.WorkOrderDocNo && prefillLines.some((l) => l.rate > 0)) {
+      toast.info(
+        `Rates${mrPrefill.WorkOrderSupplierId ? ", GST and supplier" : " and GST"} are filled in from work order ${mrPrefill.WorkOrderDocNo}. Check them against the supplier's offer.`,
+      );
+    }
 
     // Auto-select fin year from MR
     if (mrPrefill.FinYearId) {

@@ -1567,9 +1567,16 @@ export default function ActivityDetailModal({
     [hasBlueprint, row.attemptNo],
   );
 
+  // Lock the page behind while the popup is open, so the wheel scrolls only the popup.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   return createPortal(
-    <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl max-h-[92vh] rounded-2xl overflow-hidden">
+    <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4 overscroll-contain">
+      <div className="w-full max-w-3xl max-h-[92dvh] rounded-2xl overflow-hidden flex flex-col [&>*]:min-h-0 [&>*]:h-auto">
         <CivilWorkDprShell
           fillHeight
           title={row.activityName}

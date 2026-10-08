@@ -2,7 +2,8 @@ import { generateUUID } from "../../utils/cryptoPolyfill";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
+import type { WorkOrderMRPrefill } from "@/api/workOrderApi";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -230,6 +231,9 @@ export default function MaterialRequest() {
 
   const [header, setHeader] = useState<FormHeader>(defaultHeader);
   const [cart, setCart] = useState<CartItem[]>([blankCartItem()]);
+  // Set when the form was opened from an approved Work Order (items pre-filled, still fully editable).
+  const [woSource, setWoSource] = useState<{ id: number; docNo: string } | null>(null);
+  const location = useLocation();
 
   const setH = <K extends keyof FormHeader>(k: K, v: FormHeader[K]) =>
     setHeader((p) => ({ ...p, [k]: v }));
@@ -481,6 +485,24 @@ export default function MaterialRequest() {
     [],
   );
 
+  useEffect(() => {
+    setCart((prev) => {
+      let changed = false;
+      const next = prev.map((ci) => {
+        const found = ci.ItemId ? itemMap[ci.ItemId] : undefined;
+        if (!found || ci.DefaultUOM) return ci;
+        changed = true;
+        return {
+          ...ci,
+          DefaultUOM: found.DefaultUOM || ci.UOMCode || undefined,
+          AvailableStock: Number(found.AvailableStock ?? ci.AvailableStock ?? 0),
+          ItemName: ci.ItemName || found.M_Name,
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [itemMap]);
+
   const pickItem = useCallback(
     (cartKey: string, itemId: string) => {
       const found = itemMap[itemId];
@@ -598,6 +620,7 @@ export default function MaterialRequest() {
     setViewingRecord(null);
     setHeader(defaultHeader);
     setCart([blankCartItem()]);
+    setWoSource(null);
   };
 
   const resetFields = () => {
@@ -605,7 +628,42 @@ export default function MaterialRequest() {
     setHeader(defaultHeader);
     setCart([blankCartItem()]);
     setSaved(false);
+    setWoSource(null);
   };
+
+  // Opened from an approved Work Order: /material/material-request with { woPrefill } in the router state.
+  // The form is pre-filled but nothing is saved until the user presses Save, so every field can be changed.
+  useEffect(() => {
+    const woPrefill = (location.state as { woPrefill?: WorkOrderMRPrefill } | null)?.woPrefill;
+    if (!woPrefill) return;
+    setHeader({
+      ...defaultHeader,
+      companyId: String(woPrefill.CompanyId ?? ""),
+      projectId: String(woPrefill.ProjectId ?? ""),
+      reason: woPrefill.Reason,
+      remarks: woPrefill.Remarks,
+    });
+    setCart(
+      woPrefill.items.length > 0
+        ? woPrefill.items.map((it) => ({
+            _key: generateUUID(),
+            ItemId: String(it.ItemId),
+            ItemName: it.ItemName ?? undefined,
+            UOMCode: String(it.UOMCode ?? ""),
+            Quantity: String(it.Quantity),
+            Remarks: "",
+            AvailableStock: 0,
+            CostCenterId: "",
+          }))
+        : [blankCartItem()],
+    );
+    setWoSource({ id: woPrefill.WOId, docNo: woPrefill.WODocNo });
+    setEditingId(null);
+    setViewMode("form");
+    // Clear the router state so a refresh doesn't re-apply it.
+    window.history.replaceState({}, "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // The table row (and the View overlay's own summary) only carry
   // ItemCount/QtyByUom — the list endpoint never returns the actual item
@@ -687,6 +745,7 @@ export default function MaterialRequest() {
       Reason: header.reason,
       Remarks: header.remarks || null,
       DocTypeId: header.docTypeId || null,
+      ...(editingId == null && woSource ? { SourceWOId: woSource.id } : {}),
       items: cart.map((ci) => ({
         ItemId: ci.ItemId,
         ItemName: ci.ItemName || itemMap[ci.ItemId]?.M_Name || null,
@@ -1085,6 +1144,11 @@ export default function MaterialRequest() {
 
   const FormView = () => (
     <div className="space-y-5">
+      {woSource && !editingId && (
+        <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-2.5 text-xs text-orange-700 dark:text-orange-300">
+          Raised from Work Order <strong>{woSource.docNo}</strong>. The items below are the work order's materials — change, add or remove anything, then save.
+        </div>
+      )}
       {/* Header card */}
       <Card className="border-border shadow-sm">
         <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
@@ -1558,6 +1622,14 @@ export default function MaterialRequest() {
                                 {u.Symbol ? ` (${u.Symbol})` : ""}
                               </option>
                             ))}
+                            {ci.UOMCode &&
+                              ci.UOMCode !== ci.DefaultUOM &&
+                              !relevant.some((u: any) => u.UOMCode === ci.UOMCode) &&
+                              !extraAlternates.some((u) => u.UOMCode === ci.UOMCode) && (
+                                <option value={ci.UOMCode}>
+                                  {uomMap[ci.UOMCode]?.UOMName ?? ci.UOMCode}
+                                </option>
+                              )}
                             {extraAlternates.length > 0 && (
                               <optgroup label="Tagged for this item">
                                 {extraAlternates.map((u) => (

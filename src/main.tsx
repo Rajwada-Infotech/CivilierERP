@@ -2,6 +2,11 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
+import { isChunkLoadError, reloadForNewVersion } from "./lib/chunkReload";
+import { installGatewayFetch } from "./lib/gatewayFetch";
+
+// From here on every call to our API (not only the ones using fetchWithAuth) handles the few seconds of a deploy.
+installGatewayFetch();
 
 // Global safety net: unhandled promise rejections that slip past React Query
 // are logged to the console (visible in DevTools / server logs) but never
@@ -9,6 +14,14 @@ import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 // needs to show a graceful state.
 window.addEventListener("unhandledrejection", (e) => {
   console.error("[Unhandled Promise Rejection]", e.reason);
+  // A page's file from before the latest deploy no longer exists (404) — load the new build.
+  if (isChunkLoadError(e.reason)) reloadForNewVersion();
+});
+
+// Vite fires this when a lazily loaded page's files can't be fetched (typically a tab left open across a
+// deploy). Reloading picks up the new build; if we already reloaded a moment ago, let the error surface.
+window.addEventListener("vite:preloadError", (e) => {
+  if (reloadForNewVersion()) e.preventDefault();
 });
 
 // Catch synchronous JS errors outside the React tree (e.g. in event listeners

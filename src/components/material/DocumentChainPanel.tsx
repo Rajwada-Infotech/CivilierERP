@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, FileText, ShoppingCart, Truck, Car, Receipt } from "lucide-react";
+import { ArrowRight, ClipboardList, FileText, FileSignature, ShoppingCart, Truck, Car, Receipt } from "lucide-react";
 import {
   getDocumentChain,
   CHAIN_ROUTES,
@@ -10,6 +10,8 @@ import {
 } from "@/api/materialChainApi";
 
 const DOC_ICON: Record<ChainDocType, React.ElementType> = {
+  wo: ClipboardList,
+  qt: FileSignature,
   mr: FileText,
   po: ShoppingCart,
   vio: Car,
@@ -18,6 +20,8 @@ const DOC_ICON: Record<ChainDocType, React.ElementType> = {
 };
 
 const DOC_COLOR: Record<ChainDocType, string> = {
+  wo: "bg-orange-500/10 border-orange-500/20 text-orange-700 dark:text-orange-400",
+  qt: "bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-400",
   mr: "bg-indigo-500/10 border-indigo-500/20 text-indigo-700 dark:text-indigo-400",
   po: "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400",
   vio: "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400",
@@ -27,7 +31,7 @@ const DOC_COLOR: Record<ChainDocType, string> = {
 
 /**
  * Clickable Linked Documents panel — every document in the procurement
- * chain (Material Request → Purchase Order → GRN → Invoice) is shown as a
+ * chain (Work Order → Material Request → Quotation → Purchase Order → GRN → Invoice) is shown as a
  * hyperlink. Clicking one navigates to that document's page with
  * ?view=<id>, which each page's deep-link effect picks up and opens.
  */

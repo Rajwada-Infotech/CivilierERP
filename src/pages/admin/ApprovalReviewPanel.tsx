@@ -260,6 +260,131 @@ interface ApprovalReviewPanelProps {
   onActionDone: (action: "approve" | "reject") => void;
 }
 
+// A Work Order's activities, grouped by activity group: per activity the rate, area, labour / material /
+// GST breakdown and total, with its materials listed underneath.
+type WoMaterial = Record<string, unknown>;
+type WoActivity = Record<string, unknown> & { materials?: WoMaterial[] };
+const WoActivities: React.FC<{ activities: WoActivity[] }> = ({ activities }) => {
+  const num = (v: unknown) => Number(v ?? 0) || 0;
+  const groups = new Map<string, WoActivity[]>();
+  for (const a of activities) {
+    const g = ((a.ActivityGroupName as string) || "Ungrouped").trim();
+    groups.set(g, [...(groups.get(g) ?? []), a]);
+  }
+  let n = 0;
+  return (
+    <div>
+      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+        <Package size={10} className="text-emerald-500" />
+        {`Activities (${activities.length})`}
+      </p>
+      <div className="space-y-3">
+        {[...groups.entries()].map(([group, rows]) => (
+          <div key={group} className="rounded-xl border border-border overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-3 py-2 bg-muted/40 border-b border-border">
+              <span className="text-xs font-heading font-semibold text-foreground">{group}</span>
+              <span className="text-xs font-semibold text-foreground">{formatINR(rows.reduce((s, r) => s + num(r.GrandTotal), 0))}</span>
+            </div>
+            <div className="divide-y divide-border/50">
+              {rows.map((a) => {
+                n += 1;
+                const mats = a.materials ?? [];
+                const gstRate = a.HsnGstRate != null ? `${num(a.HsnGstRate)}%` : null;
+                return (
+                  <div key={String(a.Id ?? n)} className="px-3 py-2.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-foreground">
+                          <span className="text-muted-foreground mr-1.5">{n}.</span>
+                          {(a.ActivityName as string) || "—"}
+                          {a.HsnCode ? <span className="ml-1.5 text-[0.625rem] font-mono text-muted-foreground">SAC {String(a.HsnCode)}</span> : null}
+                        </p>
+                        {a.Remarks ? <p className="text-[0.6875rem] text-muted-foreground/80 mt-0.5 whitespace-pre-wrap">{String(a.Remarks)}</p> : null}
+                      </div>
+                      <span className="text-xs font-semibold text-foreground shrink-0">{formatINR(num(a.GrandTotal))}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5">
+                      {[
+                        ["Area", `${num(a.Area).toLocaleString("en-IN")}${a.UOMName ? ` ${String(a.UOMName)}` : ""}`],
+                        ["Rate", formatINR(num(a.Rate))],
+                        ["Labour", formatINR(num(a.LabourAmount))],
+                        ["Materials", formatINR(num(a.MaterialAmount))],
+                        ...(gstRate ? [["GST", `${gstRate}${a.HsnGstType ? ` ${String(a.HsnGstType)}` : ""}`] as [string, string]] : []),
+                      ].map(([k, v]) => (
+                        <span key={k} className="text-[0.6875rem] text-muted-foreground">
+                          {k}: <span className="text-foreground font-medium">{v}</span>
+                        </span>
+                      ))}
+                    </div>
+                    {mats.length > 0 && (
+                      <div className="mt-2 rounded-lg bg-muted/30 border border-border/50 divide-y divide-border/40">
+                        {mats.map((m, mi) => {
+                          const q = num(m.Quantity);
+                          const r = num(m.Rate);
+                          return (
+                            <div key={String(m.Id ?? mi)} className="flex items-center justify-between gap-3 px-2.5 py-1.5">
+                              <div className="min-w-0">
+                                <p className="text-[0.6875rem] font-medium text-foreground">{(m.ItemName as string) || "—"}</p>
+                                <p className="text-[0.625rem] text-muted-foreground">
+                                  {q.toLocaleString("en-IN")}{m.UOMName ? ` ${String(m.UOMName)}` : ""} × {formatINR(r)}
+                                  {num(m.GSTRate) > 0 ? ` · GST ${num(m.GSTRate)}%` : ""}
+                                  {m.SupplierNamePerLine ? ` · ${String(m.SupplierNamePerLine)}` : ""}
+                                </p>
+                              </div>
+                              <span className="text-[0.6875rem] font-semibold text-foreground shrink-0">{formatINR(q * r)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// One BOQ list (Items or Activities): a card per line with its name, code, parent activity / group,
+// description, the figures that matter, and the line amount.
+interface BoqLine { name: string; code: string; sub: string; description: string; facts: [string, string][]; amount: string }
+const BoqLines: React.FC<{ title: string; rows: BoqLine[] }> = ({ title, rows }) => (
+  <div>
+    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+      <Package size={10} className="text-emerald-500" />
+      {title}
+    </p>
+    <div className="rounded-xl border border-border divide-y divide-border/50 overflow-hidden">
+      {rows.map((r, i) => (
+        <div key={i} className="px-3 py-2.5 hover:bg-muted/20 transition-colors">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-foreground">
+                <span className="text-muted-foreground mr-1.5">{i + 1}.</span>
+                {r.name}
+                {r.code && <span className="ml-1.5 text-[0.625rem] font-mono text-muted-foreground">{r.code}</span>}
+              </p>
+              {r.sub && <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{r.sub}</p>}
+              {r.description && <p className="text-[0.6875rem] text-muted-foreground/80 mt-0.5 whitespace-pre-wrap">{r.description}</p>}
+            </div>
+            <span className="text-xs font-semibold text-foreground shrink-0">{r.amount}</span>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5">
+            {r.facts.map(([k, v]) => (
+              <span key={k} className="text-[0.6875rem] text-muted-foreground">
+                {k}: <span className="text-foreground font-medium">{v}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
 export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, open, onClose, onActionDone }) => {
   const navigate = useNavigate();
   const cfg = MODULE_CONFIG[item.Module];
@@ -381,6 +506,11 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   // (ItemName/Quantity/Rate) that don't exist on a JV line at all.
   const isJournalVoucher = item.Module === "journal-voucher";
   const isInterCompanyTransfer = item.Module === "inter-company-transfer";
+  // A BOQ's lines live under BoqItems / BoqActivities (not the generic Items list), and are shown as
+  // two lists with their full details.
+  const woActivities = item.Module === "work-orders" && Array.isArray(detail?.activities) ? (detail!.activities as WoActivity[]) : [];
+  const boqItems = item.Module === "boq" && Array.isArray(detail?.BoqItems) ? (detail!.BoqItems as Record<string, unknown>[]) : [];
+  const boqActivities = item.Module === "boq" && Array.isArray(detail?.BoqActivities) ? (detail!.BoqActivities as Record<string, unknown>[]) : [];
 
   // TDS — Payments/ExpenseBooking both snapshot TDSId/TDSNature/TDSName/
   // TDSPercentage/TDSAmount onto the record at booking/payment time (same
@@ -554,6 +684,96 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
           },
         });
       }
+    }
+
+    if (woActivities.length > 0) {
+      const n = (v: unknown) => Number(v ?? 0) || 0;
+      sections.push({
+        title: `Activities (${woActivities.length})`,
+        fields: [],
+        table: {
+          columns: [
+            { header: "#", align: "center" }, { header: "Group" }, { header: "Activity" }, { header: "Area", align: "right" },
+            { header: "Rate", align: "right" }, { header: "Labour", align: "right" }, { header: "Materials", align: "right" },
+            { header: "GST" }, { header: "Total", align: "right" },
+          ],
+          rows: woActivities.map((a, i) => [
+            i + 1,
+            (a.ActivityGroupName as string) || "—",
+            (a.ActivityName as string) || "—",
+            `${n(a.Area).toLocaleString("en-IN")}${a.UOMName ? ` ${String(a.UOMName)}` : ""}`,
+            fmtAmount(n(a.Rate)),
+            fmtAmount(n(a.LabourAmount)),
+            fmtAmount(n(a.MaterialAmount)),
+            a.HsnGstRate != null ? `${n(a.HsnGstRate)}%` : "—",
+            fmtAmount(n(a.GrandTotal)),
+          ]),
+        },
+      });
+      const matRows = woActivities.flatMap((a) =>
+        (a.materials ?? []).map((m) => [
+          (a.ActivityName as string) || "—",
+          (m.ItemName as string) || "—",
+          `${n(m.Quantity).toLocaleString("en-IN")}${m.UOMName ? ` ${String(m.UOMName)}` : ""}`,
+          fmtAmount(n(m.Rate)),
+          n(m.GSTRate) > 0 ? `${n(m.GSTRate)}%` : "—",
+          fmtAmount(n(m.Quantity) * n(m.Rate)),
+        ]),
+      );
+      if (matRows.length > 0) {
+        sections.push({
+          title: `Materials (${matRows.length})`,
+          fields: [],
+          table: {
+            columns: [{ header: "Activity" }, { header: "Item" }, { header: "Qty", align: "right" }, { header: "Rate", align: "right" }, { header: "GST", align: "right" }, { header: "Amount", align: "right" }],
+            rows: matRows,
+          },
+        });
+      }
+    }
+    if (boqItems.length > 0) {
+      sections.push({
+        title: `Items (${boqItems.length})`,
+        fields: [],
+        table: {
+          columns: [
+            { header: "#", align: "center" }, { header: "Item" }, { header: "Activity" }, { header: "Qty", align: "right" },
+            { header: "UOM" }, { header: "Rate", align: "right" }, { header: "Tax %", align: "right" }, { header: "Amount", align: "right" },
+          ],
+          rows: boqItems.map((li, i) => [
+            i + 1,
+            [li.ItemName, li.ItemCode ? `(${li.ItemCode})` : ""].filter(Boolean).join(" ") || "—",
+            (li.ActivityName as string) || "—",
+            Number(li.Quantity ?? 0).toLocaleString("en-IN"),
+            (li.UomName as string) || "",
+            fmtAmount(Number(li.Rate ?? 0)),
+            String(Number(li.TaxPct ?? 0)),
+            fmtAmount(Number(li.LineAmount ?? 0)),
+          ]),
+        },
+      });
+    }
+    if (boqActivities.length > 0) {
+      sections.push({
+        title: `Activities (${boqActivities.length})`,
+        fields: [],
+        table: {
+          columns: [
+            { header: "#", align: "center" }, { header: "Activity" }, { header: "Group" }, { header: "Area", align: "right" },
+            { header: "Qty", align: "right" }, { header: "UOM" }, { header: "Rate", align: "right" }, { header: "Amount", align: "right" },
+          ],
+          rows: boqActivities.map((li, i) => [
+            i + 1,
+            [li.ActivityName, li.ActivityCode ? `(${li.ActivityCode})` : ""].filter(Boolean).join(" ") || "—",
+            (li.GroupName as string) || "—",
+            li.Area != null ? Number(li.Area).toLocaleString("en-IN") : "—",
+            Number(li.Quantity ?? 0).toLocaleString("en-IN"),
+            (li.UomName as string) || "",
+            fmtAmount(Number(li.Rate ?? 0)),
+            fmtAmount(Number(li.LineAmount ?? 0)),
+          ]),
+        },
+      });
     }
 
     if (!usesRungDetail && extraFields.length > 0) {
@@ -992,6 +1212,49 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                   Rejection Note
                 </p>
                 <p className="text-xs text-foreground">{item.RejectionNote}</p>
+              </div>
+            )}
+
+            {woActivities.length > 0 && <WoActivities activities={woActivities} />}
+
+            {/* BOQ: items and activities as detailed lists */}
+            {(boqItems.length > 0 || boqActivities.length > 0) && (
+              <div className="space-y-4">
+                {boqItems.length > 0 && (
+                  <BoqLines
+                    title={`Items (${boqItems.length})`}
+                    rows={boqItems.map((li) => ({
+                      name: (li.ItemName as string) || "—",
+                      code: (li.ItemCode as string) || "",
+                      sub: (li.ActivityName as string) ? `Activity: ${li.ActivityName}` : "",
+                      description: (li.Description as string) || "",
+                      facts: [
+                        ["Qty", `${Number(li.Quantity ?? 0).toLocaleString("en-IN")}${li.UomName ? ` ${li.UomName}` : ""}`],
+                        ["Rate", formatINR(Number(li.Rate ?? 0))],
+                        ["Tax", `${Number(li.TaxPct ?? 0)}%`],
+                      ],
+                      amount: formatINR(Number(li.LineAmount ?? 0)),
+                    }))}
+                  />
+                )}
+                {boqActivities.length > 0 && (
+                  <BoqLines
+                    title={`Activities (${boqActivities.length})`}
+                    rows={boqActivities.map((li) => ({
+                      name: (li.ActivityName as string) || "—",
+                      code: (li.ActivityCode as string) || "",
+                      sub: (li.GroupName as string) ? `Group: ${li.GroupName}` : "",
+                      description: (li.Description as string) || "",
+                      facts: [
+                        ...(li.Area != null ? [["Area", Number(li.Area).toLocaleString("en-IN")] as [string, string]] : []),
+                        ["Qty", `${Number(li.Quantity ?? 0).toLocaleString("en-IN")}${li.UomName ? ` ${li.UomName}` : ""}`],
+                        ["Rate", formatINR(Number(li.Rate ?? 0))],
+                        ["Tax", `${Number(li.TaxPct ?? 0)}%`],
+                      ],
+                      amount: formatINR(Number(li.LineAmount ?? 0)),
+                    }))}
+                  />
+                )}
               </div>
             )}
 

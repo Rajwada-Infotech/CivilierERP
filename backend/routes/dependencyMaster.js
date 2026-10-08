@@ -153,7 +153,24 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
-    const r = await pool.request().query(`
+    // Optional narrowing for the mobile app (the web page still gets the whole list, unchanged):
+    //   projectId — one project's chains      search — alias / location text
+    //   page+limit — OFFSET/FETCH paging      withActivities=0 — skip the per-chain ladder
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : null;
+    const paged = req.query.page != null || req.query.limit != null;
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 30));
+    const offset = (Math.max(1, parseInt(req.query.page, 10) || 1) - 1) * limit;
+    const withActivities = req.query.withActivities !== "0";
+    const listReq = pool.request();
+    let extra = "";
+    if (Number.isFinite(projectId)) { listReq.input("projectId", sql.Int, projectId); extra += " AND dm.ProjectId = @projectId"; }
+    if (search) {
+      listReq.input("search", sql.NVarChar(200), `%${search}%`);
+      extra += " AND (dm.Alias LIKE @search OR bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search)";
+    }
+    if (paged) { listReq.input("offset", sql.Int, offset); listReq.input("limit", sql.Int, limit); }
+    const r = await listReq.query(`
       SELECT
         dm.Id AS id,
         dm.Alias AS alias,
@@ -178,9 +195,10 @@ router.get("/", authMiddleware, async (req, res) => {
       LEFT JOIN dbo.BlockMaster  bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster   um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster   rm ON rm.Id = dm.RoomId
-      WHERE 1=1${projectPredicate(req.projectScope, "dm.ProjectId")}
-      ORDER BY dm.Id DESC
+      WHERE 1=1${projectPredicate(req.projectScope, "dm.ProjectId")}${extra}
+      ORDER BY dm.Id DESC${paged ? " OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY" : ""}
     `);
+    if (!withActivities) return res.json(r.recordset.map((row) => ({ ...row, activities: [] })));
 
     // Every rung for every chain, in one query — callers that need the full
     // activity ladder per chain (e.g. Work Done's chain browser) used to
@@ -194,7 +212,10 @@ router.get("/", authMiddleware, async (req, res) => {
       FROM dbo.DependencyMasterActivity dma
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       JOIN dbo.DependencyMaster dmx ON dmx.Id = dma.DependencyMasterId
-      WHERE 1=1${projectPredicate(req.projectScope, "dmx.ProjectId")}
+      WHERE 1=1${projectPredicate(req.projectScope, "dmx.ProjectId")}${
+        // A narrowed list only needs its own chains' rungs (ids come from the query above — integers).
+        (extra || paged) ? ` AND dma.DependencyMasterId IN (${r.recordset.map((x) => Number(x.id)).filter(Number.isFinite).join(",") || "NULL"})` : ""
+      }
       ORDER BY dma.DependencyMasterId, dma.SequenceNo ASC
     `);
     const activitiesByChain = new Map();

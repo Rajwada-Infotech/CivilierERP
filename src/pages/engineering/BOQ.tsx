@@ -12,6 +12,7 @@ import { type DbActivity } from "@/api/engineeringActivityMasterApi";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import {
   FileText,
+  FileSpreadsheet,
   Save,
   Search,
   Eye,
@@ -46,6 +47,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { DateInput } from "@/components/ui/date-input";
+import { BoqExcelImportModal } from "./BoqExcelImportModal";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -54,6 +56,9 @@ import { DateInput } from "@/components/ui/date-input";
 interface BoqItem {
   Id?: number;
   _key: string;
+  /** The BOQ Activity (Activity Master id) this item is required for; "" = none. */
+  activityId: string;
+  activityName: string;
   itemId: string;
   itemName: string;
   itemCode: string;
@@ -68,6 +73,11 @@ interface BoqItem {
 interface BoqActivity {
   Id?: number;
   _key: string;
+  /** Total area of the activity (optional) — with Qty it is the basis for per-unit figures. */
+  area: string;
+  /** Activity Group picked first; the activity can only come from this group. */
+  groupId: string;
+  groupName: string;
   activityId: string;
   activityName: string;
   activityCode: string;
@@ -139,6 +149,12 @@ interface ActivityOption {
   id: string;
   name: string;
   code: string;
+  /** Activity Group (Activity Master, type 0) this activity belongs to. */
+  groupId: string;
+}
+interface ActivityGroupOption {
+  id: string;
+  name: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -181,8 +197,21 @@ const fmtDate = (d?: string) =>
 const calcAmount = (qty: string, rate: string) =>
   (parseFloat(qty) || 0) * (parseFloat(rate) || 0);
 
+/**
+ * What an activity's per-unit figures are divided by: its Total Area when one is
+ * entered, otherwise its Total Quantity.
+ */
+const activityBasis = (a?: Pick<BoqActivity, "area" | "quantity">) => {
+  return { value: parseFloat(a?.area ?? "") || 0, kind: "area" as const };
+};
+
+const fmtQty = (n: number) =>
+  n.toLocaleString("en-IN", { maximumFractionDigits: 4 });
+
 const blankItem = (): BoqItem => ({
   _key: uid(),
+  activityId: "",
+  activityName: "",
   itemId: "",
   itemName: "",
   itemCode: "",
@@ -196,11 +225,14 @@ const blankItem = (): BoqItem => ({
 
 const blankActivity = (): BoqActivity => ({
   _key: uid(),
+  area: "",
+  groupId: "",
+  groupName: "",
   activityId: "",
   activityName: "",
   activityCode: "",
   description: "",
-  quantity: "",
+  quantity: "1",
   uomName: "",
   rate: "",
   tax: "18",
@@ -210,6 +242,8 @@ const blankActivity = (): BoqActivity => ({
 const rowToItem = (r: any): BoqItem => ({
   Id: r.Id,
   _key: uid(),
+  activityId: r.ActivityId ?? "",
+  activityName: r.ActivityName ?? "",
   itemId: r.ItemId ?? "",
   itemName: r.ItemName ?? "",
   itemCode: r.ItemCode ?? "",
@@ -224,13 +258,20 @@ const rowToItem = (r: any): BoqItem => ({
 const rowToActivity = (r: any): BoqActivity => ({
   Id: r.Id,
   _key: uid(),
+  // Total Qty is gone from activities — the area is the quantity. Older rows that
+  // only had a Qty keep their amount by showing that Qty as the area.
+  area: r.Area != null ? String(r.Area) : r.Quantity ? String(r.Quantity) : "",
+  groupId: r.GroupId ?? "",
+  groupName: r.GroupName ?? "",
   activityId: r.ActivityId ?? "",
   activityName: r.ActivityName ?? "",
   activityCode: r.ActivityCode ?? "",
   description: r.Description ?? "",
-  quantity: String(r.Quantity ?? ""),
+  quantity: "1",
   uomName: r.UomName ?? "",
-  rate: String(r.Rate ?? ""),
+  // Total Rate is the whole activity's price (not per unit). Rows saved as
+  // area x unit-rate keep their amount by showing that amount as the Total Rate.
+  rate: String(r.Quantity && Number(r.Quantity) !== 1 ? (r.LineAmount ?? r.Rate ?? "") : (r.Rate ?? "")),
   tax: String(r.TaxPct ?? "18"),
   amount: parseFloat(r.LineAmount) || 0,
 });
@@ -239,6 +280,8 @@ const buildPayload = (
   form: FormState,
   items: BoqItem[],
   activities: BoqActivity[],
+  activityOptions: ActivityOption[] = [],
+  activityGroups: ActivityGroupOption[] = [],
 ) => ({
   BoqNo: form.BoqNo || undefined,
   BoqDate: form.BoqDate,
@@ -249,7 +292,13 @@ const buildPayload = (
   DocTypeId: form.DocTypeId ? Number(form.DocTypeId) : null,
   finYear: form.FinYear || undefined,
   Status: form.Status,
-  BoqItems: items.map((it) => ({
+  BoqItems: items.map((it) => {
+    const act = it.activityId
+      ? activities.find((a) => a.activityId === it.activityId)
+      : undefined;
+    return {
+    activityId: act ? act.activityId : null,
+    activityName: act ? act.activityName : null,
     itemId: it.itemId,
     itemName: it.itemName,
     itemCode: it.itemCode,
@@ -260,13 +309,22 @@ const buildPayload = (
     rate: it.rate,
     tax: it.tax,
     amount: it.amount,
-  })),
+    };
+  }),
   BoqActivities: activities.map((ac) => ({
+    groupId: ac.groupId || activityOptions.find((o) => o.id === ac.activityId)?.groupId || null,
+    groupName:
+      ac.groupName ||
+      activityGroups.find(
+        (g) => g.id === (ac.groupId || activityOptions.find((o) => o.id === ac.activityId)?.groupId),
+      )?.name ||
+      null,
+    area: ac.area,
     activityId: ac.activityId,
     activityName: ac.activityName,
     activityCode: ac.activityCode,
     description: ac.description,
-    quantity: ac.quantity,
+    quantity: "1",
     uomName: ac.uomName,
     unit: ac.uomName,
     rate: ac.rate,
@@ -326,6 +384,9 @@ interface LineEditorProps {
   uoms: UomOption[];
   itemOptions?: ItemOption[];
   activityOptions?: ActivityOption[];
+  activityGroups?: ActivityGroupOption[];
+  /** Item mode: the activities already added to this BOQ, offered in the "Activity" column. */
+  boqActivities?: BoqActivity[];
   itemsTotal?: number;
   activitiesTotal?: number;
   onChange: (rows: any[]) => void;
@@ -342,6 +403,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
   uoms,
   itemOptions = [],
   activityOptions = [],
+  activityGroups = [],
+  boqActivities = [],
   itemsTotal = 0,
   activitiesTotal = 0,
   onChange,
@@ -351,11 +414,20 @@ const LineEditor: React.FC<LineEditorProps> = ({
 }) => {
   const isItem = mode === "item";
 
+  // The group an activity row is under: the one picked, else the one the saved
+  // activity belongs to (BOQs made before groups were recorded).
+  const rowGroupId = (r: any): string =>
+    r.groupId || activityOptions.find((o) => o.id === r.activityId)?.groupId || "";
+
   const upd = (idx: number, field: string, val: string) => {
     const next = (rows as any[]).map((r, i) => {
       if (i !== idx) return r;
       const updated = { ...r, [field]: val };
-      if (field === "quantity" || field === "rate") {
+      // Activities: Total Rate is the whole price, so Amount = Total Rate
+      // (Per Activity Price = Total Rate / Total Area is shown separately).
+      if (!isItem) {
+        if (field === "rate") updated.amount = parseFloat(val) || 0;
+      } else if (field === "quantity" || field === "rate") {
         updated.amount = calcAmount(updated.quantity, updated.rate);
       }
       return updated;
@@ -374,6 +446,10 @@ const LineEditor: React.FC<LineEditorProps> = ({
     0,
   );
   const grandTotal = itemsTotal + activitiesTotal;
+  // Every mode shows 12 columns (+ delete when editable): items get "For Activity"
+  // and "Per Unit Qty"; activities get "Area" and "Per Activity Price".
+  // Activities also get a leading "Activity Group" column.
+  const colCount = 12 + (readOnly ? 0 : 1);
 
   return (
     <div
@@ -405,7 +481,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
             padding: 3,
           }}
         >
-          {(["items", "activities"] as const).map((t) => {
+          {(["activities", "items"] as const).map((t) => {
             const active = (t === "items") === isItem;
             return (
               <button
@@ -475,14 +551,18 @@ const LineEditor: React.FC<LineEditorProps> = ({
         >
           <colgroup>
             <col style={{ width: 36 }} />
+            {!isItem && <col style={{ width: 170 }} />}
             <col style={{ width: 180 }} />
+            {isItem && <col style={{ width: 170 }} />}
             <col style={{ width: 80 }} />
             <col style={{ width: 120 }} />
-            <col style={{ width: 72 }} />
+            {isItem && <col style={{ width: 72 }} />}
+            <col style={{ width: isItem ? 130 : 84 }} />
             <col style={{ width: 96 }} />
             <col style={{ width: 96 }} />
             <col style={{ width: 64 }} />
             <col style={{ width: 108 }} />
+            {!isItem && <col style={{ width: 130 }} />}
             <col />
             {!readOnly && <col style={{ width: 36 }} />}
           </colgroup>
@@ -494,25 +574,31 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 borderBottom: "1px solid hsl(var(--border))",
               }}
             >
-              {[
-                "#",
-                isItem ? "Item" : "Activity",
-                "Code",
-                "Spec / Notes",
-                "Qty",
-                "UOM",
-                "Rate (₹)",
-                "Tax %",
-                "Amount (₹)",
-                "Tax Amt (₹)",
-              ].map((h, i) => (
+              {(
+                [
+                  ["#", "center"],
+                  ...(!isItem ? [["Activity Group", "left"]] : []),
+                  [isItem ? "Item" : "Activity", "left"],
+                  ...(isItem ? [["For Activity", "left"]] : []),
+                  ["Code", "left"],
+                  ["Spec / Notes", "left"],
+                  ...(isItem ? [["Item Qty", "right"]] : []),
+                  [isItem ? "Per Unit Qty" : "Total Area", "right"],
+                  ["UOM", "left"],
+                  [isItem ? "Rate (₹)" : "Total Rate (₹)", "right"],
+                  ["Tax %", "right"],
+                  ["Amount (₹)", "right"],
+                  ...(!isItem ? [["Per Activity Price", "right"]] : []),
+                  ["Tax Amt (₹)", "right"],
+                ] as [string, "left" | "right" | "center"][]
+              ).map(([h, align]) => {
+                return (
                 <th
                   key={h}
                   style={{
                     padding: "0 8px",
                     height: 30,
-                    textAlign:
-                      i >= 4 && i !== 5 ? "right" : i === 0 ? "center" : "left",
+                    textAlign: align,
                     fontSize: 10,
                     fontWeight: 600,
                     letterSpacing: "0.07em",
@@ -525,7 +611,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 >
                   {h}
                 </th>
-              ))}
+                );
+              })}
               {!readOnly && <th style={{ borderRight: "none", padding: 0 }} />}
             </tr>
           </thead>
@@ -534,7 +621,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
             {(rows as any[]).length === 0 ? (
               <tr>
                 <td
-                  colSpan={readOnly ? 10 : 11}
+                  colSpan={colCount}
                   style={{
                     textAlign: "center",
                     padding: 32,
@@ -585,6 +672,58 @@ const LineEditor: React.FC<LineEditorProps> = ({
                         {idx + 1}
                       </span>
                     </td>
+
+                    {/* Activity Group (activities only) — chosen before the activity */}
+                    {!isItem && (
+                      <td
+                        style={{
+                          borderRight: "1px solid hsl(var(--border))",
+                          padding: "4px 6px",
+                        }}
+                      >
+                        {readOnly ? (
+                          <span style={{ fontSize: 12.5 }}>
+                            {row.groupName ||
+                              activityGroups.find((g) => g.id === row.groupId)?.name ||
+                              "—"}
+                          </span>
+                        ) : (
+                          <Select
+                            value={rowGroupId(row) || ""}
+                            onValueChange={(val) => {
+                              const g = activityGroups.find((x) => x.id === val);
+                              if (!g) return;
+                              // A different group invalidates the activity picked under the old one.
+                              onChange(
+                                (rows as any[]).map((r, i) =>
+                                  i !== idx
+                                    ? r
+                                    : {
+                                        ...r,
+                                        groupId: g.id,
+                                        groupName: g.name,
+                                        ...(rowGroupId(r) !== g.id
+                                          ? { activityId: "", activityName: "", activityCode: "" }
+                                          : {}),
+                                      },
+                                ),
+                              );
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                              <SelectValue placeholder="— Select group —" />
+                            </SelectTrigger>
+                            <SelectContent className="z-[300] max-h-60">
+                              {activityGroups.map((g) => (
+                                <SelectItem key={g.id} value={g.id} className="text-xs">
+                                  {g.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </td>
+                    )}
 
                     {/* Name select */}
                     <td
@@ -640,10 +779,11 @@ const LineEditor: React.FC<LineEditorProps> = ({
                         </Select>
                       ) : (
                         <Select
+                          disabled={!rowGroupId(row)}
                           value={row.activityId ? String(row.activityId) : ""}
                           onValueChange={(val) => {
                             const sel = activityOptions.find(
-                              (o) => o.id === val,
+                              (o) => o.id === val && o.groupId === rowGroupId(row),
                             );
                             if (!sel) return;
                             onChange(
@@ -662,10 +802,18 @@ const LineEditor: React.FC<LineEditorProps> = ({
                           }}
                         >
                           <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
-                            <SelectValue placeholder="— Select activity —" />
+                            <SelectValue
+                              placeholder={
+                                rowGroupId(row)
+                                  ? "— Select activity —"
+                                  : "Select a group first"
+                              }
+                            />
                           </SelectTrigger>
                           <SelectContent className="z-[300] max-h-60">
-                            {activityOptions.map((o) => (
+                            {activityOptions
+                              .filter((o) => o.groupId === rowGroupId(row))
+                              .map((o) => (
                               <SelectItem
                                 key={o.id}
                                 value={o.id}
@@ -678,6 +826,60 @@ const LineEditor: React.FC<LineEditorProps> = ({
                         </Select>
                       )}
                     </td>
+
+                    {/* For Activity (items only) */}
+                    {isItem && (
+                      <td
+                        style={{
+                          borderRight: "1px solid hsl(var(--border))",
+                          padding: "4px 6px",
+                        }}
+                      >
+                        {readOnly ? (
+                          <span style={{ fontSize: 12 }}>
+                            {row.activityName || "—"}
+                          </span>
+                        ) : (
+                          <Select
+                            value={row.activityId ? String(row.activityId) : "__none"}
+                            onValueChange={(val) => {
+                              const sel = boqActivities.find((a) => a.activityId === val);
+                              onChange(
+                                (rows as any[]).map((r, i) =>
+                                  i !== idx
+                                    ? r
+                                    : {
+                                        ...r,
+                                        activityId: sel ? sel.activityId : "",
+                                        activityName: sel ? sel.activityName : "",
+                                      },
+                                ),
+                              );
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                              <SelectValue placeholder="— None —" />
+                            </SelectTrigger>
+                            <SelectContent className="z-[300] max-h-60">
+                              <SelectItem value="__none" className="text-xs">
+                                — None —
+                              </SelectItem>
+                              {boqActivities
+                                .filter(
+                                  (a, k, arr) =>
+                                    a.activityId &&
+                                    arr.findIndex((b) => b.activityId === a.activityId) === k,
+                                )
+                                .map((a) => (
+                                  <SelectItem key={a.activityId} value={a.activityId} className="text-xs">
+                                    {a.activityName}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </td>
+                    )}
 
                     {/* Code */}
                     <td
@@ -750,7 +952,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       )}
                     </td>
 
-                    {/* Qty */}
+                    {/* Qty (items only — an activity is sized by its Total Area) */}
+                    {isItem && (
                     <td
                       style={{
                         borderRight: "1px solid hsl(var(--border))",
@@ -776,6 +979,90 @@ const LineEditor: React.FC<LineEditorProps> = ({
                           value={row.quantity}
                           placeholder="0"
                           onChange={(e) => upd(idx, "quantity", e.target.value)}
+                          style={{
+                            width: "100%",
+                            height: 30,
+                            border: "0.5px solid hsl(var(--border))",
+                            borderRadius: 4,
+                            background: "hsl(var(--background))",
+                            padding: "0 7px",
+                            fontSize: 12,
+                            color: "hsl(var(--foreground))",
+                            outline: "none",
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
+                            textAlign: "right",
+                          }}
+                        />
+                      )}
+                    </td>
+
+                    )}
+
+                    {/* Per Unit Qty (items) / Total Area (activities) */}
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                        textAlign: "right",
+                      }}
+                    >
+                      {isItem ? (
+                        (() => {
+                          const act = row.activityId
+                            ? boqActivities.find((a) => a.activityId === row.activityId)
+                            : undefined;
+                          const basis = activityBasis(act);
+                          const q = parseFloat(row.quantity) || 0;
+                          if (!act || basis.value <= 0 || q <= 0) {
+                            return (
+                              <span
+                                title={
+                                  !act
+                                    ? "Pick the activity this item is for"
+                                    : "Enter the activity's Total Area and this item's quantity"
+                                }
+                                style={{ color: "hsl(var(--muted-foreground))" }}
+                              >
+                                —
+                              </span>
+                            );
+                          }
+                          return (
+                            <span
+                              title={`${fmtQty(q)} ÷ ${fmtQty(basis.value)} (activity ${basis.kind === "area" ? "area" : "quantity"})`}
+                              style={{
+                                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                                fontVariantNumeric: "tabular-nums",
+                                fontSize: 12.5,
+                                fontWeight: 600,
+                                color: "hsl(var(--primary))",
+                              }}
+                            >
+                              {fmtQty(q / basis.value)}
+                              <span style={{ fontSize: 9.5, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>
+                                {` ${row.uomName || ""} / ${basis.kind === "area" ? "area" : "unit"}`}
+                              </span>
+                            </span>
+                          );
+                        })()
+                      ) : readOnly ? (
+                        <span
+                          style={{
+                            fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                            fontVariantNumeric: "tabular-nums",
+                            fontSize: 12.5,
+                          }}
+                        >
+                          {row.area || "—"}
+                        </span>
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          value={row.area ?? ""}
+                          placeholder="0"
+                          onChange={(e) => upd(idx, "area", e.target.value)}
                           style={{
                             width: "100%",
                             height: 30,
@@ -945,6 +1232,40 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       </span>
                     </td>
 
+                    {/* Per Activity Price (activities only): amount ÷ area (or ÷ qty) */}
+                    {!isItem && (
+                      <td
+                        style={{
+                          borderRight: "1px solid hsl(var(--border))",
+                          padding: "4px 10px",
+                          textAlign: "right",
+                        }}
+                      >
+                        {(() => {
+                          const basis = activityBasis(row);
+                          if (basis.value <= 0 || amt <= 0) {
+                            return <span style={{ color: "hsl(var(--muted-foreground))" }}>—</span>;
+                          }
+                          return (
+                            <span
+                              title={`${fmt(amt)} ÷ ${fmtQty(basis.value)} (${basis.kind === "area" ? "total area" : "total qty"})`}
+                              style={{
+                                fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
+                                fontVariantNumeric: "tabular-nums",
+                                fontSize: 12.5,
+                                fontWeight: 600,
+                              }}
+                            >
+                              {fmt(amt / basis.value)}
+                              <span style={{ fontSize: 9.5, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>
+                                {basis.kind === "area" ? " / area" : " / unit"}
+                              </span>
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    )}
+
                     {/* Tax Amt */}
                     <td
                       style={{
@@ -1023,7 +1344,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 }}
               >
                 <td
-                  colSpan={readOnly ? 9 : 10}
+                  colSpan={colCount - 2}
                   style={{
                     textAlign: "right",
                     padding: "6px 10px",
@@ -1206,6 +1527,7 @@ interface FormModalProps {
   uoms: UomOption[];
   itemOptions: ItemOption[];
   activityOptions: ActivityOption[];
+  activityGroups: ActivityGroupOption[];
   finYears: { id?: number | string; year: string; status?: string; locked?: boolean }[];
   activeFinYear?: string;
   onClose: () => void;
@@ -1220,6 +1542,7 @@ const FormModal: React.FC<FormModalProps> = ({
   uoms,
   itemOptions,
   activityOptions,
+  activityGroups,
   finYears,
   activeFinYear,
   onClose,
@@ -1240,7 +1563,7 @@ const FormModal: React.FC<FormModalProps> = ({
   const [activities, setActivities] = useState<BoqActivity[]>(
     (record?.BoqActivities ?? []).map(rowToActivity),
   );
-  const [lineTab, setLineTab] = useState<"items" | "activities">("items");
+  const [lineTab, setLineTab] = useState<"items" | "activities">("activities");
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -1266,10 +1589,13 @@ const FormModal: React.FC<FormModalProps> = ({
 
       setItems((prev) => {
         const existingIds = new Set(prev.map((it) => it.itemId));
+        const actName = activityOptions.find((o) => o.id === activityId)?.name ?? "";
         const newRows = linkedList
           .filter((li) => !existingIds.has(li.itemId))
           .map((li) => ({
             _key: uid(),
+            activityId,
+            activityName: actName,
             itemId: li.itemId,
             itemName: li.itemName,
             itemCode: li.itemCode || "",
@@ -1346,7 +1672,7 @@ const FormModal: React.FC<FormModalProps> = ({
     if (!validate()) return;
     setSaving(true);
     try {
-      const payload = buildPayload(form, items, activities);
+      const payload = buildPayload(form, items, activities, activityOptions, activityGroups);
       if (isEdit) {
         await apiFetch(`/boq/${record!.BoqID}`, {
           method: "PUT",
@@ -1703,6 +2029,8 @@ const FormModal: React.FC<FormModalProps> = ({
               uoms={uoms}
               itemOptions={itemOptions}
               activityOptions={activityOptions}
+              activityGroups={activityGroups}
+              boqActivities={activities}
               itemsTotal={itemsTotal}
               activitiesTotal={activitiesTotal}
               onChange={
@@ -1745,7 +2073,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
   canPrint,
   canEdit,
 }) => {
-  const [lineTab, setLineTab] = useState<"items" | "activities">("items");
+  const [lineTab, setLineTab] = useState<"items" | "activities">("activities");
   const [acting, setActing] = useState(false);
 
   const doDelete = async () => {
@@ -1956,6 +2284,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
                 : (record.BoqActivities ?? []).map(rowToActivity)
             }
             uoms={uoms}
+            boqActivities={(record.BoqActivities ?? []).map(rowToActivity)}
             itemsTotal={itemsTotal}
             activitiesTotal={activitiesTotal}
             onChange={() => {}}
@@ -2087,7 +2416,6 @@ export default function BOQ() {
   const PAGE_LIMIT = 10;
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("All");
-  const [filterCompanyId, setFilterCompanyId] = useState<number | null>(null);
   const searchRef = useRef<ReturnType<typeof setTimeout>>();
 
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -2096,8 +2424,10 @@ export default function BOQ() {
   const [uoms, setUoms] = useState<UomOption[]>([]);
   const [itemOptions, setItemOptions] = useState<ItemOption[]>([]);
   const [activityOptions, setActivityOptions] = useState<ActivityOption[]>([]);
+  const [activityGroups, setActivityGroups] = useState<ActivityGroupOption[]>([]);
 
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editRecord, setEditRecord] = useState<BoqRecord | null>(null);
   const [viewRecord, setViewRecord] = useState<BoqRecord | null>(null);
 
@@ -2109,12 +2439,11 @@ export default function BOQ() {
     isLoading: loading,
     refetch: loadList,
   } = useQuery({
-    queryKey: ["boqs", page, search, filterStatus, filterCompanyId],
+    queryKey: ["boqs", page, search, filterStatus],
     queryFn: () => {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(PAGE_LIMIT),
-        companyId: String(filterCompanyId),
         ...(search ? { search } : {}),
         ...(filterStatus && filterStatus !== "All"
           ? { status: filterStatus }
@@ -2122,7 +2451,6 @@ export default function BOQ() {
       });
       return apiFetch(`/boq?${params}`);
     },
-    enabled: !!filterCompanyId,
     staleTime: 30_000,
   });
 
@@ -2283,7 +2611,13 @@ export default function BOQ() {
             id: String(a.id),
             name: a.activity_name ?? "",
             code: String(a.id),
+            groupId: a.group_id != null ? String(a.group_id) : "",
           })),
+      );
+      setActivityGroups(
+        activityData
+          .filter((a) => a.activity_type === 0 && a.is_active !== false)
+          .map((a) => ({ id: String(a.id), name: a.activity_name ?? "" })),
       );
     } catch (err) {
       toast.error("Failed to load dropdown data");
@@ -2524,6 +2858,7 @@ export default function BOQ() {
           uoms={uoms}
           itemOptions={itemOptions}
           activityOptions={activityOptions}
+          activityGroups={activityGroups}
           finYears={finYears}
           activeFinYear={activeFinYear}
           onClose={() => {
@@ -2531,6 +2866,23 @@ export default function BOQ() {
             setEditRecord(null);
           }}
           onSaved={() => loadList()}
+        />
+      )}
+
+      {showImport && (
+        <BoqExcelImportModal
+          masters={{
+            companies,
+            projects,
+            docTypes,
+            finYears: finYears.map((f) => ({ year: f.year })),
+            uoms,
+            items: itemOptions,
+            activities: activityOptions,
+            groups: activityGroups,
+          }}
+          onClose={() => setShowImport(false)}
+          onImported={() => loadList()}
         />
       )}
 
@@ -2571,6 +2923,14 @@ export default function BOQ() {
                 />
                 Refresh
               </button>
+              {rights.canCreate && (
+                <button
+                  onClick={() => setShowImport(true)}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted transition-all"
+                >
+                  <FileSpreadsheet size={13} /> Excel Import
+                </button>
+              )}
               {rights.canCreate && (
                 <button
                   onClick={() => {
@@ -2639,24 +2999,6 @@ export default function BOQ() {
                   className="pl-9 h-9"
                 />
               </div>
-              <Select
-                value={filterCompanyId ? String(filterCompanyId) : ""}
-                onValueChange={(v) => {
-                  setFilterCompanyId(v ? Number(v) : null);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="h-9 w-48 text-xs">
-                  <SelectValue placeholder="Select company…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)} className="text-xs">
-                      {c.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <div className="flex gap-2 flex-wrap">
                 {statuses.map((s) => (
                   <Button
@@ -2676,11 +3018,7 @@ export default function BOQ() {
             </CardHeader>
 
             <CardContent className="p-0">
-              {!filterCompanyId ? (
-                <div className="flex items-center justify-center p-12 text-muted-foreground text-sm gap-2">
-                  Select a company above to view BOQs.
-                </div>
-              ) : loading ? (
+              {loading ? (
                 <div className="flex items-center justify-center p-12 text-muted-foreground text-sm gap-2">
                   <RefreshCw size={15} className="animate-spin" /> Loading BOQs…
                 </div>

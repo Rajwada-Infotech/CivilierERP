@@ -4,7 +4,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 
 // Work Checkpoint Master is ONE general, reusable catalog of checkpoints
 // (migration 461) — not a list per activity. dbo.ActivityCheckpoint.ActivityId
@@ -199,7 +199,9 @@ router.get("/template/:activityId", authMiddleware, async (req, res) => {
 // dependencyMaster.js's POST /, which already took an array of activities).
 // Each id is deduped/sorted the same way whichever path is used, so a
 // single-id caller gets byte-identical behaviour to before.
-router.post("/template/:activityId", authMiddleware, requirePageRight("dpr-activity-master", "edit"), async (req, res) => {
+// Attaching / detaching checkpoints is done from either Activity Master page.
+const ACTIVITY_MASTER_PAGES = ["activity-master", "engineering-activity-master"];
+router.post("/template/:activityId", authMiddleware, requireAnyPageRight(ACTIVITY_MASTER_PAGES, "edit"), async (req, res) => {
   const activityId = parseInt(req.params.activityId, 10);
   if (!Number.isFinite(activityId)) return res.status(400).json({ error: "Invalid activityId" });
 
@@ -258,7 +260,7 @@ router.post("/template/:activityId", authMiddleware, requirePageRight("dpr-activ
 });
 
 // DELETE /template/:activityId/:linkId — detach one.
-router.delete("/template/:activityId/:linkId", authMiddleware, requirePageRight("dpr-activity-master", "edit"), async (req, res) => {
+router.delete("/template/:activityId/:linkId", authMiddleware, requireAnyPageRight(ACTIVITY_MASTER_PAGES, "edit"), async (req, res) => {
   const linkId = parseInt(req.params.linkId, 10);
   if (!Number.isFinite(linkId)) return res.status(400).json({ error: "Invalid id" });
   try {

@@ -15,8 +15,12 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getGodowns, type Godown } from "@/api/godownsApi";
-import { getItems } from "@/api/itemMasterApi";
-import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { getItems, type DbItem } from "@/api/itemMasterApi";
+import { parseSheetDate } from "@/lib/xlsxBook";
+import { createInventoryImport } from "@/api/fixedAssetInventoryImportApi";
+import { downloadFaInventoryTemplate, readFaImportFile } from "./faInventoryExcel";
+import { godownMatches, validateFaImportRows, type FaImportResultRow } from "./faImportValidation";
+import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import {
   getEligibleAssetItems, getPendingBatches, deletePendingBatch, getFixedAssetTaggings, createFixedAssetTagging,
   updateFixedAssetTagging, deleteFixedAssetTagging,
@@ -113,41 +117,7 @@ type ViewMode = "list" | "form";
 // laptops means 10 rows instead of one row with Quantity=10.
 type ImportMode = "bulk" | "individual";
 
-const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
-  { header: "Company", accessor: "Company" },
-  { header: "Project", accessor: "Project" },
-  { header: "Godown", accessor: "Godown" },
-  { header: "Item", accessor: "Item" },
-  { header: "Date", accessor: "Date" },
-  { header: "Quantity", accessor: "Quantity" },
-  { header: "Remarks", accessor: "Remarks" },
-];
-
-const INDIVIDUAL_IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
-  { header: "Company", accessor: "Company" },
-  { header: "Project", accessor: "Project" },
-  { header: "Godown", accessor: "Godown" },
-  { header: "Item", accessor: "Item" },
-  { header: "Date", accessor: "Date" },
-  { header: "Remarks", accessor: "Remarks" },
-];
-
-interface ImportRow {
-  row: number;
-  companyId: number;
-  companyLabel: string;
-  projectId: number | null;
-  projectLabel: string;
-  godownId: number | null;
-  godownLabel: string;
-  itemId: string | null;
-  itemName: string;
-  docDate: string;
-  quantity: number;
-  remarks?: string;
-  status: "valid" | "success" | "error";
-  message?: string;
-}
+type ImportRow = FaImportResultRow;
 
 export default function FixedAssetTagging() {
   const rights = usePageRights("fixed-asset-tagging");
@@ -226,22 +196,21 @@ export default function FixedAssetTagging() {
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(form.companyId));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, form.companyId));
   }, [allProjects, form.companyId]);
 
   const filterProjects = useMemo(() => {
     if (!filterCompany) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(filterCompany));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, filterCompany));
   }, [allProjects, filterCompany]);
 
   const godowns = useMemo(() => {
     if (!form.companyId) return [];
     return ensureArray<Godown>(godownsData?.data)
       .filter((g) => !g.IsDeleted && g.IsActive)
-      .filter((g) => g.EnterpriseID === Number(form.companyId))
-      .filter((g) => !form.projectId || g.ProjectID === Number(form.projectId) || g.ProjectID == null);
+      .filter((g) => godownMatches(g, Number(form.companyId), form.projectId ? Number(form.projectId) : null));
   }, [godownsData, form.companyId, form.projectId]);
 
   const selectedItem = useMemo(
@@ -298,6 +267,7 @@ export default function FixedAssetTagging() {
         description: preview,
       });
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
@@ -313,6 +283,7 @@ export default function FixedAssetTagging() {
     onSuccess: () => {
       toast.success("Tagging entry updated");
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
       setEditTag(null);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -323,6 +294,7 @@ export default function FixedAssetTagging() {
     onSuccess: () => {
       toast.success("Tagging entry deleted");
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
@@ -361,20 +333,23 @@ export default function FixedAssetTagging() {
   // ── bulk import (Excel/CSV) ────────────────────────────────────────────────
   const handleImportClick = () => importFileInputRef.current?.click();
 
-  const handleDownloadImportTemplate = () => {
-    if (importMode === "individual") {
-      exportToCsv(
-        [{ Company: "", Project: "", Godown: "", Item: "", Date: "", Remarks: "" }],
-        INDIVIDUAL_IMPORT_TEMPLATE_COLUMNS,
-        "fa-inventory-individual-import-template",
-      );
-      return;
+  const handleDownloadImportTemplate = async () => {
+    try {
+      const items = await getItems();
+      await downloadFaInventoryTemplate(importMode, {
+        companies: ensureArray<{ id: number; label: string }>(companies),
+        projects: ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects),
+        godowns: ensureArray<Godown>(godownsData?.data)
+          .filter((g) => !g.IsDeleted && g.IsActive)
+          .map((g) => ({ GodownName: g.GodownName, EnterpriseID: g.EnterpriseID ?? null, ProjectID: g.ProjectID ?? null })),
+        // Only Fixed Asset items can be imported, so only they are offered.
+        faItems: items
+          .filter((i) => (i.M_Type || "").trim().toLowerCase() === "fixed asset")
+          .map((i) => ({ code: i.M_code || "", name: i.M_Name || "", uom: i.M_UOM || "" })),
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not create the template");
     }
-    exportToCsv(
-      [{ Company: "", Project: "", Godown: "", Item: "", Date: "", Quantity: "", Remarks: "" }],
-      IMPORT_TEMPLATE_COLUMNS,
-      "fa-inventory-import-template",
-    );
   };
 
   const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -384,115 +359,23 @@ export default function FixedAssetTagging() {
 
     setImportValidating(true);
     try {
-      const rawRows = parseCsv(await file.text());
+      const rawRows = await readFaImportFile(file);
+      const itemMaster: DbItem[] = await getItems();
       if (rawRows.length === 0) {
         toast.error("The file has no data rows");
         return;
       }
 
-      const companyList = ensureArray<{ id: number; label: string }>(companies);
-      const projectList = ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects);
-      const godownList = ensureArray<Godown>(godownsData?.data).filter((g) => !g.IsDeleted && g.IsActive);
-
-      // Eligible items depend on (company, project, godown, finYear) scope —
-      // cache per unique combination so rows sharing a scope don't refetch.
-      const eligibleCache = new Map<string, EligibleAssetItem[]>();
-
-      const results: ImportRow[] = [];
-      let rowNum = 1;
-      for (const raw of rawRows) {
-        rowNum += 1; // header is row 1, first data row is row 2
-        const companyName  = (raw["Company"]  || "").trim();
-        const projectName  = (raw["Project"]  || "").trim();
-        const godownName   = (raw["Godown"]   || "").trim();
-        const itemName     = (raw["Item"]     || "").trim();
-        const docDate      = (raw["Date"]     || "").trim();
-        const quantityRaw  = (raw["Quantity"] || "").trim();
-        const remarks      = (raw["Remarks"]  || "").trim();
-
-        const row: ImportRow = {
-          row: rowNum,
-          companyId: 0,
-          companyLabel: companyName || "—",
-          projectId: null,
-          projectLabel: projectName || "—",
-          godownId: null,
-          godownLabel: godownName || "—",
-          itemId: null,
-          itemName: itemName || "—",
-          docDate,
-          quantity: 0,
-          remarks: remarks || undefined,
-          status: "error",
-        };
-
-        if (!companyName || !projectName || !godownName || !itemName || !docDate || (importMode === "bulk" && !quantityRaw)) {
-          row.message = "Missing required field(s)";
-          results.push(row);
-          continue;
-        }
-
-        const company = companyList.find((c) => c.label.toLowerCase() === companyName.toLowerCase());
-        if (!company) { row.message = `Company "${companyName}" not found`; results.push(row); continue; }
-        row.companyId = company.id;
-        row.companyLabel = company.label;
-
-        const project = projectList.find((p) => p.company_id === company.id && p.label.toLowerCase() === projectName.toLowerCase());
-        if (!project) { row.message = `Project "${projectName}" not found under ${company.label}`; results.push(row); continue; }
-        row.projectId = project.id;
-        row.projectLabel = project.label;
-
-        const godown = godownList.find((g) =>
-          g.EnterpriseID === company.id &&
-          (g.ProjectID === project.id || g.ProjectID == null) &&
-          g.GodownName.toLowerCase() === godownName.toLowerCase()
-        );
-        if (!godown) { row.message = `Godown "${godownName}" not found for this company/project`; results.push(row); continue; }
-        row.godownId = godown.GodownID;
-        row.godownLabel = godown.GodownName;
-
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(docDate)) {
-          row.message = "Date must be in YYYY-MM-DD format";
-          results.push(row);
-          continue;
-        }
-        const finYear = deriveFinYear(docDate, finYears);
-        if (!finYear) { row.message = "Date doesn't fall in any configured Financial Year"; results.push(row); continue; }
-
-        let quantity = 1;
-        if (importMode === "bulk") {
-          quantity = parseInt(quantityRaw, 10);
-          if (!Number.isFinite(quantity) || quantity <= 0 || String(quantity) !== quantityRaw) {
-            row.message = "Quantity must be a positive whole number";
-            results.push(row);
-            continue;
-          }
-        }
-        row.quantity = quantity;
-
-        const cacheKey = `${company.id}|${project.id}|${godown.GodownID}|${finYear}`;
-        let items = eligibleCache.get(cacheKey);
-        if (!items) {
-          items = await getEligibleAssetItems({
-            godownId: godown.GodownID,
-            companyId: company.id,
-            projectId: project.id,
-            finYear,
-          });
-          eligibleCache.set(cacheKey, items);
-        }
-        const item = items.find((i) => (i.ItemName || "").toLowerCase() === itemName.toLowerCase());
-        if (!item) { row.message = `Item "${itemName}" is not an untagged fixed-asset item at this godown`; results.push(row); continue; }
-        if (quantity > item.UntaggedQty) {
-          row.message = `Only ${fmt(item.UntaggedQty)} unit(s) untagged for "${item.ItemName}"`;
-          results.push(row);
-          continue;
-        }
-        row.itemId = item.ItemId;
-        row.itemName = item.ItemName || itemName;
-        row.status = "valid";
-        results.push(row);
-      }
+      const results: ImportRow[] = validateFaImportRows(rawRows, {
+        mode: importMode,
+        companies: ensureArray<{ id: number; label: string }>(companies),
+        projects: ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects),
+        godowns: ensureArray<Godown>(godownsData?.data)
+          .filter((g) => !g.IsDeleted && g.IsActive)
+          .map((g) => ({ GodownID: g.GodownID, GodownName: g.GodownName, EnterpriseID: g.EnterpriseID, ProjectID: g.ProjectID })),
+        itemMaster,
+        deriveFinYear: (iso) => deriveFinYear(iso, finYears),
+      });
 
       setImportPreview(results);
       setImportDone(false);
@@ -516,16 +399,19 @@ export default function FixedAssetTagging() {
     for (const row of validRows) {
       const idx = finalResults.findIndex((r) => r.row === row.row);
       try {
-        await createFixedAssetTagging({
+        // Imported stock goes straight into the godown (no GRN), then follows the
+        // normal FA tagging / FA Code generation — same call Inventory Import uses.
+        const created = await createInventoryImport({
           docDate: row.docDate,
           companyId: row.companyId,
           projectId: row.projectId!,
           godownId: row.godownId!,
           itemId: row.itemId!,
-          numberOfItems: row.quantity,
+          quantity: row.quantity,
+          rate: row.rate,
           remarks: row.remarks || undefined,
         });
-        finalResults[idx] = { ...row, status: "success" };
+        finalResults[idx] = { ...row, status: "success", tagged: created.tagged };
       } catch (err) {
         finalResults[idx] = { ...row, status: "error", message: err instanceof Error ? err.message : "Failed to create" };
       }
@@ -539,6 +425,7 @@ export default function FixedAssetTagging() {
     const errorCount = finalResults.length - successCount;
     if (successCount > 0) {
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
@@ -727,7 +614,7 @@ export default function FixedAssetTagging() {
       action={
         rights.canCreate ? (
           <div className="flex items-center gap-2">
-            <input ref={importFileInputRef} type="file" accept=".csv"
+            <input ref={importFileInputRef} type="file" accept=".xlsx,.csv"
               onChange={handleImportFileChange} className="hidden" />
             <div className="inline-flex rounded-lg border border-border p-0.5 text-xs font-heading font-semibold" role="group" aria-label="Import mode">
               <button type="button" onClick={() => setImportMode("bulk")}
@@ -742,7 +629,7 @@ export default function FixedAssetTagging() {
               </button>
             </div>
             <button onClick={handleDownloadImportTemplate}
-              title="Download a blank CSV import template (opens/edits fine in Excel)"
+              title="Download the FA Inventory Excel template (all required columns, dropdowns from your masters)"
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
               <Download size={13} /> <span className="hidden sm:inline">Template</span>
             </button>
@@ -895,7 +782,14 @@ export default function FixedAssetTagging() {
                     const hasRecord = t.RecordStatus === "Done";
                     return (
                     <tr key={t.TagId} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs">{t.DocNo || "—"}</td>
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {t.DocNo || "—"}
+                        {t.StockSource === "IMPORT" && (
+                          <span title="Stock added by import — no GRN" className="mt-1 block w-fit rounded-full bg-sky-100 px-2 py-0.5 text-[0.625rem] font-sans font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">
+                            Imported Stock / Without GRN
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(t.DocDate)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium truncate">{t.AssetName || "—"}</p>
@@ -1087,14 +981,14 @@ export default function FixedAssetTagging() {
                         <td className="px-3 py-2">{r.row}</td>
                         <td className="px-3 py-2 max-w-[160px] truncate">{r.companyLabel} / {r.projectLabel}</td>
                         <td className="px-3 py-2 max-w-[120px] truncate">{r.godownLabel}</td>
-                        <td className="px-3 py-2 max-w-[140px] truncate">{r.itemName}</td>
+                        <td className="px-3 py-2 max-w-[180px] truncate" title={r.itemName}>{r.itemCode ? `${r.itemCode} · ` : ""}{r.itemName}</td>
                         <td className="px-3 py-2">{r.docDate}</td>
                         <td className="px-3 py-2">{r.quantity || "—"}</td>
-                        <td className="px-3 py-2 max-w-[260px]">
+                        <td className="px-3 py-2 min-w-[260px] max-w-[460px] whitespace-normal break-words align-top">
                           {r.status === "error" ? (
                             <span className="text-destructive">{r.message}</span>
                           ) : r.status === "success" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><Check size={12} /> Imported</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><Check size={12} /> Imported{r.tagged ? ` · ${r.tagged} FA code${r.tagged === 1 ? "" : "s"}` : " · awaiting tagging"}</span>
                           ) : (
                             <span className="text-emerald-600 dark:text-emerald-400">Valid</span>
                           )}

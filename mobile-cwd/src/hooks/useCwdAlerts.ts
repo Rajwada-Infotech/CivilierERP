@@ -18,7 +18,18 @@ export interface CwdAlert {
 }
 
 export function useCwdAlerts() {
-  const q = useQuery({ queryKey: ["cwd-activities"], queryFn: () => getActivityAssignments(), staleTime: 60_000 });
+  // Only the activities that need attention, a handful each — the bell shows on every screen, so it must be cheap.
+  const q = useQuery({
+    queryKey: ["cwd-alerts"],
+    queryFn: async () => {
+      const [rework, hold] = await Promise.all([
+        getActivityAssignments({ filter: "REWORK", limit: 15 }),
+        getActivityAssignments({ filter: "HOLD", limit: 15 }),
+      ]);
+      return [...rework, ...hold];
+    },
+    staleTime: 120_000,
+  });
 
   const alerts = useMemo<CwdAlert[]>(() => {
     const out: CwdAlert[] = [];

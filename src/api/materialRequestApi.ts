@@ -54,6 +54,8 @@ export interface CreateMRPayload {
   Priority?: string;
   Reason: string;
   Remarks?: string | null;
+  /** Set when the request is raised from an approved Work Order (checked again by the server). */
+  SourceWOId?: number | null;
   items: MRLineItem[];
 }
 
@@ -176,6 +178,11 @@ export interface MRPOPrefillItem {
   M_CGST: number | null;
   M_SGST: number | null;
   M_IGST: number | null;
+  /** From the work order this MR was raised from (absent otherwise): its rate, GST % and per-line supplier. */
+  WoRate?: number;
+  WoGstRate?: number;
+  WoSupplierId?: number | null;
+  WoSupplierName?: string | null;
 }
 
 export interface MRItemFulfillment {
@@ -222,6 +229,11 @@ export interface MRPOPrefill {
   FinYearId: number | null;
   FinYearName: string;
   Remarks: string;
+  /** Set when the MR was raised from a work order. The supplier is only given when every line agrees on one. */
+  WorkOrderId?: number;
+  WorkOrderDocNo?: string | null;
+  WorkOrderSupplierId?: number | null;
+  WorkOrderSupplierName?: string | null;
   items: MRPOPrefillItem[];
 }
 

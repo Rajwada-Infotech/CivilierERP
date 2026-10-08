@@ -211,6 +211,17 @@ router.get(
   const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
   const fromDate = req.query.fromDate ? String(req.query.fromDate) : null;
   const toDate = req.query.toDate ? String(req.query.toDate) : null;
+  // Narrowing for the mobile app, so it can page small slices instead of pulling everything:
+  //   search  — activity, project, chain, block/unit/room, or an engineer's name
+  //   qcPending — Completed activities still waiting for a Quality Check pass
+  //   overdue / dueSoon — same definitions as the Civil Work DPR dashboard's counts
+  //   rungId  — exactly one activity (its current attempt)
+  const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : null;
+  const overdueOnly = req.query.overdue === "1";
+  const dueSoonOnly = req.query.dueSoon === "1";
+  // Quality Check's queue: Completed work that hasn't already passed QC (a passed one is waiting on approval).
+  const qcPending = req.query.qcPending === "1";
+  const rungIdFilter = req.query.rungId ? parseInt(req.query.rungId, 10) : null;
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit, 10) || DEFAULT_LIMIT));
   const offset = (page - 1) * limit;
@@ -226,7 +237,7 @@ router.get(
     if (Number.isFinite(dependencyMasterId)) {
       request.input("dependencyMasterId", sql.Int, dependencyMasterId);
       conds.push("dm.Id = @dependencyMasterId");
-    } else {
+    } else if (!Number.isFinite(rungIdFilter)) {
       conds.push("dm.IsActive = 1");
     }
     if (roomIdIsNull) {
@@ -247,6 +258,27 @@ router.get(
     if (Number.isFinite(projectId)) {
       request.input("projectId", sql.Int, projectId);
       conds.push("dm.ProjectId = @projectId");
+    }
+    if (Number.isFinite(rungIdFilter)) {
+      request.input("rungIdFilter", sql.Int, rungIdFilter);
+      conds.push("daa.DependencyMasterActivityId = @rungIdFilter");
+    }
+    if (search) {
+      request.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push(`(
+        am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
+        bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search OR
+        EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer sdae JOIN dbo.users su ON su.id = sdae.EngineerId
+                WHERE sdae.AssignmentId = daa.Id AND su.name LIKE @search)
+      )`);
+    }
+    if (qcPending) {
+      conds.push("ISNULL((SELECT TOP 1 qcp.Decision FROM dbo.DependencyActivityQc qcp WHERE qcp.AssignmentId = daa.Id ORDER BY qcp.QcAt DESC, qcp.Id DESC), '') <> 'APPROVED'");
+    }
+    if (overdueOnly) {
+      conds.push("daa.Status IN ('ALLOCATED','IN_PROGRESS','HOLD','REWORK') AND daa.EndDate BETWEEN '2000-01-01' AND DATEADD(DAY, -1, CAST(GETDATE() AS DATE))");
+    } else if (dueSoonOnly) {
+      conds.push("daa.Status IN ('ALLOCATED','IN_PROGRESS','HOLD') AND daa.EndDate >= CAST(GETDATE() AS DATE) AND daa.EndDate <= DATEADD(DAY, 2, CAST(GETDATE() AS DATE))");
     }
     if (req.projectScope) conds.push(projectPredicate(req.projectScope, "dm.ProjectId", "").trim());
     if (fromDate && !Number.isNaN(Date.parse(fromDate))) {
@@ -560,8 +592,63 @@ router.get(
 // there's nothing left for a new engineer to do.
 const TRANSFERABLE_STATUSES = ["ALLOCATED", "IN_PROGRESS", "HOLD", "REWORK"];
 
+// Shared by the paged list and by "select all". Joins from the engineer's own index entries
+// (migration 541), so cost follows what THEY hold, not the size of the table.
+const transferFilters = (req, request) => {
+  const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+  const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : "";
+  let cond = "";
+  if (Number.isFinite(projectId)) {
+    request.input("projectId", sql.Int, projectId);
+    cond += " AND dm.ProjectId = @projectId";
+  }
+  if (search) {
+    request.input("search", sql.NVarChar(200), `%${search}%`);
+    cond += " AND (am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search)";
+  }
+  return cond;
+};
+const TRANSFER_FROM = `
+  FROM dbo.DependencyActivityEngineer dae
+  JOIN dbo.DependencyActivityAssignment daa ON daa.Id = dae.AssignmentId
+  JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+  JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+  JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+  LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+  LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+  LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+  LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId`;
+
+// GET /transfer/candidates/ids?engineerId=&projectId=&search= — every matching assignment id (for "select all").
+router.get(
+  "/transfer/candidates/ids",
+  authMiddleware,
+  requirePageRight("civilworkdpr-work-transfer", "view"),
+  async (req, res) => {
+    const engineerId = parseInt(req.query.engineerId, 10);
+    if (!Number.isFinite(engineerId)) return res.status(400).json({ error: "engineerId is required" });
+    try {
+      const pool = await getPool();
+      const request = pool.request().input("engineerId", sql.Int, engineerId);
+      const cond = transferFilters(req, request);
+      const r = await request.query(`
+        SELECT TOP 2000 daa.Id AS id
+        ${TRANSFER_FROM}
+        WHERE dae.EngineerId = @engineerId AND daa.IsCurrent = 1
+          AND daa.Status IN (${TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ")})${cond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        ORDER BY daa.Id
+      `);
+      res.json({ ids: r.recordset.map((x) => x.id) });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /transfer/candidates/ids error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // GET /transfer/candidates?engineerId=&projectId= — current activities the
-// given engineer holds that can still be transferred.
+// given engineer holds that can still be transferred. With ?page= (and optional
+// limit / search) it is paged and returns { rows, total, projects } instead of the whole array.
 router.get(
   "/transfer/candidates",
   authMiddleware,
@@ -570,6 +657,74 @@ router.get(
     const engineerId = parseInt(req.query.engineerId, 10);
     if (!Number.isFinite(engineerId)) return res.status(400).json({ error: "engineerId is required" });
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    if (req.query.page != null) {
+      try {
+        const pool = await getPool();
+        const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+        const offset = (Math.max(1, parseInt(req.query.page, 10) || 1) - 1) * limit;
+        const statuses = TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ");
+        const scope = projectPredicate(req.projectScope, "dm.ProjectId");
+        const base = `WHERE dae.EngineerId = @engineerId AND daa.IsCurrent = 1 AND daa.Status IN (${statuses})${scope}`;
+
+        const listReq = pool.request().input("engineerId", sql.Int, engineerId);
+        const cond = transferFilters(req, listReq);
+        listReq.input("offset", sql.Int, offset).input("limit", sql.Int, limit);
+        // Page first (ids only), then fetch details and engineer names for just those rows.
+        const pageRes = await listReq.query(`
+          SELECT daa.Id AS assignmentId
+          ${TRANSFER_FROM}
+          ${base}${cond}
+          ORDER BY ep.name, dm.ProjectId, dm.Id, dma.SequenceNo, daa.Id
+          OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+        `);
+        const totalReq = pool.request().input("engineerId", sql.Int, engineerId);
+        const totalCond = transferFilters(req, totalReq);
+        const totalPromise = totalReq.query(`SELECT COUNT(*) AS total ${TRANSFER_FROM} ${base}${totalCond}`);
+        // Project chips: counts across ALL of the engineer's transferable work (ignores the project/search filter).
+        const projPromise = pool.request().input("engineerId", sql.Int, engineerId).query(`
+          SELECT dm.ProjectId AS id, MAX(ep.name) AS name, COUNT(*) AS count
+          ${TRANSFER_FROM}
+          ${base}
+          GROUP BY dm.ProjectId
+          ORDER BY MAX(ep.name)
+        `);
+        const ids = pageRes.recordset.map((x) => Number(x.assignmentId));
+        let rows = [];
+        if (ids.length) {
+          const detail = await pool.request().query(`
+            SELECT
+              daa.Id AS assignmentId, daa.DependencyMasterActivityId AS rungId, daa.Status AS status,
+              daa.ProgressPercent AS progressPercent, daa.StartDate AS startDate, daa.EndDate AS endDate,
+              am.activity_name AS activityName, dm.ProjectId AS projectId, ep.name AS projectName,
+              CONCAT(
+                ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > Plot ' END, dm.Floor,
+                ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+              ) AS scopePath,
+              (
+                SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+                FROM dbo.DependencyActivityEngineer d2 JOIN dbo.users u ON u.id = d2.EngineerId
+                WHERE d2.AssignmentId = daa.Id
+              ) AS engineerNames
+            FROM dbo.DependencyActivityAssignment daa
+            JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+            JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+            JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+            LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+            LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+            LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+            LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+            WHERE daa.Id IN (${ids.join(",")})
+          `);
+          const byId = new Map(detail.recordset.map((x) => [Number(x.assignmentId), x]));
+          rows = ids.map((id) => byId.get(id)).filter(Boolean);
+        }
+        const [totalRes, projRes] = await Promise.all([totalPromise, projPromise]);
+        return res.json({ rows, total: totalRes.recordset[0].total, projects: projRes.recordset });
+      } catch (err) {
+        console.error("[dependency-activity-assignment] GET /transfer/candidates (paged) error:", err.message);
+        return res.status(500).json({ error: err.message });
+      }
+    }
     try {
       const pool = await getPool();
       const request = pool.request().input("engineerId", sql.Int, engineerId);
@@ -610,7 +765,7 @@ router.get(
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
         WHERE daa.IsCurrent = 1
           AND daa.Status IN (${TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ")})${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
-        ORDER BY ep.name, scopePath, am.activity_name
+        ORDER BY ep.name, dm.ProjectId, scopePath, am.activity_name
       `);
       res.json(r.recordset);
     } catch (err) {
@@ -2249,6 +2404,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const isRealDate = (d) => DATE_RE.test(d) && !Number.isNaN(new Date(d + "T00:00:00Z").getTime());
 
 // GET /checkpoint/:cpId/updates — the dates that have an update (no binary).
+// loggedTime is always IST (UTC+5:30), whatever timezone the SQL server runs in.
 router.get("/checkpoint/:cpId/updates", authMiddleware, async (req, res) => {
   const cpId = parseInt(req.params.cpId, 10);
   if (!Number.isFinite(cpId)) return res.status(400).json({ error: "Invalid checkpoint id" });
@@ -2257,7 +2413,8 @@ router.get("/checkpoint/:cpId/updates", authMiddleware, async (req, res) => {
     const r = await pool.request().input("cpId", sql.Int, cpId).query(`
       SELECT Id AS id, CONVERT(VARCHAR(10), UpdateDate, 23) AS date,
              CAST(CASE WHEN Photo IS NULL THEN 0 ELSE 1 END AS BIT) AS hasPhoto,
-             Note AS note, CreatedBy AS createdBy, CreatedAt AS createdAt
+             Note AS note, CreatedBy AS createdBy, CreatedAt AS createdAt,
+             CONVERT(VARCHAR(5), DATEADD(MINUTE, 330 - DATEDIFF(MINUTE, SYSUTCDATETIME(), SYSDATETIME()), COALESCE(UpdatedAt, CreatedAt)), 108) AS loggedTime
       FROM dbo.DependencyActivityCheckpointUpdate
       WHERE AssignmentCheckpointId = @cpId
       ORDER BY UpdateDate DESC
@@ -2280,10 +2437,15 @@ router.post("/checkpoint/:cpId/updates", authMiddleware, upload.single("photo"),
   const photo = req.file || null;
   if (photo && !/^image\//i.test(photo.mimetype)) return res.status(400).json({ error: "The update photo must be an image" });
 
-  // No future dates (one day of slack for timezone differences between browser and server).
-  const limit = new Date();
-  limit.setUTCDate(limit.getUTCDate() + 1);
-  if (date > limit.toISOString().slice(0, 10)) return res.status(400).json({ error: "You can't log an update for a future date" });
+  // A daily update can only be logged for today (one day of slack either side for timezone
+  // differences between the browser and the server).
+  const lo = new Date();
+  lo.setUTCDate(lo.getUTCDate() - 1);
+  const hi = new Date();
+  hi.setUTCDate(hi.getUTCDate() + 1);
+  if (date < lo.toISOString().slice(0, 10) || date > hi.toISOString().slice(0, 10)) {
+    return res.status(400).json({ error: "A daily update can only be logged for today" });
+  }
 
   const actor = req.user?.email || req.user?.name || "system";
   try {

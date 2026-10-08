@@ -213,7 +213,7 @@ export function DataTable<TData extends RowData>({
           search) still need this row rendered so exportConfig's ExportMenu
           isn't silently dropped. */}
       {(searchable || exportConfig) && (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
+        <div className="dt-toolbar flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
           <p className="text-[0.6875rem] font-body text-muted-foreground">
             {loading
               ? "Loading..."

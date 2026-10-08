@@ -13,7 +13,7 @@ import { useAppVersion } from "@/hooks/useAppVersion";
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&";
 const rand = () => CHARS[Math.floor(Math.random() * CHARS.length)];
 
-function useMatrixCycle(targets: string[]) {
+function useMatrixCycle(targets: string[], active = true) {
   const [display, setDisplay] = useState(targets[0] ?? "");
   const frameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cycleRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -21,6 +21,9 @@ function useMatrixCycle(targets: string[]) {
   useEffect(() => {
     const allReady = targets.every((t) => t && t !== "…");
     if (!allReady) return;
+    // Every stacked screen keeps its own header mounted — only the visible one animates, so timers don't pile up
+    // (each scramble is ~20 state updates on the JS thread).
+    if (!active) { setDisplay(targets[0]); return; }
 
     const scrambleTo = (target: string) => {
       const steps = 8;
@@ -61,7 +64,7 @@ function useMatrixCycle(targets: string[]) {
       if (cycleRef.current) clearInterval(cycleRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targets.join("|")]);
+  }, [targets.join("|"), active]);
 
   return display;
 }
@@ -82,7 +85,7 @@ function AnimatedLogoIcon({ size = 32 }: { size?: number }) {
   );
 }
 
-export function AnimatedLogo({ iconSize = 32 }: { iconSize?: number }) {
+export function AnimatedLogo({ iconSize = 32, animate = true }: { iconSize?: number; animate?: boolean }) {
   const { appVersion, dbVersion, isLoading } = useAppVersion();
 
   const normalise = (v: string) => (v === "…" || v === "—" ? v : v.startsWith("v") ? v : `v${v}`);
@@ -92,7 +95,7 @@ export function AnimatedLogo({ iconSize = 32 }: { iconSize?: number }) {
     appLabel === "…" || dbLabel === "…" ? "…" : `app. ${appLabel}`,
     appLabel === "…" || dbLabel === "…" ? "…" : `db. ${dbLabel}`,
   ];
-  const display = useMatrixCycle(targets);
+  const display = useMatrixCycle(targets, animate);
 
   return (
     <View className="flex-row items-center gap-2">

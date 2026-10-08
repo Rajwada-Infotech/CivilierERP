@@ -18,6 +18,8 @@
 - [Core Modules](#core-modules)
 - [Key Features](#key-features)
 - [Tech Stack](#tech-stack)
+- [Mobile Apps](#mobile-apps)
+- [Themes & UI](#themes--ui)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
@@ -88,23 +90,24 @@ CivilierERP is our flagship product tailored for the construction and infrastruc
 
 ## Core Modules
 
-### 🏗️ Project Management
-End-to-end project lifecycle tracking — tasks, milestones, progress monitoring, and delay alerts across all active sites.
-
-### 👷 Resource Management
-Manpower allocation, attendance tracking, equipment scheduling, and resource utilization reporting across multiple sites and projects.
-
-### 💰 Financial Management
-Budget planning and control, expense tracking, RA billing, invoice generation, cost variance monitoring, and detailed financial reporting.
-
-### 📦 Procurement & Inventory
-Material requisitions with multi-level approvals, vendor management, purchase orders, Goods Receipt Notes (GRN), and site-wise real-time stock tracking.
-
-### 🛡️ HR & Admin
-User and role management with granular permissions, master data control (companies, suppliers, items, UOM), and full system configuration.
-
-### 📊 Reporting & Dashboards
-Real-time operational dashboards, KPI tracking, custom report generation, and export to PDF and Excel.
+| Module | What it covers |
+|---|---|
+| 🏠 **Home & Command Center** | Project network across companies, live KPIs, widgets, notifications |
+| 💰 **Finance** | Invoices, payments, received payments, on-account adjustments, fund transfer, BRS, cheque cancellation, journal vouchers, trial balance, balance sheet, P&L, balance enquiry, year-end close |
+| 📦 **Material** | Material requests, quotations & L1 chart, purchase orders, GRN, issues & returns, stock, stock update, transfers, debit notes, short close, vehicle in/out, expense booking |
+| 🏗️ **Engineering** | BOQ, work orders, work done, DPR |
+| 🧱 **Civil Work DPR** | Work allocation & transfer, activity reporting with photos/checkpoints/daily log, quality check, dependencies, attendance |
+| 🤝 **CRM** | Applications, bookings, agreements, legal milestones, project auto-setup, customer portal |
+| 📣 **Sales Automation** | Campaigns, ads, leads, sales/marketing/team-lead dashboards |
+| ✅ **Follow-Up** | Tasks, sub-tasks, follow-ups, chat & files, closed/cancelled tasks, task transfer, performance reports |
+| 🧑‍💼 **HR & Payroll** | Employees, attendance, payroll |
+| 🏦 **Loan** | Loan tracking and EMI schedules |
+| 🪑 **Fixed Assets** | Asset register and lifecycle |
+| 🔧 **Maintenance** | Maintenance requests and tracking |
+| 🎫 **Tickets** | Support lifecycle, real-time chat, escalation, SLA |
+| 🚚 **Supplier & Customer portals** | Separate logins for vendors (orders) and customers (bookings / owner portal) |
+| 🛡️ **Admin / Super Admin / DBA** | Enterprise, companies, projects, masters, users & rights, approval setup & inbox, security, communicator, integrations |
+| 📊 **Reports & Widgets** | Report builder, exports (PDF / Excel / CSV), dashboard widgets |
 
 ---
 
@@ -118,6 +121,10 @@ Real-time operational dashboards, KPI tracking, custom report generation, and ex
 - **Scalable architecture** suitable for growing construction businesses with multiple concurrent projects
 - **Real-time insights and analytics** through live dashboards
 - **Document number generation** per financial year across all document types (PO, WO, GRN, etc.)
+- **Real-time updates** — chat, notifications and live status via Socket.IO
+- **Letterhead print & PDF** for MR, PO, GRN, payments, invoices and more
+- **Six UI themes** with module-coloured accents, fully responsive down to phone width
+- **Field mobile apps** (Expo / React Native) for each department
 
 ---
 
@@ -125,13 +132,61 @@ Real-time operational dashboards, KPI tracking, custom report generation, and ex
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React, TypeScript, Vite, Tailwind CSS, shadcn/ui |
-| **Backend** | Node.js, Express |
-| **Database** | Microsoft SQL Server |
-| **Caching** | Redis |
-| **Auth** | JWT (JSON Web Tokens) |
-| **State Management** | TanStack Query (React Query) |
-| **Containerization** | Docker, Docker Compose |
+| **Frontend** | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui (Radix), TanStack Table |
+| **State / Data** | TanStack Query (React Query) |
+| **Backend** | Node.js 22, Express 5, Socket.IO, background worker |
+| **Database** | Microsoft SQL Server (`mssql`), numbered SQL migrations |
+| **Caching / Rate limiting** | Redis (`ioredis`) |
+| **Auth** | JWT with Redis token blacklist |
+| **Mobile** | Expo SDK 57 / React Native (EAS builds) |
+| **Testing** | Vitest (frontend), Jest (backend) |
+| **Deployment** | Docker, Docker Compose, Nginx |
+
+---
+
+## Mobile Apps
+
+Each department has its own Expo app in the repo root, sharing the same backend API:
+
+| Folder | App |
+|---|---|
+| `mobile-admin/` | Admin & approvals |
+| `mobile-finance-material/` | Finance & material (MR, PO, GRN, vehicle in/out) |
+| `mobile-cwd/` | Civil Work DPR (allocation, transfer, reporting) |
+| `mobile-follow-up/` | Follow-up tasks |
+| `mobile-maintenance/` | Maintenance |
+| `mobile-Fixed-Asset/` | Fixed assets |
+| `mobile-supplier/` | Supplier portal |
+
+```bash
+cd mobile-admin        # or any mobile-* folder
+npm install
+npx expo start
+```
+
+Android builds are produced with EAS (`eas.json`); release APKs are kept in `apk-releases/` and offered on the in-app *Download Android App* page.
+
+---
+
+## Themes & UI
+
+Users pick a theme from the top bar; it is stored per browser.
+
+| Theme | Look |
+|---|---|
+| **Dark** (default) | Indigo on deep navy |
+| **Light** | Soft violet on white |
+| **Midnight** | Teal on near-black |
+| **Root** | Amber accents |
+| **Glass** | Frosted, tumbled-glass panels over a water tint that follows the active module's colour |
+| **BW** | Black, white & grey; colour only in text and accent bars |
+
+UI conventions applied app-wide (mostly via `src/index.css` and runtime helpers in `src/main.tsx`):
+
+- Buttons follow the active **module colour** (Approve / Reject keep green / red).
+- Tables: click a row to view, pinned **Status / Actions** columns, sideways scroll when wide, compact cards on phones.
+- Dialogs: pinned header & footer, a single close button, frosted in Glass.
+- Dates use the shadcn date / date-time / month pickers; dropdowns show a single arrow and themed lists.
 
 ---
 
@@ -139,43 +194,31 @@ Real-time operational dashboards, KPI tracking, custom report generation, and ex
 
 ```
 CivilierERP/
-├── .env                        # Frontend environment variables (VITE_ prefix only)
-├── public/
-│   └── CivilierERP.jpeg
+├── .env                        # Frontend env (VITE_ prefix only) — never commit
 ├── src/
-│   ├── api/                    # Frontend API client functions
-│   ├── components/             # Reusable UI components
-│   │   ├── ApprovalActions.tsx # Submit/Approve/Reject action component
-│   │   ├── StatusBadge.tsx
-│   │   └── layout/
-│   │       ├── AppLayout.tsx
-│   │       ├── AppSidebar.tsx
-│   │       └── sidebars/       # Role-specific sidebar configs
-│   ├── pages/                  # Application views and routes
-│   │   ├── admin/              # Admin module (Approval Inbox, User Management)
-│   │   ├── material/           # Procurement (Purchase Orders, GRN, MR)
-│   │   ├── finance/            # Finance module
-│   │   ├── project/            # Project management views
-│   │   └── ...
-│   └── assets/                 # Styles, icons, images
-│
-└── backend/
-    ├── .env                    # Backend secrets — NEVER commit this file
-    ├── index.js                # Express app entry point
-    ├── db.js                   # Database connection
-    ├── logger.js               # Logging setup
-    ├── config/
-    │   └── env.js              # Environment variable loader
-    ├── middleware/
-    │   ├── auth.js             # JWT authentication
-    │   ├── role.js             # Role enforcement
-    │   ├── permissions.js      # Granular permission checks
-    │   └── ...
-    ├── routes/
-    │   ├── purchaseOrders.js
-    │   └── ...
-    ├── migrations/             # Ordered SQL migration files
-    └── migrate.js              # Migration runner
+│   ├── api/                    # Frontend API clients
+│   ├── components/             # Shared UI (DataTable, MasterPage, ui/*, layout/*)
+│   ├── contexts/               # Auth, Theme, …
+│   ├── pages/                  # admin, finance, material, engineering, civilworkdpr,
+│   │                           # CRM, SalesAutomation, followup, hrpayroll, loan,
+│   │                           # fixedAsset, maintenance, ticket, supplier, customer, …
+│   ├── utils/                  # Letterhead / document print & PDF builders
+│   ├── index.css               # Themes and global UI rules
+│   └── main.tsx                # App entry + runtime UI helpers
+├── backend/
+│   ├── .env                    # Backend secrets — NEVER commit
+│   ├── server.js               # Express entry point
+│   ├── worker.js               # Background jobs
+│   ├── socket.js               # Socket.IO setup
+│   ├── db.js · redis.js        # SQL Server / Redis connections
+│   ├── config/ middleware/ routes/ services/ validation/ utils/
+│   ├── migrations/             # Ordered SQL migrations (run by migrate.js)
+│   ├── seeds/ scripts/         # Seed data & maintenance scripts
+│   └── test/                   # Jest tests
+├── mobile-*/                   # Expo apps per department
+├── apk-releases/               # Android release builds
+├── docker-compose.yml · Dockerfile · nginx.conf
+└── DEPLOYMENT.md · SECURITY.md
 ```
 
 ---
@@ -186,7 +229,7 @@ CivilierERP/
 
 Ensure the following are installed on your system:
 
-- **Node.js** v20 or later
+- **Node.js** v22 or later
 - **Microsoft SQL Server** 2019 or later, or AWS RDS for SQL Server
 - **Redis** v7 or later
 - **Docker & Docker Compose** *(optional, for containerized setup)*
@@ -198,8 +241,8 @@ Ensure the following are installed on your system:
 **1. Clone the repository**
 
 ```bash
-git clone https://github.com/rajwadainfotech/civilier-erp.git
-cd civilier-erp
+git clone https://github.com/Rajwada-Infotech/CivilierERP.git
+cd CivilierERP
 ```
 
 **2. Install frontend dependencies**
@@ -251,7 +294,7 @@ Fill in your values based on your local environment. Refer to `backend/.env.exam
 - **Database** — SQL Server host, port, name, user, password, and TLS settings
 - **Redis** — host and port for caching
 - **JWT** — secret key and token expiry
-- **App** — server port and Node environment
+- **App** — server port (default `5001`) and Node environment
 
 > 🔒 **This file must never be committed.** It is already listed in `.gitignore`. Do not log, print, or expose these values anywhere in the codebase.
 
@@ -262,34 +305,42 @@ Fill in your values based on your local environment. Refer to `backend/.env.exam
 #### Option A — Docker Compose *(recommended for a clean setup)*
 
 ```bash
-cd backend
 docker compose up --build
 ```
 
-This runs the app stack with Redis. SQL Server should be provided separately, either locally or through RDS in production.
+Runs the app stack with Redis from the project root. SQL Server is provided separately (local or RDS in production).
 
 #### Option B — Manual
 
-**Run the backend:**
-
 ```bash
-cd backend
-npm run dev
+npm run dev:all        # frontend + backend together
 ```
 
-**Run the frontend** (in a separate terminal from the project root):
+or separately:
 
 ```bash
-npm run dev
+npm run dev            # frontend → http://localhost:8080
+npm run dev:backend    # backend  → http://localhost:5001
 ```
 
-The frontend will be available at `http://localhost:5173` and will proxy API calls to the backend.
+The Vite dev server proxies `/api` calls to the backend.
+
+#### Useful scripts
+
+| Command | Purpose |
+|---|---|
+| `npm run build` | Production build of the frontend |
+| `npm run typecheck` | TypeScript check |
+| `npm run lint` | ESLint |
+| `npm test` | Frontend tests (Vitest) |
+| `npm --prefix backend test` | Backend tests (Jest) |
 
 #### Running Database Migrations
 
 ```bash
 cd backend
-npm run migrate
+npm run migrate          # apply pending migrations
+npm run migrate:status   # list applied / pending
 ```
 
 Migrations are numbered and run in order. Always run migrations after pulling new changes that include files in `backend/migrations/`.
@@ -299,9 +350,9 @@ Migrations are numbered and run in order. Always run migrations after pulling ne
 ## Architecture
 
 ```
-Browser (React + Vite)
+Browser (React + Vite)  ·  Mobile apps (Expo)
         │
-        │  HTTP / REST
+        │  HTTP / REST  +  WebSocket (Socket.IO)
         ▼
 Express API Server (Node.js)
         │

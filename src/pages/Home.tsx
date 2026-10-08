@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { motion, useInView } from "framer-motion";
+import { AnimatePresence, LayoutGroup, MotionConfig, motion, useInView } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -49,6 +49,20 @@ import {
   type SalesSummaryData,
 } from "@/api/homeDashboardApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { LazyWhenVisible } from "@/components/LazyWhenVisible";
+import { getModuleRanking } from "@/api/homeWidgetsApi";
+import { moduleOfPath } from "@/lib/moduleOfPath";
+import { getFixedAssets } from "@/api/fixedAssetApi";
+import {
+  HOME_TILES,
+  MODULE_COLORS,
+  MODULE_LABELS,
+  orderTiles,
+  pickHeroTiles,
+  rankedModuleOrder,
+  type HomeModuleId,
+  type HomeTileData,
+} from "@/pages/home/homeTiles";
 import {
   ResponsiveContainer,
   BarChart,
@@ -285,9 +299,15 @@ function KpiPill({
 }) {
   return (
     <motion.div
+      layout
       initial={{ opacity: 0, scale: 0.94 }}
       animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.4, delay: 0.1 + i * 0.04 }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      transition={{
+        duration: 0.4,
+        delay: 0.1 + i * 0.04,
+        layout: { type: "spring", stiffness: 280, damping: 30 },
+      }}
       className="rounded-xl border border-border/45 bg-card/50 backdrop-blur-sm px-3.5 py-3 flex flex-col gap-1"
     >
       <div className="flex items-center gap-1.5">
@@ -354,9 +374,16 @@ function StatCard({
   const max = Math.max(...sparkline, 1);
   return (
     <motion.div
+      layout
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, delay: 0.06 * i, ease: [0.16, 1, 0.3, 1] }}
+      exit={{ opacity: 0, scale: 0.94 }}
+      transition={{
+        duration: 0.45,
+        delay: 0.06 * i,
+        ease: [0.16, 1, 0.3, 1],
+        layout: { type: "spring", stiffness: 280, damping: 30 },
+      }}
       className="relative rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm p-4 flex flex-col gap-4 overflow-hidden"
     >
       <div
@@ -1528,7 +1555,14 @@ export default function HomePage() {
     civilworkdpr: [
       "civilworkdpr-dashboard",
       "civilworkdpr-dependency",
+      "civilworkdpr-work-done",
+      "civilworkdpr-activity-reporting",
+      "civilworkdpr-quality-check",
+      "civilworkdpr-work-transfer",
       "civilworkdpr-worker-attendance",
+      "civilworkdpr-daily-labour",
+      "civilworkdpr-amendment",
+      "civilworkdpr-room-master",
     ],
     crm: [
       "crm-dashboard",
@@ -1544,6 +1578,7 @@ export default function HomePage() {
       "asset-transfer",
       "fixed-asset-quality-check",
       "fixed-asset-maintenance",
+      "fixed-asset-depreciation-generate",
     ],
   };
 
@@ -1663,6 +1698,67 @@ export default function HomePage() {
     retry: 1,
   });
 
+  // Sales Automation marketing totals and the Fixed Asset register — fetched
+  // only for users who can open those modules, tolerating a failure (a missing
+  // sub-right just leaves that module's tiles at zero).
+  const { data: saData } = useQuery({
+    queryKey: ["home-sa-marketing"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/sa/dashboard/marketing");
+      if (!res.ok) throw new Error("Sales Automation stats unavailable");
+      return res.json().catch(() => ({}));
+    },
+    enabled: access.salesAutomation,
+    staleTime: 2 * 60 * 1000,
+    retry: 0,
+  });
+  const { data: faList } = useQuery({
+    queryKey: ["home-fixed-assets"],
+    queryFn: () => getFixedAssets(),
+    enabled: access.fixedasset,
+    staleTime: 5 * 60 * 1000,
+    retry: 0,
+  });
+  const faSummary = useMemo(() => {
+    if (!faList) return null;
+    const live = faList.filter((a) => a.AssetStatus !== "Sold" && a.AssetStatus !== "Scrapped" && (a as any).Status !== "Deleted");
+    return {
+      count: live.length,
+      active: live.filter((a) => a.AssetStatus === "Active").length,
+      pending: live.filter((a) => a.AssetStatus === "Pending").length,
+      totalCost: live.reduce((s, a) => s + Number(a.PurchaseCost || 0), 0),
+    };
+  }, [faList]);
+
+  // How much and how recently this user works in each module — decides which
+  // module's tiles lead the page. Ids match the access flags above.
+  const accessibleModules = useMemo(
+    () =>
+      (
+        [
+          access.finance && "finance",
+          access.material && "material",
+          access.engineering && "engineering",
+          access.followup && "followup",
+          access.ticket && "ticket",
+          access.sales && "sales",
+          access.salesAutomation && "salesAutomation",
+          access.civilworkdpr && "civilworkdpr",
+          access.crm && "crm",
+          access.fixedasset && "fixedasset",
+        ] as const
+      ).filter(Boolean) as HomeModuleId[],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [access.finance, access.material, access.engineering, access.followup, access.ticket, access.sales, access.salesAutomation, access.civilworkdpr, access.crm, access.fixedasset],
+  );
+  const { data: ranking } = useQuery({
+    queryKey: ["home-module-ranking", accessibleModules.join(",")],
+    queryFn: () => getModuleRanking(accessibleModules),
+    enabled: accessibleModules.length > 0,
+    staleTime: 2 * 60 * 1000,
+    retry: 0,
+  });
+
   // ── Universal recent-activity feed (server-side UNION across every module) ──
   const feedModules = privileged
     ? ""
@@ -1743,23 +1839,53 @@ export default function HomePage() {
     access.material && { severity: "low" as Sev, label: "Purchase orders open", count: mat?.purchaseOrders?.open ?? 0, hint: "Not yet closed / cancelled", href: "/material/purchase-order", icon: Package },
   ];
   const sevRank: Record<Sev, number> = { high: 0, med: 1, low: 2 };
-  const attention: Attention[] = (rawAttn.filter(Boolean) as Attention[])
-    .filter((a) => a.count > 0)
-    .sort((a, b) => sevRank[a.severity] - sevRank[b.severity] || b.count - a.count);
+  const attentionRaw: Attention[] = (rawAttn.filter(Boolean) as Attention[]).filter((a) => a.count > 0);
 
-  // ── KPI pills (wrap → scale with module count) ───────────────────────────
-  const kpis = [
-    access.finance && { label: "Transferred all-time", value: isLoading ? null : ((fin?.payments?.totalAmount ?? 0) / 1e7).toFixed(2), prefix: "₹", suffix: "Cr", color: "#10b981", icon: IndianRupee },
-    (access.material || access.finance) && { label: "Open PO value", value: isLoading ? null : Math.round((mat?.purchaseOrders?.openValue ?? fin?.purchaseOrders?.openValue ?? 0) / 100000), prefix: "₹", suffix: "L", color: "#f59e0b", icon: Layers },
-    access.material && { label: "GRNs this month", value: isLoading ? null : (mat?.grns?.thisMonth ?? 0), color: "#8b5cf6", icon: Warehouse },
-    { label: "Active projects", value: isLoading ? null : (eng?.projects?.active ?? 0), color: "#06b6d4", icon: Building2 },
-    access.finance && { label: "Active suppliers", value: isLoading ? null : (fin?.parties?.activeSupplierCount ?? 0), color: "#3b82f6", icon: Building2 },
-    access.sales && { label: "Sales this month", value: isLoading ? null : (() => { const a = sal?.thisMonthAmount ?? 0; return a >= 1e5 ? Math.round(a / 1e5) : a; })(), prefix: "₹", suffix: (sal?.thisMonthAmount ?? 0) >= 1e5 ? "L" : "", color: "#7c3aed", icon: TrendingUp },
-    access.crm && { label: "Total bookings", value: isLoading ? null : crmTotalBookings, color: "#e11d48", icon: HeartHandshake },
-    access.ticket && { label: "Resolution rate", value: isLoading ? null : `${tick?.resolvedPct ?? 0}%`, color: "#0d9488", icon: CheckCircle2 },
-    (access.admin || access.dba) && { label: "Active users", value: isLoading ? null : (adm?.stats?.activeUsers ?? 0), color: "#a855f7", icon: Users },
-    access.engineering && { label: "Open work orders", value: isLoading ? null : (eng?.workOrders?.open ?? 0), color: "#ec4899", icon: Hammer },
-  ].filter(Boolean) as Array<{ label: string; value: number | string | null; prefix?: string; suffix?: string; color: string; icon: React.ElementType }>;
+  // ── Tiles — every module offers a few (see pages/home/homeTiles.ts); which
+  // ones lead the page follows the user's own usage. Admin tiles sit last.
+  const tileData: HomeTileData = {
+    loading: isLoading,
+    fin, mat, eng, adm, tick, fol, sal,
+    crm: crmData
+      ? { bookings: crmBookings, applications: crmApps, serviceTickets: crmTickets, overdue: crmOverdue }
+      : null,
+    dpr: civilDpr ?? null,
+    sa: saData ?? null,
+    fa: faSummary,
+  };
+  const moduleOrder = rankedModuleOrder(
+    ranking?.modules.map((m) => m.module),
+    [...accessibleModules, ...(access.admin || access.dba ? (["admin"] as HomeModuleId[]) : [])],
+    ["finance", "material", "engineering", "followup", "ticket", "sales", "salesAutomation", "civilworkdpr", "crm", "fixedasset", "admin"],
+  );
+  const orderedTiles = orderTiles(HOME_TILES, moduleOrder);
+  const kpis = orderedTiles.map((t) => {
+    const v = t.compute(tileData);
+    return { id: t.id, module: t.module, label: t.label, value: isLoading ? null : v.value, prefix: v.prefix, suffix: v.suffix, color: t.color, icon: t.icon };
+  });
+  const heroIds = new Set(pickHeroTiles(orderedTiles, moduleOrder).map((t) => t.id));
+  const heroKpis = kpis.filter((k) => heroIds.has(k.id));
+  const restKpis = kpis.filter((k) => !heroIds.has(k.id));
+  const spotlightModules = moduleOrder.filter((m) => m !== "admin").slice(0, 3);
+  // Share of the user's recorded module visits, across every module they can open.
+  const totalModuleVisits = (ranking?.modules ?? []).reduce((a, m) => a + m.visits, 0);
+  const moduleSharePct = (m: string): string | null => {
+    const v = ranking?.modules.find((x) => x.module === m)?.visits ?? 0;
+    if (!totalModuleVisits || !v) return null;
+    const pct = (v / totalModuleVisits) * 100;
+    return pct < 1 ? "<1%" : `${Math.round(pct)}%`;
+  };
+
+  // Within the same urgency, items from the modules this user works in come
+  // first; module-less items (the approval queue) lead their urgency band.
+  const modulePos = new Map(moduleOrder.map((m, i) => [m as string, i]));
+  const attnPos = (a: Attention) => {
+    const m = moduleOfPath(a.href);
+    return m == null ? -1 : (modulePos.get(m) ?? 99);
+  };
+  const attention: Attention[] = [...attentionRaw].sort(
+    (a, b) => sevRank[a.severity] - sevRank[b.severity] || attnPos(a) - attnPos(b) || b.count - a.count,
+  );
 
   const feedItems: LiveActivityItem[] = liveFeed?.items ?? [];
 
@@ -1789,8 +1915,6 @@ export default function HomePage() {
   // Always show at least something
   const hasAnyAccess = Object.values(access).some(Boolean);
 
-  const heroKpis = kpis.slice(0, 4);
-  const restKpis = kpis.slice(4);
   const chartTooltipStyle = {
     background: "hsl(var(--card))",
     border: "1px solid hsl(var(--border))",
@@ -1804,6 +1928,7 @@ export default function HomePage() {
   const amountTicks = niceTicks(Math.max(...activitySeries.map((d) => d.amount), 1), 4);
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="relative min-h-[calc(100vh-3.5rem)] bg-background overflow-hidden font-body">
       <BgGrid />
 
@@ -1897,12 +2022,46 @@ export default function HomePage() {
           // fade+rise, StatCard's sparkline/counter) replays each time,
           // not just once on first mount.
           <div key={dataUpdatedAt || "initial"} className="space-y-4">
+            {/* ── Who this page is tuned to — the modules this user works in
+                most and most recently lead the tiles below ── */}
+            {spotlightModules.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="flex flex-wrap items-center gap-2"
+              >
+                <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground/55">
+                  Your top worked modules
+                </span>
+                <LayoutGroup>
+                  {spotlightModules.map((m, idx) => (
+                    <motion.span
+                      layout
+                      key={m}
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ type: "spring", stiffness: 320, damping: 28, delay: idx * 0.06 }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-medium border"
+                      style={{ color: MODULE_COLORS[m], background: `${MODULE_COLORS[m]}12`, borderColor: `${MODULE_COLORS[m]}30` }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: MODULE_COLORS[m] }} />
+                      {MODULE_LABELS[m]}
+                      {moduleSharePct(m) && <span className="font-semibold tabular-nums opacity-80">{moduleSharePct(m)}</span>}
+                    </motion.span>
+                  ))}
+                </LayoutGroup>
+              </motion.div>
+            )}
+
             {/* ── Hero stat cards ── */}
             {heroKpis.length > 0 && (
+              <LayoutGroup id="home-hero">
               <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+                <AnimatePresence>
                 {heroKpis.map((k, i) => (
                   <StatCard
-                    key={k.label}
+                    key={k.id}
                     icon={k.icon}
                     label={k.label}
                     value={k.value}
@@ -1913,7 +2072,9 @@ export default function HomePage() {
                     i={i}
                   />
                 ))}
+                </AnimatePresence>
               </div>
+              </LayoutGroup>
             )}
 
             {/* ── Charts row: activity volume, activity value, WO completion gauge ── */}
@@ -2026,18 +2187,26 @@ export default function HomePage() {
             {/* ── Project Network (map-style panel) + remaining key numbers ── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
               <Bento title="Project Network" icon={Building2} accent="#7c3aed" className="lg:col-span-2" delay={0.3}>
-                <ProjectNetworkMap projects={projectList} total={eng?.projects?.total ?? projectList.length} />
+                {/* Below the first screen and the heaviest panel on the page (force layout + ~50 animated lines):
+                    built only when it is about to be scrolled to, so it no longer competes with the first paint. */}
+                <LazyWhenVisible minHeight={400}>
+                  <ProjectNetworkMap projects={projectList} total={eng?.projects?.total ?? projectList.length} />
+                </LazyWhenVisible>
               </Bento>
 
               <Bento title="More key numbers" icon={Database} accent="#6366f1" delay={0.35}>
                 {restKpis.length === 0 ? (
                   <div className="px-4 py-10 text-center text-xs text-muted-foreground/40">Nothing else to show.</div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2.5 p-3">
-                    {restKpis.map((k, i) => (
-                      <KpiPill key={k.label} label={k.label} value={k.value} prefix={k.prefix} suffix={k.suffix} color={k.color} icon={k.icon} i={i} />
-                    ))}
-                  </div>
+                  <LayoutGroup id="home-rest">
+                    <div className="grid grid-cols-2 gap-2.5 p-3 max-h-[420px] overflow-y-auto">
+                      <AnimatePresence>
+                        {restKpis.map((k, i) => (
+                          <KpiPill key={k.id} label={k.label} value={k.value} prefix={k.prefix} suffix={k.suffix} color={k.color} icon={k.icon} i={i} />
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  </LayoutGroup>
                 )}
               </Bento>
             </div>
@@ -2228,5 +2397,6 @@ export default function HomePage() {
         </motion.div>
       </div>
     </div>
+    </MotionConfig>
   );
 }
