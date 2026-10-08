@@ -1,0 +1,85 @@
+import { API_BASE_URL } from "./apiBase";
+import { reportGatewayFailure, reportSystemRecovered, setHealthCheck } from "./systemStatus";
+
+// While a new build is going live, nginx answers 502 (or 504) for the few seconds the backend restarts.
+// That is not an application error. Every call to our own API goes through here (the browser's fetch is
+// wrapped once at start-up), so every page — not just the ones using fetchWithAuth — gets the same
+// treatment: the "system is updating" banner, and reads (GET / HEAD) are quietly retried a few times.
+// Writes are never retried — a repeated POST could save twice — they just fail with the gateway's answer.
+
+export const STABILISING_MESSAGE = "Please wait a few seconds for the system to stabilise.";
+export const GATEWAY_RETRY_DELAYS_MS = [1500, 3000, 5000];
+
+// nginx's own error pages are HTML; the backend's deliberate 503s (e.g. "run the migrations") are JSON with an
+// `error` message and must reach the screen untouched.
+export function isGatewayFailure(response: Response): boolean {
+  if (response.status === 502 || response.status === 504) return true;
+  if (response.status === 503) {
+    return !(response.headers.get("content-type") || "").includes("application/json");
+  }
+  return false;
+}
+
+function isOurApi(input: RequestInfo | URL): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const url = new URL(raw, window.location.href);
+    if (url.pathname.startsWith("/api/") && url.origin === window.location.origin) return true;
+    return /^https?:\/\//i.test(API_BASE_URL) && url.href.startsWith(API_BASE_URL);
+  } catch {
+    return false;
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
+}
+
+type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+/** Wraps a fetch function with the gateway handling above. */
+export function createGatewayFetch(native: FetchFn, delays: number[] = GATEWAY_RETRY_DELAYS_MS): FetchFn {
+  return async (input, init) => {
+    if (!isOurApi(input)) return native(input, init);
+
+    const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const canRetry = (method === "GET" || method === "HEAD") && !(input instanceof Request && input.bodyUsed);
+    let retries = 0;
+    for (;;) {
+      const response = await native(input, init);
+      if (!isGatewayFailure(response)) {
+        if (retries > 0) reportSystemRecovered();
+        return response;
+      }
+      reportGatewayFailure();
+      if (!canRetry || retries >= delays.length) return response;
+      await sleep(delays[retries++], init?.signal);
+    }
+  };
+}
+
+let installed = false;
+
+/** Call once at start-up, before anything else fetches. */
+export function installGatewayFetch() {
+  if (installed || typeof window === "undefined") return;
+  installed = true;
+  const native: FetchFn = window.fetch.bind(window);
+  // The health check uses the browser's own fetch, so it is never retried or counted as a failure.
+  setHealthCheck(async () => {
+    const res = await native("/health", { cache: "no-store" });
+    return res.ok;
+  });
+  window.fetch = createGatewayFetch(native);
+}

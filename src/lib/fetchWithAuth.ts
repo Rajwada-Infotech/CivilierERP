@@ -1,5 +1,6 @@
 ﻿import { apiUrl } from "./apiBase";
 import { toast } from "sonner";
+import { STABILISING_MESSAGE, isGatewayFailure } from "./gatewayFetch";
 
 // Exported so callers can distinguish auth/permission errors from network errors.
 export class ApiError extends Error {
@@ -21,38 +22,10 @@ export interface FetchWithAuthOptions extends RequestInit {
   skipActivityLog?: boolean;
 }
 
-// ── Gateway errors during a deploy ───────────────────────────────────────────
-// While a new build is going live, nginx answers 502 (or 504) for the few seconds the backend is
-// restarting. That is not an application error, so instead of failing the page we tell the person to
-// wait and quietly retry reads (GET / HEAD) a few times. Writes are never retried — a repeated POST
-// could save twice — they just get the same message.
-export const STABILISING_MESSAGE = "Please wait a few seconds for the system to stabilise.";
-const STABILISING_TOAST_ID = "system-stabilising";
-const GATEWAY_RETRY_DELAYS_MS = [1500, 3000, 5000];
-
-// nginx's own error pages are HTML; the backend's deliberate 503s (e.g. "run the migrations") are JSON
-// with an `error` message and must reach the screen untouched.
-function isGatewayFailure(response: Response): boolean {
-  if (response.status === 502 || response.status === 504) return true;
-  if (response.status === 503) {
-    return !(response.headers.get("content-type") || "").includes("application/json");
-  }
-  return false;
-}
-
-function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new DOMException("Aborted", "AbortError"));
-      },
-      { once: true },
-    );
-  });
-}
+// A 502 / 504 from the gateway during a deploy: the browser's fetch is already wrapped (see gatewayFetch.ts) so
+// reads were retried and the "system is updating" banner is showing. If it is still down, fail with a plain
+// sentence instead of handing back the gateway's error page.
+export { STABILISING_MESSAGE };
 
 // Dedup key in sessionStorage — survives Vite HMR module re-evaluation
 // (unlike a plain `let`), is cleared when the tab closes, and is not
@@ -187,19 +160,10 @@ export async function fetchWithAuth(
   }
   };
 
-  const method = (fetchOptions.method || "GET").toUpperCase();
-  const canRetry = method === "GET" || method === "HEAD";
-  let retries = 0;
-  for (;;) {
-    response = await send();
-    if (!isGatewayFailure(response)) break;
-    toast.warning(STABILISING_MESSAGE, { id: STABILISING_TOAST_ID, duration: 8000 });
-    if (!canRetry || retries >= GATEWAY_RETRY_DELAYS_MS.length) {
-      throw new ApiError(STABILISING_MESSAGE, response.status);
-    }
-    await sleep(GATEWAY_RETRY_DELAYS_MS[retries++], fetchOptions.signal);
+  response = await send();
+  if (isGatewayFailure(response)) {
+    throw new ApiError(STABILISING_MESSAGE, response.status);
   }
-  if (retries > 0) toast.dismiss(STABILISING_TOAST_ID);
 
   if (response.status === 401) {
     if (
