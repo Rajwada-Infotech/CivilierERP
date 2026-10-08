@@ -65,6 +65,11 @@ import {
   Repeat,
   Cpu,
   ListChecks,
+  HardHat,
+  TriangleAlert,
+  ShieldCheck,
+  Camera,
+  UserCog,
 } from "lucide-react";
 import { DateInput } from "@/components/ui/date-input";
 
@@ -159,6 +164,26 @@ interface ModuleSection {
 // used in Vendor Ledger's and Expense Booking's own exports).
 const fmt = (n: number | undefined | null) =>
   n == null ? "—" : Number(n).toFixed(2);
+
+// Civil Work DPR reports that show their own Project picker above the table.
+const CWD_INLINE_PROJECT_REPORTS = new Set([
+  "cwd-activity-status",
+  "cwd-overdue",
+  "cwd-engineer-workload",
+  "cwd-quality-checks",
+  "cwd-daily-updates",
+]);
+
+// Civil Work DPR report cells.
+const cwdDate = (v: unknown) => (v ? String(v).slice(0, 10) : "—");
+const cwdPercent = (v: unknown) => (v == null || v === "" ? "—" : `${Math.round(Number(v) * 10) / 10}%`);
+const cwdStatusLabel = (v: unknown) =>
+  v
+    ? String(v)
+        .toLowerCase()
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+    : "—";
 
 // ── All report definitions ────────────────────────────────────────────────────
 
@@ -1169,6 +1194,187 @@ const ALL_REPORTS: ReportDef[] = [
       },
     ],
   },
+  // ── Civil Work DPR ─────────────────────────────────────────────────────────
+  {
+    id: "cwd-activity-status",
+    label: "Activity Status",
+    description: "Every activity: location, engineers, status, progress and dates (date range = planned end date)",
+    icon: HardHat,
+    color: "#0ea5e9",
+    apiPath: "/api/civilworkdpr-reports/activity-status",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: null,
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Project", accessor: (r) => (r.projectName ?? "—") as string },
+      { header: "Location", accessor: (r) => (r.location ?? "—") as string },
+      { header: "Chain", accessor: (r) => (r.chain ?? "—") as string },
+      { header: "Activity", accessor: (r) => (r.activityName ?? "—") as string },
+      { header: "Engineers", accessor: (r) => (r.engineers ?? "—") as string },
+      { header: "Status", accessor: (r) => cwdStatusLabel(r.status) },
+      { header: "Progress", accessor: (r) => cwdPercent(r.progressPercent) },
+      { header: "Start Date", accessor: (r) => cwdDate(r.startDate) },
+      { header: "End Date", accessor: (r) => cwdDate(r.endDate) },
+      { header: "Attempt", accessor: (r) => (r.attemptNo ?? "—") as string },
+      { header: "QC", accessor: (r) => cwdStatusLabel(r.qcStatus) },
+    ],
+  },
+  {
+    id: "cwd-overdue",
+    label: "Overdue & Due Soon",
+    description: "Open activities past their end date, or ending within 2 days (today's position)",
+    icon: TriangleAlert,
+    color: "#ef4444",
+    apiPath: "/api/civilworkdpr-reports/overdue",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
+    columns: [
+      { header: "Project", accessor: (r) => (r.projectName ?? "—") as string },
+      { header: "Location", accessor: (r) => (r.location ?? "—") as string },
+      { header: "Activity", accessor: (r) => (r.activityName ?? "—") as string },
+      { header: "Engineers", accessor: (r) => (r.engineers ?? "—") as string },
+      { header: "Status", accessor: (r) => cwdStatusLabel(r.status) },
+      { header: "Progress", accessor: (r) => cwdPercent(r.progressPercent) },
+      { header: "End Date", accessor: (r) => cwdDate(r.endDate) },
+      { header: "State", accessor: (r) => (r.dueState ?? "—") as string },
+      {
+        header: "Days",
+        accessor: (r) => {
+          const n = Number(r.daysLate);
+          if (!Number.isFinite(n)) return "—";
+          return n > 0 ? `${n} late` : n === 0 ? "Due today" : `${-n} left`;
+        },
+      },
+    ],
+  },
+  {
+    id: "cwd-engineer-workload",
+    label: "Engineer Workload",
+    description: "Per engineer: current activities by status, overdue and average progress",
+    icon: UserCog,
+    color: "#8b5cf6",
+    apiPath: "/api/civilworkdpr-reports/engineer-workload",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: null,
+      dateFromParam: null,
+      dateToParam: null,
+    },
+    columns: [
+      { header: "Engineer", accessor: (r) => (r.engineerName ?? "—") as string },
+      { header: "Total", accessor: (r) => (r.total ?? 0) as number },
+      { header: "Allocated", accessor: (r) => (r.allocated ?? 0) as number },
+      { header: "In Progress", accessor: (r) => (r.inProgress ?? 0) as number },
+      { header: "On Hold", accessor: (r) => (r.onHold ?? 0) as number },
+      { header: "Rework", accessor: (r) => (r.rework ?? 0) as number },
+      { header: "Completed", accessor: (r) => (r.completed ?? 0) as number },
+      { header: "Approved", accessor: (r) => (r.approved ?? 0) as number },
+      { header: "Overdue", accessor: (r) => (r.overdue ?? 0) as number },
+      { header: "Avg Progress", accessor: (r) => cwdPercent(r.avgProgress) },
+    ],
+  },
+  {
+    id: "cwd-quality-checks",
+    label: "Quality Checks",
+    description: "Every QC inspection: decision, inspector and checks passed (date range = inspection date)",
+    icon: ShieldCheck,
+    color: "#10b981",
+    apiPath: "/api/civilworkdpr-reports/quality-checks",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: null,
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Inspected On", accessor: (r) => cwdDate(r.qcAt) },
+      { header: "Project", accessor: (r) => (r.projectName ?? "—") as string },
+      { header: "Location", accessor: (r) => (r.location ?? "—") as string },
+      { header: "Activity", accessor: (r) => (r.activityName ?? "—") as string },
+      { header: "Attempt", accessor: (r) => (r.attemptNo ?? "—") as string },
+      { header: "Engineers", accessor: (r) => (r.engineers ?? "—") as string },
+      { header: "Inspector", accessor: (r) => (r.qcBy ?? "—") as string },
+      { header: "Decision", accessor: (r) => cwdStatusLabel(r.decision) },
+      {
+        header: "Checks Passed",
+        accessor: (r) => (Number(r.checksTotal) > 0 ? `${r.checksPassed} / ${r.checksTotal}` : "—"),
+      },
+      { header: "Remarks", accessor: (r) => (r.remarks ?? "—") as string },
+    ],
+  },
+  {
+    id: "cwd-daily-updates",
+    label: "Daily Checkpoint Updates",
+    description: "Daily photo updates per checkpoint, with the time logged in IST (date range = update date)",
+    icon: Camera,
+    color: "#f59e0b",
+    apiPath: "/api/civilworkdpr-reports/daily-updates",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: null,
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Date", accessor: (r) => cwdDate(r.updateDate) },
+      { header: "Time (IST)", accessor: (r) => (r.loggedTime ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.projectName ?? "—") as string },
+      { header: "Location", accessor: (r) => (r.location ?? "—") as string },
+      { header: "Activity", accessor: (r) => (r.activityName ?? "—") as string },
+      { header: "Checkpoint", accessor: (r) => (r.checkpoint ?? "—") as string },
+      { header: "Logged By", accessor: (r) => (r.loggedBy ?? "—") as string },
+      { header: "Photo", accessor: (r) => (r.hasPhoto ? "Yes" : "No") },
+      { header: "Note", accessor: (r) => (r.note ?? "—") as string },
+    ],
+  },
+  {
+    id: "cwd-daily-labour",
+    label: "Daily Labour",
+    description: "Labour logged per day by contractor and activity",
+    icon: Users,
+    color: "#14b8a6",
+    apiPath: "/api/daily-labour",
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: null,
+      dateFromParam: "from",
+      dateToParam: "to",
+    },
+    columns: [
+      { header: "Date", accessor: (r) => cwdDate(r.entryDate) },
+      { header: "Project", accessor: (r) => (r.projectName ?? "—") as string },
+      { header: "Contractor", accessor: (r) => (r.contractorName ?? "—") as string },
+      { header: "Activity", accessor: (r) => (r.activityName ?? "—") as string },
+      { header: "Block", accessor: (r) => (r.blockName ?? "—") as string },
+      { header: "Unit", accessor: (r) => (r.unitName ?? "—") as string },
+      { header: "Room", accessor: (r) => (r.roomName ?? "—") as string },
+      { header: "Skilled", accessor: (r) => (r.skilledLabourCount ?? 0) as number },
+      { header: "Unskilled", accessor: (r) => (r.unskilledLabourCount ?? 0) as number },
+      { header: "Total", accessor: (r) => (r.totalLabourPresent ?? 0) as number },
+      { header: "Shift", accessor: (r) => (r.shift ?? "—") as string },
+      { header: "Attendance", accessor: (r) => (r.attendanceStatus ?? "—") as string },
+      { header: "Remarks", accessor: (r) => (r.remarks ?? "—") as string },
+    ],
+  },
   {
     id: "invoice-register",
     label: "Invoice Register",
@@ -2095,6 +2301,22 @@ const MODULE_SECTIONS: ModuleSection[] = [
     ],
   },
   {
+    id: "civilworkdpr",
+    label: "Civil Work DPR",
+    accent: "#0ea5e9",
+    description: "Activity status, overdue work, engineer workload, quality checks, daily updates, attendance & labour",
+    icon: HardHat,
+    reportIds: [
+      "cwd-activity-status",
+      "cwd-overdue",
+      "cwd-engineer-workload",
+      "cwd-quality-checks",
+      "cwd-daily-updates",
+      "worker-attendance",
+      "cwd-daily-labour",
+    ],
+  },
+  {
     id: "admin",
     label: "Admin",
     accent: "#f59e0b",
@@ -2583,6 +2805,8 @@ const ReportTable: React.FC<{
   //     parent Account Group) multi-select, so more than one head can be
   //     picked at once instead of one at a time. ───────────────────────────
   const isExpenseRegister = report.id === "expense-register";
+  // Civil Work DPR reports carry their own multi-select Project picker (supersedes the section bar's single one).
+  const hasInlineProject = CWD_INLINE_PROJECT_REPORTS.has(report.id);
   const isGrnRegister = report.id === "grn-register";
   const [expenseHeadIds, setExpenseHeadIds] = useState<string[]>([]);
   const [expenseHeadOptions, setExpenseHeadOptions] = useState<MultiSelectOption[]>([]);
@@ -2702,6 +2926,9 @@ const ReportTable: React.FC<{
       f["projectId"] = projectIds.join(",");
       delete f["projectName"];
     }
+
+    // Civil Work DPR reports: every picked project, comma-separated.
+    if (hasInlineProject && projectIds.length) f[fc.projectParam ?? "projectId"] = projectIds.join(",");
 
     // Expense Register: inline Date Range — supersedes the shared section
     // bar's Day/Range date filter the same way Company/Project above do.
@@ -2923,6 +3150,20 @@ const ReportTable: React.FC<{
 
           {isExpenseRegister && projects.length > 0 && (
             <div className="w-44">
+              <MultiSelectDropdown
+                options={projects.map((pr) => ({ id: pr.id, label: pr.name }))}
+                value={projectIds}
+                onChange={setProjectIds}
+                placeholder="All Projects"
+                searchPlaceholder="Search projects…"
+                itemNoun="project"
+                className="h-[30px] py-1"
+              />
+            </div>
+          )}
+
+          {hasInlineProject && projects.length > 0 && (
+            <div className="w-52">
               <MultiSelectDropdown
                 options={projects.map((pr) => ({ id: pr.id, label: pr.name }))}
                 value={projectIds}

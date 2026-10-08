@@ -533,6 +533,19 @@ const ItemMaster: React.FC = () => {
     if (!form.shortCode.trim()) errs.shortCode = true;
     if (!form.itemType) errs.itemType = true;
     if (!form.belongsTo) errs.belongsTo = true;
+    // Short codes are unique across items. The server enforces it too; this is the quick answer.
+    const code = form.shortCode.trim().toUpperCase();
+    if (code && !errs.shortCode) {
+      const own = editingId ? data.find((r) => r._id === editingId) : undefined;
+      const unchanged = !!own && (own.shortCode || "").trim().toUpperCase() === code;
+      const clash = unchanged
+        ? undefined
+        : data.find((r) => r._id !== editingId && (r.shortCode || "").trim().toUpperCase() === code);
+      if (clash) {
+        errs.shortCode = true;
+        toast.error(`Short code "${form.shortCode.trim()}" is already used by "${clash.itemName}". Each item needs its own short code.`);
+      }
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
