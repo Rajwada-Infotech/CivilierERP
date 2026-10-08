@@ -12,6 +12,7 @@ import { type DbActivity } from "@/api/engineeringActivityMasterApi";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import {
   FileText,
+  FileSpreadsheet,
   Save,
   Search,
   Eye,
@@ -46,6 +47,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { DateInput } from "@/components/ui/date-input";
+import { BoqExcelImportModal } from "./BoqExcelImportModal";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -2425,6 +2427,7 @@ export default function BOQ() {
   const [activityGroups, setActivityGroups] = useState<ActivityGroupOption[]>([]);
 
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editRecord, setEditRecord] = useState<BoqRecord | null>(null);
   const [viewRecord, setViewRecord] = useState<BoqRecord | null>(null);
 
@@ -2866,6 +2869,23 @@ export default function BOQ() {
         />
       )}
 
+      {showImport && (
+        <BoqExcelImportModal
+          masters={{
+            companies,
+            projects,
+            docTypes,
+            finYears: finYears.map((f) => ({ year: f.year })),
+            uoms,
+            items: itemOptions,
+            activities: activityOptions,
+            groups: activityGroups,
+          }}
+          onClose={() => setShowImport(false)}
+          onImported={() => loadList()}
+        />
+      )}
+
       {/* ── Inline Detail / View ── */}
       {!showForm && viewRecord && (
         <DetailModal
@@ -2903,6 +2923,14 @@ export default function BOQ() {
                 />
                 Refresh
               </button>
+              {rights.canCreate && (
+                <button
+                  onClick={() => setShowImport(true)}
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted transition-all"
+                >
+                  <FileSpreadsheet size={13} /> Excel Import
+                </button>
+              )}
               {rights.canCreate && (
                 <button
                   onClick={() => {

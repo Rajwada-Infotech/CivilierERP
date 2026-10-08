@@ -672,7 +672,7 @@ router.get(
           SELECT daa.Id AS assignmentId
           ${TRANSFER_FROM}
           ${base}${cond}
-          ORDER BY ep.name, dm.Id, dma.SequenceNo, daa.Id
+          ORDER BY ep.name, dm.ProjectId, dm.Id, dma.SequenceNo, daa.Id
           OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
         `);
         const totalReq = pool.request().input("engineerId", sql.Int, engineerId);
@@ -762,7 +762,7 @@ router.get(
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
         WHERE daa.IsCurrent = 1
           AND daa.Status IN (${TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ")})${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
-        ORDER BY ep.name, scopePath, am.activity_name
+        ORDER BY ep.name, dm.ProjectId, scopePath, am.activity_name
       `);
       res.json(r.recordset);
     } catch (err) {
@@ -2401,6 +2401,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const isRealDate = (d) => DATE_RE.test(d) && !Number.isNaN(new Date(d + "T00:00:00Z").getTime());
 
 // GET /checkpoint/:cpId/updates — the dates that have an update (no binary).
+// loggedTime is always IST (UTC+5:30), whatever timezone the SQL server runs in.
 router.get("/checkpoint/:cpId/updates", authMiddleware, async (req, res) => {
   const cpId = parseInt(req.params.cpId, 10);
   if (!Number.isFinite(cpId)) return res.status(400).json({ error: "Invalid checkpoint id" });
@@ -2409,7 +2410,8 @@ router.get("/checkpoint/:cpId/updates", authMiddleware, async (req, res) => {
     const r = await pool.request().input("cpId", sql.Int, cpId).query(`
       SELECT Id AS id, CONVERT(VARCHAR(10), UpdateDate, 23) AS date,
              CAST(CASE WHEN Photo IS NULL THEN 0 ELSE 1 END AS BIT) AS hasPhoto,
-             Note AS note, CreatedBy AS createdBy, CreatedAt AS createdAt
+             Note AS note, CreatedBy AS createdBy, CreatedAt AS createdAt,
+             CONVERT(VARCHAR(5), DATEADD(MINUTE, 330 - DATEDIFF(MINUTE, SYSUTCDATETIME(), SYSDATETIME()), COALESCE(UpdatedAt, CreatedAt)), 108) AS loggedTime
       FROM dbo.DependencyActivityCheckpointUpdate
       WHERE AssignmentCheckpointId = @cpId
       ORDER BY UpdateDate DESC
@@ -2432,10 +2434,15 @@ router.post("/checkpoint/:cpId/updates", authMiddleware, upload.single("photo"),
   const photo = req.file || null;
   if (photo && !/^image\//i.test(photo.mimetype)) return res.status(400).json({ error: "The update photo must be an image" });
 
-  // No future dates (one day of slack for timezone differences between browser and server).
-  const limit = new Date();
-  limit.setUTCDate(limit.getUTCDate() + 1);
-  if (date > limit.toISOString().slice(0, 10)) return res.status(400).json({ error: "You can't log an update for a future date" });
+  // A daily update can only be logged for today (one day of slack either side for timezone
+  // differences between the browser and the server).
+  const lo = new Date();
+  lo.setUTCDate(lo.getUTCDate() - 1);
+  const hi = new Date();
+  hi.setUTCDate(hi.getUTCDate() + 1);
+  if (date < lo.toISOString().slice(0, 10) || date > hi.toISOString().slice(0, 10)) {
+    return res.status(400).json({ error: "A daily update can only be logged for today" });
+  }
 
   const actor = req.user?.email || req.user?.name || "system";
   try {

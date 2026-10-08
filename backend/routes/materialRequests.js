@@ -33,6 +33,7 @@ const {
 const { transition, writeAuditLog } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { makeColumnProbe } = require("../services/columnProbe");
 const { poExistsForMR } = require("../utils/materialChainGuard");
 const {
   getMRItemFulfillment,
@@ -838,6 +839,7 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       Reason,
       Remarks,
       DocTypeId: clientDocTypeId,
+      SourceWOId: clientSourceWOId,
       items = [],
     } = req.body;
 
@@ -846,6 +848,15 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       return res.status(400).json({ error: "Reason is required" });
     if (!items.length)
       return res.status(400).json({ error: "At least one item required" });
+
+    // Raised from an approved Work Order: the link is checked here, not trusted from the client.
+    let sourceWO = null;
+    if (clientSourceWOId != null && clientSourceWOId !== "") {
+      const woId = parseInt(clientSourceWOId, 10);
+      if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid SourceWOId" });
+      sourceWO = await loadWorkOrderForMR(req, res, pool, woId);
+      if (!sourceWO) return;
+    }
 
     if (RequiredByDate) {
       const minDate = await computeMinRequiredByDate(
@@ -905,13 +916,15 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
         .input("DocTypeId", sql.Int, dtId || null)
         .input("DocNo", sql.NVarChar(50), lockedDocNo || null)
+        .input("SourceWOId", sql.Int, sourceWO ? sourceWO.Id : null)
+        .input("SourceWODocNo", sql.NVarChar(100), sourceWO ? sourceWO.woNo : null)
         .input("CreatedBy", sql.NVarChar(200), user).query(`
           INSERT INTO dbo.MaterialRequests
             (CompanyId, ProjectId, FinYearId, RequestDate, RequiredByDate,
-             Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy)
+             Priority, Reason, Remarks, Status, DocTypeId, DocNo, CreatedBy, UpdatedBy${sourceWO ? ", SourceWOId, SourceWODocNo" : ""})
           OUTPUT INSERTED.MRId
           VALUES (@CompanyId, @ProjectId, @FinYearId, @RequestDate, @RequiredByDate,
-                  @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy)
+                  @Priority, @Reason, @Remarks, 'Draft', @DocTypeId, @DocNo, @CreatedBy, @CreatedBy${sourceWO ? ", @SourceWOId, @SourceWODocNo" : ""})
         `);
 
       newId = insertHdr.recordset[0].MRId;
@@ -981,6 +994,93 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
       MRId: newId,
       DocNo: created.recordset[0]?.DocNo,
       Status: created.recordset[0]?.Status,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Material Request raised from an approved Work Order ───────────────────────
+// The Work Order page opens the normal Material Request form pre-filled from GET
+// /from-work-order/:woId/prefill (items summed per item + unit); the user can change anything, and
+// POST / then stores SourceWOId / SourceWODocNo so the document chain starts at the Work Order.
+// One live MR per Work Order: while the first is not Rejected/Cancelled a second is refused (409).
+const hasSourceWO = makeColumnProbe("dbo.MaterialRequests", "SourceWOId");
+
+// Loads the approved Work Order a Material Request may be raised from. On any problem it has already
+// answered the request and returns null.
+async function loadWorkOrderForMR(req, res, pool, woId) {
+  if (!(await hasSourceWO(pool))) {
+    res.status(503).json({ error: "Material Requests from Work Orders need migration 545 — ask an administrator to run the database migrations." });
+    return null;
+  }
+  const wo = (await pool.request().input("id", sql.Int, woId).query(`
+    SELECT Id, DocumentNumber, DocNo, Status, CompanyId, ProjectId
+    FROM dbo.WorkOrderHeader WHERE Id = @id
+  `)).recordset[0];
+  if (!wo) {
+    res.status(404).json({ error: "Work order not found" });
+    return null;
+  }
+  if (!assertProjectAllowed(req, res, wo.ProjectId)) return null;
+  if (wo.Status !== "Approved") {
+    res.status(400).json({ error: "A Material Request can only be raised from an approved work order." });
+    return null;
+  }
+  const existing = (await pool.request().input("id", sql.Int, woId).query(`
+    SELECT TOP 1 MRId, DocNo, Status FROM dbo.MaterialRequests
+    WHERE SourceWOId = @id AND Status NOT IN ('Rejected', 'Cancelled')
+    ORDER BY MRId DESC
+  `)).recordset[0];
+  if (existing) {
+    res.status(409).json({
+      error: `Material Request ${existing.DocNo || "#" + existing.MRId} already exists for this work order.`,
+      mrId: existing.MRId,
+      docNo: existing.DocNo,
+      status: existing.Status,
+    });
+    return null;
+  }
+  return { ...wo, woNo: wo.DocNo || wo.DocumentNumber || `WO-${woId}` };
+}
+
+router.get("/from-work-order/:woId/prefill", authenticateToken, requirePageRight("material-request", "create"), async (req, res) => {
+  const woId = parseInt(req.params.woId, 10);
+  if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid work order id" });
+  try {
+    const pool = getPool();
+    await ensureTablesExist(pool);
+    const wo = await loadWorkOrderForMR(req, res, pool, woId);
+    if (!wo) return;
+
+    const mats = (await pool.request().input("id", sql.Int, woId).query(`
+      SELECT m.ItemId, MAX(img.M_Name) AS ItemName, uom.UOMCode, SUM(ISNULL(m.Quantity, 0)) AS Quantity
+      FROM dbo.WorkOrderActivityMaterials m
+      JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
+      LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = m.ItemId
+      LEFT JOIN dbo.UOMMaster uom ON uom.Id = m.UOMId
+      WHERE a.WorkOrderHeaderId = @id AND m.ItemId IS NOT NULL
+      GROUP BY m.ItemId, uom.UOMCode
+      HAVING SUM(ISNULL(m.Quantity, 0)) > 0
+      ORDER BY MAX(img.M_Name), m.ItemId
+    `)).recordset;
+    if (!mats.length) {
+      return res.status(400).json({ error: "This work order has no material items to request." });
+    }
+
+    res.json({
+      WOId: woId,
+      WODocNo: wo.woNo,
+      CompanyId: wo.CompanyId || null,
+      ProjectId: wo.ProjectId || null,
+      Reason: `Materials for Work Order ${wo.woNo}`,
+      Remarks: `Raised from approved Work Order ${wo.woNo}`,
+      items: mats.map((m) => ({
+        ItemId: String(m.ItemId),
+        ItemName: m.ItemName || null,
+        UOMCode: m.UOMCode || null,
+        Quantity: parseFloat(m.Quantity) || 0,
+      })),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

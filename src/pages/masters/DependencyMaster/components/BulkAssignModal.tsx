@@ -24,7 +24,8 @@ function CountLine({ label, c }: { label: string; c: BulkAssignSummary["engineer
     <div className="flex items-center justify-between text-sm">
       <span className="text-foreground">{label}</span>
       <span className="tabular-nums text-muted-foreground">
-        <strong className="text-foreground">{c.willFill}</strong> will be set
+        <strong className="text-foreground">{c.willFill + c.willReplace}</strong> will be set
+        {c.willReplace > 0 && <> · {c.willReplace} replaced</>}
         {c.alreadySet > 0 && <> · {c.alreadySet} already set, left as they are</>}
       </span>
     </div>
@@ -33,8 +34,8 @@ function CountLine({ label, c }: { label: string; c: BulkAssignSummary["engineer
 
 /**
  * Sets Engineers, Quality Check and Approval Setup on every activity of a project
- * (or one block of it) in one go. Only fills what is empty — an activity that
- * already has engineers / QC / approval levels keeps them.
+ * (or one block of it) in one go. By default only fills what is empty; with
+ * "Overwrite existing" the chosen fields replace what the activities already have.
  */
 export function BulkAssignModal({
   open, onClose, rows,
@@ -45,6 +46,7 @@ export function BulkAssignModal({
   const [engineerIds, setEngineerIds] = useState<number[]>([]);
   const [qcUserIds, setQcUserIds] = useState<number[]>([]);
   const [levels, setLevels] = useState<ApprovalLevel[]>([]);
+  const [overwrite, setOverwrite] = useState(false);
 
   // Start clean every time it opens.
   useEffect(() => {
@@ -54,6 +56,7 @@ export function BulkAssignModal({
     setEngineerIds([]);
     setQcUserIds([]);
     setLevels([]);
+    setOverwrite(false);
   }, [open]);
 
   const { data: users = [] } = useQuery({
@@ -83,6 +86,7 @@ export function BulkAssignModal({
         engineerIds,
         qcUserIds,
         approvalLevels: levels.filter((l) => l.userIds.length > 0),
+        overwrite,
       }
     : null;
   const hasChoice = !!request && (engineerIds.length > 0 || qcUserIds.length > 0 || request.approvalLevels.length > 0);
@@ -128,8 +132,8 @@ export function BulkAssignModal({
             <Layers size={16} className="text-cyan-500" /> Bulk assign
           </DialogTitle>
           <DialogDescription className="mt-0.5 text-xs">
-            Set engineers, quality check and approvers on every activity of a project or block. Activities that already have
-            a value for a field keep it — only empty ones are filled.
+            Set engineers, quality check and approvers on every activity of a project or block. By default activities that
+            already have a value for a field keep it; turn on "Overwrite existing" to replace them.
           </DialogDescription>
         </div>
 
@@ -175,6 +179,22 @@ export function BulkAssignModal({
 
           <ApprovalLevelsEditor levels={levels} onChange={setLevels} users={users} />
 
+          <label className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/30 p-3 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={overwrite}
+              onChange={(e) => setOverwrite(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-cyan-600"
+            />
+            <span>
+              <span className="font-semibold text-foreground">Overwrite existing</span>
+              <span className="block text-xs text-muted-foreground">
+                Replace the engineers, quality check and approvers already set on these activities with the ones chosen above.
+                Fields you leave empty are not touched.
+              </span>
+            </span>
+          </label>
+
           {/* Preview */}
           <div className="rounded-lg border border-border bg-muted/30 p-3.5">
             <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
@@ -200,7 +220,7 @@ export function BulkAssignModal({
                 <CountLine label="Quality check" c={summary.qc} />
                 <CountLine label="Approval setup" c={summary.approval} />
                 {summary.willChange === 0 && (
-                  <p className="text-xs text-muted-foreground">Every activity here already has these set, so there is nothing to change.</p>
+                  <p className="text-xs text-muted-foreground">Every activity here already has these set, so there is nothing to change. Turn on "Overwrite existing" to replace them.</p>
                 )}
               </div>
             )}

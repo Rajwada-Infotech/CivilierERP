@@ -28,10 +28,16 @@ function Blink({ on, children }: { on: boolean; children: React.ReactNode }) {
   return <Animated.View style={{ opacity: v }}>{children}</Animated.View>;
 }
 
+/** "15:42" -> "03:42 pm" */
+const fmtTime = (hhmm: string) => {
+  const [h, m] = hhmm.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm;
+  return `${String(h % 12 || 12).padStart(2, "0")}:${String(m).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`;
+};
 const addDays = (s: string, n: number) => { const d = fromYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
 const diffDays = (a: string, b: string) => Math.round((fromYmd(b).getTime() - fromYmd(a).getTime()) / 86_400_000);
 
-function DailyUpdates({ checkpointId, startDate, canEdit }: { checkpointId: number; startDate: string; canEdit: boolean }) {
+function DailyUpdates({ checkpointId, canEdit }: { checkpointId: number; canEdit: boolean }) {
   const qc = useQueryClient();
   const today = useMemo(() => todayYmd(), []);
   const [date, setDate] = useState(today);
@@ -42,12 +48,8 @@ function DailyUpdates({ checkpointId, startDate, canEdit }: { checkpointId: numb
   const current = byDate.get(date);
 
   // Every day from the start date (or the last 14) up to today, newest last, so the strip lands on today.
-  const days = useMemo(() => {
-    const from = startDate && diffDays(startDate, today) < 60 ? startDate : addDays(today, -13);
-    const out: string[] = [];
-    for (let d = from; d <= today; d = addDays(d, 1)) out.push(d);
-    return out;
-  }, [startDate, today]);
+  // Locked to today: a daily update is a same-day record (the server enforces it too).
+  const days = useMemo(() => [today], [today]);
   const strip = useRef<ScrollView>(null);
 
   const save = useMutation({
@@ -82,7 +84,7 @@ function DailyUpdates({ checkpointId, startDate, canEdit }: { checkpointId: numb
         })}
       </ScrollView>
       <Text style={{ fontSize: 11, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>
-        {date === today ? "Today · " : ""}{fmtDay(date)} · {(q.data ?? []).length} day{(q.data ?? []).length === 1 ? "" : "s"} logged
+        Today · {fmtDay(date)}{current?.loggedTime ? ` · logged at ${fmtTime(current.loggedTime)}` : ""} · {(q.data ?? []).length} day{(q.data ?? []).length === 1 ? "" : "s"} logged
       </Text>
 
       {canEdit && (
@@ -176,7 +178,7 @@ export function CheckpointsTab({ rungId, canEdit, onChanged }: { rungId: number;
                   </View>
                 </View>
               </View>
-              {cp.isDaily && cp.id != null && <DailyUpdates checkpointId={cp.id} startDate={startDate} canEdit={canEdit} />}
+              {cp.isDaily && cp.id != null && <DailyUpdates checkpointId={cp.id} canEdit={canEdit} />}
             </View>
           </Blink>
         );
