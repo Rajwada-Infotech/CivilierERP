@@ -1,5 +1,8 @@
 // Two ways to sell a villa built on plots: directly (its plots unsold — any
 // buyer, land and all), or after the plots were sold (only their owner).
+// The real db module needs DB settings that CI doesn't have; these tests pass
+// their own fake pool, so a stub is all that's needed.
+jest.mock("../db", () => ({ sql: { Int: "Int", NVarChar: () => "NVarChar" }, getPool: () => { throw new Error("no db in tests"); } }));
 const { assertVillaBuyerOwnsLand, VillaLandError } = require("../services/villaLand");
 
 const poolWith = (rows) => ({
