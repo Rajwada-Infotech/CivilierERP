@@ -39,6 +39,7 @@ import {
   Upload,
   Loader2,
   Printer,
+  ClipboardList,
 } from "lucide-react";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
@@ -124,6 +125,9 @@ interface IssueHeader {
   costCenter: string;
   blockId: string;
   floorNo: string;
+  /** Work order this issue is tagged to ("" = none), and its number for display. */
+  workOrderId: string;
+  workOrderDocNo: string;
 }
 
 const defaultHeader: IssueHeader = {
@@ -140,6 +144,8 @@ const defaultHeader: IssueHeader = {
   costCenter: "",
   blockId: "",
   floorNo: "",
+  workOrderId: "",
+  workOrderDocNo: "",
 };
 
 const blankCartItem = (): CartItem => ({
@@ -196,6 +202,139 @@ function GodownBadge({
         </span>
       )}
     </span>
+  );
+}
+
+// What the tagged work order listed against what is being issued: the work order's quantity, what other
+// issues tagged to it have already issued, what is in this issue's cart, and what is left. Informational —
+// it never blocks saving.
+const fmtQty = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+function WorkOrderComparePanel({
+  woId,
+  docNo,
+  excludeIssueId,
+  cart,
+}: {
+  woId: number;
+  docNo: string;
+  excludeIssueId: number | null;
+  cart: CartItem[];
+}) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["issue-work-order-compare", woId, excludeIssueId],
+    queryFn: () => issuesApi.getWorkOrderCompare(woId, excludeIssueId),
+    staleTime: 30_000,
+  });
+
+  const rows = useMemo(() => {
+    if (!data) return [];
+    const keyOf = (id: string, uom: string | null | undefined) => `${String(id).toLowerCase()}|${uom || ""}`;
+    type Row = { key: string; itemId: string; name: string; uom: string; woQty: number; issuedQty: number; thisQty: number };
+    const map = new Map<string, Row>();
+    for (const i of data.items) {
+      map.set(keyOf(i.itemId, i.uomCode), {
+        key: keyOf(i.itemId, i.uomCode),
+        itemId: i.itemId,
+        name: i.itemName || i.itemId,
+        uom: i.uomName || i.uomCode || "—",
+        woQty: i.woQty,
+        issuedQty: i.issuedQty,
+        thisQty: 0,
+      });
+    }
+    for (const ci of cart) {
+      const qty = Number(ci.Quantity);
+      if (!ci.ItemId || !(qty > 0)) continue;
+      const k = keyOf(ci.ItemId, ci.UOMCode);
+      const row = map.get(k) ?? {
+        key: k,
+        itemId: ci.ItemId,
+        name: ci.ItemName || ci.ItemId,
+        uom: ci.UOMCode || "—",
+        woQty: 0,
+        issuedQty: 0,
+        thisQty: 0,
+      };
+      row.thisQty += qty;
+      map.set(k, row);
+    }
+    const listedItems = new Set(data.items.filter((i) => i.woQty > 0).map((i) => String(i.itemId).toLowerCase()));
+    return [...map.values()]
+      .map((r) => {
+        const balance = r.woQty - r.issuedQty - r.thisQty;
+        let state: "over" | "done" | "left" | "unit" | "extra";
+        if (r.woQty === 0) state = listedItems.has(r.itemId.toLowerCase()) ? "unit" : "extra";
+        else state = balance < 0 ? "over" : balance === 0 ? "done" : "left";
+        return { ...r, balance, state };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [data, cart]);
+
+  const listed = rows.filter((r) => r.woQty > 0);
+  const covered = listed.filter((r) => r.issuedQty + r.thisQty > 0).length;
+
+  return (
+    <Card className="border-border shadow-sm">
+      <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <ClipboardList size={15} className="text-orange-600 dark:text-orange-400" />
+          <CardTitle className="text-base font-semibold">Work order comparison</CardTitle>
+          <span className="px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700 dark:text-orange-400 text-xs font-semibold">{docNo}</span>
+        </div>
+        {!isLoading && !error && listed.length > 0 && (
+          <span className="text-[0.6875rem] text-muted-foreground">
+            {covered} of {listed.length} work order items issued so far
+          </span>
+        )}
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <p className="px-5 py-4 text-sm text-muted-foreground">Loading the work order's items…</p>
+        ) : error ? (
+          <p className="px-5 py-4 text-sm text-destructive">{(error as Error).message}</p>
+        ) : rows.length === 0 ? (
+          <p className="px-5 py-4 text-sm text-muted-foreground">This work order lists no material items.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-[0.625rem] uppercase tracking-widest text-muted-foreground bg-muted/30">
+                <tr>
+                  <th className="px-4 py-2 text-left font-semibold">Item</th>
+                  <th className="px-4 py-2 text-left font-semibold">Unit</th>
+                  <th className="px-4 py-2 text-right font-semibold">Work order</th>
+                  <th className="px-4 py-2 text-right font-semibold">Issued earlier</th>
+                  <th className="px-4 py-2 text-right font-semibold">This issue</th>
+                  <th className="px-4 py-2 text-right font-semibold">Balance</th>
+                  <th className="px-4 py-2 text-left font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {rows.map((r) => (
+                  <tr key={r.key}>
+                    <td className="px-4 py-2.5 font-medium text-foreground">{r.name}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">{r.uom}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{r.woQty > 0 ? fmtQty(r.woQty) : "—"}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmtQty(r.issuedQty)}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums font-semibold">{fmtQty(r.thisQty)}</td>
+                    <td className={`px-4 py-2.5 text-right tabular-nums font-semibold ${r.balance < 0 ? "text-destructive" : ""}`}>
+                      {r.woQty > 0 ? fmtQty(r.balance) : "—"}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {r.state === "over" && <span className="text-xs font-medium text-destructive">Over by {fmtQty(-r.balance)}</span>}
+                      {r.state === "done" && <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Fully issued</span>}
+                      {r.state === "left" && <span className="text-xs text-muted-foreground">{fmtQty(r.balance)} still to issue</span>}
+                      {r.state === "unit" && <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Different unit from the work order</span>}
+                      {r.state === "extra" && <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Not in the work order</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -418,9 +557,19 @@ export default function Issues() {
     );
   }, [blocks, header.projectId]);
 
+  // Work orders that can be tagged: approved, this company + project, with a Material Request raised.
+  const { data: issueWorkOrders = [] } = useQuery({
+    queryKey: ["issue-work-orders", header.companyId, header.projectId],
+    queryFn: () => issuesApi.getIssueWorkOrders(Number(header.companyId), Number(header.projectId)),
+    enabled: viewMode === "form" && !!header.companyId && !!header.projectId,
+    staleTime: 60_000,
+  });
+
   const handleCompanyChange = (v: string) => {
     setH("companyId", v);
     setH("projectId", ""); // reset project when company changes
+    setH("workOrderId", ""); // the work order belongs to the company + project
+    setH("workOrderDocNo", "");
     setH("godownId", "");
     setH("blockId", "");
     setH("floorNo", "");
@@ -428,6 +577,8 @@ export default function Issues() {
 
   const handleProjectChange = (v: string) => {
     setH("projectId", v);
+    setH("workOrderId", "");
+    setH("workOrderDocNo", "");
     setH("godownId", "");
     setH("blockId", "");
     setH("floorNo", "");
@@ -651,6 +802,8 @@ export default function Issues() {
       costCenter: record.CostCenter ?? "",
       blockId: record.BlockId ? String(record.BlockId) : "",
       floorNo: record.FloorNo != null ? String(record.FloorNo) : "",
+      workOrderId: record.SourceWOId ? String(record.SourceWOId) : "",
+      workOrderDocNo: record.SourceWODocNo ?? "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
       _key: generateUUID(),
@@ -709,6 +862,7 @@ export default function Issues() {
       CostCenter: header.costCenter || null,
       BlockId: header.blockId ? Number(header.blockId) : null,
       FloorNo: header.floorNo !== "" ? Number(header.floorNo) : null,
+      SourceWOId: header.workOrderId ? Number(header.workOrderId) : null,
       items: cart
         .filter((ci) => ci.ItemId && ci.ItemId.trim() !== "")
         .map((ci) => ({
@@ -1361,6 +1515,49 @@ export default function Issues() {
               </Field>
             </div>
 
+            {/* Work order tag */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Work Order (optional)">
+                <div className="relative">
+                  <ClipboardList
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <select
+                    value={header.workOrderId}
+                    onChange={(e) => {
+                      const wo = issueWorkOrders.find((w) => String(w.id) === e.target.value);
+                      setH("workOrderId", e.target.value);
+                      setH("workOrderDocNo", wo?.docNo ?? "");
+                    }}
+                    disabled={!header.companyId || !header.projectId}
+                    className={`${selectCls} pl-9 disabled:opacity-60 disabled:cursor-not-allowed`}
+                  >
+                    <option value="">
+                      {!header.companyId || !header.projectId
+                        ? "Select company and project first"
+                        : issueWorkOrders.length === 0
+                          ? "No work orders with a Material Request for this project"
+                          : "— Tag a work order —"}
+                    </option>
+                    {header.workOrderId && !issueWorkOrders.some((w) => String(w.id) === header.workOrderId) && (
+                      <option value={header.workOrderId}>{header.workOrderDocNo || `Work order #${header.workOrderId}`}</option>
+                    )}
+                    {issueWorkOrders.map((w) => (
+                      <option key={w.id} value={String(w.id)}>
+                        {w.docNo}
+                        {w.contractorName ? ` · ${w.contractorName}` : ""}
+                        {w.mrDocNo ? ` · ${w.mrDocNo}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </Field>
+              <p className="text-[0.6875rem] text-muted-foreground self-end pb-2">
+                Only approved work orders of this company and project that already have a Material Request are listed. Tagging one shows what the work order listed next to what is being issued.
+              </p>
+            </div>
+
             {/* Row 3: Reason | Remarks */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="Reason for Issue" required>
@@ -1649,6 +1846,16 @@ export default function Issues() {
           </CardContent>
         </Card>
 
+        {/* ── Work order comparison ── */}
+        {header.workOrderId && (
+          <WorkOrderComparePanel
+            woId={Number(header.workOrderId)}
+            docNo={header.workOrderDocNo || `#${header.workOrderId}`}
+            excludeIssueId={editingId}
+            cart={cart}
+          />
+        )}
+
         {/* ── Save bar ── */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
           <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
@@ -1696,6 +1903,7 @@ export default function Issues() {
         : []),
       ...(viewingRecord.IssuedTo ? [{ label: "Issued To", value: viewingRecord.IssuedTo }] : []),
       ...(viewingRecord.CostCenter ? [{ label: "Cost Center", value: viewingRecord.CostCenter }] : []),
+      ...(viewingRecord.SourceWODocNo ? [{ label: "Work Order", value: viewingRecord.SourceWODocNo }] : []),
     ];
 
     return createPortal(
