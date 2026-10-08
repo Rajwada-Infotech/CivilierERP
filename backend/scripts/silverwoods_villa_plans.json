@@ -1,285 +1,283 @@
 {
-  "source": "Silverwoods By Delta Realtech brochure, villa type plan pages 17-22 (small print: confirm against the drawings)",
-  "project": "SILVER WOODS",
-  "categories": [
-    {
-      "name": "STUDY_ROOM",
-      "alias": "Study Room"
-    },
-    {
-      "name": "WALK_IN_CLOSET",
-      "alias": "Walk-in Closet"
-    },
-    {
-      "name": "POWDER_TOILET",
-      "alias": "Powder Toilet"
-    },
-    {
-      "name": "PUJA_ROOM",
-      "alias": "Puja Room"
-    },
-    {
-      "name": "FOYER",
-      "alias": "Foyer"
-    },
-    {
-      "name": "LOBBY",
-      "alias": "Lobby"
-    },
-    {
-      "name": "STORE_ROOM",
-      "alias": "Store Room"
-    },
-    {
-      "name": "TERRACE",
-      "alias": "Terrace"
-    },
-    {
-      "name": "DECK",
-      "alias": "Deck"
-    },
-    {
-      "name": "SIT_OUT",
-      "alias": "Sit-out"
-    },
-    {
-      "name": "SEMI_COVERED_AREA",
-      "alias": "Semi-covered Area"
-    },
-    {
-      "name": "LAWN",
-      "alias": "Lawn"
-    },
-    {
-      "name": "SPLASH_POOL",
-      "alias": "Splash Pool"
-    },
-    {
-      "name": "CAR_PARKING",
-      "alias": "Car Parking"
-    },
-    {
-      "name": "STRUCTURE",
-      "alias": "Structure"
-    },
-    {
-      "name": "EXTERNAL_WORKS",
-      "alias": "External Works"
-    }
-  ],
-  "types": {
-    "T1": {
-      "G": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "KITCHEN": 1,
-        "HALL_ROOM": 1,
-        "LOBBY": 1,
-        "CAR_PARKING": 1,
-        "DECK": 2,
-        "SPLASH_POOL": 1,
-        "STRUCTURE": 1,
-        "EXTERNAL_WORKS": 1
-      },
-      "1": {
-        "BEDROOM": 2,
-        "BATHROOM": 2,
-        "WALK_IN_CLOSET": 2,
-        "LOBBY": 1,
-        "BALCONY": 1,
-        "DECK": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      },
-      "2": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "WALK_IN_CLOSET": 1,
-        "STORE_ROOM": 1,
-        "LOBBY": 1,
-        "SIT_OUT": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      }
-    },
-    "T2": {
-      "G": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "KITCHEN": 1,
-        "HALL_ROOM": 1,
-        "LOBBY": 1,
-        "CAR_PARKING": 1,
-        "DECK": 2,
-        "SPLASH_POOL": 1,
-        "STRUCTURE": 1,
-        "EXTERNAL_WORKS": 1
-      },
-      "1": {
-        "BEDROOM": 2,
-        "BATHROOM": 2,
-        "WALK_IN_CLOSET": 2,
-        "LOBBY": 1,
-        "BALCONY": 1,
-        "DECK": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      },
-      "2": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "WALK_IN_CLOSET": 1,
-        "STORE_ROOM": 1,
-        "LOBBY": 1,
-        "SIT_OUT": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      }
-    },
-    "T3": {
-      "G": {
-        "STUDY_ROOM": 1,
-        "BATHROOM": 1,
-        "HALL_ROOM": 1,
-        "KITCHEN": 1,
-        "FOYER": 1,
-        "CAR_PARKING": 1,
-        "DECK": 2,
-        "SPLASH_POOL": 1,
-        "STRUCTURE": 1,
-        "EXTERNAL_WORKS": 1
-      },
-      "1": {
-        "BEDROOM": 2,
-        "BATHROOM": 2,
-        "WALK_IN_CLOSET": 2,
-        "LOBBY": 1,
-        "BALCONY": 1,
-        "DECK": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      },
-      "2": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "WALK_IN_CLOSET": 1,
-        "STORE_ROOM": 1,
-        "LOBBY": 1,
-        "SEMI_COVERED_AREA": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      }
-    },
-    "T4": {
-      "G": {
-        "STUDY_ROOM": 1,
-        "BATHROOM": 1,
-        "HALL_ROOM": 1,
-        "KITCHEN": 1,
-        "FOYER": 1,
-        "CAR_PARKING": 1,
-        "DECK": 2,
-        "SPLASH_POOL": 1,
-        "STRUCTURE": 1,
-        "EXTERNAL_WORKS": 1
-      },
-      "1": {
-        "BEDROOM": 2,
-        "BATHROOM": 2,
-        "WALK_IN_CLOSET": 2,
-        "LOBBY": 1,
-        "BALCONY": 1,
-        "DECK": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      },
-      "2": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "WALK_IN_CLOSET": 1,
-        "STORE_ROOM": 1,
-        "LOBBY": 1,
-        "SEMI_COVERED_AREA": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      }
-    },
-    "T5": {
-      "G": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "HALL_ROOM": 1,
-        "KITCHEN": 1,
-        "FOYER": 1,
-        "CAR_PARKING": 1,
-        "SEMI_COVERED_AREA": 1,
-        "DECK": 1,
-        "LAWN": 1,
-        "SPLASH_POOL": 1,
-        "STRUCTURE": 1,
-        "EXTERNAL_WORKS": 1
-      },
-      "1": {
-        "BEDROOM": 2,
-        "BATHROOM": 2,
-        "WALK_IN_CLOSET": 2,
-        "LOBBY": 1,
-        "BALCONY": 1,
-        "DECK": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      },
-      "2": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "WALK_IN_CLOSET": 1,
-        "LOBBY": 1,
-        "BALCONY": 1,
-        "SIT_OUT": 1,
-        "STORE_ROOM": 1,
-        "SEMI_COVERED_AREA": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      }
-    },
-    "T6": {
-      "G": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "WALK_IN_CLOSET": 1,
-        "POWDER_TOILET": 1,
-        "KITCHEN": 1,
-        "HALL_ROOM": 1,
-        "FOYER": 1,
-        "CAR_PARKING": 1,
-        "DECK": 2,
-        "LAWN": 1,
-        "SPLASH_POOL": 1,
-        "STRUCTURE": 1,
-        "EXTERNAL_WORKS": 1
-      },
-      "1": {
-        "BEDROOM": 2,
-        "BATHROOM": 2,
-        "WALK_IN_CLOSET": 2,
-        "PUJA_ROOM": 1,
-        "LOBBY": 1,
-        "BALCONY": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      },
-      "2": {
-        "BEDROOM": 1,
-        "BATHROOM": 1,
-        "WALK_IN_CLOSET": 1,
-        "BALCONY": 1,
-        "SIT_OUT": 1,
-        "STORE_ROOM": 1,
-        "SEMI_COVERED_AREA": 1,
-        "TERRACE": 1,
-        "STRUCTURE": 1
-      }
-    }
-  },
-  "notes": "Structure (one per floor) carries that floor's structural work - footing/plinth on G, columns, beams and slab per floor, roof slab and parapet on the top floor. External Works (one per villa, on G) carries facade, waterproofing, pool shell, boundary and landscaping. Give each one DPR step template in Dependency Master; every villa copies it."
+    "source":  "Silverwoods By Delta Realtech brochure, villa type plan pages 17-22 — checked floor by floor against the drawings (each labelled room counted; Entry / WM / lift provision are not rooms)",
+    "project":  "SILVER WOODS",
+    "categories":  [
+                       {
+                           "name":  "STUDY_ROOM",
+                           "alias":  "Study Room"
+                       },
+                       {
+                           "name":  "WALK_IN_CLOSET",
+                           "alias":  "Walk-in Closet"
+                       },
+                       {
+                           "name":  "POWDER_TOILET",
+                           "alias":  "Powder Toilet"
+                       },
+                       {
+                           "name":  "PUJA_ROOM",
+                           "alias":  "Puja Room"
+                       },
+                       {
+                           "name":  "FOYER",
+                           "alias":  "Foyer"
+                       },
+                       {
+                           "name":  "LOBBY",
+                           "alias":  "Lobby"
+                       },
+                       {
+                           "name":  "STORE_ROOM",
+                           "alias":  "Store Room"
+                       },
+                       {
+                           "name":  "TERRACE",
+                           "alias":  "Terrace"
+                       },
+                       {
+                           "name":  "DECK",
+                           "alias":  "Deck"
+                       },
+                       {
+                           "name":  "SIT_OUT",
+                           "alias":  "Sit-out"
+                       },
+                       {
+                           "name":  "SEMI_COVERED_AREA",
+                           "alias":  "Semi-covered Area"
+                       },
+                       {
+                           "name":  "LAWN",
+                           "alias":  "Lawn"
+                       },
+                       {
+                           "name":  "SPLASH_POOL",
+                           "alias":  "Splash Pool"
+                       },
+                       {
+                           "name":  "CAR_PARKING",
+                           "alias":  "Car Parking"
+                       },
+                       {
+                           "name":  "STRUCTURE",
+                           "alias":  "Structure"
+                       },
+                       {
+                           "name":  "EXTERNAL_WORKS",
+                           "alias":  "External Works"
+                       }
+                   ],
+    "types":  {
+                  "T1":  {
+                             "G":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "KITCHEN":  1,
+                                       "HALL_ROOM":  1,
+                                       "LOBBY":  1,
+                                       "CAR_PARKING":  1,
+                                       "DECK":  2,
+                                       "SPLASH_POOL":  1,
+                                       "STRUCTURE":  1,
+                                       "EXTERNAL_WORKS":  1
+                                   },
+                             "1":  {
+                                       "BEDROOM":  2,
+                                       "BATHROOM":  2,
+                                       "WALK_IN_CLOSET":  2,
+                                       "LOBBY":  1,
+                                       "BALCONY":  1,
+                                       "DECK":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   },
+                             "2":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "WALK_IN_CLOSET":  1,
+                                       "STORE_ROOM":  1,
+                                       "LOBBY":  1,
+                                       "SIT_OUT":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   }
+                         },
+                  "T2":  {
+                             "G":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "KITCHEN":  1,
+                                       "HALL_ROOM":  1,
+                                       "CAR_PARKING":  1,
+                                       "DECK":  2,
+                                       "SPLASH_POOL":  1,
+                                       "STRUCTURE":  1,
+                                       "EXTERNAL_WORKS":  1
+                                   },
+                             "1":  {
+                                       "BEDROOM":  2,
+                                       "BATHROOM":  2,
+                                       "WALK_IN_CLOSET":  2,
+                                       "LOBBY":  1,
+                                       "BALCONY":  1,
+                                       "DECK":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   },
+                             "2":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "WALK_IN_CLOSET":  1,
+                                       "STORE_ROOM":  1,
+                                       "LOBBY":  1,
+                                       "SIT_OUT":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   }
+                         },
+                  "T3":  {
+                             "G":  {
+                                       "STUDY_ROOM":  1,
+                                       "BATHROOM":  1,
+                                       "HALL_ROOM":  1,
+                                       "KITCHEN":  1,
+                                       "FOYER":  1,
+                                       "CAR_PARKING":  1,
+                                       "DECK":  2,
+                                       "SPLASH_POOL":  1,
+                                       "STRUCTURE":  1,
+                                       "EXTERNAL_WORKS":  1
+                                   },
+                             "1":  {
+                                       "BEDROOM":  2,
+                                       "BATHROOM":  2,
+                                       "WALK_IN_CLOSET":  2,
+                                       "BALCONY":  1,
+                                       "DECK":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   },
+                             "2":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "WALK_IN_CLOSET":  1,
+                                       "STORE_ROOM":  1,
+                                       "LOBBY":  1,
+                                       "SEMI_COVERED_AREA":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   }
+                         },
+                  "T4":  {
+                             "G":  {
+                                       "STUDY_ROOM":  1,
+                                       "BATHROOM":  1,
+                                       "HALL_ROOM":  1,
+                                       "KITCHEN":  1,
+                                       "FOYER":  1,
+                                       "CAR_PARKING":  1,
+                                       "DECK":  2,
+                                       "SPLASH_POOL":  1,
+                                       "STRUCTURE":  1,
+                                       "EXTERNAL_WORKS":  1
+                                   },
+                             "1":  {
+                                       "BEDROOM":  2,
+                                       "BATHROOM":  2,
+                                       "WALK_IN_CLOSET":  2,
+                                       "BALCONY":  1,
+                                       "DECK":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   },
+                             "2":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "WALK_IN_CLOSET":  1,
+                                       "STORE_ROOM":  1,
+                                       "LOBBY":  1,
+                                       "SEMI_COVERED_AREA":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   }
+                         },
+                  "T5":  {
+                             "G":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "HALL_ROOM":  1,
+                                       "KITCHEN":  1,
+                                       "FOYER":  1,
+                                       "CAR_PARKING":  1,
+                                       "SEMI_COVERED_AREA":  1,
+                                       "DECK":  2,
+                                       "LAWN":  1,
+                                       "SPLASH_POOL":  1,
+                                       "STRUCTURE":  1,
+                                       "EXTERNAL_WORKS":  1
+                                   },
+                             "1":  {
+                                       "BEDROOM":  2,
+                                       "BATHROOM":  2,
+                                       "WALK_IN_CLOSET":  2,
+                                       "LOBBY":  1,
+                                       "BALCONY":  1,
+                                       "DECK":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   },
+                             "2":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "WALK_IN_CLOSET":  1,
+                                       "LOBBY":  1,
+                                       "BALCONY":  1,
+                                       "SIT_OUT":  1,
+                                       "STORE_ROOM":  1,
+                                       "SEMI_COVERED_AREA":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   }
+                         },
+                  "T6":  {
+                             "G":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "WALK_IN_CLOSET":  1,
+                                       "POWDER_TOILET":  1,
+                                       "KITCHEN":  1,
+                                       "HALL_ROOM":  1,
+                                       "FOYER":  1,
+                                       "CAR_PARKING":  1,
+                                       "DECK":  3,
+                                       "LAWN":  1,
+                                       "SPLASH_POOL":  1,
+                                       "STRUCTURE":  1,
+                                       "EXTERNAL_WORKS":  1
+                                   },
+                             "1":  {
+                                       "BEDROOM":  2,
+                                       "BATHROOM":  2,
+                                       "WALK_IN_CLOSET":  2,
+                                       "PUJA_ROOM":  1,
+                                       "LOBBY":  1,
+                                       "BALCONY":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1
+                                   },
+                             "2":  {
+                                       "BEDROOM":  1,
+                                       "BATHROOM":  1,
+                                       "WALK_IN_CLOSET":  1,
+                                       "BALCONY":  1,
+                                       "SIT_OUT":  1,
+                                       "STORE_ROOM":  1,
+                                       "SEMI_COVERED_AREA":  1,
+                                       "TERRACE":  1,
+                                       "STRUCTURE":  1,
+                                       "LOBBY":  1
+                                   }
+                         }
+              },
+    "notes":  "Structure (one per floor) carries that floor\u0027s structural work - footing/plinth on G, columns, beams and slab per floor, roof slab and parapet on the top floor. External Works (one per villa, on G) carries facade, waterproofing, pool shell, boundary and landscaping. Give each one DPR step template in Dependency Master; every villa copies it."
 }

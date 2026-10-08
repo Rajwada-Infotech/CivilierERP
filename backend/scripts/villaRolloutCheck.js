@@ -66,6 +66,21 @@ const { connectDB, getPool, closeDB } = require("../db");
   if (!noSteps.length) line("  none — every villa room type has a step list to copy");
   for (const r of noSteps) line(`  ${r.Alias.padEnd(24)} ${r.Rooms} villa room(s) — set one chain for it in Dependency Master`);
 
+  line("\n== 4b. Room types in villa type floor plans with no DPR step list yet");
+  line("   (a plot converted to such a type gets these rooms WITHOUT DPR steps)");
+  const planNoSteps = await q(`
+    SELECT u.Alias, STRING_AGG(CAST(u.Code AS NVARCHAR(MAX)), ', ') WITHIN GROUP (ORDER BY u.Code) AS Codes
+    FROM (SELECT DISTINCT c.Alias, vt.Code
+          FROM dbo.VillaTypeRoomPlan rp
+          JOIN dbo.VillaTypeMaster vt ON vt.Id = rp.VillaTypeId AND vt.IsActive = 1
+          JOIN dbo.RoomCategoryMaster c ON c.Id = rp.RoomCategoryId
+          WHERE NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d JOIN dbo.RoomMaster r ON r.Id = d.RoomId
+                            WHERE d.IsActive = 1 AND r.RoomCategoryId = rp.RoomCategoryId
+                              AND EXISTS (SELECT 1 FROM dbo.DependencyMasterActivity x WHERE x.DependencyMasterId = d.Id))) u
+    GROUP BY u.Alias ORDER BY u.Alias`);
+  if (!planNoSteps.length) line("  none — every room type in the plans has a step list");
+  for (const r of planNoSteps) line(`  ${r.Alias.padEnd(24)} used in ${r.Codes}`);
+
   line("\n== 5. Units / plots still held by a dead application (stuck sales)");
   const dead = `(a.IsActive = 0 OR a.Status IN (N'Rejected', N'Cancelled', N'Expired')
     OR (a.Status = N'Converted' AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.ApplicationId = a.Id AND b.IsActive = 1
