@@ -1,4 +1,5 @@
 const express = require("express");
+const { DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -190,6 +191,9 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         u.Id, u.UnitName, u.FloorNo, u.BlockId, blk.BlockName, u.IsActive AS UnitIsActive,
         -- a villa built on a plot: no tower floor, grouped as "Villas"
         CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id AND pl.IsActive = 1) THEN 1 ELSE 0 END AS BIT) AS IsVilla,
+        -- who owns the land under a villa (services/villaLand.js rule): only
+        -- that customer can buy it, and only once every plot under it is sold
+        land.PlotCount AS VillaPlotCount, land.SoldPlotCount AS VillaSoldPlotCount, land.OwnerName AS VillaLandOwner,
         u.AreaSqFt,
         -- The unit's kind as named in the kind master, and whether it's
         -- commercial — so the matrix can tell shops/offices from flats.
@@ -206,6 +210,20 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         hassn.name AS HoldAssignedToName, hassn.email AS HoldAssignedToEmail
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
+      OUTER APPLY (
+        SELECT COUNT(*) AS PlotCount, COUNT(o.CustomerId) AS SoldPlotCount, MAX(o.CustomerName) AS OwnerName
+        FROM dbo.PlotMaster lp
+        OUTER APPLY (
+          SELECT TOP 1 la.CustomerId, lc.CustomerName
+          FROM dbo.CrmBookingPlot lbp
+          JOIN dbo.CrmBooking lb ON lb.Id = lbp.BookingId
+          JOIN dbo.CrmApplication la ON la.Id = lb.ApplicationId
+          LEFT JOIN dbo.CrmCustomer lc ON lc.Id = la.CustomerId
+          WHERE lbp.PlotId = lp.Id AND lbp.Status = N'Active' AND lb.IsActive = 1 AND lb.Status NOT IN ${DEAD_BOOKING_SQL}
+          ORDER BY lbp.Id DESC
+        ) o
+        WHERE lp.ConvertedUnitId = u.Id AND lp.IsActive = 1
+      ) land
       OUTER APPLY (SELECT TOP 1 k.Name, ${commercialCol ? "k.IsCommercial" : "CAST(0 AS BIT) AS IsCommercial"} FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind) knd
       LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (bk.Status = 'Approved' OR bk.ConfirmDeadline IS NULL OR bk.ConfirmDeadline >= SYSDATETIME())
       LEFT JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
@@ -246,6 +264,10 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         BlockName: r.BlockName,
         Status: !r.UnitIsActive ? "Blocked" : isBooked ? "Booked" : isOnHold ? "OnHold" : "Available",
         AreaSqFt: r.AreaSqFt || null,
+        IsVilla: !!r.IsVilla,
+        // A villa whose land isn't (fully) sold can't be booked by anyone yet.
+        VillaLandSold: r.IsVilla ? r.VillaPlotCount > 0 && r.VillaSoldPlotCount === r.VillaPlotCount : null,
+        VillaLandOwner: r.IsVilla ? r.VillaLandOwner || null : null,
         KindName: r.KindName || null,
         IsCommercial: !!r.IsCommercial,
         BookingId: hasBookingId ? r.BookingId : null,

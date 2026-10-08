@@ -66,6 +66,9 @@ interface MatrixUnit {
   // 'plot' from a missing floor, which a floor-less unit would also satisfy.
   IsPlot?: boolean;
   IsVilla?: boolean;
+  // A villa can only be booked by whoever owns all the plots it stands on.
+  VillaLandSold?: boolean | null;
+  VillaLandOwner?: string | null;
   PlotNo?: string | null;
   Facing?: string | null;
   IsCornerPlot?: boolean | null;
@@ -682,7 +685,7 @@ export function UnitMatrixPage() {
                                         <Clock size={11} className="shrink-0" />
                                         {u.HoldApplicantName || u.ApplicantName || "—"}
                                       </>
-                                    ) : "—"}
+                                    ) : u.IsVilla ? (u.VillaLandSold ? `Land owner: ${u.VillaLandOwner || "—"}` : "Plot not sold yet") : "—"}
                                 </div>
                               </button>
                             ))}

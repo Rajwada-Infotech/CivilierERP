@@ -54,9 +54,23 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
   // record where the "who's holding this" data doesn't even belong to the
   // same building the entity is in.
   const entityProject = entityType === "Unit"
-    ? await pool.request().input("eid", sql.Int, entityId).query("SELECT ProjectId FROM dbo.UnitMaster WHERE Id = @eid")
+    ? await pool.request().input("eid", sql.Int, entityId).query(`SELECT ProjectId, IsActive,
+        CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = UnitKind AND k.IsLand = 1) THEN 1 ELSE 0 END AS IsLand
+        FROM dbo.UnitMaster WHERE Id = @eid`)
     : await pool.request().input("eid", sql.Int, entityId).query("SELECT ProjectId FROM dbo.ParkingSlot WHERE Id = @eid");
   if (!entityProject.recordset.length) { const e = new Error(`${entityType} not found`); e.status = 404; throw e; }
+  if (entityType === "Unit") {
+    const u = entityProject.recordset[0];
+    if (!u.IsActive) { const e = new Error("This unit is no longer active"); e.status = 400; throw e; }
+    // Land is held as a plot (EntityType 'Plot'), never through its unit row.
+    if (u.IsLand) { const e = new Error("This is land — hold it from the plot list"); e.status = 400; throw e; }
+    // A villa on plots can only go to whoever owns those plots, so a hold for
+    // anyone else would only fail later, at booking.
+    const cust = (await pool.request().input("aid", sql.Int, applicationId)
+      .query("SELECT CustomerId FROM dbo.CrmApplication WHERE Id = @aid")).recordset[0]?.CustomerId ?? null;
+    const { assertVillaBuyerOwnsLand } = require("./villaLand");
+    await assertVillaBuyerOwnsLand(pool, [entityId], cust);
+  }
 
   // Callers that are placing this hold as PART OF the same request that's
   // also changing the Application's ProjectId (e.g. crmApplications.js's
