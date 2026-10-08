@@ -11,6 +11,10 @@ const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
 const router = express.Router();
+
+// A user limited to some projects can't read or change another project's
+// blocks, floors, plots, villas or villa types (services/projectScope.js).
+require("../services/projectScope").setupScopeGuard(router, { params: {}, idPaths: [["/dpr-ready-categories", null], ["/", "villaType"]] });
 const PAGE = "crm-auto-project-setup";
 
 const parseId = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
