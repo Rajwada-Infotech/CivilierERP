@@ -418,6 +418,24 @@ function fetchRemindersShared(
   return promise;
 }
 
+/** Runs `fn` when the browser is idle (or after 2.5 s at the latest). Returns a cancel function. */
+export function runWhenIdle(fn: () => void): () => void {
+  if (typeof window === "undefined") {
+    fn();
+    return () => {};
+  }
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  if (typeof w.requestIdleCallback === "function") {
+    const id = w.requestIdleCallback(fn, { timeout: 2500 });
+    return () => w.cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(fn, 1500);
+  return () => window.clearTimeout(id);
+}
+
 export function useReminders(options: { pollingInterval?: number } = {}) {
   const { pollingInterval = 0 } = options;
   const { currentUser } = useAuth();
@@ -483,11 +501,17 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
     if (!role) return;
     let cancelled = false;
 
-    refresh();
+    // The reminders badge is a nicety, but it downloads whole lists (POs, GRNs, work orders, expense bookings,
+    // material requests, PDCs…). Started at page load those requests competed with the page's own data and
+    // the browser's connection limit, so the first screen waited for them. Start once the page has settled.
+    const cancelInitial = runWhenIdle(() => {
+      if (!cancelled) void refresh();
+    });
 
     if (pollingInterval <= 0) {
       return () => {
         cancelled = true;
+        cancelInitial();
         if (backoffTimer.current) clearTimeout(backoffTimer.current);
       };
     }
