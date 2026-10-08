@@ -358,6 +358,33 @@ const CrmPlotMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
   };
+  // Villa type for a villa already built (rooms re-cut from the type's plan).
+  const [builtVillaType, setBuiltVillaType] = useState("");
+  const [settingVillaType, setSettingVillaType] = useState(false);
+  const { data: detailVillaTypes = [] } = useQuery({
+    queryKey: [...villaTypesKey(detailPlot?.ProjectId), "active"],
+    queryFn: () => fetchVillaTypes(detailPlot!.ProjectId),
+    enabled: !!detailPlot?.ConvertedUnitId && detailPlot?.ProjectId != null,
+  });
+  const setVillaTypeOnBuilt = async (plot: Plot) => {
+    if (!plot.ConvertedUnitId || !builtVillaType) return;
+    const type = detailVillaTypes.find((t) => String(t.Id) === builtVillaType);
+    if (!window.confirm(`Set ${plot.ConvertedUnitName || "this villa"} to ${type?.Code} — ${type?.Name}? Its rooms are rebuilt floor by floor from the type's plan.`)) return;
+    setSettingVillaType(true);
+    try {
+      const response = await fetchWithAuth(`${SETUP_API}/villas/${plot.ConvertedUnitId}/villa-type`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ VillaTypeId: Number(builtVillaType) }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not set the villa type");
+      const missing = body.roomsWithoutSteps?.length ? ` · ${body.roomsWithoutSteps.length} room(s) have no DPR steps yet — set those room types in Dependency Master` : "";
+      toast.success(`${type?.Code} applied: ${body.rooms} rooms${missing}`);
+      setBuiltVillaType("");
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
+      await queryClient.invalidateQueries({ queryKey: ["villa-types"] });
+    } catch (e: any) { toast.error(e.message); } finally { setSettingVillaType(false); }
+  };
+
   // Reverses a conversion made by mistake. The server refuses once the villa is
   // booked or held, or any DPR work has started; nothing is deleted.
   const undoConversion = async (plot: Plot) => {
@@ -891,6 +918,22 @@ const CrmPlotMaster: React.FC = () => {
                     <button onClick={() => undoConversion(detailPlot)} className="shrink-0 px-3 py-1.5 text-xs border border-destructive/40 text-destructive rounded-lg hover:bg-destructive/10"
                       title="Only while the villa is unsold and no DPR work has started">Undo conversion</button>
                   )}
+                </div>
+              )}
+              {detailPlot.ConvertedUnitId && rights.canEdit && (
+                <div className="rounded-lg border border-border p-3 grid gap-2">
+                  <p className="text-xs text-muted-foreground">Villa type — sets the villa's rooms floor by floor from the type's plan, with their DPR steps. Only while no DPR work has started.</p>
+                  <div className="flex gap-2">
+                    <select value={builtVillaType} onChange={(e) => setBuiltVillaType(e.target.value)} className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-sm">
+                      <option value="">Choose a villa type</option>
+                      {detailVillaTypes.map((t) => <option key={t.Id} value={t.Id} disabled={!t.LayoutLabel}>{t.Code} — {t.Name}{t.LayoutLabel ? "" : " (no rooms yet)"}</option>)}
+                    </select>
+                    <button onClick={() => setVillaTypeOnBuilt(detailPlot)} disabled={!builtVillaType || settingVillaType}
+                      className="px-3 h-9 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">
+                      {settingVillaType ? "Applying…" : "Apply"}
+                    </button>
+                  </div>
+                  {detailVillaTypes.length === 0 && <p className="text-xs text-muted-foreground">No active villa types in this project — add or restore them in Villa types.</p>}
                 </div>
               )}
               <div className="flex justify-end gap-2">
