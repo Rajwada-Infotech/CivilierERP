@@ -2392,13 +2392,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
       // A bare name (the plot's own, e.g. "P-100") is given the same
       // SHORT/BLOCK/ prefix every other unit carries, so the villa and its DPR
       // chains ("SW/A/P-100/Bedroom 1") read like the rest of the system.
-      let villaName = unitName;
-      if (!villaName.includes("/")) {
-        const proj = await getProject(tx, first.ProjectId);
-        const blk = (await tx.request().input("b", sql.Int, first.BlockId).query("SELECT BlockName FROM dbo.BlockMaster WHERE Id = @b")).recordset[0];
-        const short = proj ? resolveShortCode(proj) : "";
-        if (short && blk?.BlockName) villaName = `${short}/${String(blk.BlockName).trim()}/${unitName}`;
-      }
+      const villaName = await fullVillaName(tx, first.ProjectId, first.BlockId, unitName);
+      // A clear message instead of the name index's raw error.
+      const nameTaken = (await tx.request().input("p", sql.Int, first.ProjectId).input("n", sql.NVarChar(100), villaName)
+        .query("SELECT TOP 1 Id FROM dbo.UnitMaster WHERE ProjectId = @p AND UnitName = @n")).recordset[0];
+      if (nameTaken) { const dup = new Error(`${villaName} is already used by another unit in this project — choose another villa name`); dup.status = 409; throw dup; }
       const created = await tx.request()
         .input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId)
         .input("name", sql.NVarChar(100), villaName).input("type", sql.NVarChar(50), resolvedType.unitType)
@@ -2445,6 +2443,74 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
     console.error("[auto-setup] POST convert-plots:", e.message);
     if (res.headersSent) return; // the request already timed out and was answered
     res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// The full name a villa is stored under: a bare name ("V-21", "Rose Villa")
+// gets the same SHORT/BLOCK/ prefix every unit carries; a name that already
+// has "/" in it is taken as given.
+async function fullVillaName(db, projectId, blockId, name) {
+  const n = String(name || "").trim();
+  if (!n || n.includes("/")) return n;
+  const proj = await getProject(db, projectId);
+  const blk = (await db.request().input("b", sql.Int, blockId).query("SELECT BlockName FROM dbo.BlockMaster WHERE Id = @b")).recordset[0];
+  const short = proj ? resolveShortCode(proj) : "";
+  return short && blk?.BlockName ? `${short}/${String(blk.BlockName).trim()}/${n}` : n;
+}
+
+// Rename a built villa. Its DPR chains are renamed with it (each in its own
+// naming style), and so are its live bookings / applications, so every screen
+// shows the new name; dead and transferred sales keep the name they had.
+router.post("/villas/:unitId/rename", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const unitId = Number(req.params.unitId);
+  const raw = String(req.body?.UnitName || "").trim();
+  if (!Number.isInteger(unitId) || unitId <= 0) return res.status(400).json({ error: "Invalid villa" });
+  if (!raw || raw.length > 80) return res.status(400).json({ error: "Enter a villa name of up to 80 characters" });
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  const fail = async (status, error) => { try { await tx.rollback(); } catch (_) { /* rolled back */ } return res.status(status).json({ error }); };
+  try {
+    await tx.request().query("SET XACT_ABORT ON");
+    const unit = (await tx.request().input("u", sql.Int, unitId).query(`
+      SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId FROM dbo.UnitMaster u WITH (UPDLOCK)
+      WHERE u.Id = @u AND u.IsActive = 1 AND EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)`)).recordset[0];
+    if (!unit) return fail(404, "That is not an active villa built on a plot");
+    const name = await fullVillaName(tx, unit.ProjectId, unit.BlockId, raw);
+    if (name.length > 100) return fail(400, "The full name is too long — shorten it");
+    if (name === unit.UnitName) return fail(400, "That is already the villa's name");
+    const taken = (await tx.request().input("p", sql.Int, unit.ProjectId).input("n", sql.NVarChar(100), name).input("u", sql.Int, unitId)
+      .query("SELECT TOP 1 Id FROM dbo.UnitMaster WHERE ProjectId = @p AND UnitName = @n AND Id <> @u")).recordset[0];
+    if (taken) return fail(409, `${name} is already used by another unit in this project`);
+    // Chain names: re-built in each chain's own style from its room.
+    const { aliasFormatOf, buildAlias } = require("../services/autoDprChains");
+    const chains = (await tx.request().input("u", sql.Int, unitId).query(`
+      SELECT d.Id, d.Alias, r.RoomName FROM dbo.DependencyMaster d JOIN dbo.RoomMaster r ON r.Id = d.RoomId WHERE d.FlatId = @u`)).recordset;
+    await tx.request().input("u", sql.Int, unitId).input("n", sql.NVarChar(100), name)
+      .query("UPDATE dbo.UnitMaster SET UnitName = @n, UpdatedAt = SYSDATETIME() WHERE Id = @u");
+    let renamedChains = 0;
+    for (const c of chains) {
+      const style = aliasFormatOf({ Alias: c.Alias, UnitName: unit.UnitName, RoomName: c.RoomName });
+      if (!style) continue; // a hand-named chain keeps its name
+      await tx.request().input("id", sql.Int, c.Id).input("a", sql.NVarChar(200), buildAlias(style, name, c.RoomName).slice(0, 200))
+        .query("UPDATE dbo.DependencyMaster SET Alias = @a, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      renamedChains++;
+    }
+    const sales = await tx.request().input("u", sql.Int, unitId).input("n", sql.NVarChar(100), name).query(`
+      UPDATE dbo.CrmBooking SET UnitNo = @n, UpdatedAt = SYSDATETIME()
+      WHERE UnitId = @u AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL};
+      UPDATE dbo.CrmApplication SET InterestedUnit = @n, UpdatedAt = SYSDATETIME()
+      WHERE PreferredUnitId = @u AND IsActive = 1 AND Status NOT IN (N'Rejected', N'Cancelled', N'Expired');`);
+    await tx.commit();
+    await bumpCacheVersion("unit-master");
+    await bumpFlatMasterCaches();
+    await logAudit({ module: "PlotConversion", recordId: unitId, recordNo: name, action: "VillaRenamed",
+      changedBy: req.user?.userId ?? null, notes: `${unit.UnitName} -> ${name}; ${renamedChains} DPR chain(s) renamed` }).catch(() => {});
+    res.json({ success: true, UnitName: name, chainsRenamed: renamedChains, bookingsUpdated: sales.rowsAffected[0] || 0, applicationsUpdated: sales.rowsAffected[1] || 0 });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* rolled back */ }
+    console.error("[auto-setup] POST villa rename:", e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
   }
 });
 

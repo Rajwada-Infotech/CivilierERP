@@ -85,6 +85,9 @@ const CrmPlotMaster: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [convertOpen, setConvertOpen] = useState(false);
   const [unitName, setUnitName] = useState("");
+  // One villa per plot: how each villa is named — {plot} is the plot's name.
+  const [namePattern, setNamePattern] = useState("{plot}");
+  const villaNameFor = (plotName: string) => (namePattern.trim() || "{plot}").split("{plot}").join(plotName).trim();
   const [unitType, setUnitType] = useState("");
   const [unitKind, setUnitKind] = useState("");
   const [villaRate, setVillaRate] = useState("");
@@ -318,7 +321,7 @@ const CrmPlotMaster: React.FC = () => {
       return {
         plot,
         body: {
-          PlotIds: [plot.Id], UnitName: plot.PlotName, UnitType: own ? layout : unitType, UnitKind: unitKind,
+          PlotIds: [plot.Id], UnitName: villaNameFor(plot.PlotName), UnitType: own ? layout : unitType, UnitKind: unitKind,
           RatePerSqFt: (villaRate !== "" && Number(villaRate) > 0) ? Number(villaRate) : 0,
           VillaTypeId: own ? own.Id : (villaTypeId ? Number(villaTypeId) : null),
           BuiltUpAreaSqFt: own ? null : (builtUpArea ? Number(builtUpArea) : null),
@@ -358,6 +361,27 @@ const CrmPlotMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
   };
+  // Rename a built villa (its DPR chains and live sales follow the new name).
+  const [renameTo, setRenameTo] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  React.useEffect(() => { setRenameTo(null); }, [detailPlot?.Id]);
+  const renameVilla = async (plot: Plot) => {
+    if (!plot.ConvertedUnitId || !renameTo?.trim()) return;
+    setRenaming(true);
+    try {
+      const response = await fetchWithAuth(`${SETUP_API}/villas/${plot.ConvertedUnitId}/rename`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ UnitName: renameTo.trim() }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not rename the villa");
+      const extra = [body.chainsRenamed ? `${body.chainsRenamed} DPR chain(s)` : "", body.bookingsUpdated ? `${body.bookingsUpdated} booking(s)` : "", body.applicationsUpdated ? `${body.applicationsUpdated} application(s)` : ""].filter(Boolean).join(", ");
+      toast.success(`Renamed to ${body.UnitName}${extra ? ` — ${extra} updated` : ""}`);
+      setRenameTo(null);
+      setDetailPlot((p) => (p && p.Id === plot.Id ? { ...p, ConvertedUnitName: body.UnitName } : p));
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
+    } catch (e: any) { toast.error(e.message); } finally { setRenaming(false); }
+  };
+
   // Villa type for a villa already built (rooms re-cut from the type's plan).
   const [builtVillaType, setBuiltVillaType] = useState("");
   const [settingVillaType, setSettingVillaType] = useState(false);
@@ -719,7 +743,7 @@ const CrmPlotMaster: React.FC = () => {
                   const own = plot.PlannedVillaTypeId != null ? typesById.get(plot.PlannedVillaTypeId) : undefined;
                   const type = own ?? fallback;
                   const bua = type ? Number(type.BuiltUpAreaSqFt) : Number(builtUpArea) || null;
-                  return { key: plot.Id, name: plot.PlotName, on: [plot.PlotName], type: type?.Code ?? null, planned: !!own, bua };
+                  return { key: plot.Id, name: villaNameFor(plot.PlotName), on: [plot.PlotName], type: type?.Code ?? null, planned: !!own, bua };
                 })
               : [{ key: 0, name: unitName.trim() || "Unnamed villa", on: selectedPlots.map((plot) => plot.PlotName), type: fallback?.Code ?? null, planned: false, bua: Number(builtUpArea) || null }];
             const missing = rows.filter((row) => !row.bua).length;
@@ -778,8 +802,20 @@ const CrmPlotMaster: React.FC = () => {
 
                     <section className="space-y-4">
                       <p className={label}>Villa specification</p>
-                      {!separate && (
-                        <div><label className={label}>Villa name</label><input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} className={input} /></div>
+                      {!separate ? (
+                        <div>
+                          <label className={label}>Villa name</label>
+                          <input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} placeholder="e.g. V-21 or Rose Villa" className={input} />
+                          <p className="mt-1 text-[0.6875rem] text-muted-foreground">The project and block prefix (like SLV/A/) is added for you. Rename it any time later from the plot.</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className={label}>Villa names</label>
+                          <input value={namePattern} onChange={(event) => setNamePattern(event.target.value)} placeholder="{plot}" className={`${input} font-mono`} />
+                          <p className="mt-1 text-[0.6875rem] text-muted-foreground">
+                            <span className="font-mono">{"{plot}"}</span> is each plot's name — e.g. <span className="font-mono">V-{"{plot}"}</span> or <span className="font-mono">Villa {"{plot}"}</span>. First one: <span className="font-medium text-foreground">{villaNameFor(selectedPlots[0]?.PlotName || "P-1")}</span>
+                          </p>
+                        </div>
                       )}
                       <div>
                         <div className="flex items-center justify-between">
@@ -913,7 +949,23 @@ const CrmPlotMaster: React.FC = () => {
               </div>
               {detailPlot.ConvertedUnitId && (
                 <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 flex items-center justify-between gap-3">
-                  <div><p className="text-xs text-muted-foreground">Converted Unit Master record</p><p className="font-medium">{detailPlot.ConvertedUnitName || `Unit #${detailPlot.ConvertedUnitId}`}</p></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-muted-foreground">Villa built on this plot</p>
+                    {renameTo === null ? (
+                      <p className="font-medium flex items-center gap-2">
+                        {detailPlot.ConvertedUnitName || `Unit #${detailPlot.ConvertedUnitId}`}
+                        {rights.canEdit && <button type="button" onClick={() => setRenameTo((detailPlot.ConvertedUnitName || "").split("/").pop() || "")} className="text-xs font-normal text-primary hover:underline">Rename</button>}
+                      </p>
+                    ) : (
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <input autoFocus value={renameTo} onChange={(e) => setRenameTo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") renameVilla(detailPlot); if (e.key === "Escape") setRenameTo(null); }}
+                          maxLength={80} placeholder="e.g. V-100 or Rose Villa" className="h-8 min-w-[12rem] flex-1 rounded-lg border border-border bg-background px-2.5 text-sm outline-none focus:border-primary" />
+                        <button type="button" onClick={() => renameVilla(detailPlot)} disabled={renaming || !renameTo.trim()} className="h-8 px-3 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">{renaming ? "Saving…" : "Save"}</button>
+                        <button type="button" onClick={() => setRenameTo(null)} className="h-8 px-3 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
+                        <p className="w-full text-[0.6875rem] text-muted-foreground">The project and block prefix is kept. DPR chains and live bookings take the new name.</p>
+                      </div>
+                    )}
+                  </div>
                   {rights.canDelete && (
                     <button onClick={() => undoConversion(detailPlot)} className="shrink-0 px-3 py-1.5 text-xs border border-destructive/40 text-destructive rounded-lg hover:bg-destructive/10"
                       title="Only while the villa is unsold and no DPR work has started">Undo conversion</button>
