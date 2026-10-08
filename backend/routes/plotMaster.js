@@ -34,6 +34,11 @@ const PLOT_SELECT = `
          p.GridRow, p.GridCol,
          p.PlannedVillaTypeId, vt.Code AS PlannedVillaTypeCode, vt.Name AS PlannedVillaTypeName,
          p.ConvertedUnitId, p.ConvertedAt, converted.UnitName AS ConvertedUnitName,
+         -- the villa's own type and what it was built to
+         converted.VillaTypeId AS ConvertedVillaTypeId, cvt.Code AS ConvertedVillaTypeCode, cvt.Name AS ConvertedVillaTypeName,
+         converted.BuiltUpAreaSqFt AS ConvertedBuiltUpAreaSqFt,
+         (SELECT COUNT(*) FROM dbo.RoomMaster vr WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1) AS ConvertedRoomCount,
+         (SELECT COUNT(DISTINCT vr.Storey) FROM dbo.RoomMaster vr WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1 AND vr.Storey IS NOT NULL) AS ConvertedFloorCount,
          (SELECT COUNT(*) FROM dbo.PlotAdjacency pa
             JOIN dbo.PlotMaster o ON o.Id = CASE WHEN pa.PlotId = p.Id THEN pa.AdjacentPlotId ELSE pa.PlotId END
            WHERE (pa.PlotId = p.Id OR pa.AdjacentPlotId = p.Id) AND o.IsActive = 1) AS AdjacentPlotCount,
@@ -42,6 +47,7 @@ const PLOT_SELECT = `
   JOIN dbo.enterprise e ON e.id = p.ProjectId
   JOIN dbo.BlockMaster b ON b.Id = p.BlockId
   LEFT JOIN dbo.UnitMaster converted ON converted.Id = p.ConvertedUnitId
+  LEFT JOIN dbo.VillaTypeMaster cvt ON cvt.Id = converted.VillaTypeId
   LEFT JOIN dbo.VillaTypeMaster vt ON vt.Id = p.PlannedVillaTypeId
   OUTER APPLY (
     SELECT TOP 1 cb.BookingNo

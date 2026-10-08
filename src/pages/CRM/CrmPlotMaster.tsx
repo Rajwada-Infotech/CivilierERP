@@ -26,6 +26,8 @@ type Plot = {
   GridRow?: number | null; GridCol?: number | null;
   PlannedVillaTypeId?: number | null; PlannedVillaTypeCode?: string | null; PlannedVillaTypeName?: string | null;
   ConvertedUnitId?: number | null; ConvertedAt?: string | null; ConvertedUnitName?: string | null;
+  ConvertedVillaTypeId?: number | null; ConvertedVillaTypeCode?: string | null; ConvertedVillaTypeName?: string | null;
+  ConvertedBuiltUpAreaSqFt?: number | null; ConvertedRoomCount?: number | null; ConvertedFloorCount?: number | null;
   LockBookingNo?: string | null; LockApplicationNo?: string | null; LockHoldId?: number | null; AdjacentPlotCount?: number;
 };
 type PlotBlock = { BlockId: number; BlockName: string; ProjectId: number; ProjectName: string };
@@ -364,7 +366,13 @@ const CrmPlotMaster: React.FC = () => {
   // Rename a built villa (its DPR chains and live sales follow the new name).
   const [renameTo, setRenameTo] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
-  React.useEffect(() => { setRenameTo(null); }, [detailPlot?.Id]);
+  React.useEffect(() => { setRenameTo(null); setBuiltVillaType(""); setChangingType(false); }, [detailPlot?.Id]);
+  React.useEffect(() => {
+    if (!detailPlot) return;
+    const fresh = (plots as Plot[]).find((p) => p.Id === detailPlot.Id);
+    if (fresh && fresh !== detailPlot) setDetailPlot(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plots]);
   const renameVilla = async (plot: Plot) => {
     if (!plot.ConvertedUnitId || !renameTo?.trim()) return;
     setRenaming(true);
@@ -385,6 +393,7 @@ const CrmPlotMaster: React.FC = () => {
   // Villa type for a villa already built (rooms re-cut from the type's plan).
   const [builtVillaType, setBuiltVillaType] = useState("");
   const [settingVillaType, setSettingVillaType] = useState(false);
+  const [changingType, setChangingType] = useState(false);
   const { data: detailVillaTypes = [] } = useQuery({
     queryKey: [...villaTypesKey(detailPlot?.ProjectId), "active"],
     queryFn: () => fetchVillaTypes(detailPlot!.ProjectId),
@@ -972,23 +981,51 @@ const CrmPlotMaster: React.FC = () => {
                   )}
                 </div>
               )}
-              {detailPlot.ConvertedUnitId && rights.canEdit && (
+              {detailPlot.ConvertedUnitId && (
                 <div className="rounded-lg border border-border p-3 grid gap-2">
-                  <p className="text-xs text-muted-foreground">Villa type — sets the villa's rooms floor by floor from the type's plan, with their DPR steps. Only while no DPR work has started.</p>
-                  <div className="flex gap-2">
-                    <select value={builtVillaType} onChange={(e) => setBuiltVillaType(e.target.value)} className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-sm">
-                      <option value="">Choose a villa type</option>
-                      {detailVillaTypes.map((t) => <option key={t.Id} value={t.Id} disabled={!t.LayoutLabel}>{t.Code} — {t.Name}{t.LayoutLabel ? "" : " (no rooms yet)"}</option>)}
-                    </select>
-                    <button onClick={() => setVillaTypeOnBuilt(detailPlot)} disabled={!builtVillaType || settingVillaType}
-                      className="px-3 h-9 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">
-                      {settingVillaType ? "Applying…" : "Apply"}
-                    </button>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">Villa type</p>
+                      {detailPlot.ConvertedVillaTypeId ? (
+                        <p className="font-medium">
+                          {detailPlot.ConvertedVillaTypeCode} — {detailPlot.ConvertedVillaTypeName}
+                          <span className="font-normal text-muted-foreground">
+                            {" · "}{detailPlot.ConvertedRoomCount ?? 0} rooms
+                            {detailPlot.ConvertedFloorCount ? ` on ${detailPlot.ConvertedFloorCount} floor${detailPlot.ConvertedFloorCount === 1 ? "" : "s"}` : ""}
+                            {detailPlot.ConvertedBuiltUpAreaSqFt ? ` · ${Number(detailPlot.ConvertedBuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft built-up` : ""}
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-sm text-amber-700 dark:text-amber-300">Not set — {detailPlot.ConvertedRoomCount ?? 0} rooms from a generic layout, no floors. Set its type so its rooms follow the type's floor plan.</p>
+                      )}
+                    </div>
+                    {rights.canEdit && !changingType && (
+                      <button type="button" onClick={() => { setChangingType(true); setBuiltVillaType(detailPlot.ConvertedVillaTypeId ? String(detailPlot.ConvertedVillaTypeId) : ""); }}
+                        className="shrink-0 h-8 px-3 text-xs font-semibold border border-border rounded-lg hover:bg-muted">
+                        {detailPlot.ConvertedVillaTypeId ? "Change type" : "Set type"}
+                      </button>
+                    )}
                   </div>
-                  {detailVillaTypes.length === 0 && <p className="text-xs text-muted-foreground">No active villa types in this project — add or restore them in Villa types.</p>}
+                  {rights.canEdit && changingType && (
+                    <>
+                      <div className="flex gap-2">
+                        <select value={builtVillaType} onChange={(e) => setBuiltVillaType(e.target.value)} className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-sm">
+                          <option value="">Choose a villa type</option>
+                          {detailVillaTypes.map((t) => <option key={t.Id} value={t.Id} disabled={!t.LayoutLabel}>{t.Code} — {t.Name}{t.LayoutLabel ? "" : " (no rooms yet)"}</option>)}
+                        </select>
+                        <button onClick={() => setVillaTypeOnBuilt(detailPlot)}
+                          disabled={!builtVillaType || settingVillaType || builtVillaType === String(detailPlot.ConvertedVillaTypeId ?? "")}
+                          className="px-3 h-9 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">
+                          {settingVillaType ? "Applying…" : "Apply"}
+                        </button>
+                        <button type="button" onClick={() => { setChangingType(false); setBuiltVillaType(""); }} className="px-3 h-9 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
+                      </div>
+                      <p className="text-[0.6875rem] text-muted-foreground">Its rooms are rebuilt floor by floor from the type's plan, with their DPR steps. Only while no DPR work has started; the villa keeps its areas and price.</p>
+                      {detailVillaTypes.length === 0 && <p className="text-xs text-muted-foreground">No active villa types in this project — add or restore them in Villa types.</p>}
+                    </>
+                  )}
                 </div>
-              )}
-              <div className="flex justify-end gap-2">
+              )}              <div className="flex justify-end gap-2">
                 <button onClick={() => setDetailOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Close</button>
                 {rights.canEdit && !detailPlot.ConvertedUnitId && (
                   <button onClick={() => { setDetailOpen(false); openLayout(detailPlot.BlockId, "neighbours", detailPlot.Id); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted"><Network size={13} /> Neighbours</button>
