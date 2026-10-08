@@ -1388,6 +1388,12 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       });
     }
 
+    // Same rule as cancellation: the land under a booked villa can't be let go.
+    const villaOnLand = await require("../services/villaLand").villaBookedOnLandOf(pool, id);
+    if (villaOnLand) {
+      return res.status(409).json({ error: `Villa booking ${villaOnLand} stands on this plot — cancel the villa booking first.` });
+    }
+
     const actor = actorId(req);
     const tx = pool.transaction();
     await tx.begin();

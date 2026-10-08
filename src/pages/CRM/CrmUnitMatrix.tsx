@@ -685,7 +685,7 @@ export function UnitMatrixPage() {
                                         <Clock size={11} className="shrink-0" />
                                         {u.HoldApplicantName || u.ApplicantName || "—"}
                                       </>
-                                    ) : u.IsVilla ? (u.VillaLandSold ? `Land owner: ${u.VillaLandOwner || "—"}` : "Plot not sold yet") : "—"}
+                                    ) : u.IsVilla ? (u.VillaLandSold ? `Plot owner only: ${u.VillaLandOwner || "—"}` : "Sold as a whole villa") : "—"}
                                 </div>
                               </button>
                             ))}

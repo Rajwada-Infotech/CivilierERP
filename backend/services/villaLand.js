@@ -61,15 +61,21 @@ async function landPositionOfUnits(poolOrTx, unitIds) {
 }
 
 /**
- * A villa built on plots may only be bought by the customer who owns every
- * one of those plots. Throws VillaLandError otherwise; returns quietly for
- * units that are not built on plots.
+ * Who may buy a villa built on plots. Two ways to sell one:
+ *   - Direct: none of its plots is sold — the villa is sold whole, land and
+ *     all, to any buyer (the plots are then taken by that sale, see
+ *     plotsTakenByVillaSale).
+ *   - Plot first: its plots were sold — only the customer who owns every one
+ *     of them can buy the villa on top.
+ * Some plots sold and some not can't be sold either way. Throws
+ * VillaLandError when refused; returns quietly for units not built on plots.
  */
 async function assertVillaBuyerOwnsLand(poolOrTx, unitIds, customerId) {
   const { units } = await landPositionOfUnits(poolOrTx, unitIds);
   for (const u of units) {
+    if (u.ownedPlotCount === 0) continue; // direct sale of the whole villa
     if (u.ownedPlotCount < u.plotCount) {
-      throw new VillaLandError(`${u.unitName} stands on plots that have not been sold. Sell the plot first — the villa is then bought by the plot's owner as a separate booking.`);
+      throw new VillaLandError(`${u.unitName} stands on several plots and only some are sold. Sell the rest to the same owner first, or cancel those plot sales and sell the villa directly.`);
     }
     if (u.ownerCustomerIds.length !== 1 || customerId == null || u.ownerCustomerIds[0] !== Number(customerId)) {
       throw new VillaLandError(`${u.unitName} stands on land owned by ${u.ownerNames.join(", ")} — only the plot's owner can buy this villa. If the plot is being sold on, complete the resale first.`, 409);
