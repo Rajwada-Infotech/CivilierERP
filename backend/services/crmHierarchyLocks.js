@@ -31,7 +31,7 @@ async function getUnitLockReason(pool, unitId) {
     LEFT JOIN dbo.CrmInventoryHold h
       ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
     LEFT JOIN dbo.CrmApplication app
-      ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected')
+      ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Converted')
     WHERE u.Id = @Id AND (bk.Id IS NOT NULL OR h.Id IS NOT NULL OR app.Id IS NOT NULL)
   `);
   if (!result.recordset.length) return null;
@@ -115,7 +115,7 @@ async function getProjectLockReason(pool, projectId) {
     SELECT TOP 1 bk.BookingNo, app.ApplicationNo
     FROM dbo.enterprise e
     LEFT JOIN dbo.CrmBooking bk ON bk.ProjectId = e.id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
-    LEFT JOIN dbo.CrmApplication app ON app.ProjectId = e.id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected')
+    LEFT JOIN dbo.CrmApplication app ON app.ProjectId = e.id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Converted')
     WHERE e.id = @pid AND (bk.Id IS NOT NULL OR app.Id IS NOT NULL)
   `);
   if (direct.recordset.length) {

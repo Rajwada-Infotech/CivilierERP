@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { PARKING_TYPES } = require("../constants/parkingTypes");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -1415,7 +1415,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
           ) tags
           LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
-          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Converted')
           WHERE u.BlockId = @bid AND u.FloorNo IS NULL AND u.IsActive = 1
           ORDER BY u.UnitName
         `)
@@ -1434,7 +1434,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
           ) tags
           LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
-          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Converted')
           WHERE u.BlockId = @bid AND u.FloorNo = @fno AND u.IsActive = 1
           ORDER BY u.UnitName
         `);
@@ -2194,15 +2194,16 @@ router.get("/blocks/:blockId/plots", requirePageRight("crm-auto-project-setup", 
         -- booking / hold / application locks (same pattern as /floors/:id/units)
         (SELECT TOP 1 b.BookingNo FROM dbo.CrmBooking b
            JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id
-           WHERE bp.PlotId = p.Id AND b.IsActive = 1
-             AND b.Status NOT IN ('Cancelled', 'Draft', 'Transferred')) AS LockBookingNo,
+           -- same lock rule as Plot Master (routes/plotMaster.js)
+           WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND b.IsActive = 1
+             AND b.Status NOT IN ${DEAD_BOOKING_SQL}) AS LockBookingNo,
         (SELECT TOP 1 CAST(h.Id AS NVARCHAR) FROM dbo.CrmInventoryHold h
            WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id AND h.Status = N'Active'
              AND h.HoldUntil > SYSDATETIME()) AS LockHoldId,
         (SELECT TOP 1 a.ApplicationNo FROM dbo.CrmApplication a
            JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a.Id
-           WHERE ap.PlotId = p.Id AND a.IsActive = 1
-             AND a.Status NOT IN ('Cancelled', 'Draft')) AS LockApplicationNo
+           WHERE ap.PlotId = p.Id AND ap.Status = N'Active' AND a.IsActive = 1
+             AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')) AS LockApplicationNo
       FROM dbo.PlotMaster p
       WHERE p.BlockId = @bid AND p.IsActive = 1
       ORDER BY p.PlotName
