@@ -2366,7 +2366,23 @@ main :is(.flex, .inline-flex, .grid) > :has(.truncate, .line-clamp-1, .line-clam
         display: inline-flex;
         align-items: center;
         min-height: 2rem;
+        /* One line, never wrap ("Select / project…"): long values end in an ellipsis. */
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
     }
+    select:not([multiple]):not([size]) selectedcontent {
+        display: block;
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    /* Arrow pinned to the right edge, so long text can't push it out of view. */
+    select:not([multiple]):not([size]):not([aria-hidden="true"]) { position: relative; padding-right: 2rem; }
+    select:not([aria-hidden="true"])::picker-icon { position: absolute; right: 0.7rem; top: 50%; translate: 0 -50%; margin: 0; }
     select:is(.w-full, [class*="w-full"]):not([aria-hidden="true"]) { display: flex; }
     /* our own chevron is drawn beside these, so hide the built-in one */
     select.appearance-none::picker-icon { display: none; }
