@@ -11,6 +11,7 @@ const compression = require("compression");
 const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
+const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const authMiddleware = require("./middleware/auth");
 const { attachProjectScope } = require("./services/projectScope");
 const rateLimit = require("express-rate-limit");
@@ -664,6 +665,7 @@ async function startServer() {
       logger.info(`[START] Server ready on port ${PORT}`);
       startCrmSlaEngine();
       startFollowupReminderEngine();
+      startAutoDepreciationEngine();
     });
 
     setupGracefulShutdown(server, worker);

@@ -9,6 +9,7 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
+const { runDepreciationForPeriod, previewDepreciationForPeriod, AUTO_USER } = require("../services/fixedAssetAutoDepreciation");
 const { buildReversalPlan, executeReversal } = require("../services/fixedAssetReversal");
 const {
   buildPostingPlan: buildDepreciationPlan,
@@ -174,6 +175,97 @@ router.get("/depreciation-summary", requirePageRight("fixed-asset-record", "view
   } catch (err) {
     console.error("[fixedAssets] GET /depreciation-summary:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /depreciation-history — every posted monthly depreciation, entry by entry ─
+// Powers the "Monthly Depreciation History" report: calculation (posting) date,
+// period, FA Item Code, depreciation amount, accumulated depreciation and remaining
+// book value. Accumulated / book value are a LIVE running total of the non-reversed
+// entries (so reversing an earlier month corrects every later row). Filters:
+// companyId, projectId, finYear, fromDate / toDate (period month), assetId,
+// includeReversed=1. Source = "Auto" for scheduler postings, "Manual" otherwise.
+router.get("/depreciation-history", requirePageRight("fixed-asset-record", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    const where = ["fa.AssetCode IS NOT NULL"];
+    if (!req.query.includeReversed) where.push("x.Status <> 'Reversed'");
+    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
+    if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
+    if (req.query.assetId)   { request.input("AssetId", sql.Int, parseInt(req.query.assetId, 10)); where.push("fa.AssetId = @AssetId"); }
+    if (req.query.finYear)   { request.input("FinYear", sql.NVarChar(20), String(req.query.finYear)); where.push("x.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
+    if (req.query.fromDate)  { request.input("FromDate", sql.Date, req.query.fromDate); where.push("DATEFROMPARTS(x.PeriodYear, x.PeriodMonth, 1) >= @FromDate"); }
+    if (req.query.toDate)    { request.input("ToDate", sql.Date, req.query.toDate); where.push("DATEFROMPARTS(x.PeriodYear, x.PeriodMonth, 1) <= @ToDate"); }
+    request.input("AutoUser", sql.NVarChar(200), AUTO_USER);
+
+    const result = await request.query(`
+      WITH x AS (
+        SELECT e.*,
+               SUM(CASE WHEN e.Status <> 'Reversed' THEN e.DepreciationAmount ELSE 0 END)
+                 OVER (PARTITION BY e.AssetId ORDER BY e.PeriodYear, e.PeriodMonth, e.EntryId ROWS UNBOUNDED PRECEDING) AS LiveAccum
+        FROM dbo.FixedAssetDepreciationEntry e
+      )
+      SELECT
+        x.EntryId, x.PostedAt AS CalculationDate,
+        DATEFROMPARTS(x.PeriodYear, x.PeriodMonth, 1) AS PeriodStart,
+        x.PeriodYear, x.PeriodMonth, x.FinYear,
+        fa.AssetId, fa.FAItemCode, fa.AssetCode, fa.AssetName, fa.AssetStatus,
+        co.name AS CompanyName, pr.name AS ProjectName,
+        x.Method, x.RatePct, fa.PurchaseCost,
+        x.OpeningBookValue, x.DepreciationAmount,
+        x.LiveAccum AS AccumulatedDepreciation,
+        fa.PurchaseCost - x.LiveAccum AS RemainingBookValue,
+        x.VoucherNo, x.Status, x.PostedBy,
+        CASE WHEN x.PostedBy = @AutoUser THEN 'Auto' ELSE 'Manual' END AS Source
+      FROM x
+      JOIN dbo.FixedAssetRecord fa ON fa.AssetId = x.AssetId
+      LEFT JOIN dbo.enterprise co ON co.id = fa.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = fa.ProjectId
+      WHERE ${where.join(" AND ")}
+      ORDER BY x.PeriodYear DESC, x.PeriodMonth DESC, fa.FAItemCode, x.EntryId DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[fixedAssets] GET /depreciation-history:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /depreciation/runs — recent automatic / manual monthly runs ───────────
+router.get("/depreciation/runs", requirePageRight("fixed-asset-record", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query(`
+      SELECT TOP 36 RunId, PeriodYear, PeriodMonth, TriggerType, Status, StartedAt, FinishedAt, RunBy,
+             Eligible, Posted, AlreadyPosted, Skipped, Failed, NotConfigured, TotalAmount, Details
+      FROM dbo.FixedAssetDepreciationRun
+      ORDER BY StartedAt DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[fixedAssets] GET /depreciation/runs:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /depreciation/run { year, month, dryRun? } — run (or preview) a month now ─
+// The scheduler does this by itself on the 1st; this is the manual / catch-up button
+// and is safe to repeat: months already posted are counted, never posted again.
+router.post("/depreciation/run", requirePageRight("fixed-asset-record", "edit"), async (req, res) => {
+  const email = requireUser(req, res);
+  if (!email) return;
+  const year = DEP_YEAR(req.body.year);
+  const month = DEP_MONTHS(req.body.month);
+  if (!year || !month) return res.status(400).json({ error: "Valid year and month (1-12) are required" });
+  try {
+    const pool = getPool();
+    if (req.body.dryRun) return res.json({ ok: true, dryRun: true, ...(await previewDepreciationForPeriod(pool, { year, month })) });
+    const result = await runDepreciationForPeriod(pool, { year, month, trigger: "Manual", runBy: email });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[fixedAssets] POST /depreciation/run:", err.message);
+    res.status(err.code === "CONFIG_MISSING" ? 409 : 500).json({ error: err.message });
   }
 });
 
