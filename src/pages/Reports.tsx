@@ -147,6 +147,10 @@ interface ReportDef {
    *  reports) instead of opening an inline table. `apiPath`/`columns` are
    *  then unused — pass "" / []. */
   route?: string;
+  /** The API pages server-side ({ data, total, totalPages } per `page`/`limit`) and the result can be huge
+   *  (lakhs of rows): the on-screen table then fetches only the page being viewed instead of every page
+   *  up front. Export still fetches everything. */
+  serverPaged?: boolean;
 }
 
 interface ModuleSection {
@@ -1234,6 +1238,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: HardHat,
     color: "#0ea5e9",
     apiPath: "/api/civilworkdpr-reports/activity-status",
+    serverPaged: true,
     filterConfig: {
       companyParam: null,
       finYearParam: null,
@@ -1263,6 +1268,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: TriangleAlert,
     color: "#ef4444",
     apiPath: "/api/civilworkdpr-reports/overdue",
+    serverPaged: true,
     filterConfig: {
       companyParam: null,
       finYearParam: null,
@@ -1297,6 +1303,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: UserCog,
     color: "#8b5cf6",
     apiPath: "/api/civilworkdpr-reports/engineer-workload",
+    serverPaged: true,
     filterConfig: {
       companyParam: null,
       finYearParam: null,
@@ -1325,6 +1332,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: ShieldCheck,
     color: "#10b981",
     apiPath: "/api/civilworkdpr-reports/quality-checks",
+    serverPaged: true,
     filterConfig: {
       companyParam: null,
       finYearParam: null,
@@ -1384,6 +1392,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Camera,
     color: "#f59e0b",
     apiPath: "/api/civilworkdpr-reports/daily-updates",
+    serverPaged: true,
     filterConfig: {
       companyParam: null,
       finYearParam: null,
@@ -3060,7 +3069,46 @@ const ReportTable: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, dateFrom, dateTo, projects]);
 
+  // ── Server-paged reports: fetch just the page on screen ──────────────────
+  // Fetching every page up front (fetchAllRows) meant hundreds of sequential
+  // requests before a single row showed on a lakh-row report. Here: page 1
+  // (with the total) on filter change, other pages on demand, cached, and the
+  // next page prefetched so "Next" is instant.
+  const serverPaged = !!report.serverPaged;
+  const [serverTotal, setServerTotal] = useState(0);
+  const pageCache = useRef(new Map<number, Record<string, unknown>[]>());
+  const fetchServerPage = useCallback(async (pg: number, withTotal: boolean) => {
+    const cached = pageCache.current.get(pg);
+    if (cached && !withTotal) return { rows: cached, total: null as number | null };
+    const params = new URLSearchParams({
+      ...report.defaultParams, ...buildParams(),
+      page: String(pg), limit: String(PAGE_SIZE), withTotal: withTotal ? "1" : "0",
+    });
+    const res = await fetchWithAuth(`${report.apiPath}?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const batch: Record<string, unknown>[] = Array.isArray(json) ? json : (json.data ?? []);
+    pageCache.current.set(pg, batch);
+    return { rows: batch, total: typeof json?.total === "number" ? json.total : null };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchAllRows]); // fetchAllRows' deps are exactly the filter set
+
   const load = useCallback(async () => {
+    if (serverPaged) {
+      pageCache.current.clear();
+      setLoading(true);
+      setError(null);
+      try {
+        const { rows: first, total } = await fetchServerPage(1, true);
+        setRows(first);
+        setServerTotal(total ?? first.length);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     // VendorLedgerReportBody fetches everything it needs itself — nothing
     // for this generic apiPath flow to do.
     if (isVendorLedger) {
@@ -3076,7 +3124,7 @@ const ReportTable: React.FC<{
     } finally {
       setLoading(false);
     }
-  }, [isVendorLedger, fetchAllRows]);
+  }, [isVendorLedger, fetchAllRows, serverPaged, fetchServerPage]);
 
   useEffect(() => {
     load();
@@ -3090,8 +3138,38 @@ const ReportTable: React.FC<{
     return fetchAllRows();
   }, [isVendorLedger, rows, fetchAllRows]);
 
-  const totalPages = Math.ceil(rows.length / PAGE_SIZE);
-  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Page change on a server-paged report: show that page (cached or fetched), then warm the next one.
+  const [pageLoading, setPageLoading] = useState(false);
+  useEffect(() => {
+    if (!serverPaged || loading) return;
+    let cancelled = false;
+    const show = async () => {
+      if (page !== 1 || !pageCache.current.has(1)) {
+        if (!pageCache.current.has(page)) setPageLoading(true);
+        try {
+          const { rows: r } = await fetchServerPage(page, false);
+          if (!cancelled) setRows(r);
+        } catch (e) {
+          if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
+        } finally {
+          if (!cancelled) setPageLoading(false);
+        }
+      } else {
+        setRows(pageCache.current.get(1)!);
+      }
+      const next = page + 1;
+      if (next <= Math.ceil(serverTotal / PAGE_SIZE) && !pageCache.current.has(next)) {
+        fetchServerPage(next, false).catch(() => {});
+      }
+    };
+    show();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, serverPaged, loading]);
+
+  const recordCount = serverPaged ? serverTotal : rows.length;
+  const totalPages = Math.ceil(recordCount / PAGE_SIZE);
+  const pageRows = serverPaged ? rows : rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const cell = (row: Record<string, unknown>, col: ExportColumn): string => {
     if (typeof col.accessor === "function") return col.accessor(row) as string;
     const v = row[col.accessor as string];
@@ -3125,7 +3203,7 @@ const ReportTable: React.FC<{
           </span>
           {!loading && !error && !isVendorLedger && (
             <span className="text-[0.625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
-              {rows.length} records
+              {recordCount.toLocaleString("en-IN")} records
             </span>
           )}
         </div>
@@ -3418,7 +3496,8 @@ const ReportTable: React.FC<{
             <div className="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-muted-foreground">
               <span>
                 {(page - 1) * PAGE_SIZE + 1}–
-                {Math.min(page * PAGE_SIZE, rows.length)} of {rows.length}
+                {Math.min(page * PAGE_SIZE, recordCount)} of {recordCount.toLocaleString("en-IN")}
+                {pageLoading && <Loader2 size={11} className="inline ml-2 animate-spin" />}
               </span>
               <div className="flex items-center gap-1">
                 <button

@@ -58,6 +58,8 @@ function parseCommon(req) {
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   return {
     projectIds,
+    // ?withTotal=0 — the caller already has the total (page 2+ of the same filters), skip the COUNT(*).
+    withTotal: req.query.withTotal !== "0",
     dateFrom: validDate(req.query.dateFrom),
     dateTo: validDate(req.query.dateTo),
     limit,
@@ -102,8 +104,12 @@ async function sendPage(res, pool, p, { core, countSql, orderBy, bind }) {
   rowsReq.input("offset", sql.Int, p.offset).input("limit", sql.Int, p.limit);
   const [rows, count] = await Promise.all([
     rowsReq.query(`${core} ORDER BY ${orderBy} OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`),
-    countReq.query(countSql || `SELECT COUNT(*) AS total FROM (${core}) q`),
+    p.withTotal ? countReq.query(countSql || `SELECT COUNT(*) AS total FROM (${core}) q`) : null,
   ]);
+  if (!count) {
+    // No count asked for: report "more pages" only when this page came back full.
+    return res.json({ data: rows.recordset, page: p.page, hasMore: rows.recordset.length === p.limit });
+  }
   const total = Number(count.recordset[0]?.total || 0);
   res.json({ data: rows.recordset, total, page: p.page, totalPages: Math.max(1, Math.ceil(total / p.limit)) });
 }
