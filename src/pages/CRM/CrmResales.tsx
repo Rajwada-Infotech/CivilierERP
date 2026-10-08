@@ -10,6 +10,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, ArrowRightLeft, TrendingUp, Landmark, X, Info } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { DateInput } from "@/components/ui/date-input";
 
 const API = "/api/crm/resales";
 const PLOT_API = "/api/plot-master";
@@ -300,7 +301,7 @@ const CrmResales: React.FC = () => {
 
             <div>
               <label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5">Resale Date</label>
-              <input type="date" value={form.ResaleDate}
+              <DateInput value={form.ResaleDate}
                 onChange={(e) => setForm((f) => ({ ...f, ResaleDate: e.target.value }))}
                 className="w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background" />
             </div>

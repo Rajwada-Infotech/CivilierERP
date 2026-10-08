@@ -246,7 +246,7 @@ function SubGroup({ label, children }: { label: string; children: React.ReactNod
       <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5">
         {label}
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 xl:gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 xl:gap-5">
         {children}
       </div>
     </div>
@@ -464,7 +464,7 @@ function ItemPicturePicker({ value, onChange }: { value: string; onChange: (data
   };
 
   return (
-    <div className="sm:col-span-2 lg:col-span-3 xl:col-span-4">
+    <div className="col-span-full">
       <label className={labelCls}><ImageIcon size={11} /> Item Picture</label>
       <input
         ref={inputRef}
@@ -520,7 +520,7 @@ function LivePreviewCard({ form, saving, glassStyle }: { form: FormState; saving
   const pct = Math.round((doneCount / fields.length) * 100);
 
   return (
-    <div className="relative rounded-2xl overflow-hidden h-fit" style={glassStyle}>
+    <div className="relative rounded-2xl overflow-hidden h-fit xl:sticky xl:top-20" style={glassStyle}>
       <div className="bg-gradient-to-br from-yellow-500 via-amber-500 to-yellow-700 p-4 text-white">
         <p className="text-[0.625rem] uppercase tracking-wide text-white/70 mb-1.5">Draft Document</p>
         <div className="flex items-center gap-2.5">
@@ -549,7 +549,10 @@ function LivePreviewCard({ form, saving, glassStyle }: { form: FormState; saving
         <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
           <div className="h-full rounded-full bg-gradient-to-r from-yellow-500 to-amber-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }} />
         </div>
-        <p className="text-[0.6875rem] text-muted-foreground mt-1.5">{pct}% filled</p>
+        <div className="flex items-center justify-between mt-1.5 text-[0.6875rem] text-muted-foreground">
+          <span>{pct}% filled</span>
+          <span className="tabular-nums">{doneCount} of {fields.length} done</span>
+        </div>
       </div>
 
       {saving && (
@@ -1167,26 +1170,26 @@ export default function FixedAssetRecord() {
           {/* ── Header Info ── */}
           <div className={sectionCls} style={glassSection}>
             <SectionHeader icon={FileText}>Header Information</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}><Calendar size={11} /> Document Date</label>
                 <DateInput value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}><Building2 size={11} /> Company</label>
-                <select value={form.companyId} onChange={(e) => { setField("companyId", e.target.value); setField("projectId", ""); }} className={inputCls} disabled={!!form.sourceTagId}>
+                <SearchableNativeSelect value={form.companyId} onChange={(e) => { setField("companyId", e.target.value); setField("projectId", ""); }} className={inputCls} disabled={!!form.sourceTagId} searchPlaceholder="Search company…">
                   <option value="">Select company…</option>
                   {ensureArray<{ id: number; label: string }>(companies).map((c) => (
                     <option key={c.id} value={c.id}>{c.label}</option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
               </div>
               <div>
                 <label className={labelCls}>Project</label>
-                <select value={form.projectId} onChange={(e) => setField("projectId", e.target.value)} className={inputCls} disabled={!form.companyId || !!form.sourceTagId}>
+                <SearchableNativeSelect value={form.projectId} onChange={(e) => setField("projectId", e.target.value)} className={inputCls} disabled={!form.companyId || !!form.sourceTagId} searchPlaceholder="Search project…">
                   <option value="">Select project…</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                </select>
+                </SearchableNativeSelect>
               </div>
               <div>
                 <label className={labelCls}>Financial Year</label>
@@ -1195,7 +1198,7 @@ export default function FixedAssetRecord() {
                   {finYears.map((f) => <option key={f.id} value={f.year}>{f.year}</option>)}
                 </select>
               </div>
-              <div className="sm:col-span-2 lg:col-span-4">
+              <div className="col-span-full">
                 <label className={labelCls}>Remarks</label>
                 <input type="text" value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} placeholder="Optional remarks…" className={inputCls} />
               </div>
@@ -1335,7 +1338,7 @@ export default function FixedAssetRecord() {
           {/* ── Depreciation Details ── */}
           <div className={sectionCls} style={glassSection}>
             <SectionHeader icon={TrendingDown}>Depreciation Details</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}>Depreciation Type</label>
                 <input type="text" value={form.depreciationType} readOnly placeholder="Auto-fetched…"
@@ -1380,7 +1383,7 @@ export default function FixedAssetRecord() {
           {(form.assetStatus === "Sold" || form.sellingPrice) && (
             <div className={sectionCls} style={glassSection}>
               <SectionHeader icon={IndianRupee}>Asset Sale</SectionHeader>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 xl:gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-4 xl:gap-5">
                 <div>
                   <label className={labelCls}>Selling Price (₹)</label>
                   <input type="number" min="0" step="0.01" value={form.sellingPrice} onChange={(e) => setField("sellingPrice", e.target.value)} placeholder="0.00" className={inputCls} />
@@ -1393,7 +1396,7 @@ export default function FixedAssetRecord() {
                   <label className={labelCls}>Buyer Name</label>
                   <input type="text" value={form.buyerName} onChange={(e) => setField("buyerName", e.target.value)} placeholder="Buyer name…" className={inputCls} />
                 </div>
-                <div className="col-span-2 sm:col-span-3">
+                <div className="col-span-full sm:col-span-2 xl:col-span-3">
                   <label className={labelCls}>Sale Remarks</label>
                   <input type="text" value={form.saleRemarks} onChange={(e) => setField("saleRemarks", e.target.value)} placeholder="Optional remarks…" className={inputCls} />
                 </div>
