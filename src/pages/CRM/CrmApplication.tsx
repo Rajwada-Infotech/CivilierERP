@@ -2301,7 +2301,7 @@ const CrmApplication: React.FC = () => {
                             </SelectTrigger>
                             <SelectContent>
                               {(unitsForProject as any[]).map((u: any) => (
-                                <SelectItem key={u.Id} value={String(u.Id)}>{u.UnitName} {u.AreaSqFt ? `(${u.AreaSqFt} sq.ft)` : ""}</SelectItem>
+                                <SelectItem key={u.Id} value={String(u.Id)}>{u.UnitName}{u.VillaTypeCode ? ` · ${u.VillaTypeCode}` : ""} {u.AreaSqFt ? `(${Number(u.AreaSqFt).toLocaleString("en-IN")} sq.ft)` : ""}</SelectItem>
                               ))}
                             </SelectContent>
                           </Select>

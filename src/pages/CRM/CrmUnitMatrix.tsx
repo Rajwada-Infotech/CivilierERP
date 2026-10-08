@@ -69,6 +69,8 @@ interface MatrixUnit {
   // A villa can only be booked by whoever owns all the plots it stands on.
   VillaLandSold?: boolean | null;
   VillaLandOwner?: string | null;
+  VillaTypeCode?: string | null;
+  BuiltUpAreaSqFt?: number | null;
   PlotNo?: string | null;
   Facing?: string | null;
   IsCornerPlot?: boolean | null;
@@ -671,6 +673,9 @@ export function UnitMatrixPage() {
                                 <div className="flex items-center justify-between gap-2 mb-1.5">
                                   <span className="font-bold text-sm text-foreground truncate">{u.UnitName}</span>
                                   {/* Commercial units (shop, office…) — name from the unit kind master. */}
+                                  {u.IsVilla && u.VillaTypeCode && (
+                                    <span className="shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-700 dark:text-violet-300" title={u.BuiltUpAreaSqFt ? `${Number(u.BuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft built-up` : undefined}>{u.VillaTypeCode}</span>
+                                  )}
                                   {!!u.IsCommercial && u.KindName && (
                                     <span className="shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-300">{u.KindName}</span>
                                   )}

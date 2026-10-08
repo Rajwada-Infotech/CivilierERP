@@ -193,6 +193,7 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id AND pl.IsActive = 1) THEN 1 ELSE 0 END AS BIT) AS IsVilla,
         -- who owns the land under a villa (services/villaLand.js rule): only
         -- that customer can buy it, and only once every plot under it is sold
+        (SELECT TOP 1 vt.Code FROM dbo.VillaTypeMaster vt WHERE vt.Id = u.VillaTypeId) AS VillaTypeCode, u.BuiltUpAreaSqFt,
         land.PlotCount AS VillaPlotCount, land.SoldPlotCount AS VillaSoldPlotCount, land.OwnerName AS VillaLandOwner,
         u.AreaSqFt,
         -- The unit's kind as named in the kind master, and whether it's
@@ -268,6 +269,8 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         // A villa whose land isn't (fully) sold can't be booked by anyone yet.
         VillaLandSold: r.IsVilla ? r.VillaPlotCount > 0 && r.VillaSoldPlotCount === r.VillaPlotCount : null,
         VillaLandOwner: r.IsVilla ? r.VillaLandOwner || null : null,
+        VillaTypeCode: r.IsVilla ? r.VillaTypeCode || null : null,
+        BuiltUpAreaSqFt: r.BuiltUpAreaSqFt ?? null,
         KindName: r.KindName || null,
         IsCommercial: !!r.IsCommercial,
         BookingId: hasBookingId ? r.BookingId : null,

@@ -100,7 +100,8 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         -- Land (a plot kept as a unit row) and a villa built on a plot — the
         -- DPR pickers hide land and list villas under their own "Villas" floor.
         CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind AND k.IsLand = 1) THEN 1 ELSE 0 END AS BIT) AS IsLand,
-        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id AND pl.IsActive = 1) THEN 1 ELSE 0 END AS BIT) AS IsVilla
+        CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster pl WHERE pl.ConvertedUnitId = u.Id AND pl.IsActive = 1) THEN 1 ELSE 0 END AS BIT) AS IsVilla,
+        (SELECT TOP 1 vt.Code FROM dbo.VillaTypeMaster vt WHERE vt.Id = u.VillaTypeId) AS VillaTypeCode
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise  ep ON ep.id = u.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster  b ON b.Id  = u.BlockId
