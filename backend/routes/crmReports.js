@@ -627,7 +627,7 @@ router.get("/aging-analysis", requirePageRight("crm-payments", "view"), async (r
       WHERE m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate < CAST(SYSDATETIME() AS DATE)
         AND b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Transferred')
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}', 'Expired','Transferred')
         ${cpb.clauses.length ? "AND " + cpb.clauses.join(" AND ") : ""}
       ORDER BY DaysOverdue DESC
     `);
@@ -645,22 +645,30 @@ router.get("/inventory-status", requirePageRight("crm-bookings", "view"), async 
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
-    const conds = ["u.IsActive = 1"];
+    // Land rows (plots kept as units) are plot inventory, not units — counting
+    // them here doubled every plotted project's totals.
+    const conds = ["u.IsActive = 1",
+      "NOT EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind lk WHERE lk.Code = u.UnitKind AND lk.IsLand = 1)"];
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "u.ProjectId", "").trim());
     if (projectId) { req0.input("cpbProjectId", sql.Int, projectId); conds.push("u.ProjectId = @cpbProjectId"); }
     if (blockId) { req0.input("cpbBlockId", sql.Int, blockId); conds.push("u.BlockId = @cpbBlockId"); }
     const result = await req0.query(`
       SELECT
         ep.name AS ProjectName,
-        COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind)) AS UnitType,
+        t.UnitType,
         COUNT(u.Id) AS TotalUnits,
-        SUM(CASE WHEN bk.Id IS NOT NULL THEN 1 ELSE 0 END) AS BookedUnits,
-        SUM(CASE WHEN bk.Id IS NULL THEN 1 ELSE 0 END) AS AvailableUnits
+        SUM(bk.Booked) AS BookedUnits,
+        SUM(1 - bk.Booked) AS AvailableUnits
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.enterprise ep ON ep.id = u.ProjectId
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Transferred')
+      -- SQL Server can't GROUP BY a subquery: resolve the type name first.
+      OUTER APPLY (SELECT COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind)) AS UnitType) t
+      -- one flag per unit, so a unit is never counted twice
+      OUTER APPLY (SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.UnitId = u.Id AND b.IsActive = 1
+        AND b.Status NOT IN ${DEAD_BOOKING_SQL}) THEN 1 ELSE 0 END AS Booked) bk
       WHERE ${conds.join(" AND ")}
-      GROUP BY ep.name, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind))
-      ORDER BY ep.name, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind))
+      GROUP BY ep.name, t.UnitType
+      ORDER BY ep.name, t.UnitType
     `);
     res.json(result.recordset);
   } catch (err) { res.status(500).json({ error: err.message }); }

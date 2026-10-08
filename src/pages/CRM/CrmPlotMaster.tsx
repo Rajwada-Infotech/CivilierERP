@@ -26,6 +26,8 @@ type Plot = {
   GridRow?: number | null; GridCol?: number | null;
   PlannedVillaTypeId?: number | null; PlannedVillaTypeCode?: string | null; PlannedVillaTypeName?: string | null;
   ConvertedUnitId?: number | null; ConvertedAt?: string | null; ConvertedUnitName?: string | null;
+  ConvertedVillaTypeId?: number | null; ConvertedVillaTypeCode?: string | null; ConvertedVillaTypeName?: string | null;
+  ConvertedBuiltUpAreaSqFt?: number | null; ConvertedRoomCount?: number | null; ConvertedFloorCount?: number | null;
   LockBookingNo?: string | null; LockApplicationNo?: string | null; LockHoldId?: number | null; AdjacentPlotCount?: number;
 };
 type PlotBlock = { BlockId: number; BlockName: string; ProjectId: number; ProjectName: string };
@@ -85,6 +87,9 @@ const CrmPlotMaster: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [convertOpen, setConvertOpen] = useState(false);
   const [unitName, setUnitName] = useState("");
+  // One villa per plot: how each villa is named — {plot} is the plot's name.
+  const [namePattern, setNamePattern] = useState("{plot}");
+  const villaNameFor = (plotName: string) => (namePattern.trim() || "{plot}").split("{plot}").join(plotName).trim();
   const [unitType, setUnitType] = useState("");
   const [unitKind, setUnitKind] = useState("");
   const [villaRate, setVillaRate] = useState("");
@@ -123,6 +128,13 @@ const CrmPlotMaster: React.FC = () => {
   const { data: conversionVillaTypes = [] } = useQuery<VillaType[]>({ queryKey: villaTypesKey(conversionProjectId), queryFn: () => fetchVillaTypes(conversionProjectId!), enabled: convertOpen && conversionProjectId != null });
   const { data: editVillaTypes = [] } = useQuery<VillaType[]>({ queryKey: villaTypesKey(plotDraft.ProjectId), queryFn: () => fetchVillaTypes(plotDraft.ProjectId), enabled: editOpen && !!plotDraft.ProjectId });
   const unitTypeOptionsForConversion = useMemo(() => unitTypeOptions(layoutTypes, unitType), [layoutTypes, unitType]);
+  // A villa type with its own rooms-by-floor plan decides the villa's rooms —
+  // no separate unit type is asked for then.
+  const ownLayoutOf = (villaTypeIdValue: number | null | undefined) => {
+    const t = conversionVillaTypes.find((x) => x.Id === villaTypeIdValue);
+    const l = t?.LayoutTypeId != null ? layoutTypes.find((x) => x.id === t.LayoutTypeId) : undefined;
+    return l?.ownerVillaTypeId ? l : null;
+  };
 
   // Picking a villa type fills the areas and room layout from the master;
   // every field stays editable.
@@ -228,7 +240,14 @@ const CrmPlotMaster: React.FC = () => {
     }
     // No kind is assumed here (kinds are master data): a single active kind is
     // pre-picked, otherwise the user chooses — the form already requires it.
-    if (!unitKind) { const usable = constructedAssetKinds.filter((kind) => !kind.IsLand && kind.IsActive !== false); if (usable.length === 1) setUnitKind(usable[0].Code); }
+    // A plot is built on as a villa: pre-pick the villa kind when the master has
+    // exactly one, else the only constructed kind; land kinds are never offered.
+    if (!unitKind) {
+      const usable = constructedAssetKinds.filter((kind) => !kind.IsLand && kind.IsActive !== false);
+      const villaKinds = usable.filter((kind) => /villa/i.test(`${kind.Code} ${kind.Name}`));
+      const pick = villaKinds.length === 1 ? villaKinds[0] : usable.length === 1 ? usable[0] : null;
+      if (pick) setUnitKind(pick.Code);
+    }
     setConvertOpen(true);
   };
 
@@ -304,7 +323,7 @@ const CrmPlotMaster: React.FC = () => {
       return {
         plot,
         body: {
-          PlotIds: [plot.Id], UnitName: plot.PlotName, UnitType: own ? layout : unitType, UnitKind: unitKind,
+          PlotIds: [plot.Id], UnitName: villaNameFor(plot.PlotName), UnitType: own ? layout : unitType, UnitKind: unitKind,
           RatePerSqFt: (villaRate !== "" && Number(villaRate) > 0) ? Number(villaRate) : 0,
           VillaTypeId: own ? own.Id : (villaTypeId ? Number(villaTypeId) : null),
           BuiltUpAreaSqFt: own ? null : (builtUpArea ? Number(builtUpArea) : null),
@@ -344,6 +363,63 @@ const CrmPlotMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
   };
+  // Rename a built villa (its DPR chains and live sales follow the new name).
+  const [renameTo, setRenameTo] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  React.useEffect(() => { setRenameTo(null); setBuiltVillaType(""); setChangingType(false); }, [detailPlot?.Id]);
+  React.useEffect(() => {
+    if (!detailPlot) return;
+    const fresh = (plots as Plot[]).find((p) => p.Id === detailPlot.Id);
+    if (fresh && fresh !== detailPlot) setDetailPlot(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plots]);
+  const renameVilla = async (plot: Plot) => {
+    if (!plot.ConvertedUnitId || !renameTo?.trim()) return;
+    setRenaming(true);
+    try {
+      const response = await fetchWithAuth(`${SETUP_API}/villas/${plot.ConvertedUnitId}/rename`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ UnitName: renameTo.trim() }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not rename the villa");
+      const extra = [body.chainsRenamed ? `${body.chainsRenamed} DPR chain(s)` : "", body.bookingsUpdated ? `${body.bookingsUpdated} booking(s)` : "", body.applicationsUpdated ? `${body.applicationsUpdated} application(s)` : ""].filter(Boolean).join(", ");
+      toast.success(`Renamed to ${body.UnitName}${extra ? ` — ${extra} updated` : ""}`);
+      setRenameTo(null);
+      setDetailPlot((p) => (p && p.Id === plot.Id ? { ...p, ConvertedUnitName: body.UnitName } : p));
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
+    } catch (e: any) { toast.error(e.message); } finally { setRenaming(false); }
+  };
+
+  // Villa type for a villa already built (rooms re-cut from the type's plan).
+  const [builtVillaType, setBuiltVillaType] = useState("");
+  const [settingVillaType, setSettingVillaType] = useState(false);
+  const [changingType, setChangingType] = useState(false);
+  // Take the chosen type's areas too (unsold villas only — checked on the server).
+  const [takeAreas, setTakeAreas] = useState(true);
+  const { data: detailVillaTypes = [] } = useQuery({
+    queryKey: [...villaTypesKey(detailPlot?.ProjectId), "active"],
+    queryFn: () => fetchVillaTypes(detailPlot!.ProjectId),
+    enabled: !!detailPlot?.ConvertedUnitId && detailPlot?.ProjectId != null,
+  });
+  const setVillaTypeOnBuilt = async (plot: Plot) => {
+    if (!plot.ConvertedUnitId || !builtVillaType) return;
+    const type = detailVillaTypes.find((t) => String(t.Id) === builtVillaType);
+    if (!window.confirm(`Set ${plot.ConvertedUnitName || "this villa"} to ${type?.Code} — ${type?.Name}? Its rooms are rebuilt floor by floor from the type's plan.`)) return;
+    setSettingVillaType(true);
+    try {
+      const response = await fetchWithAuth(`${SETUP_API}/villas/${plot.ConvertedUnitId}/villa-type`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ VillaTypeId: Number(builtVillaType), TakeAreas: takeAreas }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not set the villa type");
+      const missing = body.roomsWithoutSteps?.length ? ` · ${body.roomsWithoutSteps.length} room(s) have no DPR steps yet — set those room types in Dependency Master` : "";
+      toast.success(`${type?.Code} applied: ${body.rooms} rooms${body.areasTaken ? ", areas updated" : ""}${missing}`);
+      setBuiltVillaType("");
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
+      await queryClient.invalidateQueries({ queryKey: ["villa-types"] });
+    } catch (e: any) { toast.error(e.message); } finally { setSettingVillaType(false); }
+  };
+
   // Reverses a conversion made by mistake. The server refuses once the villa is
   // booked or held, or any DPR work has started; nothing is deleted.
   const undoConversion = async (plot: Plot) => {
@@ -410,9 +486,15 @@ const CrmPlotMaster: React.FC = () => {
         </div>
         <div className="min-w-0">
           <span className="block truncate text-xs text-muted-foreground">
-            {plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "Area pending"}{plot.IsCornerPlot ? " · Corner" : ""}{plot.Facing ? ` · ${plot.Facing}` : ""}{plot.PlannedVillaTypeCode ? ` · ${plot.PlannedVillaTypeCode}` : ""}
+            {plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "Area pending"}{plot.IsCornerPlot ? " · Corner" : ""}{plot.Facing ? ` · ${plot.Facing}` : ""}
+            {/* Built: the villa's own type. Not yet built: the type planned on it. */}
+            {plot.ConvertedUnitId
+              ? (plot.ConvertedVillaTypeCode ? ` · ${plot.ConvertedVillaTypeCode}` : " · type not set")
+              : plot.PlannedVillaTypeCode ? ` · plans ${plot.PlannedVillaTypeCode}` : ""}
           </span>
-          <span className="mt-0.5 block truncate text-[0.6875rem]">{status.label}</span>
+          <span className="mt-0.5 block truncate text-[0.6875rem]" title={plot.ConvertedUnitName || undefined}>
+            {plot.ConvertedUnitId ? `${status.label} · ${(plot.ConvertedUnitName || "").split("/").pop()}` : status.label}
+          </span>
         </div>
       </div>
     );
@@ -678,7 +760,7 @@ const CrmPlotMaster: React.FC = () => {
                   const own = plot.PlannedVillaTypeId != null ? typesById.get(plot.PlannedVillaTypeId) : undefined;
                   const type = own ?? fallback;
                   const bua = type ? Number(type.BuiltUpAreaSqFt) : Number(builtUpArea) || null;
-                  return { key: plot.Id, name: plot.PlotName, on: [plot.PlotName], type: type?.Code ?? null, planned: !!own, bua };
+                  return { key: plot.Id, name: villaNameFor(plot.PlotName), on: [plot.PlotName], type: type?.Code ?? null, planned: !!own, bua };
                 })
               : [{ key: 0, name: unitName.trim() || "Unnamed villa", on: selectedPlots.map((plot) => plot.PlotName), type: fallback?.Code ?? null, planned: false, bua: Number(builtUpArea) || null }];
             const missing = rows.filter((row) => !row.bua).length;
@@ -737,8 +819,20 @@ const CrmPlotMaster: React.FC = () => {
 
                     <section className="space-y-4">
                       <p className={label}>Villa specification</p>
-                      {!separate && (
-                        <div><label className={label}>Villa name</label><input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} className={input} /></div>
+                      {!separate ? (
+                        <div>
+                          <label className={label}>Villa name</label>
+                          <input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} placeholder="e.g. V-21 or Rose Villa" className={input} />
+                          <p className="mt-1 text-[0.6875rem] text-muted-foreground">The project and block prefix (like SLV/A/) is added for you. Rename it any time later from the plot.</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className={label}>Villa names</label>
+                          <input value={namePattern} onChange={(event) => setNamePattern(event.target.value)} placeholder="{plot}" className={`${input} font-mono`} />
+                          <p className="mt-1 text-[0.6875rem] text-muted-foreground">
+                            <span className="font-mono">{"{plot}"}</span> is each plot's name — e.g. <span className="font-mono">V-{"{plot}"}</span> or <span className="font-mono">Villa {"{plot}"}</span>. First one: <span className="font-medium text-foreground">{villaNameFor(selectedPlots[0]?.PlotName || "P-1")}</span>
+                          </p>
+                        </div>
                       )}
                       <div>
                         <div className="flex items-center justify-between">
@@ -753,10 +847,27 @@ const CrmPlotMaster: React.FC = () => {
                         {separate && unplanned.length > 0 && <p className="mt-1.5 text-xs text-muted-foreground">No type planned on {unplanned.map((plot) => plot.PlotName).join(", ")}. Plots with a planned type use their own.</p>}
                       </div>
                       <div className="grid gap-4 sm:grid-cols-2">
-                        <div><label className={label}>Unit type (room layout)</label>
-                          <Select value={unitType || undefined} onValueChange={setUnitType}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a layout" /></SelectTrigger><SelectContent>{unitTypeOptionsForConversion.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+                        {(() => {
+                          const each = conversionMode === "each" && selectedPlots.length > 1;
+                          const fromType = each
+                            ? selectedPlots.length > 0 && selectedPlots.every((plot) => plot.PlannedVillaTypeId != null && !!ownLayoutOf(plot.PlannedVillaTypeId))
+                            : villaTypeId !== "" && !!ownLayoutOf(Number(villaTypeId));
+                          if (fromType) {
+                            const l = each ? null : ownLayoutOf(Number(villaTypeId));
+                            return (
+                              <div><label className={label}>Rooms</label>
+                                <div className="h-10 rounded-lg border border-border bg-muted/30 px-3 flex items-center text-sm text-muted-foreground">
+                                  {l ? `From the villa type — ${l.roomCount} rooms, by floor` : "From each plot's villa type, by floor"}
+                                </div></div>
+                            );
+                          }
+                          return (
+                            <div><label className={label}>Unit type (room layout)</label>
+                              <Select value={unitType || undefined} onValueChange={setUnitType}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a layout" /></SelectTrigger><SelectContent>{unitTypeOptionsForConversion.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+                          );
+                        })()}
                         <div><label className={label}>Asset kind</label>
-                          <Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div>
+                          <Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.filter((kind) => !kind.IsLand && kind.IsActive !== false).map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div>
                         <div className="sm:col-span-2"><label className={label}>Construction rate <span className="font-normal opacity-70">· Optional</span></label>
                           <div className="relative"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₹</span>
                             <input type="number" min="0" value={villaRate} onChange={(event) => setVillaRate(event.target.value)} placeholder="0" className={`${input} pl-7 pr-16 tabular-nums`} />
@@ -855,14 +966,84 @@ const CrmPlotMaster: React.FC = () => {
               </div>
               {detailPlot.ConvertedUnitId && (
                 <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3 flex items-center justify-between gap-3">
-                  <div><p className="text-xs text-muted-foreground">Converted Unit Master record</p><p className="font-medium">{detailPlot.ConvertedUnitName || `Unit #${detailPlot.ConvertedUnitId}`}</p></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-muted-foreground">Villa built on this plot</p>
+                    {renameTo === null ? (
+                      <p className="font-medium flex items-center gap-2">
+                        {detailPlot.ConvertedUnitName || `Unit #${detailPlot.ConvertedUnitId}`}
+                        {rights.canEdit && <button type="button" onClick={() => setRenameTo((detailPlot.ConvertedUnitName || "").split("/").pop() || "")} className="text-xs font-normal text-primary hover:underline">Rename</button>}
+                      </p>
+                    ) : (
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <input autoFocus value={renameTo} onChange={(e) => setRenameTo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") renameVilla(detailPlot); if (e.key === "Escape") setRenameTo(null); }}
+                          maxLength={80} placeholder="e.g. V-100 or Rose Villa" className="h-8 min-w-[12rem] flex-1 rounded-lg border border-border bg-background px-2.5 text-sm outline-none focus:border-primary" />
+                        <button type="button" onClick={() => renameVilla(detailPlot)} disabled={renaming || !renameTo.trim()} className="h-8 px-3 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">{renaming ? "Saving…" : "Save"}</button>
+                        <button type="button" onClick={() => setRenameTo(null)} className="h-8 px-3 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
+                        <p className="w-full text-[0.6875rem] text-muted-foreground">The project and block prefix is kept. DPR chains and live bookings take the new name.</p>
+                      </div>
+                    )}
+                  </div>
                   {rights.canDelete && (
                     <button onClick={() => undoConversion(detailPlot)} className="shrink-0 px-3 py-1.5 text-xs border border-destructive/40 text-destructive rounded-lg hover:bg-destructive/10"
                       title="Only while the villa is unsold and no DPR work has started">Undo conversion</button>
                   )}
                 </div>
               )}
-              <div className="flex justify-end gap-2">
+              {detailPlot.ConvertedUnitId && (
+                <div className="rounded-lg border border-border p-3 grid gap-2">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">Villa type</p>
+                      {detailPlot.ConvertedVillaTypeId ? (
+                        <p className="font-medium">
+                          {detailPlot.ConvertedVillaTypeCode} — {detailPlot.ConvertedVillaTypeName}
+                          <span className="font-normal text-muted-foreground">
+                            {" · "}{detailPlot.ConvertedRoomCount ?? 0} rooms
+                            {detailPlot.ConvertedFloorCount ? ` on ${detailPlot.ConvertedFloorCount} floor${detailPlot.ConvertedFloorCount === 1 ? "" : "s"}` : ""}
+                            {detailPlot.ConvertedBuiltUpAreaSqFt ? ` · ${Number(detailPlot.ConvertedBuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft built-up` : ""}
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-sm text-amber-700 dark:text-amber-300">Not set — {detailPlot.ConvertedRoomCount ?? 0} rooms from a generic layout, no floors. Set its type so its rooms follow the type's floor plan.</p>
+                      )}
+                    </div>
+                    {rights.canEdit && !changingType && (
+                      <button type="button" onClick={() => { setChangingType(true); setBuiltVillaType(detailPlot.ConvertedVillaTypeId ? String(detailPlot.ConvertedVillaTypeId) : ""); }}
+                        className="shrink-0 h-8 px-3 text-xs font-semibold border border-border rounded-lg hover:bg-muted">
+                        {detailPlot.ConvertedVillaTypeId ? "Change type" : "Set type"}
+                      </button>
+                    )}
+                  </div>
+                  {rights.canEdit && changingType && (
+                    <>
+                      <div className="flex gap-2">
+                        <select value={builtVillaType} onChange={(e) => setBuiltVillaType(e.target.value)} className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-sm">
+                          <option value="">Choose a villa type</option>
+                          {detailVillaTypes.map((t) => <option key={t.Id} value={t.Id} disabled={!t.LayoutLabel}>{t.Code} — {t.Name}{t.LayoutLabel ? "" : " (no rooms yet)"}</option>)}
+                        </select>
+                        <button onClick={() => setVillaTypeOnBuilt(detailPlot)}
+                          disabled={!builtVillaType || settingVillaType || builtVillaType === String(detailPlot.ConvertedVillaTypeId ?? "")}
+                          className="px-3 h-9 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">
+                          {settingVillaType ? "Applying…" : "Apply"}
+                        </button>
+                        <button type="button" onClick={() => { setChangingType(false); setBuiltVillaType(""); }} className="px-3 h-9 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
+                      </div>
+                      {(() => {
+                        const pick = detailVillaTypes.find((t) => String(t.Id) === builtVillaType);
+                        const differs = !!pick && Number(pick.BuiltUpAreaSqFt) !== Number(detailPlot.ConvertedBuiltUpAreaSqFt || 0);
+                        return pick && differs ? (
+                          <label className="flex items-start gap-2 text-sm">
+                            <input type="checkbox" className="mt-0.5" checked={takeAreas} onChange={(e) => setTakeAreas(e.target.checked)} />
+                            <span>Also take {pick.Code}'s areas — built-up {Number(pick.BuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft{pick.SuperBuiltUpAreaSqFt ? `, super built-up ${Number(pick.SuperBuiltUpAreaSqFt).toLocaleString("en-IN")}` : ""} (now {Number(detailPlot.ConvertedBuiltUpAreaSqFt || 0).toLocaleString("en-IN")}). Not allowed once the villa is booked.</span>
+                          </label>
+                        ) : null;
+                      })()}
+                      <p className="text-[0.6875rem] text-muted-foreground">Its rooms are rebuilt floor by floor from the type's plan, with their DPR steps. Only while no DPR work has started.</p>
+                      {detailVillaTypes.length === 0 && <p className="text-xs text-muted-foreground">No active villa types in this project — add or restore them in Villa types.</p>}
+                    </>
+                  )}
+                </div>
+              )}              <div className="flex justify-end gap-2">
                 <button onClick={() => setDetailOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Close</button>
                 {rights.canEdit && !detailPlot.ConvertedUnitId && (
                   <button onClick={() => { setDetailOpen(false); openLayout(detailPlot.BlockId, "neighbours", detailPlot.Id); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted"><Network size={13} /> Neighbours</button>

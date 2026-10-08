@@ -28,6 +28,8 @@ export interface FaImportMasters {
   godowns: { GodownName: string; EnterpriseID: number | null; ProjectID: number | null }[];
   /** Fixed Asset items of the Item Master only. */
   faItems: { code: string; name: string; uom: string }[];
+  /** Categories with an active Depreciation Setup. */
+  assetCategories: string[];
 }
 
 /** One data row of an uploaded file, keyed by canonical column. */
@@ -39,6 +41,7 @@ export interface FaImportFileRow {
   Godown: string;
   ItemCode: string;
   ItemName: string;
+  AssetCategory: string;
   Date: string;
   Quantity: string;
   Rate: string;
@@ -55,6 +58,7 @@ const COLUMN_ALIASES: Record<keyof Omit<FaImportFileRow, "rowNo">, string[]> = {
   ItemCode: ["itemcode", "code"],
   // "Item" is the single item column of the previous template — treated as the name.
   ItemName: ["itemname", "item", "assetname"],
+  AssetCategory: ["assetcategory", "category"],
   Date: ["date", "taggingdate", "docdate"],
   Quantity: ["quantity", "qty"],
   Rate: ["rate", "unitrate", "rateperunit", "cost", "unitcost"],
@@ -89,6 +93,7 @@ export async function downloadFaInventoryTemplate(mode: FaImportMode, m: FaImpor
     ["Fixed Asset Item Code", ...m.faItems.map((i) => i.code.trim())], // G
     ["Fixed Asset Item Name", ...m.faItems.map((i) => i.name.trim())], // H
     ["Item's UOM", ...m.faItems.map((i) => i.uom)], // I
+    ["Asset Category", ...m.assetCategories], // J
   ];
   const depth = Math.max(...cols.map((c) => c.length));
   const masterRows: XlsxCell[][] = Array.from({ length: depth }, (_, r) =>
@@ -103,6 +108,7 @@ export async function downloadFaInventoryTemplate(mode: FaImportMode, m: FaImpor
     req("Godown *"),
     req("Item Code *"),
     req("Item Name *"),
+    req("Asset Category *"),
     req("Date *"),
     ...(bulk ? [req("Quantity *")] : []),
     opt("Rate (₹ per unit)"),
@@ -110,7 +116,7 @@ export async function downloadFaInventoryTemplate(mode: FaImportMode, m: FaImpor
   ];
   const inventory: XlsxSheet = {
     name: SHEET,
-    widths: bulk ? [26, 26, 26, 18, 32, 14, 12, 18, 36] : [26, 26, 26, 18, 32, 14, 18, 36],
+    widths: bulk ? [26, 26, 26, 18, 32, 22, 14, 12, 18, 36] : [26, 26, 26, 18, 32, 22, 14, 18, 36],
     freezeBelowRow: 2,
     rows: [head],
     lists: [
@@ -119,6 +125,7 @@ export async function downloadFaInventoryTemplate(mode: FaImportMode, m: FaImpor
       { sqref: "C2:C2000", formula: range("D", m.godowns.length) },
       { sqref: "D2:D2000", formula: range("G", m.faItems.length) },
       { sqref: "E2:E2000", formula: range("H", m.faItems.length) },
+      { sqref: "F2:F2000", formula: range("J", m.assetCategories.length) },
     ],
   };
 
@@ -138,24 +145,25 @@ export async function downloadFaInventoryTemplate(mode: FaImportMode, m: FaImpor
           : "Each row adds exactly ONE unit of Fixed Asset stock straight into the Godown (there is no Quantity column — list a unit per row) — no GRN and no existing stock needed — and generates its FA Item Code through the normal FA tagging. The entry is marked “Imported Stock / Without GRN”.",
       ),
       [{ v: "Required columns (dark orange headers)", s: "label" }],
-      note("Company · Project · Godown · Item Code · Item Name · Date" + (bulk ? " · Quantity" : "")),
+      note("Company · Project · Godown · Item Code · Item Name · Asset Category · Date" + (bulk ? " · Quantity" : "")),
       note("Rate (₹ per unit) and Remarks are optional. Rate becomes the asset's purchase cost."),
       [{ v: "Rules checked on import", s: "label" }],
       note("• Company, Project (of that company) and Godown must exist in the masters — use the dropdowns or the Masters sheet."),
       note("• The item must exist in the Item Master (Item Code and Item Name must belong to the same item). If only one is given, that one is used."),
       note("• Only items whose Type of Item = Fixed Asset are accepted; any other item is rejected with its type shown."),
+      note("• Asset Category is mandatory and must be a category that has an active Depreciation Setup (see the Masters sheet). It is saved on the imported stock and fetched automatically in Fixed Asset Depreciation Tag, where it fixes the depreciation rate."),
       note("• The Godown does not need to hold the item already — the imported quantity is added to its stock. No GRN number is required or created."),
       note("• Date: YYYY-MM-DD or DD/MM/YYYY, inside a configured Financial Year." + (bulk ? " Quantity: a whole number above 0." : "")),
       note("• Rows with problems are shown with the reason and are not imported; valid rows can still be imported."),
       note(""),
       [{ v: "Example", s: "label" }],
-      note(bulk ? "Rajwada | Rajwada 2 | Main Store | CAM-01 | Camera | 2026-10-06 | 3 | 18500 | Site CCTV" : "Rajwada | Rajwada 2 | Main Store | CAM-01 | Camera | 2026-10-06 | 18500 | Site CCTV"),
+      note(bulk ? "Rajwada | Rajwada 2 | Main Store | CAM-01 | Camera | Camera | 2026-10-06 | 3 | 18500 | Site CCTV" : "Rajwada | Rajwada 2 | Main Store | CAM-01 | Camera | Camera | 2026-10-06 | 18500 | Site CCTV"),
     ],
   };
 
   const masters: XlsxSheet = {
     name: "Masters",
-    widths: [26, 26, 26, 26, 26, 26, 22, 32, 14],
+    widths: [26, 26, 26, 26, 26, 26, 22, 32, 14, 24],
     freezeBelowRow: 2,
     rows: masterRows,
   };
@@ -206,6 +214,7 @@ export async function readFaImportFile(file: File): Promise<FaImportFileRow[]> {
       Godown: get("Godown"),
       ItemCode: get("ItemCode"),
       ItemName: get("ItemName"),
+      AssetCategory: get("AssetCategory"),
       Date: get("Date"),
       Quantity: get("Quantity"),
       Rate: get("Rate"),

@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Shared cascading Company -> Project -> Block filter for every CRM list
 // page being migrated to server-side pagination + real filtering. Backed by
@@ -69,29 +70,46 @@ export function CrmCompanyProjectBlockFilter({
   });
 
   return (
-    <div className={`flex gap-2 flex-wrap ${className}`}>
-      <select
-        value={value.companyId}
-        onChange={(e) => onChange({ companyId: e.target.value, projectId: "", blockId: "" })}
-        className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
-        <option value="">All Companies</option>
-        {companies.map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
-      </select>
-      <select
-        value={value.projectId}
-        onChange={(e) => onChange({ ...value, projectId: e.target.value, blockId: "" })}
-        className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
-        <option value="">All Projects</option>
-        {projectOptions.map((p: any) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
-      </select>
-      <select
-        value={value.blockId}
-        onChange={(e) => onChange({ ...value, blockId: e.target.value })}
+    <div className={`flex gap-2 flex-wrap sm:flex-nowrap ${className}`}>
+      <Select
+        value={value.companyId || "__all__"}
+        onValueChange={(v) => onChange({ companyId: v === "__all__" ? "" : v, projectId: "", blockId: "" })}
+      >
+        <SelectTrigger className="h-8 text-sm min-w-[130px]">
+          <SelectValue placeholder="All Companies" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__all__">All Companies</SelectItem>
+          {companies.map((c: any) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={value.projectId || "__all__"}
+        onValueChange={(v) => onChange({ ...value, projectId: v === "__all__" ? "" : v, blockId: "" })}
+      >
+        <SelectTrigger className="h-8 text-sm min-w-[130px]">
+          <SelectValue placeholder="All Projects" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__all__">All Projects</SelectItem>
+          {projectOptions.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={value.blockId || "__all__"}
+        onValueChange={(v) => onChange({ ...value, blockId: v === "__all__" ? "" : v })}
         disabled={!value.projectId}
-        className="px-3 py-2 text-sm border border-border rounded-lg bg-background disabled:opacity-50 disabled:cursor-not-allowed">
-        <option value="">{value.projectId ? "All Blocks" : "Select a Project first"}</option>
-        {blocks.map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.Name}</option>)}
-      </select>
+      >
+        <SelectTrigger className="h-8 text-sm min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed">
+          <SelectValue placeholder={value.projectId ? "All Blocks" : "Select a Project first"} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__all__">{value.projectId ? "All Blocks" : "Select a Project first"}</SelectItem>
+          {blocks.map((b: any) => <SelectItem key={b.Id} value={String(b.Id)}>{b.Name}</SelectItem>)}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
 import { Toaster } from "sonner";
 import { SystemUpdateBanner } from "./components/SystemUpdateBanner";
+import { MaintenanceActiveBanner } from "./components/MaintenanceActiveBanner";
 import {
   BrowserRouter as Router,
   Routes,
@@ -356,6 +357,7 @@ const ApprovalInbox = lazy(() => import("./pages/admin/ApprovalInbox"));
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
 const ApkManagerPage = lazy(() => import("./pages/admin/ApkManager"));
+const SystemMaintenancePage = lazy(() => import("./pages/admin/SystemMaintenance"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
 const AdminProfile = lazy(() => import("./pages/admin/AdminProfile"));
 const DBAProfile = lazy(() => import("./pages/dba/DBAProfile"));
@@ -2208,6 +2210,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/admin/system-maintenance"
+        element={
+          <SuperAdminRoute>
+            <SystemMaintenancePage />
+          </SuperAdminRoute>
+        }
+      />
+      <Route
         path="/admin/apk-manager"
         element={
           <AdminRoute>
@@ -2509,8 +2519,8 @@ function AppRoutes() {
         }
       />
 
-      {/* MAINTENANCE & 404 */}
-      <Route path="/maintenance" element={<Maintenance />} />
+      {/* MAINTENANCE & 404 - /maintenance itself is the building-maintenance module, so the page that everyone is held on has its own path */}
+      <Route path="/system-maintenance" element={<Maintenance />} />
       <Route path="/sales-automation/social-media" element={<ProtectedRoute pageKey="sa-social-media"><SaSocialMediaMaster /></ProtectedRoute>} />
       <Route path="/sales-automation/campaigns" element={<ProtectedRoute pageKey="sa-campaigns"><SaCampaignMaster /></ProtectedRoute>} />
       <Route path="/sales-automation/ads" element={<ProtectedRoute pageKey="sa-ads"><SaAdMaster /></ProtectedRoute>} />
@@ -2636,6 +2646,7 @@ function App() {
               <ModuleProvider>
                 <ThemeProvider>
                   <AppRoutes />
+                  <MaintenanceActiveBanner />
                 </ThemeProvider>
               </ModuleProvider>
             </Router>

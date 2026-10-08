@@ -33,7 +33,15 @@ router.get("/types", authMiddleware, async (req, res) => {
   try {
     const pool = await getPool();
     const types = await listLayoutTypes(pool);
+    // Layouts a villa type owns (migration 539) stay listed — units built to
+    // them resolve through this list — but are marked so pickers hide them.
+    let owned = new Map();
+    try {
+      const o = await pool.request().query("SELECT Id, OwnerVillaTypeId FROM dbo.RoomLayoutType WHERE OwnerVillaTypeId IS NOT NULL");
+      owned = new Map(o.recordset.map((r) => [r.Id, r.OwnerVillaTypeId]));
+    } catch (_) { /* before migration 539: nothing is owned */ }
     res.json(types.map((t) => ({
+      ownerVillaTypeId: owned.get(t.id) ?? null,
       id: t.id,
       typeKey: t.typeKey,
       label: t.label,

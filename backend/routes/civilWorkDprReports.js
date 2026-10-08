@@ -8,6 +8,7 @@
  *   GET /api/civilworkdpr-reports/engineer-workload   per engineer: activities by status, overdue, average progress
  *   GET /api/civilworkdpr-reports/quality-checks      every QC inspection (approved / rework) with its check results
  *   GET /api/civilworkdpr-reports/daily-updates       daily checkpoint photo updates (date, time logged in IST, who)
+ *   GET /api/civilworkdpr-reports/daily-reports       the daily logbook: which work was done where on which day, and how much progress that day
  *
  * Every route answers { data, total, page, totalPages } so the Reports page can page through it (it asks for
  * 500 rows at a time) and export everything. Filters: projectId (one id or a comma-separated list), dateFrom,
@@ -284,6 +285,49 @@ router.get("/daily-updates", authMiddleware, guard, async (req, res) => {
     });
   } catch (err) {
     fail(res, "daily-updates", err);
+  }
+});
+
+// ── Daily Reports ─────────────────────────────────────────────────────────────
+// The daily logbook (dbo.DependencyActivityDailyLog): one row per activity per day it was reported on, grouped
+// by project. "Rate" is the progress made that day - the day's progress % minus the previous reported day's
+// (the first report counts from 0) - next to the progress reached. Date range = the log date. The day-over-day
+// difference is worked out over the whole logbook BEFORE the date filter, so the first day in a range still
+// shows its true progress made.
+router.get("/daily-reports", authMiddleware, guard, async (req, res) => {
+  const p = parseCommon(req);
+  try {
+    const conds = [...projectConds(req, p)];
+    if (p.dateFrom) conds.push("dl.LogDate >= @dateFrom");
+    if (p.dateTo) conds.push("dl.LogDate <= @dateTo");
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+    const from = `
+      FROM (
+        SELECT l.Id, l.DependencyMasterActivityId, l.LogDate, l.ProgressPercent, l.Remarks, l.CreatedBy, l.UpdatedBy,
+          CASE WHEN l.ProgressPercent IS NULL THEN NULL
+               ELSE l.ProgressPercent - ISNULL(LAG(l.ProgressPercent) OVER (PARTITION BY l.DependencyMasterActivityId ORDER BY l.LogDate), 0)
+          END AS ProgressMade
+        FROM dbo.DependencyActivityDailyLog l
+      ) dl
+      JOIN dbo.DependencyMasterActivity dma ON dma.Id = dl.DependencyMasterActivityId
+      JOIN dbo.DependencyActivityAssignment daa ON daa.DependencyMasterActivityId = dma.Id AND daa.IsCurrent = 1
+      JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+      JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+      LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+      LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+      LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+      LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId`;
+    await sendPage(res, await getPool(), p, {
+      core: `SELECT dl.Id AS logId, dl.LogDate AS logDate, ${ACTIVITY_COLUMNS},
+        daa.Status AS status, dl.ProgressPercent AS progressPercent, dl.ProgressMade AS progressMade,
+        dl.Remarks AS remarks, COALESCE(dl.UpdatedBy, dl.CreatedBy) AS loggedBy
+        ${from} ${where}`,
+      countSql: `SELECT COUNT(*) AS total ${from} ${where}`,
+      orderBy: "ep.name, dl.LogDate DESC, dm.Id, dma.SequenceNo, dl.Id DESC",
+      bind: bindFilters(p),
+    });
+  } catch (err) {
+    fail(res, "daily-reports", err);
   }
 });
 

@@ -17,6 +17,7 @@ import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -813,10 +814,10 @@ const CrmPaymentMilestones: React.FC = () => {
                           <span className="text-muted-foreground">Collected</span>
                           <span className="font-medium text-green-600 tabular-nums">{fmt(summary.totalPaid)}</span>
                         </div>
-                        {bookingOnAccountReceived > 0 && (
+                        {onAccountBalance > 0 && (
                           <div className="flex items-baseline justify-between">
-                            <span className="text-blue-600 flex items-center gap-1"><Wallet size={11} /> Held On-Account (not yet applied)</span>
-                            <span className="text-blue-600 font-medium tabular-nums">{fmt(bookingOnAccountReceived)}</span>
+                            <span className="text-blue-600 flex items-center gap-1"><Wallet size={11} /> Available On-Account (unapplied)</span>
+                            <span className="text-blue-600 font-medium tabular-nums">{fmt(onAccountBalance)}</span>
                           </div>
                         )}
                         {totalPendingVerification > 0 && (
@@ -968,33 +969,53 @@ const CrmPaymentMilestones: React.FC = () => {
                     <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" /> Full booking amount is on-account — every eligible milestone auto-settles automatically, in order.
                   </div>
                 )}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {onAccountData.payments.map((p: any) => {
                     const remaining = Number(p.Amount) - Number(p.AppliedAmount || 0);
                     const canApply = remaining > 0 && p.Status !== "Applied" && !notFullyPaid;
+                    const isApplied = p.Status === "Applied";
+                    const isPartial = p.Status === "PartiallyApplied";
+                    const borderAccent = isApplied
+                      ? "border-l-emerald-400"
+                      : isPartial
+                      ? "border-l-blue-400"
+                      : "border-l-sky-400";
                     return (
-                      <div key={p.Id} className="flex items-center justify-between gap-3 text-xs">
-                        <span className="text-muted-foreground min-w-0">
-                          <span className="font-medium text-foreground">{p.ReceiptNo}</span>
-                          {" · "}{fmt(p.Amount)}
-                          {p.PaymentMode ? ` · ${p.PaymentMode}` : ""}
-                          {p.ReceivedDate ? ` · ${fmtDate(p.ReceivedDate)}` : ""}
+                      <div
+                        key={p.Id}
+                        className={`flex items-center justify-between gap-3 rounded-lg border border-border border-l-4 ${borderAccent} px-3 py-2 ${isApplied ? "bg-muted/20 opacity-70" : "bg-background"}`}
+                      >
+                        {/* Left: receipt info */}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono text-xs font-semibold text-foreground">{p.ReceiptNo}</span>
+                            <span className="text-xs text-muted-foreground">{fmt(p.Amount)}</span>
+                            {p.PaymentMode && <span className="text-xs text-muted-foreground">· {p.PaymentMode}</span>}
+                            {p.ReceivedDate && <span className="text-xs text-muted-foreground">· {fmtDate(p.ReceivedDate)}</span>}
+                          </div>
                           {remaining > 0 && remaining < Number(p.Amount) && (
-                            <span className="text-emerald-700 font-medium"> · {fmt(remaining)} remaining</span>
+                            <div className="text-[0.6875rem] text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
+                              {fmt(remaining)} remaining
+                            </div>
                           )}
-                        </span>
+                        </div>
+                        {/* Right: badge + action */}
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <span className={`px-1.5 py-0.5 rounded-full border font-medium ${
-                            p.Status === "Applied" ? "text-green-600 bg-green-50 border-green-200"
-                            : p.Status === "PartiallyApplied" ? "text-blue-600 bg-blue-50 border-blue-200"
-                            : "text-sky-600 bg-sky-50 border-sky-200"
+                          <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${
+                            isApplied
+                              ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-700 dark:text-emerald-300"
+                              : isPartial
+                              ? "text-blue-700 bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-700 dark:text-blue-300"
+                              : "text-sky-700 bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-700 dark:text-sky-300"
                           }`}>
-                            {p.Status === "PartiallyApplied" ? "Partial" : p.Status}
+                            {isApplied ? "✓ Applied" : isPartial ? "Partial" : "Unapplied"}
                           </span>
                           {canApply && (
-                            <button onClick={() => openApplyDialog(p, null)}
+                            <button
+                              onClick={() => openApplyDialog(p, null)}
                               title="This deposit should auto-apply once its milestone is eligible — use this only as a manual fallback"
-                              className="px-2 py-0.5 rounded border border-blue-400 text-blue-600 bg-white dark:bg-transparent hover:bg-blue-50 font-medium transition-colors">
+                              className="text-[0.6875rem] px-2 py-0.5 rounded border border-blue-400 text-blue-600 bg-white dark:bg-transparent hover:bg-blue-50 font-medium transition-colors whitespace-nowrap"
+                            >
                               Apply Manually
                             </button>
                           )}
@@ -1069,11 +1090,21 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 <div>
                   <label className={LABEL}>Payment Mode</label>
-                  <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value, BankName: modeHasBank(e.target.value) ? f.BankName : "" }))}
-                    className={FIELD}>
-                    <option value="">Select mode</option>
-                    {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
-                  </select>
+                  <Select
+                    value={payForm.PaymentMode || "__none__"}
+                    onValueChange={(v) => {
+                      const mode = v === "__none__" ? "" : v;
+                      setPayForm((f) => ({ ...f, PaymentMode: mode, BankName: modeHasBank(mode) ? f.BankName : "" }));
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-full text-sm">
+                      <SelectValue placeholder="Select mode" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Select mode</SelectItem>
+                      {PAY_MODES.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
                 {previewOverflow > 0 && (
                   <div className="col-span-2 sm:col-span-3">
@@ -1148,38 +1179,39 @@ const CrmPaymentMilestones: React.FC = () => {
             <DialogHeader><DialogTitle className="font-heading">Add Custom Milestone</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Milestone Name *</label>
+                <label className={LABEL}>Milestone Name *</label>
                 <input type="text" value={addForm.MilestoneName}
                   onChange={(e) => setAddForm((f) => ({ ...f, MilestoneName: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
-                  placeholder="e.g. PLC Charges" />
+                  className={FIELD}
+                  placeholder="e.g. PLC Charges"
+                  autoFocus />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Due Date</label>
+                  <label className={LABEL}>Due Date</label>
                   <DateInput value={addForm.DueDate}
                     onChange={(e) => setAddForm((f) => ({ ...f, DueDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    className={FIELD} />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Amount Due (₹)</label>
+                  <label className={LABEL}>Amount Due (₹)</label>
                   <input type="number" value={addForm.AmountDue}
                     onChange={(e) => setAddForm((f) => ({ ...f, AmountDue: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    className={`${FIELD} tabular-nums`} />
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Responsible Department</label>
+                <label className={LABEL}>Responsible Department</label>
                 <input type="text" value={addForm.ResponsibleDepartment}
                   onChange={(e) => setAddForm((f) => ({ ...f, ResponsibleDepartment: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                  className={FIELD}
                   placeholder="e.g. Construction, Legal, Sales" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Required Documents</label>
+                <label className={LABEL}>Required Documents</label>
                 <input type="text" value={addForm.RequiredDocuments}
                   onChange={(e) => setAddForm((f) => ({ ...f, RequiredDocuments: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                  className={FIELD}
                   placeholder="e.g. Completion Certificate" />
               </div>
             </div>
@@ -1219,11 +1251,21 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 <div>
                   <label className={LABEL}>Payment Mode</label>
-                  <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value, BankName: modeHasBank(e.target.value) ? f.BankName : "" }))}
-                    className={FIELD}>
-                    <option value="">Select mode</option>
-                    {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
-                  </select>
+                  <Select
+                    value={onAccountForm.PaymentMode || "__none__"}
+                    onValueChange={(v) => {
+                      const mode = v === "__none__" ? "" : v;
+                      setOnAccountForm((f) => ({ ...f, PaymentMode: mode, BankName: modeHasBank(mode) ? f.BankName : "" }));
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-full text-sm">
+                      <SelectValue placeholder="Select mode" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Select mode</SelectItem>
+                      {PAY_MODES.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
                 {modeHasBank(onAccountForm.PaymentMode) && (
                   <div className="col-span-2 sm:col-span-1">
@@ -1301,39 +1343,48 @@ const CrmPaymentMilestones: React.FC = () => {
 
                   {applyDialog.milestone ? (
                     <div>
-                      <p className="text-xs text-muted-foreground mb-1">Applying to milestone</p>
-                      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm font-medium">
+                      <p className={LABEL}>Applying to milestone</p>
+                      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium">
                         {applyDialog.milestone.MilestoneName}
                         <span className="ml-2 text-xs font-normal text-muted-foreground">({fmt(milBalance)} outstanding)</span>
                       </div>
                     </div>
                   ) : (
                     <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Apply to milestone <span className="text-red-500">*</span></label>
-                      <select value={applyMilestoneId} onChange={(e) => {
-                        setApplyMilestoneId(e.target.value);
-                        const m = milestones.find((x: any) => String(x.Id) === e.target.value);
-                        if (m) {
-                          const bal = Number(m.AmountDue) - Number(m.AmountPaid || 0);
-                          setApplyDialog((d) => d ? { ...d, amount: String(Math.min(remaining, bal)) } : d);
-                        }
-                      }} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                        <option value="">— select —</option>
-                        {unpaidMilestones.map((m: any) => (
-                          <option key={m.Id} value={String(m.Id)}>
-                            {m.MilestoneName} — {fmt(Number(m.AmountDue) - Number(m.AmountPaid || 0))} due
-                          </option>
-                        ))}
-                      </select>
+                      <label className={LABEL}>Apply to milestone <span className="text-red-500">*</span></label>
+                      <Select
+                        value={applyMilestoneId || "__none__"}
+                        onValueChange={(v) => {
+                          const val = v === "__none__" ? "" : v;
+                          setApplyMilestoneId(val);
+                          const m = milestones.find((x: any) => String(x.Id) === val);
+                          if (m) {
+                            const bal = Number(m.AmountDue) - Number(m.AmountPaid || 0);
+                            setApplyDialog((d) => d ? { ...d, amount: String(Math.min(remaining, bal)) } : d);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-9 w-full text-sm">
+                          <SelectValue placeholder="— select milestone —" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— select —</SelectItem>
+                          {unpaidMilestones.map((m: any) => (
+                            <SelectItem key={m.Id} value={String(m.Id)}>
+                              {m.MilestoneName} — {fmt(Number(m.AmountDue) - Number(m.AmountPaid || 0))} due
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
 
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Amount to apply</label>
+                    <label className={LABEL}>Amount to apply</label>
                     <input type="number" min="1" max={remaining}
                       value={applyDialog.amount}
                       onChange={(e) => setApplyDialog((d) => d ? { ...d, amount: e.target.value } : d)}
-                      className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                      className={`${FIELD} tabular-nums`} />
                     {chosenMil && milBalance > 0 && (
                       <p className="text-xs text-muted-foreground mt-1">
                         Milestone outstanding: {fmt(milBalance)} · Available: {fmt(remaining)}
@@ -1344,9 +1395,9 @@ const CrmPaymentMilestones: React.FC = () => {
 
                   <div className="flex justify-end gap-2 pt-1 border-t border-border">
                     <button onClick={() => setApplyDialog(null)}
-                      className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                      className="h-9 px-4 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                     <button onClick={handleConfirmApply} disabled={saving || !applyDialog.amount || (!applyDialog.milestone && !applyMilestoneId)}
-                      className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40">
+                      className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40">
                       {saving ? "Applying…" : `Apply ${applyDialog.amount ? fmt(parseFloat(applyDialog.amount)) : ""}`}
                     </button>
                   </div>
@@ -1370,22 +1421,22 @@ const CrmPaymentMilestones: React.FC = () => {
                   Waiving <span className="font-medium text-foreground">{waiveDialog.milestone.MilestoneName}</span> ({fmt(waiveDialog.milestone.AmountDue)}) marks it as cleared without payment. This cannot be undone.
                 </p>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Reason *</label>
+                  <label className={LABEL}>Reason *</label>
                   <textarea
                     value={waiveDialog.reason}
                     onChange={(e) => setWaiveDialog((d) => d ? { ...d, reason: e.target.value } : d)}
                     rows={3}
                     placeholder="e.g. Discount approved by management, PLC waiver agreed in negotiation…"
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none"
+                    className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-shadow"
                     autoFocus
                   />
                 </div>
                 <div className="flex justify-end gap-2 pt-3 border-t border-border">
                   <button onClick={() => setWaiveDialog(null)}
-                    className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                    className="h-9 px-4 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                   <button onClick={handleWaiveConfirm}
                     disabled={waiving || !waiveDialog.reason.trim()}
-                    className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
+                    className="h-9 px-4 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                     {waiving ? "Waiving..." : "Confirm Waive"}
                   </button>
                 </div>

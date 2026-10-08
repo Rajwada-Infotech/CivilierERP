@@ -1,5 +1,6 @@
 import { API_BASE_URL } from "./apiBase";
 import { reportGatewayFailure, reportSystemRecovered, setHealthCheck } from "./systemStatus";
+import { sendToMaintenancePage } from "./maintenanceRedirect";
 
 // While a new build is going live, nginx answers 502 (or 504) for the few seconds the backend restarts.
 // That is not an application error. Every call to our own API goes through here (the browser's fetch is
@@ -60,6 +61,7 @@ export function createGatewayFetch(native: FetchFn, delays: number[] = GATEWAY_R
       const response = await native(input, init);
       if (!isGatewayFailure(response)) {
         if (retries > 0) reportSystemRecovered();
+        if (response.status === 503) await sendToMaintenancePage(response);
         return response;
       }
       reportGatewayFailure();

@@ -18,6 +18,7 @@ import {
   type ApprovalLevel,
 } from "@/api/dependencyActivityAssignmentApi";
 import { getRoomBlueprint } from "@/api/roomMasterApi";
+import { chainFloorDisplay, roomDisplay } from "@/lib/floorLabel";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
@@ -336,7 +337,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
 
   const defaultDescription = useMemo(
     () =>
-      `Work for ${chain.projectName || "—"}, ${chain.towerName || "—"}, Floor ${chain.floor}, ${chain.flatName || "—"}, ${chain.roomName || "—"} and ${rung.activityName}`,
+      `Work for ${chain.projectName || "—"}, ${chain.towerName || "—"}, ${chainFloorDisplay(chain.floor)}, ${chain.flatName || "—"}, ${roomDisplay(chain.roomName, chain.storey)} and ${rung.activityName}`,
     [chain, rung],
   );
 

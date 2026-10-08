@@ -7,8 +7,10 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Search, Plus, CheckCircle2, AlertTriangle, ExternalLink, ArrowRightLeft, X, Wallet, Landmark, ReceiptText, Banknote, Building2 } from "lucide-react";
+import { Search, Plus, CheckCircle2, AlertTriangle, ExternalLink, ArrowRightLeft, Wallet, Landmark, ReceiptText, Banknote, Building2, PenLine } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -23,6 +25,9 @@ const PROJECT_BANK_API = "/api/crm/project-banks";
 const CUSTOMER_BANK_API = "/api/crm/customer-bank-details";
 const PAGE_SIZE = 20;
 
+const LABEL = "text-[0.6875rem] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5";
+const FIELD = "w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-shadow";
+
 const STATUS_TABS = ["All", "Draft", "Pending", "FinancePending", "FinanceApproved", "Paid", "Rejected"] as const;
 const statusColor: Record<string, string> = {
   Draft: "text-slate-600 bg-slate-50 border-slate-200",
@@ -32,11 +37,19 @@ const statusColor: Record<string, string> = {
   Paid: "text-green-600 bg-green-50 border-green-200",
   Rejected: "text-red-600 bg-red-50 border-red-200",
 };
+// What each status means to a reader. A refund has one Finance step: CRM
+// approval raises its payout voucher, which Finance approves in Payments.
+const STATUS_LABEL: Record<string, string> = {
+  Pending: "Awaiting CRM approval",
+  FinancePending: "Voucher not raised",
+  FinanceApproved: "With Finance",
+};
 const SOURCE_LABEL: Record<string, string> = {
   CancellationHeldCredit: "Cancelled booking",
   OverpaymentOnAccount: "Overpayment",
   Manual: "Manual",
 };
+const PAY_MODES = ["NEFT", "RTGS", "IMPS", "UPI", "Cheque"];
 const fmt = (n: number | null | undefined) => (n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—");
 
 interface Filters { search: string; companyId: string; projectId: string; blockId: string; status: string }
@@ -69,9 +82,20 @@ async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
-async function fetchCustomerBankDetail(bookingId?: number | null): Promise<any | null> {
-  if (bookingId == null) return null;
-  try { const r = await fetchWithAuth(`${CUSTOMER_BANK_API}/booking/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
+// Fetch ALL bank accounts on file for this booking's customer — lets staff
+// pick from a dropdown rather than typing from memory. Falls back to manual
+// entry if none exist.
+async function fetchCustomerBanks(bookingId?: number | null): Promise<any[]> {
+  if (bookingId == null) return [];
+  try {
+    const r = await fetchWithAuth(`${CUSTOMER_BANK_API}/booking/${bookingId}`);
+    if (!r.ok) return [];
+    const d = await r.json();
+    // Endpoint may return a single object or an array
+    if (Array.isArray(d)) return d;
+    if (d && (d.BankName || d.AccountNo)) return [d];
+    return [];
+  } catch { return []; }
 }
 
 // ── New refund / re-booking dialog ─────────────────────────────────────────
@@ -105,6 +129,8 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
   const [reason, setReason] = useState("");
   const [bankLHeadId, setBankLHeadId] = useState("");
   const [paymentMode, setPaymentMode] = useState("");
+  // Customer bank: either a picked bank ID from dropdown, or manual entry
+  const [selectedBankId, setSelectedBankId] = useState<string>(""); // "__manual__" = manual entry
   const [cbName, setCbName] = useState("");
   const [cbAcc, setCbAcc] = useState("");
   const [cbIfsc, setCbIfsc] = useState("");
@@ -118,22 +144,29 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
     enabled: picked?.ProjectId != null,
   });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, enabled: mode === "rebook", staleTime: 5 * 60_000 });
-  const { data: customerBank } = useQuery({
-    queryKey: ["crm-refund-customer-bank", picked?.BookingId],
-    queryFn: () => fetchCustomerBankDetail(picked?.BookingId),
+  const { data: customerBanks = [] } = useQuery({
+    queryKey: ["crm-refund-customer-banks", picked?.BookingId],
+    queryFn: () => fetchCustomerBanks(picked?.BookingId),
     enabled: picked?.BookingId != null,
   });
-  // Pre-fill the payout bank details from the customer's on-file KYC the
-  // moment a source is picked — staff shouldn't have to retype what's
-  // already on record. Fields stay fully editable so a bank account that's
-  // changed since KYC was captured can be corrected right here, at the
-  // moment of refund, without going back to update KYC first.
+
+  // When customer banks load: if exactly one bank on file, auto-select it.
+  // If multiple, leave blank so staff consciously picks one.
   useEffect(() => {
-    if (!customerBank) return;
-    setCbName(customerBank.BankName || "");
-    setCbAcc(customerBank.AccountNo || "");
-    setCbIfsc(customerBank.IfscCode || "");
-  }, [customerBank]);
+    if (!picked) return;
+    if (customerBanks.length === 1) {
+      const b = customerBanks[0];
+      setSelectedBankId("__bank_0__");
+      setCbName(b.BankName || "");
+      setCbAcc(b.AccountNo || "");
+      setCbIfsc(b.IfscCode || "");
+    } else if (customerBanks.length === 0) {
+      // No bank on file — open manual entry immediately
+      setSelectedBankId("__manual__");
+    } else {
+      setSelectedBankId("");
+    }
+  }, [customerBanks, picked]);
 
   const remaining = picked ? Number(picked.Remaining) : 0;
   const amt = Number(amount) || 0;
@@ -146,6 +179,21 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
 
   const canRebook = picked?.SourceType === "CancellationHeldCredit";
   useEffect(() => { if (!canRebook && mode === "rebook") setMode("refund"); }, [canRebook, mode]);
+
+  const isManual = selectedBankId === "__manual__";
+  const hasBanks = customerBanks.length > 0;
+
+  // When a bank is picked from the dropdown, pre-fill the fields
+  const handleBankSelect = (val: string) => {
+    setSelectedBankId(val);
+    if (val === "__manual__") {
+      setCbName(""); setCbAcc(""); setCbIfsc("");
+      return;
+    }
+    const idx = parseInt(val.replace("__bank_", "").replace("__", ""));
+    const b = customerBanks[idx];
+    if (b) { setCbName(b.BankName || ""); setCbAcc(b.AccountNo || ""); setCbIfsc(b.IfscCode || ""); }
+  };
 
   const submit = async () => {
     setSaving(true);
@@ -192,18 +240,31 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
           {/* Step 1 — where the money comes from */}
           <Section icon={Wallet} title="Source of funds">
             <div>
-              <select value={picked ? String(picked.OnAccountId) : ""} onChange={(e) => {
-                const s = (sources as any[]).find((x) => String(x.OnAccountId) === e.target.value) || null;
-                setPicked(s); setAmount(s ? String(Number(s.Remaining)) : ""); setBankLHeadId("");
-                setCbName(""); setCbAcc(""); setCbIfsc("");
-              }} className="w-full text-sm border border-border rounded-lg px-2.5 py-2.5 bg-background">
-                <option value="">Select a held credit or overpayment…</option>
-                {(sources as any[]).map((s) => (
-                  <option key={`${s.SourceType}-${s.OnAccountId}`} value={String(s.OnAccountId)}>
-                    {SOURCE_LABEL[s.SourceType]} · {s.CustomerName} · {s.BookingNo}{s.CancellationNo ? ` (${s.CancellationNo})` : ""} · {fmt(s.Remaining)} left
-                  </option>
-                ))}
-              </select>
+              <label className={LABEL}>Select held credit or overpayment</label>
+              <Select
+                value={picked ? String(picked.OnAccountId) : "__none__"}
+                onValueChange={(v) => {
+                  const s = v === "__none__" ? null : (sources as any[]).find((x) => String(x.OnAccountId) === v) || null;
+                  setPicked(s);
+                  setAmount(s ? String(Number(s.Remaining)) : "");
+                  setBankLHeadId("");
+                  // Fix: clear bank fields synchronously so stale data never shows
+                  setSelectedBankId("");
+                  setCbName(""); setCbAcc(""); setCbIfsc("");
+                }}
+              >
+                <SelectTrigger className="h-9 w-full text-sm">
+                  <SelectValue placeholder="Select a held credit or overpayment…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Select a held credit or overpayment…</SelectItem>
+                  {(sources as any[]).map((s) => (
+                    <SelectItem key={`${s.SourceType}-${s.OnAccountId}`} value={String(s.OnAccountId)}>
+                      {SOURCE_LABEL[s.SourceType]} · {s.CustomerName} · {s.BookingNo}{s.CancellationNo ? ` (${s.CancellationNo})` : ""} · {fmt(s.Remaining)} left
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {!sources.length ? (
                 <p className="text-[0.6875rem] text-muted-foreground mt-1.5">No held credits or unapplied overpayments right now — a refund can only be raised against one.</p>
               ) : picked && (
@@ -230,7 +291,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
               <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0"
-                className="w-full text-sm border border-border rounded-lg pl-7 pr-24 py-2.5 bg-background" />
+                className={`${FIELD} pl-7 pr-20`} />
               {picked && (
                 <button type="button" onClick={() => setAmount(String(remaining))}
                   className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[0.6875rem] font-medium px-2 py-1 rounded-md border border-border text-muted-foreground hover:bg-muted">
@@ -271,56 +332,122 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
             </Section>
           ) : (
             <Section icon={Landmark} title="Payout details">
+              {/* Company bank */}
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Company bank (disburses from)</label>
-                <select value={bankLHeadId} onChange={(e) => setBankLHeadId(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                  <option value="">Finance will pick at approval</option>
-                  {(banks as any[]).map((b) => (
-                    <option key={b.BId} value={String(b.BId)}>
-                      {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
-                    </option>
-                  ))}
-                </select>
+                <label className={LABEL}>Company bank (disburses from)</label>
+                <Select value={bankLHeadId || "__none__"} onValueChange={(v) => setBankLHeadId(v === "__none__" ? "" : v)}>
+                  <SelectTrigger className="h-9 w-full text-sm">
+                    <SelectValue placeholder="Finance will pick at approval" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Finance will pick at approval</SelectItem>
+                    {(banks as any[]).map((b) => (
+                      <SelectItem key={b.BId} value={String(b.BId)}>
+                        {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <SelectedBankCard bank={findBank(banks as any[], bankLHeadId)} />
               </div>
+
+              {/* Payment mode */}
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Payment mode (optional — Finance can set this later)</label>
-                <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                  <option value="">Not set yet</option>
-                  <option value="NEFT">NEFT</option>
-                  <option value="RTGS">RTGS</option>
-                  <option value="IMPS">IMPS</option>
-                  <option value="UPI">UPI</option>
-                  <option value="Cheque">Cheque</option>
-                </select>
+                <label className={LABEL}>Payment mode <span className="text-muted-foreground/60 normal-case font-normal tracking-normal">(optional — Finance can set this later)</span></label>
+                <Select value={paymentMode || "__none__"} onValueChange={(v) => setPaymentMode(v === "__none__" ? "" : v)}>
+                  <SelectTrigger className="h-9 w-full text-sm">
+                    <SelectValue placeholder="Not set yet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Not set yet</SelectItem>
+                    {PAY_MODES.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
+
+              {/* Customer payout account — dropdown if banks on file, manual entry otherwise */}
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[0.6875rem] text-muted-foreground">Customer payout account</label>
-                  {customerBank && (cbName || cbAcc || cbIfsc) && (
-                    <span className="text-[0.625rem] text-emerald-600 dark:text-emerald-400">Pre-filled from KYC — edit if it's changed</span>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className={LABEL + " mb-0"}>Customer payout account</label>
+                  {hasBanks && selectedBankId && selectedBankId !== "__manual__" && (
+                    <button type="button" onClick={() => setSelectedBankId("__manual__")}
+                      className="text-[0.625rem] flex items-center gap-1 text-primary hover:underline">
+                      <PenLine size={10} /> Enter manually instead
+                    </button>
+                  )}
+                  {isManual && hasBanks && (
+                    <button type="button" onClick={() => setSelectedBankId("")}
+                      className="text-[0.625rem] flex items-center gap-1 text-primary hover:underline">
+                      ← Pick from saved banks
+                    </button>
                   )}
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  <input value={cbName} onChange={(e) => setCbName(e.target.value)} placeholder="Bank name" className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                  <input value={cbAcc} onChange={(e) => setCbAcc(e.target.value)} placeholder="Account No" className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                  <input value={cbIfsc} onChange={(e) => setCbIfsc(e.target.value)} placeholder="IFSC" className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                </div>
-                {picked?.BookingId != null && !customerBank?.BankName && !customerBank?.AccountNo && (
-                  <p className="text-[0.6875rem] text-sky-600 dark:text-sky-400 mt-1">No bank details on file for this customer — enter them manually before raising the refund.</p>
+
+                {/* Bank picker dropdown — shown when customer has banks on file AND not in manual mode */}
+                {hasBanks && !isManual && (
+                  <Select value={selectedBankId || "__none__"} onValueChange={handleBankSelect}>
+                    <SelectTrigger className="h-9 w-full text-sm">
+                      <SelectValue placeholder="Select customer's bank account…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Select customer's bank account…</SelectItem>
+                      {(customerBanks as any[]).map((b, i) => (
+                        <SelectItem key={i} value={`__bank_${i}__`}>
+                          {b.BankName || "—"}{b.BranchName ? ` · ${b.BranchName}` : ""} · A/C {b.AccountNo ? `••${String(b.AccountNo).slice(-4)}` : "—"}
+                          {b.IfscCode ? ` · ${b.IfscCode}` : ""}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="__manual__"><span className="flex items-center gap-1.5"><PenLine size={11} />Enter different account manually</span></SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {/* Selected bank preview card */}
+                {selectedBankId && selectedBankId !== "__manual__" && selectedBankId !== "__none__" && (cbName || cbAcc) && (
+                  <div className="mt-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                    {cbName && <><span className="text-muted-foreground">Bank</span><span className="font-medium">{cbName}</span></>}
+                    {cbAcc && <><span className="text-muted-foreground">A/C No.</span><span className="font-mono font-medium">{cbAcc}</span></>}
+                    {cbIfsc && <><span className="text-muted-foreground">IFSC</span><span className="font-mono font-medium">{cbIfsc}</span></>}
+                    <span className="col-span-2 text-emerald-600 dark:text-emerald-400 text-[0.625rem] mt-0.5">Pre-filled from KYC — switch to manual if account has changed</span>
+                  </div>
+                )}
+
+                {/* Manual entry fields — shown when: no banks on file, or staff clicked "Enter manually" */}
+                {(!hasBanks || isManual) && (
+                  <div className="space-y-2">
+                    <div>
+                      <BankNamePicker
+                        value={cbName}
+                        onChange={(v) => setCbName(v)}
+                        placeholder="Select customer's bank…"
+                        otherPlaceholder="Bank name (if not listed)"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input value={cbAcc} onChange={(e) => setCbAcc(e.target.value)} placeholder="Account No" className={FIELD} />
+                      <input value={cbIfsc} onChange={(e) => setCbIfsc(e.target.value.toUpperCase())} placeholder="IFSC" className={FIELD} />
+                    </div>
+                    {!hasBanks && picked?.BookingId != null && (
+                      <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400">
+                        ⚠ No bank details on file for this customer — enter them here before raising the refund.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
+
+              {/* Reason */}
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Reason</label>
+                <label className={LABEL}>Reason</label>
                 <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this refund is being raised"
-                  className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
+                  className={FIELD} />
               </div>
             </Section>
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <button onClick={onClose} className="px-3.5 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={submit} disabled={saving} className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40 flex items-center gap-1.5">
+            <button onClick={onClose} className="h-9 px-4 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+            <button onClick={submit} disabled={saving} className="h-9 px-5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40 flex items-center gap-1.5">
               {saving ? "Saving…" : mode === "rebook" ? <><ArrowRightLeft size={14} />Apply Credit</> : <><Banknote size={14} />Raise Refund</>}
             </button>
           </div>
@@ -370,7 +497,7 @@ const CrmRefunds: React.FC = () => {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       toast.success(action === "finance-approve" ? `Payout voucher ${d.docNo || ""} raised` : "Sent back to CRM");
-      setFinanceDialog(null); setFinanceBank("");
+      setFinanceDialog(null); setFinanceBank(""); setFinanceMode("");
       invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
@@ -391,7 +518,7 @@ const CrmRefunds: React.FC = () => {
       const s = i.getValue() as string;
       return (
         <div className="flex flex-col gap-1">
-          <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium w-fit ${statusColor[s] || "text-muted-foreground bg-muted/50 border-border"}`}>{s}</span>
+          <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium w-fit ${statusColor[s] || "text-muted-foreground bg-muted/50 border-border"}`}>{STATUS_LABEL[s] || s}</span>
           {i.row.original.IsOverdue ? <span className="flex items-center gap-1 text-[0.625rem] text-red-600"><AlertTriangle size={10} /> RERA overdue</span> : null}
         </div>
       );
@@ -401,19 +528,19 @@ const CrmRefunds: React.FC = () => {
       return (
         <div className="flex items-center gap-2 flex-wrap justify-end">
           {["Draft", "Pending", "Rejected"].includes(r.Status) && (
-            <ApprovalActions status={r.Status} recordId={r.Id} endpoint={API} onSuccess={invalidate} extraSubmitStatuses={["Draft"]} />
+            <ApprovalActions status={r.Status} recordId={r.Id} endpoint={API} onSuccess={invalidate} extraSubmitStatuses={["Draft"]} submitOnly />
           )}
           {r.Status === "FinancePending" && rights.canEdit && (
             <>
               <button onClick={() => { setFinanceDialog(r); setFinanceBank(r.RefundBankLHeadId != null ? String(r.RefundBankLHeadId) : ""); setFinanceMode(r.PreferredPaymentMode || ""); }}
-                className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200">Finance Approve</button>
+                className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200" title="Raises the payout voucher in Finance → Payments, where Finance approves it">Send to Finance</button>
               <button onClick={() => financeAction(r.Id, "finance-reject", { note: "Sent back" })}
                 className="text-xs px-2 py-1 text-red-600 hover:underline">Send back</button>
             </>
           )}
           {r.FinanceNewPaymentId != null && (
             <button onClick={() => navigate(`/payments?view=${r.FinanceNewPaymentId}`)}
-              className="text-xs text-primary hover:underline flex items-center gap-1">Payment <ExternalLink size={11} /></button>
+              className="text-xs text-primary hover:underline flex items-center gap-1">{r.Status === "Paid" ? "Payment" : "Open in Payments"} <ExternalLink size={11} /></button>
           )}
           {r.Status === "Paid" && <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Paid</span>}
         </div>
@@ -439,23 +566,27 @@ const CrmRefunds: React.FC = () => {
           </div>
         }
       >
-        <div className="flex gap-3 flex-wrap items-center mb-3">
-          <div className="relative flex-1 min-w-48">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { setSearch(searchInput); setPage(1); } }}
-              placeholder="Search customer, refund no, booking, cancellation… (Enter)"
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+        <div className="space-y-2 mb-3">
+          {/* Row 1: search + status tabs */}
+          <div className="flex gap-3 flex-wrap items-center">
+            <div className="relative flex-1 min-w-48">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { setSearch(searchInput); setPage(1); } }}
+                placeholder="Search customer, refund no, booking, cancellation… (Enter)"
+                className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {STATUS_TABS.map((s) => (
+                <button key={s} onClick={() => { setStatus(s); setPage(1); }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${status === s ? "btn-module text-white border-transparent" : "bg-background border-border text-muted-foreground hover:bg-muted"}`}>
+                  {STATUS_LABEL[s] || s}
+                </button>
+              ))}
+            </div>
           </div>
+          {/* Row 2: company / project / block */}
           <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
-          <div className="flex flex-wrap gap-1.5">
-            {STATUS_TABS.map((s) => (
-              <button key={s} onClick={() => { setStatus(s); setPage(1); }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${status === s ? "btn-module text-white border-transparent" : "bg-background border-border text-muted-foreground hover:bg-muted"}`}>
-                {s}
-              </button>
-            ))}
-          </div>
         </div>
 
         <DataTable data={rows} columns={columns} searchable={false} loading={isLoading}
@@ -465,9 +596,10 @@ const CrmRefunds: React.FC = () => {
 
         {showNew && <NewRefundDialog onClose={() => setShowNew(false)} onDone={invalidate} />}
 
+        {/* Finance approve dialog */}
         <Dialog open={!!financeDialog} onOpenChange={(o) => { if (!o) { setFinanceDialog(null); setFinanceBank(""); setFinanceMode(""); } }}>
           <DialogContent className="max-w-md">
-            <DialogHeader><DialogTitle className="font-heading">Finance-approve refund {financeDialog?.RefundNo}</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle className="font-heading">Send refund {financeDialog?.RefundNo} to Finance</DialogTitle></DialogHeader>
             <div className="space-y-3 text-sm">
               <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 <div><span className="text-muted-foreground block">Customer</span>{financeDialog?.CustomerName}</div>
@@ -475,34 +607,41 @@ const CrmRefunds: React.FC = () => {
                 <div className="col-span-2"><span className="text-muted-foreground block">To</span>{financeDialog?.CustomerBankName || "—"} {financeDialog?.CustomerAccountNo || ""} {financeDialog?.CustomerIfscCode || ""}</div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Company bank to disburse from *</label>
-                <select value={financeBank} onChange={(e) => setFinanceBank(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                  <option value="">Select…</option>
-                  {(financeBanks as any[]).map((b) => (
-                    <option key={b.BId} value={String(b.BId)}>
-                      {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
-                    </option>
-                  ))}
-                </select>
+                <label className={LABEL}>Company bank to disburse from *</label>
+                <Select value={financeBank || "__none__"} onValueChange={(v) => setFinanceBank(v === "__none__" ? "" : v)}>
+                  <SelectTrigger className="h-9 w-full text-sm">
+                    <SelectValue placeholder="Select…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select…</SelectItem>
+                    {(financeBanks as any[]).map((b) => (
+                      <SelectItem key={b.BId} value={String(b.BId)}>
+                        {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <SelectedBankCard bank={findBank(financeBanks as any[], financeBank)} />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Payment mode (optional — can be set later)</label>
-                <select value={financeMode} onChange={(e) => setFinanceMode(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                  <option value="">Not set yet</option>
-                  <option value="NEFT">NEFT</option>
-                  <option value="RTGS">RTGS</option>
-                  <option value="IMPS">IMPS</option>
-                  <option value="UPI">UPI</option>
-                  <option value="Cheque">Cheque</option>
-                </select>
+                <label className={LABEL}>Payment mode <span className="text-muted-foreground/60 normal-case font-normal tracking-normal">(optional — can be set later)</span></label>
+                <Select value={financeMode || "__none__"} onValueChange={(v) => setFinanceMode(v === "__none__" ? "" : v)}>
+                  <SelectTrigger className="h-9 w-full text-sm">
+                    <SelectValue placeholder="Not set yet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Not set yet</SelectItem>
+                    {PAY_MODES.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               <p className="text-[0.6875rem] text-muted-foreground">Approving raises a Finance payment voucher. The refund is marked Paid when that voucher is approved.</p>
               <div className="flex justify-end gap-2">
-                <button onClick={() => { setFinanceDialog(null); setFinanceBank(""); setFinanceMode(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={() => { setFinanceDialog(null); setFinanceBank(""); setFinanceMode(""); }}
+                  className="h-9 px-4 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                 <button onClick={() => financeAction(financeDialog.Id, "finance-approve", { RefundBankLHeadId: financeBank || undefined, PaymentMode: financeMode || undefined })}
                   disabled={!financeBank}
-                  className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40">Raise Payout</button>
+                  className="h-9 px-4 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40">Raise Payout</button>
               </div>
             </div>
           </DialogContent>

@@ -525,6 +525,9 @@ async function createApp() {
     app.use("/api", apiLimiter);
   }
 
+  // Maintenance switch (Admin > System Maintenance): while on, only a super admin gets past this.
+  app.use("/api", require("./middleware/maintenanceGate").maintenanceGate);
+
   app.get("/", (req, res) => res.send("CivilierERP API running"));
   app.use("/health", require("./routes/health"));
   app.use("/api/users", require("./routes/users"));
@@ -535,6 +538,8 @@ async function createApp() {
   // "New: X just launched" badge on the Login page — public/pre-auth for
   // the same reason as app-version above.
   app.use("/api/feature-announcement", require("./routes/featureAnnouncement"));
+  // Maintenance status is public (the Maintenance page polls it); changing it needs a super admin token.
+  app.use("/api/system-maintenance", require("./routes/systemMaintenance"));
   // APK Manager. Registered here, before the blanket staff auth wall, because
   // GET /latest is called by the mobile apps on launch (possibly before login)
   // to check for an update. Every other route in the file carries its own

@@ -11,6 +11,10 @@ const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
 const router = express.Router();
+
+// A user limited to some projects can't read or change another project's
+// blocks, floors, plots, villas or villa types (services/projectScope.js).
+require("../services/projectScope").setupScopeGuard(router, { params: {}, idPaths: [["/dpr-ready-categories", null], ["/", "villaType"]] });
 const PAGE = "crm-auto-project-setup";
 
 const parseId = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
@@ -46,7 +50,11 @@ const SELECT = `
   SELECT v.Id, v.ProjectId, v.Code, v.Name, v.LayoutTypeId, l.Label AS LayoutLabel,
          v.BaseLandAreaSqFt, v.BuiltUpAreaSqFt, v.SuperBuiltUpAreaSqFt, v.SortOrder, v.IsActive,
          (SELECT COUNT(*) FROM dbo.PlotMaster p WHERE p.PlannedVillaTypeId = v.Id AND p.IsActive = 1) AS PlotCount,
-         (SELECT COUNT(*) FROM dbo.UnitMaster u WHERE u.VillaTypeId = v.Id AND u.IsActive = 1) AS VillaCount
+         (SELECT COUNT(*) FROM dbo.UnitMaster u WHERE u.VillaTypeId = v.Id AND u.IsActive = 1) AS VillaCount,
+         -- the floor plan (migration 539): when set, the type's layout is its own, built from it
+         CAST(CASE WHEN l.OwnerVillaTypeId = v.Id THEN 1 ELSE 0 END AS BIT) AS HasFloorPlan,
+         (SELECT ISNULL(SUM(rp.Quantity), 0) FROM dbo.VillaTypeRoomPlan rp WHERE rp.VillaTypeId = v.Id) AS PlanRoomCount,
+         (SELECT COUNT(DISTINCT rp.Storey) FROM dbo.VillaTypeRoomPlan rp WHERE rp.VillaTypeId = v.Id) AS PlanFloorCount
   FROM dbo.VillaTypeMaster v
   LEFT JOIN dbo.RoomLayoutType l ON l.Id = v.LayoutTypeId
 `;
@@ -118,6 +126,13 @@ router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
     const projectId = cur.recordset[0].ProjectId;
     const layoutError = await checkLayout(pool, v.layoutTypeId);
     if (layoutError) return res.status(400).json({ error: layoutError });
+    // A type with a floor plan owns its layout (built from the plan); a
+    // different layout here would leave its rooms out of step with the plan.
+    const owned = (await pool.request().input("id", sql.Int, id).query(
+      "SELECT TOP 1 l.Id FROM dbo.VillaTypeMaster v JOIN dbo.RoomLayoutType l ON l.Id = v.LayoutTypeId AND l.OwnerVillaTypeId = v.Id WHERE v.Id = @id")).recordset[0];
+    if (owned && v.layoutTypeId !== owned.Id) {
+      return res.status(400).json({ error: "This villa type's rooms come from its floor plan — change them with Rooms, not the layout." });
+    }
     if (wantsActive && await codeTaken(pool, projectId, v.code, id)) return res.status(409).json({ error: `Villa type "${v.code}" already exists in this project` });
     if (!wantsActive) {
       const used = await pool.request().input("id", sql.Int, id)
@@ -157,6 +172,77 @@ router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   } catch (e) {
     console.error("[villa-type-master] DELETE:", e.message);
     res.status(500).json({ error: "Failed to remove the villa type" });
+  }
+});
+
+// GET /dpr-ready-categories?projectId= — room types that already have a DPR
+// step list (an active chain with steps), this project's first. A room of any
+// other type gets no DPR steps when a villa is built, so the plan editor
+// flags it before the plan is saved.
+router.get("/dpr-ready-categories", requirePageRight(PAGE, "view"), async (req, res) => {
+  const projectId = parseId(req.query.projectId);
+  try {
+    const r = await getPool().request().input("p", sql.Int, projectId).query(`
+      SELECT r.RoomCategoryId AS categoryId, MAX(CASE WHEN d.ProjectId = @p THEN 1 ELSE 0 END) AS inProject
+      FROM dbo.DependencyMaster d JOIN dbo.RoomMaster r ON r.Id = d.RoomId
+      WHERE d.IsActive = 1 AND r.RoomCategoryId IS NOT NULL
+        AND EXISTS (SELECT 1 FROM dbo.DependencyMasterActivity x WHERE x.DependencyMasterId = d.Id)
+      GROUP BY r.RoomCategoryId`);
+    res.json(r.recordset);
+  } catch (e) {
+    console.error("[villa-type-master] GET dpr-ready-categories:", e.message);
+    res.status(500).json({ error: "Failed to load DPR readiness" });
+  }
+});
+
+// ── Rooms by floor (migration 539) ───────────────────────────────────────────
+// GET /:id/plan — the villa type's rooms on each of its floors.
+router.get("/:id/plan", requirePageRight(PAGE, "view"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid villa type" });
+  try {
+    res.json({ rooms: await require("../services/villaComposition").getPlan(getPool(), id) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/plan { rooms: [{ storey, categoryId, quantity }] } — saves the
+// plan, rebuilds the type's own room layout from it, and brings every villa
+// already built to this type in line: missing rooms are added (with their
+// DPR steps) and every room gets its floor. Rooms are never removed here —
+// a room no longer in the plan is kept and reported by the DPR health check.
+router.put("/:id/plan", requirePageRight(PAGE, "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid villa type" });
+  const { savePlan, applyStoreys, VillaPlanError } = require("../services/villaComposition");
+  const { syncUnitRooms, bumpFlatMasterCaches } = require("../services/unitLayout");
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const saved = await savePlan(tx, id, req.body?.rooms, req.user?.email || null);
+    // The plan is for villas converted from now on. Villas already built keep
+    // their rooms (and the DPR work on them) — one is changed only on purpose,
+    // with Villa type > Apply on that villa, or when updateVillas is sent.
+    const villas = req.body?.updateVillas !== true ? [] : (await tx.request().input("v", sql.Int, id).input("lt", sql.Int, saved.layoutTypeId).input("l", sql.NVarChar(50), saved.label).query(`
+      UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @l, UpdatedAt = SYSDATETIME()
+      OUTPUT INSERTED.Id
+      WHERE VillaTypeId = @v AND IsActive = 1`)).recordset;
+    let roomsAdded = 0;
+    for (const v of villas) {
+      const s = await syncUnitRooms(tx, v.Id, { removeUnused: false, createdBy: req.user?.userId || null });
+      roomsAdded += s.created + (s.reactivated || 0);
+      await applyStoreys(tx, v.Id);
+    }
+    await tx.commit();
+    await bumpFlatMasterCaches().catch(() => {});
+    res.json({ success: true, roomCount: saved.roomCount, villasUpdated: villas.length, roomsAdded });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+    if (e instanceof VillaPlanError) return res.status(e.status).json({ error: e.message });
+    console.error("[villa-types] PUT plan:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

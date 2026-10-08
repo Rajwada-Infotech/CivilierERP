@@ -43,7 +43,15 @@ const EXPIRABLE_BOOKING_SQL = `
   AND NOT EXISTS (SELECT 1 FROM dbo.CrmMoneyReceipt mr WHERE mr.BookingId = bk.Id AND ISNULL(mr.Amount, 0) > 0
                     AND ISNULL(mr.Status, N'') NOT IN (N'Rejected', N'Cancelled', N'Bounced'))
   AND NOT EXISTS (SELECT 1 FROM dbo.CrmOnAccountPayment oa WHERE oa.BookingId = bk.Id AND ISNULL(oa.Amount, 0) > 0
-                    AND ISNULL(oa.Status, N'') NOT IN (N'Rejected', N'Cancelled', N'Bounced', N'Refunded'))`;
+                    AND ISNULL(oa.Status, N'') NOT IN (N'Rejected', N'Cancelled', N'Bounced', N'Refunded'))
+  -- A plot booking with a live villa booking on its land never lapses on its
+  -- own: that would leave the villa sold on land nobody owns
+  -- (services/villaLand.js villaBookedOnLandOf).
+  AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot lbp
+                    JOIN dbo.PlotMaster lp ON lp.Id = lbp.PlotId AND lp.ConvertedUnitId IS NOT NULL
+                    JOIN dbo.CrmBooking vb ON vb.UnitId = lp.ConvertedUnitId
+                  WHERE lbp.BookingId = bk.Id AND lbp.Status = N'Active' AND vb.Id <> bk.Id AND vb.IsActive = 1
+                    AND vb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred'))`;
 const COOLDOWN_HOURS = 24; // don't re-notify the same overdue record within this window
 
 // Customer side has no Users.id to notify through — a CrmCommunicationLog

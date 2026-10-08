@@ -4,6 +4,7 @@
 // which this was extracted from), reused here so Work Allocation and
 // Reporting present the exact same location hierarchy instead of each
 // page having its own flat, single-level "group by chain" list.
+import { storeyDisplay, storeyRank as sharedStoreyRank } from "@/lib/floorLabel";
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, FolderTree, Building, Layers, Home, DoorOpen, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 
@@ -17,6 +18,8 @@ export interface ScopeLocatable {
   flatName?: string | null;
   roomId: number | null;
   roomName?: string | null;
+  /** A villa room's own floor inside the villa (G, 1, 2 …); null for flats. */
+  storey?: string | null;
 }
 
 interface TreeNode<T> {
@@ -25,6 +28,7 @@ interface TreeNode<T> {
   children: TreeNode<T>[];
   items: T[]; // only at room level
   count: number; // items underneath
+  level: number; // index into LEVELS (which icon / colour)
 }
 
 const LEVELS = [
@@ -37,37 +41,46 @@ const LEVELS = [
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const floorRank = (f: string) => (f === "G" ? -1 : Number.isFinite(Number(f)) ? Number(f) : Number.MAX_SAFE_INTEGER);
+// A villa's own floors, inside the unit (the reverse of a tower).
+// A villa room's own floor: shared naming/order (src/lib/floorLabel.ts).
+const storeyRank = sharedStoreyRank;
+const storeyLabel = storeyDisplay;
 // A villa in a plotted block has no floor; its chains carry the plot label instead.
 const floorLabel = (f: string) => (!f ? "No floor" : f === "G" ? "Ground Floor" : Number.isFinite(Number(f)) ? `Floor ${f}` : f);
 
 function buildTree<T extends ScopeLocatable>(rows: T[], getCount: (item: T) => number): TreeNode<T>[] {
   const root = new Map<string, TreeNode<T>>();
-  const child = (map: Map<string, TreeNode<T>>, key: string, label: string) => {
+  const child = (map: Map<string, TreeNode<T>>, key: string, label: string, level: number) => {
     let n = map.get(key);
-    if (!n) { n = { key, label, children: [], items: [], count: 0 }; map.set(key, n); }
+    if (!n) { n = { key, label, children: [], items: [], count: 0, level }; map.set(key, n); }
     return n;
   };
   const kids = new Map<string, Map<string, TreeNode<T>>>();
   const kidMap = (n: TreeNode<T>) => kids.get(n.key) || kids.set(n.key, new Map()).get(n.key)!;
 
   for (const r of rows) {
-    const p = child(root, `p${r.projectId}`, r.projectName || `Project ${r.projectId}`);
-    const b = child(kidMap(p), `${p.key}/b${r.towerId}`, r.towerName ? `Block ${r.towerName}` : "No block");
-    const f = child(kidMap(b), `${b.key}/f${r.floor}`, floorLabel(r.floor));
-    const u = child(kidMap(f), `${f.key}/u${r.flatId}`, r.flatName || `Unit ${r.flatId}`);
-    const rm = child(kidMap(u), `${u.key}/r${r.roomId}`, r.roomName || `Room ${r.roomId}`);
+    const p = child(root, `p${r.projectId}`, r.projectName || `Project ${r.projectId}`, 0);
+    const b = child(kidMap(p), `${p.key}/b${r.towerId}`, r.towerName ? `Block ${r.towerName}` : "No block", 1);
+    const f = child(kidMap(b), `${b.key}/f${r.floor}`, floorLabel(r.floor), 2);
+    const u = child(kidMap(f), `${f.key}/u${r.flatId}`, r.flatName || `Unit ${r.flatId}`, 3);
+    // A villa room sits on one of the villa's own floors: Ground / 1 / 2 …
+    const s = r.storey ? child(kidMap(u), `${u.key}/s${r.storey}`, storeyLabel(r.storey), 2) : null;
+    const rm = child(kidMap(s || u), `${(s || u).key}/r${r.roomId}`, r.roomName || `Room ${r.roomId}`, 4);
     rm.items.push(r);
     const c = getCount(r);
-    for (const n of [p, b, f, u, rm]) n.count += c;
+    for (const n of [p, b, f, u, s, rm]) if (n) n.count += c;
   }
 
   const finish = (map: Map<string, TreeNode<T>>, depth: number): TreeNode<T>[] => {
     const nodes = [...map.values()];
     for (const n of nodes) n.children = finish(kidMap(n), depth + 1);
+    const isStorey = (n: TreeNode<T>) => /\/s[^/]*$/.test(n.key);
     return nodes.sort((a, b) =>
       depth === 2
         ? floorRank(a.key.split("/f").pop()!) - floorRank(b.key.split("/f").pop()!)
-        : collator.compare(a.label, b.label),
+        : isStorey(a) && isStorey(b)
+          ? storeyRank(a.key.split("/s").pop()!) - storeyRank(b.key.split("/s").pop()!)
+          : collator.compare(a.label, b.label),
     );
   };
   return finish(root, 0);
@@ -133,7 +146,7 @@ export function ScopeLocationTree<T extends ScopeLocatable>({
   // space for it.
   const indentFor = (depth: number) => 12 + Math.min(depth, 3) * INDENT;
   const renderNode = (node: TreeNode<T>, depth: number) => {
-    const Level = LEVELS[depth];
+    const Level = LEVELS[node.level] ?? LEVELS[LEVELS.length - 1];
     const expanded = isOpen(node.key);
     return (
       <div key={node.key} className={`min-w-0 ${depth === 0 ? "rounded-xl border border-border/60 bg-card" : ""}`}>

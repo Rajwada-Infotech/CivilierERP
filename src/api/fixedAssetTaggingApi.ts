@@ -63,6 +63,8 @@ export interface UnassignedFAItemCode {
   ProjectName: string | null;
   GodownId: number | null;
   GodownName: string | null;
+  /** Asset Category captured at FA Inventory import — the Depreciation Tag reuses it. */
+  AssetCategory?: string | null;
 }
 
 export interface TaggingPayload {

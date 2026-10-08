@@ -146,6 +146,18 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
         WHERE p.Id = @p AND vb.IsActive = 1 AND vb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')`);
       if (villaBooked.recordset.length)
         return res.status(409).json({ error: `The villa on this plot is already booked (${villaBooked.recordset[0].BookingNo}). A plot with a booked villa can't be resold as bare land.` });
+      // An open application or hold on the villa is a claim made under the
+      // current owner — it has to be closed before the land changes hands.
+      const villaClaim = (await pool.request().input("p", sql.Int, plotId).query(`
+        SELECT TOP 1 COALESCE(a.ApplicationNo, N'a hold') AS Ref
+        FROM dbo.PlotMaster p
+        LEFT JOIN dbo.CrmApplication a ON a.PreferredUnitId = p.ConvertedUnitId AND a.IsActive = 1
+          AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')
+        LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = N'Unit' AND h.EntityId = p.ConvertedUnitId
+          AND h.Status = N'Active' AND h.HoldUntil >= SYSDATETIME()
+        WHERE p.Id = @p AND p.ConvertedUnitId IS NOT NULL AND (a.Id IS NOT NULL OR h.Id IS NOT NULL)`)).recordset[0];
+      if (villaClaim)
+        return res.status(409).json({ error: `The villa on this plot has an open application or hold (${villaClaim.Ref}). Close it before reselling the plot.` });
       fromBookingId = row.BookingId;
       fromCustomerId = row.CustomerId;
       // Snapshotted so a later rate change cannot restate an already-agreed gain.

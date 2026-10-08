@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { chainFloorDisplay } from "@/lib/floorLabel";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -551,7 +552,7 @@ const WorkerAttendance: React.FC = () => {
   // down further — never an option that would empty it out.
   const floorOptions = useMemo(
     () =>
-      Array.from(new Set(activities.map((a: ActivityOption) => a.floor).filter((f): f is string => !!f))).sort(),
+      Array.from(new Set(activities.map((a: ActivityOption) => a.floor).filter((f): f is string => !!f))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
     [activities],
   );
   const activitiesForFloor = useMemo(
@@ -716,7 +717,7 @@ const WorkerAttendance: React.FC = () => {
               >
                 <option value="">All Floors</option>
                 {floorOptions.map((f) => (
-                  <option key={f} value={f}>{f}</option>
+                  <option key={f} value={f}>{chainFloorDisplay(f)}</option>
                 ))}
               </select>
             </div>

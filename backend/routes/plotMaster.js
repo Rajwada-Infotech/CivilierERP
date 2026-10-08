@@ -5,6 +5,10 @@ const { getEffectiveType } = require("../services/projectType");
 
 const router = express.Router();
 
+// A user limited to some projects can't read or change another project's
+// blocks, floors, plots, villas or villa types (services/projectScope.js).
+require("../services/projectScope").setupScopeGuard(router, { params: { blockId: "block" }, idPaths: [["/constructed-kinds", null], ["/", "plot"]] });
+
 const PAGE = "crm-auto-project-setup";
 const MAX_GRID = 60;
 const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
@@ -34,6 +38,11 @@ const PLOT_SELECT = `
          p.GridRow, p.GridCol,
          p.PlannedVillaTypeId, vt.Code AS PlannedVillaTypeCode, vt.Name AS PlannedVillaTypeName,
          p.ConvertedUnitId, p.ConvertedAt, converted.UnitName AS ConvertedUnitName,
+         -- the villa's own type and what it was built to
+         converted.VillaTypeId AS ConvertedVillaTypeId, cvt.Code AS ConvertedVillaTypeCode, cvt.Name AS ConvertedVillaTypeName,
+         converted.BuiltUpAreaSqFt AS ConvertedBuiltUpAreaSqFt,
+         (SELECT COUNT(*) FROM dbo.RoomMaster vr WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1) AS ConvertedRoomCount,
+         (SELECT COUNT(DISTINCT vr.Storey) FROM dbo.RoomMaster vr WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1 AND vr.Storey IS NOT NULL) AS ConvertedFloorCount,
          (SELECT COUNT(*) FROM dbo.PlotAdjacency pa
             JOIN dbo.PlotMaster o ON o.Id = CASE WHEN pa.PlotId = p.Id THEN pa.AdjacentPlotId ELSE pa.PlotId END
            WHERE (pa.PlotId = p.Id OR pa.AdjacentPlotId = p.Id) AND o.IsActive = 1) AS AdjacentPlotCount,
@@ -42,6 +51,7 @@ const PLOT_SELECT = `
   JOIN dbo.enterprise e ON e.id = p.ProjectId
   JOIN dbo.BlockMaster b ON b.Id = p.BlockId
   LEFT JOIN dbo.UnitMaster converted ON converted.Id = p.ConvertedUnitId
+  LEFT JOIN dbo.VillaTypeMaster cvt ON cvt.Id = converted.VillaTypeId
   LEFT JOIN dbo.VillaTypeMaster vt ON vt.Id = p.PlannedVillaTypeId
   OUTER APPLY (
     SELECT TOP 1 cb.BookingNo
@@ -231,13 +241,13 @@ router.put("/planned-villa-type", requirePageRight(PAGE, "edit"), async (req, re
   }
 });
 
-router.get("/blocks", requirePageRight(PAGE, "view"), async (_req, res) => {
+router.get("/blocks", requirePageRight(PAGE, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const rows = (await pool.request().query(`
       SELECT b.Id AS BlockId, b.BlockName, b.ProjectId, e.name AS ProjectName
       FROM dbo.BlockMaster b JOIN dbo.enterprise e ON e.id = b.ProjectId
-      WHERE b.IsActive = 1
+      WHERE b.IsActive = 1${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId")}
     `)).recordset;
     const checked = await Promise.all(rows.map(async (row) => {
       try {
@@ -397,6 +407,8 @@ router.get("/", requirePageRight(PAGE, "view"), async (req, res) => {
     const pool = getPool();
     const request = pool.request();
     const where = ["p.IsActive = 1"];
+    // A user limited to some projects sees only their plots.
+    if (req.projectScope) where.push(require("../services/projectScope").projectPredicate(req.projectScope, "p.ProjectId", "").trim());
     if (req.query.projectId != null) {
       const projectId = parseId(req.query.projectId);
       if (projectId === null) return res.status(400).json({ error: "Invalid projectId" });

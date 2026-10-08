@@ -5,7 +5,7 @@ import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getRoomsForUnit } from "@/api/roomMasterApi";
-import { floorLabel, floorDisplay } from "@/lib/floorLabel";
+import { floorLabel, floorDisplay, roomDisplay, VILLA_FLOOR } from "@/lib/floorLabel";
 import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
@@ -258,7 +258,7 @@ export default function WorkDone() {
   // reused here rather than duplicated against a second API shape.
   const unitsForProject = useMemo(() => {
     if (!form.ProjectId) return [];
-    return (units as any[]).filter((u: any) => String(u.ProjectId) === form.ProjectId);
+    return (units as any[]).filter((u: any) => String(u.ProjectId) === form.ProjectId && !u.IsLand);
   }, [units, form.ProjectId]);
 
   const towersForProject = useMemo(() => {
@@ -277,14 +277,16 @@ export default function WorkDone() {
   const floorsForTower = useMemo(() => {
     const set = new Set<string>();
     unitsForTower.forEach((u: any) => {
-      if (u.FloorNo != null) set.add(String(u.FloorNo));
+      if (u.IsVilla) set.add(VILLA_FLOOR);
+      else if (u.FloorNo != null) set.add(String(u.FloorNo));
     });
-    return Array.from(set).sort((a, b) => Number(a) - Number(b));
+    // Villas (no tower floor) come after the numbered floors.
+    return Array.from(set).sort((a, b) => (a === VILLA_FLOOR ? 1 : b === VILLA_FLOOR ? -1 : Number(a) - Number(b)));
   }, [unitsForTower]);
 
   const unitsForFloor = useMemo(() => {
     if (!form.FloorNo) return [];
-    return unitsForTower.filter((u: any) => String(u.FloorNo) === form.FloorNo);
+    return unitsForTower.filter((u: any) => (form.FloorNo === VILLA_FLOOR ? !!u.IsVilla : !u.IsVilla && String(u.FloorNo) === form.FloorNo));
   }, [unitsForTower, form.FloorNo]);
 
   // Dependency link — appears once a Room is selected. Both sides are now
@@ -305,7 +307,8 @@ export default function WorkDone() {
         String(d.towerId) === form.BlockId &&
         // Dependency Master stores the floor as a label ("G", "1", "2", …);
         // the form holds UnitMaster.FloorNo ("0" for Ground) — compare labels.
-        String(d.floor) === floorLabel(form.FloorNo) &&
+        // A villa's chains carry "Plot N" — the unit + room already pin it.
+        (form.FloorNo === VILLA_FLOOR || String(d.floor) === floorLabel(form.FloorNo)) &&
         String(d.flatId) === form.UnitId &&
         String(d.roomId) === form.RoomId,
     );
@@ -530,7 +533,7 @@ export default function WorkDone() {
                     <LocationChip
                       icon={DoorOpen}
                       label="Room"
-                      value={roomInstances.find((r) => String(r.Id) === form.RoomId)?.RoomName || form.RoomId}
+                      value={(() => { const r = roomInstances.find((x) => String(x.Id) === form.RoomId); return r ? roomDisplay(r.RoomName, r.Storey) : form.RoomId; })()}
                       onClear={() => handleRoomChange("")}
                     />
                   ) : (
@@ -553,7 +556,7 @@ export default function WorkDone() {
                         </option>
                         {roomInstances.map((r) => (
                           <option key={r.Id} value={String(r.Id)}>
-                            {r.RoomName}
+                            {roomDisplay(r.RoomName, r.Storey)}
                           </option>
                         ))}
                       </select>
@@ -631,7 +634,7 @@ export default function WorkDone() {
                       <option value="">Select a dependency chain…</option>
                       {matchingDependencies.map((d) => (
                         <option key={d.id} value={String(d.id)}>
-                          {d.alias} — {d.roomName || "Room"} — {d.workType} ({d.activityCount} step{d.activityCount === 1 ? "" : "s"})
+                          {d.alias} — {roomDisplay(d.roomName, d.storey)} — {d.workType} ({d.activityCount} step{d.activityCount === 1 ? "" : "s"})
                         </option>
                       ))}
                     </select>

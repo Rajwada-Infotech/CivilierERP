@@ -32,6 +32,7 @@ const SELECT_COLUMNS = `
   dl.RoomId                  AS roomId,
   rm.RoomName                AS roomName,
   rm.Floor                   AS floor,
+  rm.Storey                  AS storey,
   dl.Shift                 AS shift,
   dl.AttendanceStatus      AS attendanceStatus,
   dl.Remarks               AS remarks,

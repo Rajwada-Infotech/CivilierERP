@@ -65,6 +65,12 @@ interface MatrixUnit {
   // this is what the grouping below branches on rather than inferring
   // 'plot' from a missing floor, which a floor-less unit would also satisfy.
   IsPlot?: boolean;
+  IsVilla?: boolean;
+  // A villa can only be booked by whoever owns all the plots it stands on.
+  VillaLandSold?: boolean | null;
+  VillaLandOwner?: string | null;
+  VillaTypeCode?: string | null;
+  BuiltUpAreaSqFt?: number | null;
   PlotNo?: string | null;
   Facing?: string | null;
   IsCornerPlot?: boolean | null;
@@ -318,7 +324,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
         </DialogHeader>
 
         {unit.BlockName && (
-          <p className="text-xs text-muted-foreground -mt-2">{unit.BlockName}{unit.FloorNo != null ? ` · Floor ${unit.FloorNo}` : ""}{unit.AreaSqFt ? ` · ${unit.AreaSqFt} sqft` : ""}</p>
+          <p className="text-xs text-muted-foreground -mt-2">{unit.BlockName}{unit.IsVilla ? " · Villa" : unit.FloorNo != null ? ` · Floor ${unit.FloorNo}` : ""}{unit.AreaSqFt ? ` · ${unit.AreaSqFt} sqft` : ""}</p>
         )}
 
         <div className="rounded-xl border border-border p-4 space-y-2">
@@ -512,7 +518,7 @@ export function UnitMatrixPage() {
       // Plots are not on a floor, and lumping them into "Floor —" would
       // put them beside genuinely floor-less units, which are a data
       // problem rather than a different product.
-      const floorKey = u.IsPlot ? "Plots" : u.FloorNo != null ? `Floor ${u.FloorNo}` : "Floor —";
+      const floorKey = u.IsPlot ? "Plots" : u.IsVilla ? "Villas" : u.FloorNo != null ? `Floor ${u.FloorNo}` : "Floor —";
       if (!byBlock.has(blockKey)) byBlock.set(blockKey, new Map());
       const floors = byBlock.get(blockKey)!;
       if (!floors.has(floorKey)) floors.set(floorKey, []);
@@ -667,6 +673,9 @@ export function UnitMatrixPage() {
                                 <div className="flex items-center justify-between gap-2 mb-1.5">
                                   <span className="font-bold text-sm text-foreground truncate">{u.UnitName}</span>
                                   {/* Commercial units (shop, office…) — name from the unit kind master. */}
+                                  {u.IsVilla && u.VillaTypeCode && (
+                                    <span className="shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-700 dark:text-violet-300" title={u.BuiltUpAreaSqFt ? `${Number(u.BuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft built-up` : undefined}>{u.VillaTypeCode}</span>
+                                  )}
                                   {!!u.IsCommercial && u.KindName && (
                                     <span className="shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-300">{u.KindName}</span>
                                   )}
@@ -681,7 +690,7 @@ export function UnitMatrixPage() {
                                         <Clock size={11} className="shrink-0" />
                                         {u.HoldApplicantName || u.ApplicantName || "—"}
                                       </>
-                                    ) : "—"}
+                                    ) : u.IsVilla ? (u.VillaLandSold ? `Plot owner only: ${u.VillaLandOwner || "—"}` : "Sold as a whole villa") : "—"}
                                 </div>
                               </button>
                             ))}

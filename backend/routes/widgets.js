@@ -967,7 +967,7 @@ router.get("/", async (req, res) => {
               (SELECT COUNT(*) FROM dbo.SaLead WHERE IsActive = 1 AND CAST(DateGenerated AS DATE) = CAST(GETDATE() AS DATE)) AS LeadsToday,
               (SELECT COUNT(*) FROM dbo.SaLead WHERE IsActive = 1 AND Status = 'Hot') AS HotLeads,
               (SELECT COUNT(*) FROM dbo.SaCampaign WHERE IsActive = 1 AND Status = 'Active') AS ActiveCampaigns,
-              (SELECT COUNT(*) FROM dbo.CrmBooking WHERE IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Transferred')) AS ActiveCrmBookings,
+              (SELECT COUNT(*) FROM dbo.CrmBooking WHERE IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')) AS ActiveCrmBookings,
               (SELECT COUNT(*) FROM dbo.SaLead l WHERE l.IsActive = 1 AND EXISTS (
                 SELECT 1 FROM dbo.SaLeadActivity a WHERE a.LeadId = l.Id AND a.NextFollowupDate IS NOT NULL AND a.NextFollowupDate <= CAST(GETDATE() AS DATE)
               )) AS PendingFollowups,
