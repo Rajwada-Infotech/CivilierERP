@@ -332,8 +332,12 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   }
   if (preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "") {
     const unit = await pool.request().input("uid", sql.Int, parseInt(preferredUnitId))
-      .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+      .query(`SELECT UnitName,
+                CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmConstructedAssetKind k WHERE k.Code = UnitKind AND k.IsLand = 1) THEN 1 ELSE 0 END AS IsLand
+              FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1`);
     if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
+    // Land is sold through the plot list (CrmApplicationPlot), never as a unit.
+    if (unit.recordset[0].IsLand) throw new CrmCreationError("This is land — choose it from the plot list, not as a unit.");
     unitName = unit.recordset[0].UnitName;
 
     // Reject the pick up front if the unit is already spoken for — before any

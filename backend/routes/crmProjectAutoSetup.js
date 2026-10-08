@@ -1413,7 +1413,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
             FROM dbo.CrmUnitPaymentPlan upp
             WHERE upp.UnitId = u.Id AND upp.IsActive = 1
           ) tags
-          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred')
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
           LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
           WHERE u.BlockId = @bid AND u.FloorNo IS NULL AND u.IsActive = 1
@@ -1432,7 +1432,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
             FROM dbo.CrmUnitPaymentPlan upp
             WHERE upp.UnitId = u.Id AND upp.IsActive = 1
           ) tags
-          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred')
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
           LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
           LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
           WHERE u.BlockId = @bid AND u.FloorNo = @fno AND u.IsActive = 1

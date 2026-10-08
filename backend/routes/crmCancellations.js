@@ -134,7 +134,7 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
     if (!bookingId) return res.status(400).json({ error: "bookingId is required" });
 
     const bkgRow = await pool.request().input("bid", sql.Int, parseInt(bookingId))
-      .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Transferred')");
+      .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')");
     if (!bkgRow.recordset.length) return res.status(404).json({ error: "Booking not found or not eligible for cancellation" });
 
     const { ProjectId, BookingDate } = bkgRow.recordset[0];

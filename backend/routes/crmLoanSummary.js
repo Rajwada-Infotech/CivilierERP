@@ -23,7 +23,7 @@ router.get("/", requirePageRight("crm-loan-details", "view"), async (req, res) =
     const req0 = pool.request();
     const conds = [
       "b.IsActive = 1",
-      `b.Status NOT IN ('${cancelled}', '${rejected}')`,
+      `b.Status NOT IN ('${cancelled}', '${rejected}', 'Expired')`,
     ];
     // Not paginated — status-tab counts and disbursed totals are computed
     // client-side from the full set (see CrmLoanTracking.tsx), same
