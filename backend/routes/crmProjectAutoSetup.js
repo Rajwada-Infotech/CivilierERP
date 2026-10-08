@@ -2448,6 +2448,94 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   }
 });
 
+// Give a villa that is already built its villa type (or a different one), and
+// rebuild its rooms floor by floor from the type's plan. For villas converted
+// before their type had a plan, or built to the wrong type. Allowed only while
+// no DPR work has started on it (the same test undo uses): its rooms and
+// chains are still untouched stubs, so they are re-cut to the plan. Rooms of a
+// category the plan keeps return with their Id and their chain; new rooms get
+// fresh chains; rooms the plan drops are retired with their chains.
+router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const unitId = Number(req.params.unitId);
+  const villaTypeId = Number(req.body?.VillaTypeId);
+  if (!Number.isInteger(unitId) || unitId <= 0) return res.status(400).json({ error: "Invalid villa" });
+  if (!Number.isInteger(villaTypeId) || villaTypeId <= 0) return res.status(400).json({ error: "Choose a villa type" });
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  const fail = async (status, error) => { try { await tx.rollback(); } catch (_) { /* already rolled back */ } return res.status(status).json({ error }); };
+  try {
+    await tx.request().query("SET XACT_ABORT ON");
+    const q = (text) => tx.request().input("u", sql.Int, unitId).input("vt", sql.Int, villaTypeId).query(text);
+    const unit = (await q(`SELECT u.Id, u.UnitName, u.ProjectId, u.VillaTypeId FROM dbo.UnitMaster u WITH (UPDLOCK)
+                           WHERE u.Id = @u AND u.IsActive = 1
+                             AND EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)`)).recordset[0];
+    if (!unit) return fail(404, "That is not an active villa built on a plot");
+    const vt = (await q(`SELECT v.Id, v.Code, v.Name, v.ProjectId, v.LayoutTypeId, l.Label AS LayoutLabel
+                         FROM dbo.VillaTypeMaster v LEFT JOIN dbo.RoomLayoutType l ON l.Id = v.LayoutTypeId AND l.IsActive = 1
+                         WHERE v.Id = @vt AND v.IsActive = 1`)).recordset[0];
+    if (!vt) return fail(400, "Select an active villa type");
+    if (vt.ProjectId !== unit.ProjectId) return fail(400, "That villa type belongs to a different project");
+    if (!vt.LayoutLabel) return fail(400, `${vt.Name} has no rooms yet — set them with Rooms in Villa types first`);
+    const work = (await q(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.DependencyActivityAssignment a
+           JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
+           JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
+          WHERE d.FlatId = @u AND (ISNULL(a.Status, N'PENDING') NOT IN (N'PENDING', N'CANCELLED') OR a.EngineerId IS NOT NULL OR a.StartDate IS NOT NULL)) AS Steps,
+        (SELECT COUNT(*) FROM dbo.DailyLabourEntry l JOIN dbo.RoomMaster r ON r.Id = l.RoomId WHERE r.UnitId = @u) AS Labour,
+        (SELECT COUNT(*) FROM dbo.ActivityBlueprintAnnotation b JOIN dbo.RoomMaster r ON r.Id = b.RoomId WHERE r.UnitId = @u) AS Drawings,
+        (SELECT COUNT(*) FROM dbo.RoomMaster r WHERE r.UnitId = @u AND r.BlueprintFileData IS NOT NULL) AS Blueprints`)).recordset[0];
+    if (work.Steps || work.Labour || work.Drawings || work.Blueprints) {
+      return fail(409, `Work has started on ${unit.UnitName} (${work.Steps} step(s), ${work.Labour} labour entr(ies), ${work.Drawings + work.Blueprints} drawing(s)) — its rooms can't be re-cut now`);
+    }
+    // 1. Retire the untouched stubs (steps cancelled the way a manual cancel records it).
+    await q(`UPDATE a SET PreCancelStatus = a.Status, Status = N'CANCELLED', UpdatedAt = SYSDATETIME()
+             FROM dbo.DependencyActivityAssignment a
+             JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
+             JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
+             WHERE d.FlatId = @u AND d.IsActive = 1 AND a.Status = N'PENDING'`);
+    await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
+    await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1 AND RoomCategoryId IS NOT NULL");
+    // 2. The type and its own layout; the villa's areas stay as built.
+    await q("UPDATE dbo.UnitMaster SET VillaTypeId = @vt, LayoutTypeId = (SELECT LayoutTypeId FROM dbo.VillaTypeMaster WHERE Id = @vt), UpdatedAt = SYSDATETIME() WHERE Id = @u");
+    await tx.request().input("u", sql.Int, unitId).input("l", sql.NVarChar(50), vt.LayoutLabel).query("UPDATE dbo.UnitMaster SET UnitType = @l WHERE Id = @u");
+    // 3. Rooms from the plan (an inactive room of the same category comes back first), then their floors.
+    const sync = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
+    await require("../services/villaComposition").applyStoreys(tx, unitId);
+    // 4. A returning room gets its own chain back (steps restored, alias renamed with the room).
+    const revived = await q(`
+      UPDATE d SET IsActive = 1, Alias = LEFT(u.UnitName + N'/' + r.RoomName, 200), UpdatedAt = SYSDATETIME()
+      OUTPUT INSERTED.Id
+      FROM dbo.DependencyMaster d
+      JOIN dbo.RoomMaster r ON r.Id = d.RoomId AND r.IsActive = 1
+      JOIN dbo.UnitMaster u ON u.Id = d.FlatId
+      WHERE d.FlatId = @u AND d.IsActive = 0
+        AND d.Id = (SELECT MAX(d2.Id) FROM dbo.DependencyMaster d2 WHERE d2.RoomId = d.RoomId)`);
+    if (revived.recordset.length) {
+      await tx.request().query(`
+        UPDATE a SET Status = ISNULL(a.PreCancelStatus, N'PENDING'), PreCancelStatus = NULL, UpdatedAt = SYSDATETIME()
+        FROM dbo.DependencyActivityAssignment a
+        JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
+        WHERE x.DependencyMasterId IN (${revived.recordset.map((r) => r.Id).join(",")}) AND a.Status = N'CANCELLED'`);
+    }
+    // 5. Brand-new rooms get chains copied from a room of the same kind.
+    const dpr = await require("../services/autoDprChains").createChainsForUnit(tx, unitId, req.user?.email || req.user?.name || null);
+    await tx.commit();
+    await bumpCacheVersion("unit-master");
+    await bumpFlatMasterCaches();
+    const rooms = (await pool.request().input("u", sql.Int, unitId).query("SELECT COUNT(*) AS n FROM dbo.RoomMaster WHERE UnitId = @u AND IsActive = 1")).recordset[0].n;
+    await logAudit({ module: "PlotConversion", recordId: unitId, recordNo: unit.UnitName, action: "VillaTypeSet",
+      changedBy: req.user?.userId ?? null,
+      notes: `${unit.UnitName} -> ${vt.Code} ${vt.Name}; ${rooms} room(s); ${revived.recordset.length} chain(s) kept, ${dpr.created} new${dpr.skipped.length ? `; no steps yet for ${dpr.skipped.join(", ")}` : ""}` }).catch(() => {});
+    res.json({ success: true, rooms, chainsKept: revived.recordset.length, chainsCreated: dpr.created, roomsWithoutSteps: dpr.skipped, created: sync.created });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+    console.error("[auto-setup] POST villa-type:", e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
 // Undo a plot -> villa conversion made by mistake. Allowed only while nothing
 // real hangs on the villa: no booking / application / hold on it, and no DPR
 // work started (every step still an untouched PENDING stub, no labour or
