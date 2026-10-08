@@ -10,6 +10,7 @@ import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { StatusPill, displayStatus } from "@/components/StatusPill";
 import { ScopeTree } from "@/components/ScopeTree";
+import { ShowMore, useIncremental } from "@/components/ShowMore";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getRoomActivities, getScopeProjects, getScopeSummary, type ActivityAssignment, type ScopeRoom } from "@/api/cwdApi";
 
@@ -49,49 +50,59 @@ function RoomChains({ room, canInspect }: { room: ScopeRoom; canInspect: boolean
 
   return (
     <View style={{ gap: 10, paddingTop: 4 }}>
-      {chains.map(([id, c]) => (
-        <View key={id} style={{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 10, gap: 8 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Text numberOfLines={1} style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{c.alias}</Text>
-            {!!c.workType && (
-              <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: c.workType === "INTERNAL" ? "#f9731622" : "#0ea5e922" }}>
-                <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: c.workType === "INTERNAL" ? "#f97316" : "#0ea5e9" }}>{c.workType}</Text>
-              </View>
-            )}
+      {chains.map(([id, c]) => <ChainCard key={id} c={c} canInspect={canInspect} />)}
+    </View>
+  );
+}
+
+type ChainGroup = { alias: string; workType?: string | null; rungs: ActivityAssignment[] };
+
+// One chain's activities — paged, so a room with hundreds of activities opens instantly.
+function ChainCard({ c, canInspect }: { c: ChainGroup; canInspect: boolean }) {
+  const navigation = useNavigation<{ navigate: (name: string, params?: object) => void }>();
+  const page = useIncremental(c.rungs.length);
+  return (
+        <View style={{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 10, gap: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Text numberOfLines={1} style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{c.alias}</Text>
+        {!!c.workType && (
+          <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: c.workType === "INTERNAL" ? "#f9731622" : "#0ea5e922" }}>
+            <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: c.workType === "INTERNAL" ? "#f97316" : "#0ea5e9" }}>{c.workType}</Text>
           </View>
-          {c.rungs.map((a) => {
-            const shown = displayStatus(a.status, a.resumedAt);
-            const inspect = canInspect && a.status === "COMPLETED" && a.qcStatus !== "APPROVED";
-            return (
+        )}
+      </View>
+      {c.rungs.slice(0, page.count).map((a) => {
+        const shown = displayStatus(a.status, a.resumedAt);
+        const inspect = canInspect && a.status === "COMPLETED" && a.qcStatus !== "APPROVED";
+        return (
+          <TouchableOpacity
+            key={a.assignmentId}
+            activeOpacity={0.7}
+            onPress={() => navigation.navigate("AllocationForm", { rungId: a.rungId })}
+            style={{ borderRadius: 10, backgroundColor: colors.muted, padding: 10, gap: 6 }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+              <Text style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.foreground }}>{a.sequenceNo}. {a.activityName}</Text>
+              <StatusPill status={shown} />
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+              <QcBadge qc={a.qcStatus} />
+              {(a.attemptNo ?? 1) > 1 && <Text style={{ fontSize: 9.5, color: "#d946ef", fontFamily: fonts.heading.semibold }}>Attempt {a.attemptNo}</Text>}
+              <Text numberOfLines={1} style={{ flex: 1, fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>{a.engineerNames || "Not assigned yet"}</Text>
+            </View>
+            {inspect && (
               <TouchableOpacity
-                key={a.assignmentId}
-                activeOpacity={0.7}
-                onPress={() => navigation.navigate("AllocationForm", { rungId: a.rungId })}
-                style={{ borderRadius: 10, backgroundColor: colors.muted, padding: 10, gap: 6 }}
+                onPress={() => navigation.navigate("QcInspect", { rungId: a.rungId })}
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, borderRadius: 10, backgroundColor: ACCENT }}
               >
-                <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-                  <Text style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.foreground }}>{a.sequenceNo}. {a.activityName}</Text>
-                  <StatusPill status={shown} />
-                </View>
-                <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                  <QcBadge qc={a.qcStatus} />
-                  {(a.attemptNo ?? 1) > 1 && <Text style={{ fontSize: 9.5, color: "#d946ef", fontFamily: fonts.heading.semibold }}>Attempt {a.attemptNo}</Text>}
-                  <Text numberOfLines={1} style={{ flex: 1, fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>{a.engineerNames || "Not assigned yet"}</Text>
-                </View>
-                {inspect && (
-                  <TouchableOpacity
-                    onPress={() => navigation.navigate("QcInspect", { rungId: a.rungId })}
-                    style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, borderRadius: 10, backgroundColor: ACCENT }}
-                  >
-                    <ShieldCheck size={13} color="#04181d" />
-                    <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.bold, color: "#04181d" }}>Inspect</Text>
-                  </TouchableOpacity>
-                )}
+                <ShieldCheck size={13} color="#04181d" />
+                <Text style={{ fontSize: 11.5, fontFamily: fonts.heading.bold, color: "#04181d" }}>Inspect</Text>
               </TouchableOpacity>
-            );
-          })}
-        </View>
-      ))}
+            )}
+          </TouchableOpacity>
+        );
+      })}
+      <ShowMore remaining={page.remaining} step={page.step} onPress={page.more} />
     </View>
   );
 }
@@ -132,7 +143,7 @@ export default function WorkAllocationScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 96 }}
+        contentContainerStyle={{ paddingHorizontal: 10, paddingTop: 14, paddingBottom: 96 }}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor={ACCENT} onRefresh={async () => { setRefreshing(true); await Promise.all([summaryQ.refetch(), qc.invalidateQueries({ queryKey: ["cwd-room"] })]); setRefreshing(false); }} />}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 12, paddingHorizontal: 12 }}>

@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Home, ArrowRightLeft, GitBranch, Hammer, FileBarChart, ShieldCheck, Grip, X, User, LogOut, Pickaxe } from "lucide-react-native";
+import { Home, ArrowRightLeft, GitBranch, Hammer, FileBarChart, ShieldCheck, Grip, X, User, LogOut, Pickaxe, Users, FileClock } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
@@ -13,19 +13,29 @@ import type { MainStackParamList } from "./MainStack";
 
 const ACCENT = "#0891b2";
 
-type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "WorkTransfer" | "DependencyManagement" | "WorkAllocation" | "Reporting" | "QualityCheck">;
+type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "WorkTransfer" | "DependencyManagement" | "WorkAllocation" | "Reporting" | "QualityCheck" | "Attendance" | "Amendment">;
 type NavItemDef = { route: NavRoute; label: string; icon: React.ComponentType<{ size?: number; color?: string }>; params?: object; key: string };
 
 const NAV_ITEMS: NavItemDef[] = [
   { key: "Dashboard",  route: "Dashboard",  label: "Dashboard",     icon: Home          },
-  { key: "Transfer",   route: "WorkTransfer", label: "Work Transfer", icon: ArrowRightLeft },
-  { key: "Dependency", route: "DependencyManagement", label: "Dependency Management", icon: GitBranch },
   { key: "Allocation", route: "WorkAllocation", label: "Work Allocation", icon: Hammer },
+  { key: "Transfer",   route: "WorkTransfer", label: "Work Transfer", icon: ArrowRightLeft },
   { key: "Reporting",  route: "Reporting",  label: "Work Reporting", icon: FileBarChart },
   { key: "Quality",    route: "QualityCheck", label: "Quality Check",  icon: ShieldCheck },
+  { key: "Dependency", route: "DependencyManagement", label: "Dependency Management", icon: GitBranch },
+  { key: "Attendance", route: "Attendance", label: "Attendance", icon: Users },
+  { key: "Amendment",  route: "Amendment",  label: "Amendment",     icon: FileClock },
 ];
 
-export function SidebarMenu({ activeRoute }: { activeRoute: string }) {
+export function SidebarMenu() {
+  // Current route, followed from the navigation container's state events. Dashboard is MainStack's initial
+  // route, so it's right before the first event arrives.
+  const [activeRoute, setActiveRoute] = useState("Dashboard");
+  useEffect(() => {
+    const sync = () => { if (navigationRef.isReady()) setActiveRoute(navigationRef.getCurrentRoute()?.name ?? "Dashboard"); };
+    sync();
+    return navigationRef.addListener("state", sync);
+  }, []);
   const insets = useSafeAreaInsets();
   const { currentUser, logout } = useAuth();
   const [open, setOpen] = useState(false);

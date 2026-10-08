@@ -6,6 +6,7 @@
 import { View, Text, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
+import { useIsFocused } from "@react-navigation/native";
 import { Bell } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
@@ -27,6 +28,7 @@ function initialsOf(name?: string) {
 }
 
 export function TopHeader(_props: NativeStackHeaderProps) {
+  const focused = useIsFocused();
   const { currentUser } = useAuth();
   const { alerts } = useCwdAlerts();
   const alertCount = alerts.length;
@@ -38,7 +40,7 @@ export function TopHeader(_props: NativeStackHeaderProps) {
     >
       <View className="flex-row items-center justify-between px-4 py-2.5">
         <View className="flex-1 min-w-0">
-          <AnimatedLogo iconSize={28} />
+          <AnimatedLogo iconSize={28} animate={focused} />
         </View>
 
         <View className="flex-row items-center gap-2.5">

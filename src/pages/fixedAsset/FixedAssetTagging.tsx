@@ -18,7 +18,9 @@ import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { parseSheetDate } from "@/lib/xlsxBook";
 import { createInventoryImport } from "@/api/fixedAssetInventoryImportApi";
-import { downloadFaInventoryTemplate, readFaImportFile, sameName } from "./faInventoryExcel";
+import { downloadFaInventoryTemplate, readFaImportFile } from "./faInventoryExcel";
+import { godownMatches, validateFaImportRows, type FaImportResultRow } from "./faImportValidation";
+import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import {
   getEligibleAssetItems, getPendingBatches, deletePendingBatch, getFixedAssetTaggings, createFixedAssetTagging,
   updateFixedAssetTagging, deleteFixedAssetTagging,
@@ -115,26 +117,7 @@ type ViewMode = "list" | "form";
 // laptops means 10 rows instead of one row with Quantity=10.
 type ImportMode = "bulk" | "individual";
 
-interface ImportRow {
-  row: number;
-  companyId: number;
-  companyLabel: string;
-  projectId: number | null;
-  projectLabel: string;
-  godownId: number | null;
-  godownLabel: string;
-  itemId: string | null;
-  itemCode: string;
-  itemName: string;
-  docDate: string;
-  quantity: number;
-  rate: number | null;
-  remarks?: string;
-  /** FA Item Codes generated for this row once imported. */
-  tagged?: number;
-  status: "valid" | "success" | "error";
-  message?: string;
-}
+type ImportRow = FaImportResultRow;
 
 export default function FixedAssetTagging() {
   const rights = usePageRights("fixed-asset-tagging");
@@ -213,22 +196,21 @@ export default function FixedAssetTagging() {
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(form.companyId));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, form.companyId));
   }, [allProjects, form.companyId]);
 
   const filterProjects = useMemo(() => {
     if (!filterCompany) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(filterCompany));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, filterCompany));
   }, [allProjects, filterCompany]);
 
   const godowns = useMemo(() => {
     if (!form.companyId) return [];
     return ensureArray<Godown>(godownsData?.data)
       .filter((g) => !g.IsDeleted && g.IsActive)
-      .filter((g) => g.EnterpriseID === Number(form.companyId))
-      .filter((g) => !form.projectId || g.ProjectID === Number(form.projectId) || g.ProjectID == null);
+      .filter((g) => godownMatches(g, Number(form.companyId), form.projectId ? Number(form.projectId) : null));
   }, [godownsData, form.companyId, form.projectId]);
 
   const selectedItem = useMemo(
@@ -356,7 +338,7 @@ export default function FixedAssetTagging() {
       const items = await getItems();
       await downloadFaInventoryTemplate(importMode, {
         companies: ensureArray<{ id: number; label: string }>(companies),
-        projects: ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects),
+        projects: ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects),
         godowns: ensureArray<Godown>(godownsData?.data)
           .filter((g) => !g.IsDeleted && g.IsActive)
           .map((g) => ({ GodownName: g.GodownName, EnterpriseID: g.EnterpriseID ?? null, ProjectID: g.ProjectID ?? null })),
@@ -384,137 +366,16 @@ export default function FixedAssetTagging() {
         return;
       }
 
-      const companyList = ensureArray<{ id: number; label: string }>(companies);
-      const projectList = ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects);
-      const godownList = ensureArray<Godown>(godownsData?.data).filter((g) => !g.IsDeleted && g.IsActive);
-
-      const norm = (v: unknown) => String(v ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-
-
-      const results: ImportRow[] = [];
-      for (const raw of rawRows) {
-        const companyName  = raw.Company;
-        const projectName  = raw.Project;
-        const godownName   = raw.Godown;
-        const itemCodeIn   = raw.ItemCode;
-        const itemNameIn   = raw.ItemName;
-        const docDateRaw   = raw.Date;
-        const quantityRaw  = raw.Quantity;
-        const rateRaw      = raw.Rate;
-        const remarks      = raw.Remarks;
-
-        const row: ImportRow = {
-          row: raw.rowNo,
-          companyId: 0,
-          companyLabel: companyName || "—",
-          projectId: null,
-          projectLabel: projectName || "—",
-          godownId: null,
-          godownLabel: godownName || "—",
-          itemId: null,
-          itemCode: itemCodeIn,
-          itemName: itemNameIn || "—",
-          docDate: docDateRaw,
-          quantity: 0,
-          rate: null,
-          remarks: remarks || undefined,
-          status: "error",
-        };
-
-        const missing = [
-          !companyName && "Company",
-          !projectName && "Project",
-          !godownName && "Godown",
-          !itemCodeIn && !itemNameIn && "Item Code / Item Name",
-          !docDateRaw && "Date",
-          importMode === "bulk" && !quantityRaw && "Quantity",
-        ].filter(Boolean);
-        if (missing.length) {
-          row.message = `Missing required field(s): ${missing.join(", ")}`;
-          results.push(row);
-          continue;
-        }
-
-        const company = companyList.find((c) => sameName(c.label, companyName));
-        if (!company) { row.message = `Company "${companyName}" not found`; results.push(row); continue; }
-        row.companyId = company.id;
-        row.companyLabel = company.label;
-
-        const project = projectList.find((p) => p.company_id === company.id && sameName(p.label, projectName));
-        if (!project) { row.message = `Project "${projectName}" not found under ${company.label}`; results.push(row); continue; }
-        row.projectId = project.id;
-        row.projectLabel = project.label;
-
-        const godown = godownList.find((g) =>
-          g.EnterpriseID === company.id &&
-          (g.ProjectID === project.id || g.ProjectID == null) &&
-          sameName(g.GodownName, godownName)
-        );
-        if (!godown) { row.message = `Godown "${godownName}" not found for this company/project`; results.push(row); continue; }
-        row.godownId = godown.GodownID;
-        row.godownLabel = godown.GodownName;
-
-        const isoDate = parseSheetDate(docDateRaw);
-        if (!isoDate) {
-          row.message = `Date "${docDateRaw}" is not valid — use YYYY-MM-DD or DD/MM/YYYY`;
-          results.push(row);
-          continue;
-        }
-        row.docDate = isoDate;
-        const finYear = deriveFinYear(isoDate, finYears);
-        if (!finYear) { row.message = "Date doesn't fall in any configured Financial Year"; results.push(row); continue; }
-
-        let quantity = 1;
-        if (importMode === "bulk") {
-          quantity = parseInt(quantityRaw, 10);
-          if (!Number.isFinite(quantity) || quantity <= 0 || String(quantity) !== quantityRaw) {
-            row.message = "Quantity must be a positive whole number";
-            results.push(row);
-            continue;
-          }
-        }
-        row.quantity = quantity;
-
-        // ── Item Master: the item must exist and be a Fixed Asset ──
-        let master: DbItem | undefined;
-        if (itemCodeIn) {
-          master = itemMaster.find((i) => norm(i.M_code) === norm(itemCodeIn));
-          if (!master) { row.message = `Item Code "${itemCodeIn}" is not in the Item Master`; results.push(row); continue; }
-          if (itemNameIn && norm(master.M_Name) !== norm(itemNameIn)) {
-            row.message = `Item Code "${itemCodeIn}" is "${master.M_Name}" in the Item Master, not "${itemNameIn}"`;
-            results.push(row);
-            continue;
-          }
-        } else {
-          const hits = itemMaster.filter((i) => norm(i.M_Name) === norm(itemNameIn));
-          if (hits.length === 0) { row.message = `Item "${itemNameIn}" is not in the Item Master`; results.push(row); continue; }
-          if (hits.length > 1) { row.message = `Item "${itemNameIn}" matches ${hits.length} Item Master entries — enter the Item Code`; results.push(row); continue; }
-          master = hits[0];
-        }
-        row.itemCode = master.M_code || "";
-        row.itemName = master.M_Name || itemNameIn;
-        if (norm(master.M_Type) !== "fixed asset") {
-          row.message = `"${master.M_Name}" has Type of Item "${master.M_Type || "not set"}" — only Fixed Asset items can be imported`;
-          results.push(row);
-          continue;
-        }
-
-        // No stock / GRN requirement: the import itself adds the stock to the godown.
-        let rate: number | null = null;
-        if (rateRaw !== "") {
-          rate = Number(rateRaw.replace(/[,₹\s]/g, ""));
-          if (!Number.isFinite(rate) || rate < 0) {
-            row.message = `Rate "${rateRaw}" must be a number (0 or more)`;
-            results.push(row);
-            continue;
-          }
-        }
-        row.rate = rate;
-        row.itemId = String(master.M_Id);
-        row.itemName = master.M_Name || itemNameIn;
-        row.status = "valid";
-        results.push(row);
-      }
+      const results: ImportRow[] = validateFaImportRows(rawRows, {
+        mode: importMode,
+        companies: ensureArray<{ id: number; label: string }>(companies),
+        projects: ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects),
+        godowns: ensureArray<Godown>(godownsData?.data)
+          .filter((g) => !g.IsDeleted && g.IsActive)
+          .map((g) => ({ GodownID: g.GodownID, GodownName: g.GodownName, EnterpriseID: g.EnterpriseID, ProjectID: g.ProjectID })),
+        itemMaster,
+        deriveFinYear: (iso) => deriveFinYear(iso, finYears),
+      });
 
       setImportPreview(results);
       setImportDone(false);
@@ -1123,7 +984,7 @@ export default function FixedAssetTagging() {
                         <td className="px-3 py-2 max-w-[180px] truncate" title={r.itemName}>{r.itemCode ? `${r.itemCode} · ` : ""}{r.itemName}</td>
                         <td className="px-3 py-2">{r.docDate}</td>
                         <td className="px-3 py-2">{r.quantity || "—"}</td>
-                        <td className="px-3 py-2 max-w-[260px]">
+                        <td className="px-3 py-2 min-w-[260px] max-w-[460px] whitespace-normal break-words align-top">
                           {r.status === "error" ? (
                             <span className="text-destructive">{r.message}</span>
                           ) : r.status === "success" ? (

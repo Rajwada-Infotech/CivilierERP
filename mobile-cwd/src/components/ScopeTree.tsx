@@ -69,7 +69,8 @@ export function ScopeTree({
   const renderNode = (node: Node, depth: number): React.ReactNode => {
     const L = LEVELS[depth];
     const expanded = forceOpen || open.has(node.key);
-    const pad = 10 + Math.min(depth, 3) * 12;
+    // Compact indent: 8px per level (max 4 levels) so deep trees keep room for content.
+    const pad = 10 + Math.min(depth, 4) * 8;
     return (
       <View key={node.key} style={depth === 0 ? { backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 10, overflow: "hidden" } : undefined}>
         <TouchableOpacity activeOpacity={0.6} onPress={() => toggle(node.key)} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10, paddingRight: 12, paddingLeft: pad }}>
@@ -85,7 +86,8 @@ export function ScopeTree({
         {expanded && (
           <View>
             {node.children.map((c) => renderNode(c, depth + 1))}
-            {node.room && <View style={{ paddingLeft: pad + 8, paddingRight: 10, paddingBottom: 6 }}>{renderRoom(node.room)}</View>}
+            {/* Room content uses the full card width (no tree indent) — the header path above already shows where it sits. */}
+            {node.room && <View style={{ paddingHorizontal: 8, paddingBottom: 8 }}>{renderRoom(node.room)}</View>}
           </View>
         )}
       </View>

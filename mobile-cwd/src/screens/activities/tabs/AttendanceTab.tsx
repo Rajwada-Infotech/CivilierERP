@@ -1,15 +1,16 @@
 // Who worked on this activity on a given day: Present / Absent / Half-day per worker, saved in one go.
-// Workers are added from the existing worker list (registering a brand-new worker, which needs an Aadhaar
-// number, stays on the web).
+// Workers are added from the existing worker list, or registered new (name + contractor + Aadhaar), as on the web.
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Plus, Save, Search, UserX, X } from "lucide-react-native";
+import { Check, ChevronLeft, ChevronRight, History, Plus, Save, Search, UserPlus, UserX, X } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
-import { addToRoster, getAttendance, removeFromRoster, saveAttendance, searchWorkers, type AttendanceStatus } from "@/api/cwdApi";
+import { addToRoster, createWorker, getAttendance, getContractorOptions, removeFromRoster, saveAttendance, searchWorkers, type AttendanceStatus } from "@/api/cwdApi";
+import { OptionPickerModal, PickerRow } from "@/components/OptionPicker";
 import { ACCENT, Btn, Empty, ErrorText, Loading, card, fmtDay, fromYmd, todayYmd, ymd } from "./ui";
+import { WorkerHistorySheet } from "./WorkerHistorySheet";
 
 const OPTIONS: { key: AttendanceStatus; label: string; color: string }[] = [
   { key: "P", label: "Present", color: "#10b981" },
@@ -30,6 +31,30 @@ function AddWorkers({ rungId, existing, visible, onClose, onAdded }: { rungId: n
     onError: (e: Error) => toast.error(e.message),
   });
   const list = (q.data ?? []).filter((w) => !existing.has(w.id));
+
+  // "Worker not listed? Create new" — same rules as the web: name, contractor and a 12-digit Aadhaar.
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [contractorId, setContractorId] = useState<number | null>(null);
+  const [aadhaar, setAadhaar] = useState("");
+  const [pickContractor, setPickContractor] = useState(false);
+  useEffect(() => { if (!visible) { setCreating(false); setName(""); setContractorId(null); setAadhaar(""); } }, [visible]);
+  const contractors = useQuery({ queryKey: ["cwd-contractor-options"], queryFn: getContractorOptions, enabled: visible && creating, staleTime: 5 * 60_000 });
+  const contractor = contractors.data?.find((c) => c.id === contractorId) ?? null;
+  const aadhaarOk = /^\d{12}$/.test(aadhaar);
+  const create = useMutation({
+    mutationFn: async () => {
+      const { id, existed } = await createWorker({ name: name.trim(), contractorId: contractorId!, aadhaarNo: aadhaar });
+      await addToRoster(rungId, [id]);
+      return existed;
+    },
+    onSuccess: (existed) => {
+      toast.success(existed ? `${name.trim()} is already registered — added to this activity` : `${name.trim()} added to this activity`);
+      onAdded(); onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const input = { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13 } as const;
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }}>
@@ -57,18 +82,71 @@ function AddWorkers({ rungId, existing, visible, onClose, onAdded }: { rungId: n
             })}
           </ScrollView>
           <Btn label={picked.size ? `Add ${picked.size} worker${picked.size === 1 ? "" : "s"}` : "Pick workers to add"} disabled={!picked.size} busy={add.isPending} onPress={() => add.mutate()} />
+
+          <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, gap: 10 }}>
+            <TouchableOpacity onPress={() => setCreating((v) => !v)} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <UserPlus size={14} color={ACCENT} />
+              <Text style={{ flex: 1, fontSize: 12, fontFamily: fonts.heading.semibold, color: ACCENT }}>Worker not listed? Create new</Text>
+              <ChevronRight size={14} color={ACCENT} style={{ transform: [{ rotate: creating ? "90deg" : "0deg" }] }} />
+            </TouchableOpacity>
+            {creating && (
+              <View style={{ gap: 10 }}>
+                <TextInput value={name} onChangeText={setName} placeholder="Worker name" placeholderTextColor={`${colors.mutedForeground}99`} style={input} />
+                <View style={{ marginBottom: -14 }}>
+                  <PickerRow label="Contractor" required value={contractor?.label ?? ""} placeholder="Select contractor…" onPress={() => setPickContractor(true)} />
+                </View>
+                <View>
+                  <TextInput
+                    value={aadhaar}
+                    onChangeText={(t) => setAadhaar(t.replace(/\D/g, "").slice(0, 12))}
+                    placeholder="Aadhaar number (12 digits)"
+                    placeholderTextColor={`${colors.mutedForeground}99`}
+                    keyboardType="number-pad"
+                    style={{ ...input, borderColor: aadhaar && !aadhaarOk ? colors.destructive : colors.border }}
+                  />
+                  <Text style={{ fontSize: 10, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginTop: 4 }}>
+                    Used to recognise this worker if re-added later — the record is auto-removed after 4 months with no attendance.
+                  </Text>
+                </View>
+                <Btn tone="outline" label="Create & add" icon={<Plus size={14} color={ACCENT} />} disabled={!name.trim() || !contractorId || !aadhaarOk} busy={create.isPending} onPress={() => create.mutate()} />
+              </View>
+            )}
+          </View>
         </View>
       </View>
+      <OptionPickerModal
+        visible={pickContractor}
+        title="Contractor"
+        searchable
+        loading={contractors.isLoading}
+        options={(contractors.data ?? []).map((c) => ({ key: String(c.id), label: c.label }))}
+        selectedKey={contractorId ? String(contractorId) : ""}
+        onSelect={(k) => { setContractorId(k ? Number(k) : null); setPickContractor(false); }}
+        onClose={() => setPickContractor(false)}
+      />
     </Modal>
   );
 }
 
-export function AttendanceTab({ rungId, canEdit }: { rungId: number; canEdit: boolean }) {
+export function AttendanceTab({
+  rungId, canEdit, date: dateProp, onDateChange, search = "",
+}: {
+  rungId: number;
+  canEdit: boolean;
+  /** Optional: let a parent screen own the day (its Date filter) — otherwise the tab keeps its own. */
+  date?: string;
+  onDateChange?: (ymd: string) => void;
+  /** Optional worker-name filter (display only — Save still covers the whole roster). */
+  search?: string;
+}) {
   const qc = useQueryClient();
   const today = todayYmd();
-  const [date, setDate] = useState(today);
+  const [ownDate, setOwnDate] = useState(today);
+  const date = dateProp ?? ownDate;
+  const setDate = onDateChange ?? setOwnDate;
   const [status, setStatus] = useState<Record<number, AttendanceStatus>>({});
   const [adding, setAdding] = useState(false);
+  const [history, setHistory] = useState<{ id: number; name: string } | null>(null);
   const key = ["cwd-attendance", rungId, date];
   const q = useQuery({ queryKey: key, queryFn: () => getAttendance(rungId, date) });
   const rows = q.data ?? [];
@@ -91,6 +169,12 @@ export function AttendanceTab({ rungId, canEdit }: { rungId: number; canEdit: bo
     onError: (e: Error) => toast.error(e.message),
   });
   const existing = useMemo(() => new Set(rows.map((r) => r.workerId)), [rows]);
+  // Same rule as the web: something to save while any row was never saved for this day or was changed.
+  const dirty = rows.some((r) => r.attendanceId == null || status[r.workerId] !== r.status);
+  const term = search.trim().toLowerCase();
+  const shown = term ? rows.filter((r) => r.workerName.toLowerCase().includes(term)) : rows;
+  const counts = { P: 0, H: 0, A: 0 } as Record<AttendanceStatus, number>;
+  for (const r of rows) counts[status[r.workerId] ?? "P"]++;
   const step = (n: number) => { const d = fromYmd(date); d.setDate(d.getDate() + n); const s = ymd(d); if (s <= today) setDate(s); };
 
   return (
@@ -110,7 +194,17 @@ export function AttendanceTab({ rungId, canEdit }: { rungId: number; canEdit: bo
         <Empty text="No workers assigned to this activity yet." />
       ) : (
         <View style={{ ...card, padding: 0, overflow: "hidden" }}>
-          {rows.map((r, i) => {
+          {/* Live tally of what Save would record. */}
+          <View style={{ flexDirection: "row", gap: 6, padding: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+            <Text style={{ flex: 1, fontSize: 11.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{rows.length} worker{rows.length === 1 ? "" : "s"} allocated</Text>
+            {OPTIONS.map((o) => (
+              <View key={o.key} style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: `${o.color}22` }}>
+                <Text style={{ fontSize: 10, fontFamily: fonts.heading.bold, color: o.color }}>{counts[o.key]} {o.label}</Text>
+              </View>
+            ))}
+          </View>
+          {shown.length === 0 && <Empty text="No worker matches your search." />}
+          {shown.map((r, i) => {
             const cur = status[r.workerId] ?? "P";
             return (
               <View key={r.workerId} style={{ padding: 12, gap: 8, borderTopWidth: i ? 1 : 0, borderTopColor: colors.border }}>
@@ -119,6 +213,9 @@ export function AttendanceTab({ rungId, canEdit }: { rungId: number; canEdit: bo
                     <Text numberOfLines={1} style={{ fontSize: 13, fontFamily: fonts.body.medium, color: colors.foreground }}>{r.workerName}</Text>
                     <Text numberOfLines={1} style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{r.contractorName || r.skillType}</Text>
                   </View>
+                  <TouchableOpacity onPress={() => setHistory({ id: r.workerId, name: r.workerName })} hitSlop={6} style={{ padding: 6 }}>
+                    <History size={15} color={colors.mutedForeground} />
+                  </TouchableOpacity>
                   {canEdit && (
                     <TouchableOpacity onPress={() => Alert.alert("Remove from this activity?", r.workerName, [{ text: "Cancel", style: "cancel" }, { text: "Remove", style: "destructive", onPress: () => remove.mutate(r.workerId) }])} style={{ padding: 6 }}>
                       <UserX size={15} color={colors.mutedForeground} />
@@ -144,10 +241,11 @@ export function AttendanceTab({ rungId, canEdit }: { rungId: number; canEdit: bo
       {canEdit && (
         <View style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}><Btn tone="outline" label="Add worker" icon={<Plus size={14} color={ACCENT} />} onPress={() => setAdding(true)} /></View>
-          <View style={{ flex: 1 }}><Btn label="Save attendance" icon={<Save size={14} color="#04181d" />} disabled={rows.length === 0} busy={save.isPending} onPress={() => save.mutate()} /></View>
+          <View style={{ flex: 1 }}><Btn label={dirty ? "Save attendance" : "Saved"} icon={dirty ? <Save size={14} color="#04181d" /> : <Check size={14} color="#04181d" />} disabled={rows.length === 0 || !dirty} busy={save.isPending} onPress={() => save.mutate()} /></View>
         </View>
       )}
       <AddWorkers rungId={rungId} existing={existing} visible={adding} onClose={() => setAdding(false)} onAdded={refresh} />
+      <WorkerHistorySheet worker={history} onClose={() => setHistory(null)} />
     </View>
   );
 }

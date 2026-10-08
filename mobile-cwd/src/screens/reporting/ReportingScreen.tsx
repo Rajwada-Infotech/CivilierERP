@@ -11,6 +11,7 @@ import { fonts } from "@/theme/fonts";
 import { STATUS_COLOR, STATUS_LABEL } from "@/components/StatusPill";
 import { ActivityRow } from "@/components/ActivityRow";
 import { ScopeTree } from "@/components/ScopeTree";
+import { ShowMore, useIncremental } from "@/components/ShowMore";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getRoomActivities, getScopeProjects, getScopeSummary, type ScopeRoom } from "@/api/cwdApi";
 
@@ -23,11 +24,17 @@ function RoomActivities({ room, status }: { room: ScopeRoom; status: string }) {
     queryFn: () => getRoomActivities({ roomId: room.roomId, projectId: room.projectId, status }),
     staleTime: 60_000,
   });
+  const page = useIncremental(q.data?.length ?? 0);
   if (q.isLoading) return <ActivityIndicator color={colors.mutedForeground} style={{ paddingVertical: 12 }} />;
   if (q.error) return <Text style={{ color: colors.destructive, fontSize: 11.5, fontFamily: fonts.body.regular, padding: 8 }}>{(q.error as Error).message}</Text>;
   const rows = q.data ?? [];
   if (!rows.length) return <Text style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.regular, padding: 8 }}>No activities.</Text>;
-  return <View style={{ paddingTop: 4 }}>{rows.map((a) => <ActivityRow key={a.assignmentId} a={a} onPress={() => navigation.navigate("ActivityDetail", { rungId: a.rungId })} />)}</View>;
+  return (
+    <View style={{ paddingTop: 4 }}>
+      {rows.slice(0, page.count).map((a) => <ActivityRow key={a.assignmentId} a={a} onPress={() => navigation.navigate("ActivityDetail", { rungId: a.rungId })} />)}
+      <ShowMore remaining={page.remaining} step={page.step} onPress={page.more} />
+    </View>
+  );
 }
 
 export default function ReportingScreen() {
@@ -76,7 +83,7 @@ export default function ReportingScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 96 }}
+        contentContainerStyle={{ paddingHorizontal: 10, paddingTop: 14, paddingBottom: 96 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

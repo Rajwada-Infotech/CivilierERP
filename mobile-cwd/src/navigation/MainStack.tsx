@@ -11,6 +11,8 @@ import QualityCheckScreen from "@/screens/quality/QualityCheckScreen";
 import QcInspectScreen from "@/screens/quality/QcInspectScreen";
 import ActivitiesScreen from "@/screens/activities/ActivitiesScreen";
 import ActivityDetailScreen from "@/screens/activities/ActivityDetailScreen";
+import AttendanceScreen from "@/screens/attendance/AttendanceScreen";
+import AmendmentScreen from "@/screens/amendment/AmendmentScreen";
 import { TopHeader } from "./TopHeader";
 
 // Every screen this app has: Dashboard (overview), Activities (the allocated-work list — reached
@@ -26,6 +28,8 @@ export type MainStackParamList = {
   Reporting: undefined;
   QualityCheck: undefined;
   QcInspect: { rungId: number };
+  Attendance: undefined;
+  Amendment: undefined;
   Activities: { filter?: string } | undefined;
   ActivityDetail: { rungId: number };
   Profile: undefined;
@@ -45,6 +49,8 @@ export default function MainStack() {
       <Stack.Screen name="Reporting" component={ReportingScreen} options={{ title: "Work Reporting" }} />
       <Stack.Screen name="QualityCheck" component={QualityCheckScreen} options={{ title: "Quality Check" }} />
       <Stack.Screen name="QcInspect" component={QcInspectScreen} options={{ title: "Inspect" }} />
+      <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "Worker Attendance" }} />
+      <Stack.Screen name="Amendment" component={AmendmentScreen} options={{ title: "Amendment" }} />
       <Stack.Screen name="Activities" component={ActivitiesScreen} options={{ title: "Activities" }} />
       <Stack.Screen name="ActivityDetail" component={ActivityDetailScreen} options={{ title: "Activity" }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />

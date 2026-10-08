@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Alert, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
-import { Check, Circle, Plus, ShieldCheck, Trash2, Users } from "lucide-react-native";
+import { CalendarDays, Check, Circle, Plus, ShieldCheck, Timer, Trash2, Users } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
@@ -19,6 +19,31 @@ import {
 import { applyDefaultDays, changeDays, changeEnd, changeStart, type AllocDates } from "@/utils/allocationDates";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { ACCENT, Btn, ErrorText, Loading, card } from "../activities/tabs/ui";
+import { BlueprintPreview } from "@/components/BlueprintPreview";
+
+const SOURCE_META: Record<SourceType, { label: string; color: string }> = {
+  CONTRACTOR: { label: "Contractor", color: "#3b82f6" },
+  DEVELOPER: { label: "Developer", color: "#8b5cf6" },
+};
+
+function SourceBadge({ source }: { source: SourceType | null }) {
+  if (!source) return null;
+  const m = SOURCE_META[source];
+  return (
+    <View style={{ alignSelf: "flex-start", marginTop: 6, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: `${m.color}22` }}>
+      <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.bold, color: m.color, textTransform: "uppercase", letterSpacing: 0.4 }}>{m.label}</Text>
+    </View>
+  );
+}
+
+function Tag({ text, color, icon }: { text: string; color: string; icon?: React.ReactNode }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: `${color}22` }}>
+      {icon}
+      <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.semibold, color }}>{text}</Text>
+    </View>
+  );
+}
 
 const DEVELOPER = "DEVELOPER";
 const contractorKey = (id: number) => `CONTRACTOR:${id}`;
@@ -56,12 +81,14 @@ export default function AllocationFormScreen() {
   const [labourBy, setLabourBy] = useState("");
   const [materialBy, setMaterialBy] = useState("");
   const [description, setDescription] = useState("");
+  const [descTouched, setDescTouched] = useState(false);
   const [remarks, setRemarks] = useState("");
   const [qty, setQty] = useState<Record<string, string>>({});
 
   const detail = detailQ.data;
   const defaultDescription = useMemo(
-    () => `Work for ${row?.projectName || "—"}, ${row?.scopePath || "—"} and ${row?.activityName || ""}`.trim(),
+    // Same wording as the web: "Work for <project>, <tower>, Floor <n>, <flat>, <room> and <activity>".
+    () => `Work for ${row?.projectName || "—"}, ${row?.towerName || "—"}, Floor ${row?.floor ?? "—"}, ${row?.flatName || "—"}, ${row?.roomName || "—"} and ${row?.activityName || ""}`.trim(),
     [row],
   );
 
@@ -190,21 +217,36 @@ export default function AllocationFormScreen() {
 
       <FormSection title="Labour & material">
         <PickerField label="Labour given by" value={labourBy} options={givenByOptions} onSelect={setLabourBy} clearable disabled={!canEdit} loading={contractorsQ.isLoading} />
+        <SourceBadge source={parseGivenBy(labourBy).source} />
         <View style={{ height: 12 }} />
         <PickerField label="Material given by" value={materialBy} options={givenByOptions} onSelect={setMaterialBy} clearable disabled={!canEdit} loading={contractorsQ.isLoading} />
+        <SourceBadge source={parseGivenBy(materialBy).source} />
       </FormSection>
 
-      {detail.candidateItems.length > 0 && (
-        <FormSection title="Materials needed">
-          {detail.candidateItems.map((it) => (
-            <NumberField key={it.itemId} label={`${it.itemName}${it.uom ? ` (${it.uom})` : ""}`} value={qty[it.itemId] ?? ""} onChangeText={(v) => setQty((q) => ({ ...q, [it.itemId]: v }))} placeholder="Quantity" disabled={!canEdit} />
-          ))}
+      <FormSection title="Description">
+        <RemarksField label="Description" value={description} onChangeText={(v) => { setDescription(v); setDescTouched(true); }} disabled={!canEdit} />
+        {!descTouched && <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginTop: -8, marginBottom: 6 }}>Auto-filled from location — edit freely.</Text>}
+      </FormSection>
+
+      {row?.roomId != null && (
+        <FormSection title="Reference blueprint">
+          <BlueprintPreview rungId={rungId} roomId={row.roomId} title={[row.projectName, row.scopePath].filter(Boolean).join(" › ")} />
         </FormSection>
       )}
 
-      <FormSection title="Notes">
-        <RemarksField label="Description" value={description} onChangeText={setDescription} disabled={!canEdit} />
-        <RemarksField label="Remarks" value={remarks} onChangeText={setRemarks} disabled={!canEdit} />
+      <FormSection title="Material">
+        {detail.candidateItems.length === 0 ? (
+          <Text style={{ fontSize: 11.5, fontStyle: "italic", color: colors.mutedForeground, fontFamily: fonts.body.regular }}>No materials are linked to this activity yet.</Text>
+        ) : detail.candidateItems.map((it) => (
+          <NumberField
+            key={it.itemId}
+            label={`${it.itemName}${it.itemCode ? ` · ${it.itemCode}` : ""}${it.uom ? ` (${it.uom})` : ""}`}
+            value={qty[it.itemId] ?? ""}
+            onChangeText={(v) => setQty((q) => ({ ...q, [it.itemId]: v }))}
+            placeholder="Quantity"
+            disabled={!canEdit}
+          />
+        ))}
       </FormSection>
 
       <FormSection title={`Checkpoints (${checkpoints.length})`}>
@@ -213,13 +255,26 @@ export default function AllocationFormScreen() {
         ) : (
           <View style={{ ...card, gap: 8 }}>
             {checkpoints.map((c, i) => (
-              <View key={c.id ?? `${c.fieldName}-${i}`} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View
+                key={c.id ?? `${c.fieldName}-${i}`}
+                style={{
+                  flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, padding: c.needsRework ? 8 : 0, borderRadius: 10,
+                  backgroundColor: c.needsRework ? "#f59e0b18" : "transparent", borderWidth: c.needsRework ? 1 : 0, borderColor: "#f59e0b80",
+                }}
+              >
                 {c.isChecked ? <Check size={14} color="#10b981" /> : <Circle size={14} color={colors.mutedForeground} />}
-                <Text style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.foreground }}>{c.fieldName}</Text>
+                <Text style={{ flex: 1, minWidth: 120, fontSize: 12.5, fontFamily: fonts.body.regular, color: colors.foreground }}>{c.fieldName}</Text>
+                {c.needsRework && <Tag text="Redo — rated Poor" color="#f59e0b" />}
+                {c.isDaily && <Tag text="Daily" color="#06b6d4" icon={<CalendarDays size={9} color="#06b6d4" />} />}
+                {c.minWaitDays != null && c.minWaitDays > 0 && <Tag text={`${c.minWaitDays}d wait`} color="#f59e0b" icon={<Timer size={9} color="#f59e0b" />} />}
               </View>
             ))}
           </View>
         )}
+      </FormSection>
+
+      <FormSection title="Remarks">
+        <RemarksField label="Remarks" value={remarks} onChangeText={setRemarks} placeholder="Any additional notes…" disabled={!canEdit} />
       </FormSection>
 
       {canEdit && <Btn label="Save allocation" busy={save.isPending} onPress={() => save.mutate()} />}

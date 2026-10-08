@@ -1,3 +1,4 @@
+import { memo } from "react";
 // One activity as a card — name, status, location, progress bar, engineers, dates and the timeline hint.
 import { Pressable, Text, View } from "react-native";
 import { colors } from "@/theme/colors";
@@ -10,7 +11,7 @@ const ACCENT = "#0891b2";
 const fmtDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—";
 
-export function ActivityRow({ a, onPress }: { a: ActivityAssignment; onPress: () => void }) {
+function ActivityRowView({ a, onPress }: { a: ActivityAssignment; onPress: () => void }) {
   const shown = displayStatus(a.status, a.resumedAt);
   const pct = Math.max(0, Math.min(100, a.progressPercent ?? 0));
   const hint = timelineMessage(a);
@@ -42,3 +43,6 @@ export function ActivityRow({ a, onPress }: { a: ActivityAssignment; onPress: ()
     </Pressable>
   );
 }
+
+/** Memoised on the row's data: a list re-render (search, refetch of other rooms) doesn't redraw unchanged rows. */
+export const ActivityRow = memo(ActivityRowView, (p, n) => p.a === n.a);
