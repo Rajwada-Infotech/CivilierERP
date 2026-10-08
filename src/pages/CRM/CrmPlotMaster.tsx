@@ -123,6 +123,13 @@ const CrmPlotMaster: React.FC = () => {
   const { data: conversionVillaTypes = [] } = useQuery<VillaType[]>({ queryKey: villaTypesKey(conversionProjectId), queryFn: () => fetchVillaTypes(conversionProjectId!), enabled: convertOpen && conversionProjectId != null });
   const { data: editVillaTypes = [] } = useQuery<VillaType[]>({ queryKey: villaTypesKey(plotDraft.ProjectId), queryFn: () => fetchVillaTypes(plotDraft.ProjectId), enabled: editOpen && !!plotDraft.ProjectId });
   const unitTypeOptionsForConversion = useMemo(() => unitTypeOptions(layoutTypes, unitType), [layoutTypes, unitType]);
+  // A villa type with its own rooms-by-floor plan decides the villa's rooms —
+  // no separate unit type is asked for then.
+  const ownLayoutOf = (villaTypeIdValue: number | null | undefined) => {
+    const t = conversionVillaTypes.find((x) => x.Id === villaTypeIdValue);
+    const l = t?.LayoutTypeId != null ? layoutTypes.find((x) => x.id === t.LayoutTypeId) : undefined;
+    return l?.ownerVillaTypeId ? l : null;
+  };
 
   // Picking a villa type fills the areas and room layout from the master;
   // every field stays editable.
@@ -753,8 +760,25 @@ const CrmPlotMaster: React.FC = () => {
                         {separate && unplanned.length > 0 && <p className="mt-1.5 text-xs text-muted-foreground">No type planned on {unplanned.map((plot) => plot.PlotName).join(", ")}. Plots with a planned type use their own.</p>}
                       </div>
                       <div className="grid gap-4 sm:grid-cols-2">
-                        <div><label className={label}>Unit type (room layout)</label>
-                          <Select value={unitType || undefined} onValueChange={setUnitType}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a layout" /></SelectTrigger><SelectContent>{unitTypeOptionsForConversion.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+                        {(() => {
+                          const each = conversionMode === "each" && selectedPlots.length > 1;
+                          const fromType = each
+                            ? selectedPlots.length > 0 && selectedPlots.every((plot) => plot.PlannedVillaTypeId != null && !!ownLayoutOf(plot.PlannedVillaTypeId))
+                            : villaTypeId !== "" && !!ownLayoutOf(Number(villaTypeId));
+                          if (fromType) {
+                            const l = each ? null : ownLayoutOf(Number(villaTypeId));
+                            return (
+                              <div><label className={label}>Rooms</label>
+                                <div className="h-10 rounded-lg border border-border bg-muted/30 px-3 flex items-center text-sm text-muted-foreground">
+                                  {l ? `From the villa type — ${l.roomCount} rooms, by floor` : "From each plot's villa type, by floor"}
+                                </div></div>
+                            );
+                          }
+                          return (
+                            <div><label className={label}>Unit type (room layout)</label>
+                              <Select value={unitType || undefined} onValueChange={setUnitType}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a layout" /></SelectTrigger><SelectContent>{unitTypeOptionsForConversion.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div>
+                          );
+                        })()}
                         <div><label className={label}>Asset kind</label>
                           <Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger className="h-10 rounded-lg"><SelectValue placeholder="Select a kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div>
                         <div className="sm:col-span-2"><label className={label}>Construction rate <span className="font-normal opacity-70">· Optional</span></label>
