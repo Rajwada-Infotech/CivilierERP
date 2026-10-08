@@ -141,12 +141,14 @@ router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), 
         CONVERT(NVARCHAR(100), im.M_Id) AS ItemId, im.M_Name AS ItemName,
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
-        t.GodownId, gd.GodownName
+        t.GodownId, gd.GodownName,
+        batch.AssetCategory   -- captured at FA Inventory import; the Depreciation Tag reuses it
       FROM dbo.FixedAssetTagging t
       LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
       LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
       LEFT JOIN dbo.Godowns gd ON gd.GodownID = t.GodownId
+      LEFT JOIN dbo.FixedAssetRecord batch ON batch.AssetId = t.AssetId
       WHERE t.FAItemCode IS NOT NULL AND t.Status = 'Tagged'
         AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId AND fa.Status <> 'Deleted')
       ORDER BY t.CreatedAt DESC

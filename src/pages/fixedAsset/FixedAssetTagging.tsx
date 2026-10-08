@@ -18,6 +18,7 @@ import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { parseSheetDate } from "@/lib/xlsxBook";
 import { createInventoryImport } from "@/api/fixedAssetInventoryImportApi";
+import { getActiveDepreciationSetups } from "@/api/depreciationApi";
 import { downloadFaInventoryTemplate, readFaImportFile } from "./faInventoryExcel";
 import { godownMatches, validateFaImportRows, type FaImportResultRow } from "./faImportValidation";
 import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
@@ -335,8 +336,9 @@ export default function FixedAssetTagging() {
 
   const handleDownloadImportTemplate = async () => {
     try {
-      const items = await getItems();
+      const [items, setups] = await Promise.all([getItems(), getActiveDepreciationSetups()]);
       await downloadFaInventoryTemplate(importMode, {
+        assetCategories: [...new Set(setups.map((s) => s.AssetCategory.trim()).filter(Boolean))].sort(),
         companies: ensureArray<{ id: number; label: string }>(companies),
         projects: ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects),
         godowns: ensureArray<Godown>(godownsData?.data)
@@ -361,6 +363,7 @@ export default function FixedAssetTagging() {
     try {
       const rawRows = await readFaImportFile(file);
       const itemMaster: DbItem[] = await getItems();
+      const assetCategories = [...new Set((await getActiveDepreciationSetups()).map((s) => s.AssetCategory.trim()).filter(Boolean))];
       if (rawRows.length === 0) {
         toast.error("The file has no data rows");
         return;
@@ -374,6 +377,7 @@ export default function FixedAssetTagging() {
           .filter((g) => !g.IsDeleted && g.IsActive)
           .map((g) => ({ GodownID: g.GodownID, GodownName: g.GodownName, EnterpriseID: g.EnterpriseID, ProjectID: g.ProjectID })),
         itemMaster,
+        assetCategories,
         deriveFinYear: (iso) => deriveFinYear(iso, finYears),
       });
 
@@ -407,6 +411,7 @@ export default function FixedAssetTagging() {
           projectId: row.projectId!,
           godownId: row.godownId!,
           itemId: row.itemId!,
+          assetCategory: row.assetCategory,
           quantity: row.quantity,
           rate: row.rate,
           remarks: row.remarks || undefined,
@@ -981,7 +986,7 @@ export default function FixedAssetTagging() {
                         <td className="px-3 py-2">{r.row}</td>
                         <td className="px-3 py-2 max-w-[160px] truncate">{r.companyLabel} / {r.projectLabel}</td>
                         <td className="px-3 py-2 max-w-[120px] truncate">{r.godownLabel}</td>
-                        <td className="px-3 py-2 max-w-[180px] truncate" title={r.itemName}>{r.itemCode ? `${r.itemCode} · ` : ""}{r.itemName}</td>
+                        <td className="px-3 py-2 max-w-[180px] truncate" title={r.itemName}>{r.itemCode ? `${r.itemCode} · ` : ""}{r.itemName}{r.assetCategory ? <span className="block text-[0.625rem] text-muted-foreground">{r.assetCategory}</span> : null}</td>
                         <td className="px-3 py-2">{r.docDate}</td>
                         <td className="px-3 py-2">{r.quantity || "—"}</td>
                         <td className="px-3 py-2 min-w-[260px] max-w-[460px] whitespace-normal break-words align-top">

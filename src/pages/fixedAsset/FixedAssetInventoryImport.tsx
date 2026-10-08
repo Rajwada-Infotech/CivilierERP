@@ -14,6 +14,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
+import { getActiveDepreciationSetups } from "@/api/depreciationApi";
 import {
   getInventoryImports, createInventoryImport, deleteInventoryImport,
   type InventoryImportListItem,
@@ -74,6 +75,7 @@ interface FormState {
   projectId: string;
   godownId: string;
   itemId: string;
+  assetCategory: string;
   quantity: string;
   rate: string;
   remarks: string;
@@ -85,6 +87,7 @@ const emptyForm = (): FormState => ({
   projectId: "",
   godownId:  "",
   itemId:    "",
+  assetCategory: "",
   quantity:  "",
   rate:      "",
   remarks:   "",
@@ -123,6 +126,15 @@ export default function FixedAssetInventoryImport() {
     queryKey: ["godowns"],
     queryFn:  getGodowns,
   });
+  // Asset Category options = categories that have an active Depreciation Setup (so a rate applies).
+  const { data: depSetups = [] } = useQuery({
+    queryKey: ["depreciation-setups-active"],
+    queryFn: getActiveDepreciationSetups,
+  });
+  const categoryOptions = useMemo(
+    () => Array.from(new Set(ensureArray<{ AssetCategory: string }>(depSetups).map((d) => d.AssetCategory.trim()).filter(Boolean))).sort(),
+    [depSetups],
+  );
   const { data: allItems = [] } = useQuery({
     queryKey: ["item-master-all"],
     queryFn:  getItems,
@@ -204,6 +216,7 @@ export default function FixedAssetInventoryImport() {
     if (!form.docDate)  return toast.error("Date is required");
     if (!form.godownId) return toast.error("Godown is required");
     if (!form.itemId)   return toast.error("Item is required");
+    if (!form.assetCategory) return toast.error("Asset Category is required");
     const qty = parseFloat(form.quantity);
     if (!Number.isFinite(qty) || qty <= 0) return toast.error("Enter a valid quantity");
 
@@ -213,6 +226,7 @@ export default function FixedAssetInventoryImport() {
       projectId: form.projectId ? Number(form.projectId) : undefined,
       godownId:  Number(form.godownId),
       itemId:    form.itemId,
+      assetCategory: form.assetCategory,
       quantity:  qty,
       rate:      form.rate ? parseFloat(form.rate) : undefined,
       remarks:   form.remarks || undefined,
@@ -295,6 +309,18 @@ export default function FixedAssetInventoryImport() {
                 {fixedAssetItems.length === 0 && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1.5">
                     <AlertCircle size={12} /> No items tagged "Fixed Asset" in Item Master yet.
+                  </p>
+                )}
+              </div>
+              <div className="sm:col-span-2">
+                <label className={labelCls}><Hash size={11} /> Asset Category * <span className="text-muted-foreground/60 font-normal normal-case">(sets the depreciation rate — carried to FA Inventory and the Depreciation Tag)</span></label>
+                <select value={form.assetCategory} onChange={(e) => setField("assetCategory", e.target.value)} className={inputCls}>
+                  <option value="">Select asset category…</option>
+                  {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                {categoryOptions.length === 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1.5">
+                    <AlertCircle size={12} /> No active categories — add one in Depreciation Setup first.
                   </p>
                 )}
               </div>

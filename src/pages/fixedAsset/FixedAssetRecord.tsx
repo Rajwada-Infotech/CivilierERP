@@ -591,6 +591,8 @@ export default function FixedAssetRecord() {
   const [deleteId,   setDeleteId]   = useState<number | null>(null);
   const [reverseId,  setReverseId]  = useState<number | null>(null);
   const [form,       setForm]       = useState<FormState>(emptyForm(activeFinYear));
+  // True when the category came from FA Inventory with the selected FA Item Code — then it's fixed, not re-picked.
+  const [categoryFromInventory, setCategoryFromInventory] = useState(false);
 
   // ── filters ──
   const [filterCompany] = useState("");
@@ -874,10 +876,21 @@ export default function FixedAssetRecord() {
       godownId:    c.GodownId ? String(c.GodownId) : "",
       godownName:  c.GodownName || "",
     }));
+    // Asset Category was captured at FA Inventory import: fetch it (and its depreciation rate) here
+    // instead of asking again. Only when that category has an active Depreciation Setup.
+    const inv = (c.AssetCategory || "").trim().toLowerCase();
+    const match = inv ? depSetups.find((d) => d.AssetCategory.trim().toLowerCase() === inv) : undefined;
+    if (match) {
+      handleCategoryChange(match.AssetCategory);
+      setCategoryFromInventory(true);
+    } else {
+      setCategoryFromInventory(false);
+    }
   };
 
   const clearSelectedCode = () => {
     setForm((p) => ({ ...p, sourceTagId: "", faItemCode: "", assetName: "", godownId: "", godownName: "" }));
+    setCategoryFromInventory(false);
   };
 
   const handleSave = () => {
@@ -1244,7 +1257,7 @@ export default function FixedAssetRecord() {
               <div>
                 <label className={labelCls}>Asset Category *</label>
                 <div className="relative">
-                  <select value={form.assetCategory} onChange={(e) => handleCategoryChange(e.target.value)} className={`${inputCls} ${form.assetCategory ? "pl-9" : ""}`}>
+                  <select value={form.assetCategory} onChange={(e) => handleCategoryChange(e.target.value)} disabled={categoryFromInventory} className={`${inputCls} ${form.assetCategory ? "pl-9" : ""} ${categoryFromInventory ? "opacity-80 cursor-not-allowed" : ""}`}>
                     <option value="">Select category…</option>
                     {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
@@ -1254,6 +1267,9 @@ export default function FixedAssetRecord() {
                     </span>
                   )}
                 </div>
+                {categoryFromInventory && (
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">Fetched from FA Inventory for this FA Item Code — no need to select it again.</p>
+                )}
               </div>
               <div>
                 <label className={labelCls}>Type of Repairs SAC Code</label>

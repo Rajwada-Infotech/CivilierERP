@@ -96,7 +96,7 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
   const email = requireUser(req, res);
   if (!email) return;
 
-  const { docDate, companyId, projectId, godownId, itemId, quantity, rate, remarks } = req.body;
+  const { docDate, companyId, projectId, godownId, itemId, quantity, rate, remarks, assetCategory } = req.body;
 
   const godownIdVal = toInt(godownId);
   const itemIdVal = itemId ? String(itemId) : null;
@@ -107,6 +107,7 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
   if (!godownIdVal) return res.status(400).json({ error: "godownId is required" });
   if (!itemIdVal) return res.status(400).json({ error: "itemId is required" });
   if (!Number.isFinite(qtyVal) || qtyVal <= 0) return res.status(400).json({ error: "quantity must be a positive number" });
+  if (!assetCategory || !String(assetCategory).trim()) return res.status(400).json({ error: "Asset Category is required" });
 
   try {
     const pool = getPool();
@@ -118,6 +119,18 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
     if (!item) return res.status(404).json({ error: "Item not found" });
     if (item.M_Type !== "Fixed Asset") {
       return res.status(400).json({ error: `"${item.M_Name}" is not a Fixed-Asset-category item` });
+    }
+
+    // The category is captured here, once, and travels with the stock: tagging copies it onto
+    // every FA Item Code and the Fixed Asset Depreciation Tag picks it up (no re-selecting).
+    // It must be one Depreciation Setup knows, otherwise no depreciation rate could ever apply.
+    const catRes = await pool.request().input("Cat", sql.NVarChar(100), String(assetCategory).trim()).query(`
+      SELECT TOP 1 AssetCategory FROM dbo.DepreciationSetup
+      WHERE Status = 'Active' AND LOWER(LTRIM(RTRIM(AssetCategory))) = LOWER(LTRIM(RTRIM(@Cat)))
+    `);
+    const categoryName = catRes.recordset[0]?.AssetCategory?.trim();
+    if (!categoryName) {
+      return res.status(400).json({ error: `Asset Category "${String(assetCategory).trim()}" has no active Depreciation Setup — add it in Depreciation Setup first.` });
     }
 
     const docTypeId = await resolveDocTypeId(pool, sql, "FAI");
@@ -172,7 +185,7 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
         .input("CompanyId",         sql.Int, companyIdVal)
         .input("ProjectId",         sql.Int, projectIdVal)
         .input("AssetName",         sql.NVarChar(200), item.M_Name)
-        .input("AssetCategory",     sql.NVarChar(100), item.M_Group || "Uncategorized")
+        .input("AssetCategory",     sql.NVarChar(100), categoryName)
         .input("PurchaseDate",      sql.Date, docDate)
         .input("PurchaseInvoiceRef",sql.NVarChar(100), docNo)
         .input("PurchaseCost",      sql.Decimal(18,2), purchaseCost)
