@@ -1,5 +1,7 @@
 // Two ways to sell a villa built on plots: directly (its plots unsold — any
 // buyer, land and all), or after the plots were sold (only their owner).
+// The helpers under test are pure; keep db.js (which demands real env vars) out of the unit test.
+jest.mock("../db", () => ({ sql: {}, getPool: () => ({}) }));
 const { assertVillaBuyerOwnsLand, VillaLandError } = require("../services/villaLand");
 
 const poolWith = (rows) => ({

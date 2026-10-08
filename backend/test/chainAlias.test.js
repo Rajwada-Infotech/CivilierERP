@@ -1,5 +1,7 @@
 // A new DPR chain is named in its donor chain's style, so a project's chains
 // read alike whoever (script or app) created them.
+// The helpers under test are pure; keep db.js (which demands real env vars) out of the unit test.
+jest.mock("../db", () => ({ sql: {}, getPool: () => ({}) }));
 const { chainAlias, aliasFormatOf } = require("../services/autoDprChains");
 
 describe("chain naming follows the donor", () => {
