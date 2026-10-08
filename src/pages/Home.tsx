@@ -1577,6 +1577,7 @@ export default function HomePage() {
       "asset-transfer",
       "fixed-asset-quality-check",
       "fixed-asset-maintenance",
+      "fixed-asset-depreciation-generate",
     ],
   };
 
