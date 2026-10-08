@@ -511,6 +511,68 @@ router.get("/approved-list", authenticateToken, async (req, res) => {
   }
 });
 
+// ── Work-order terms for a PO ──────────────────────────────────────────────────
+// A Material Request raised from a Work Order carries the work order's own rate, GST rate and per-line
+// supplier for each material. The PO form uses them as the starting rate / GST / supplier instead of 0,
+// so the buyer only has to confirm or change them. Per item (+unit) the work order may list the same
+// material under several activities: the rate and GST are quantity-weighted averages, and a supplier is
+// only suggested when every one of those lines names the same one.
+async function attachWorkOrderTerms(pool, mrId, items) {
+  const none = { items, workOrder: null };
+  if (!(await hasSourceWO(pool))) return none;
+  const mr = (await pool.request().input("id", sql.Int, mrId)
+    .query("SELECT SourceWOId, SourceWODocNo FROM dbo.MaterialRequests WHERE MRId = @id")).recordset[0];
+  if (!mr?.SourceWOId) return none;
+
+  const lines = (await pool.request().input("wo", sql.Int, mr.SourceWOId).query(`
+    SELECT CONVERT(NVARCHAR(100), m.ItemId) AS ItemId, uom.UOMCode,
+           SUM(ISNULL(m.Quantity, 0)) AS Qty,
+           SUM(ISNULL(m.Quantity, 0) * ISNULL(m.Rate, 0)) AS Value,
+           SUM(ISNULL(m.Quantity, 0) * ISNULL(m.GSTRate, 0)) AS GstWeighted,
+           MIN(m.SupplierIdPerLine) AS MinSupplier, MAX(m.SupplierIdPerLine) AS MaxSupplier,
+           SUM(CASE WHEN m.SupplierIdPerLine IS NULL THEN 1 ELSE 0 END) AS NoSupplier,
+           MAX(sup.LHeadName) AS SupplierName
+    FROM dbo.WorkOrderActivityMaterials m
+    JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
+    LEFT JOIN dbo.UOMMaster uom ON uom.Id = m.UOMId
+    LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = m.SupplierIdPerLine
+    WHERE a.WorkOrderHeaderId = @wo AND m.ItemId IS NOT NULL
+    GROUP BY m.ItemId, uom.UOMCode
+  `)).recordset;
+
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const byKey = new Map();
+  for (const l of lines) {
+    const qty = Number(l.Qty) || 0;
+    const oneSupplier = Number(l.NoSupplier) === 0 && l.MinSupplier != null && l.MinSupplier === l.MaxSupplier;
+    byKey.set(`${String(l.ItemId).toLowerCase()}|${l.UOMCode || ""}`, {
+      WoRate: qty > 0 ? round2(Number(l.Value) / qty) : 0,
+      WoGstRate: qty > 0 ? round2(Number(l.GstWeighted) / qty) : 0,
+      WoSupplierId: oneSupplier ? l.MinSupplier : null,
+      WoSupplierName: oneSupplier ? l.SupplierName || null : null,
+    });
+  }
+
+  const enriched = items.map((it) => {
+    const terms = byKey.get(`${String(it.ItemId).toLowerCase()}|${it.UOMCode || ""}`);
+    return terms ? { ...it, ...terms } : it;
+  });
+
+  // One supplier for the whole PO only when every line agrees on it.
+  const supplierIds = new Set(enriched.map((it) => it.WoSupplierId ?? null));
+  const sole = supplierIds.size === 1 ? [...supplierIds][0] : null;
+  const soleItem = sole != null ? enriched.find((it) => it.WoSupplierId === sole) : null;
+  return {
+    items: enriched,
+    workOrder: {
+      WorkOrderId: mr.SourceWOId,
+      WorkOrderDocNo: mr.SourceWODocNo,
+      WorkOrderSupplierId: sole,
+      WorkOrderSupplierName: soleItem?.WoSupplierName ?? null,
+    },
+  };
+}
+
 // ── GET /by-docno/:docNo ───────────────────────────────────────────────────────
 // Look up an Approved MR by its document number and return PO prefill data.
 // Used by the PO form's "Load from MR" input.
@@ -588,6 +650,7 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
       })
       .filter((it) => it.PendingQty > 0);
 
+    const withTerms = await attachWorkOrderTerms(pool, mrId, itemsWithPending);
     res.json({
       MRId: mr.MRId,
       DocNo: mr.DocNo,
@@ -597,7 +660,8 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
       ProjectName: mr.ProjectName,
       FinYearId: mr.FinYearId,
       Remarks: mr.Remarks,
-      items: itemsWithPending,
+      ...(withTerms.workOrder ?? {}),
+      items: withTerms.items,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1439,6 +1503,7 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
       })
       .filter((it) => it.PendingQty > 0);
 
+    const withTerms = await attachWorkOrderTerms(pool, id, itemsWithPending);
     res.json({
       MRId: mr.MRId,
       DocNo: mr.DocNo,
@@ -1449,7 +1514,8 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
       FinYearId: mr.FinYearId,
       FinYearName: mr.FinYearName,
       Remarks: mr.Remarks,
-      items: itemsWithPending,
+      ...(withTerms.workOrder ?? {}),
+      items: withTerms.items,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

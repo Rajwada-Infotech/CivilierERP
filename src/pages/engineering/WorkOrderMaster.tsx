@@ -1711,6 +1711,34 @@ const ActivityGroupCard: React.FC<{
 
 // ─── VIEW: Work Order Detail Panel ────────────────────────────────────────────
 
+// How a Material Request's status reads on the Work Order page.
+const MR_STATUS_LABEL: Record<string, string> = {
+  Draft: "Draft",
+  Pending: "Pending approval",
+  Approved: "Approved",
+  Rejected: "Rejected",
+  "Partially Ordered": "Partly ordered",
+  "Partially Fulfilled": "Partly received",
+  Ordered: "Ordered",
+  Completed: "Completed",
+};
+const mrStatusLabel = (status: string | null | undefined) => (status ? (MR_STATUS_LABEL[status] ?? status) : "—");
+const mrStatusTone = (status: string | null | undefined) => {
+  switch (status) {
+    case "Approved":
+    case "Ordered":
+    case "Completed":
+      return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400";
+    case "Rejected":
+      return "bg-destructive/10 text-destructive";
+    case "Partially Ordered":
+    case "Partially Fulfilled":
+      return "bg-sky-500/10 text-sky-700 dark:text-sky-400";
+    default:
+      return "bg-amber-500/10 text-amber-700 dark:text-amber-400";
+  }
+};
+
 const WorkOrderDetailPanel: React.FC<{
   workOrderId: number;
   onBack: () => void;
@@ -1788,6 +1816,20 @@ const WorkOrderDetailPanel: React.FC<{
   const existingMR = woChain?.downstream
     .filter((n) => n.docType === "mr" && n.status !== "Rejected" && n.status !== "Cancelled")
     .at(-1);
+
+  // Where the work order's materials stand in procurement, from the same chain.
+  const procurement = (() => {
+    if (!woChain) return null;
+    const nodes = woChain.downstream;
+    const count = (type: string) => nodes.filter((n) => n.docType === type).length;
+    return {
+      mr: existingMR ?? null,
+      quotations: count("qt"),
+      purchaseOrders: count("po"),
+      grns: count("grn"),
+      invoices: count("expense"),
+    };
+  })();
 
   const openMaterialRequest = (mrId: number) =>
     navigate(`/material/material-request?view=${mrId}`);
@@ -2061,6 +2103,34 @@ const WorkOrderDetailPanel: React.FC<{
           </div>
         </div>
       </div>
+
+      {/* Procurement progress of this work order's materials */}
+      {detail.Status === "Approved" && procurement && (
+        <div className="rounded-xl border border-border bg-card px-4 sm:px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">Materials</span>
+          {procurement.mr ? (
+            <>
+              <button
+                type="button"
+                onClick={() => openMaterialRequest(procurement.mr!.id)}
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                {procurement.mr.docNo ?? `MR #${procurement.mr.id}`}
+              </button>
+              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${mrStatusTone(procurement.mr.status)}`}>
+                {mrStatusLabel(procurement.mr.status)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {procurement.quotations > 0 && `${procurement.quotations} quotation${procurement.quotations === 1 ? "" : "s"} · `}
+                {procurement.purchaseOrders} PO{procurement.purchaseOrders === 1 ? "" : "s"} · {procurement.grns} GRN
+                {procurement.grns === 1 ? "" : "s"} · {procurement.invoices} invoice{procurement.invoices === 1 ? "" : "s"}
+              </span>
+            </>
+          ) : (
+            <span className="text-sm text-muted-foreground">No Material Request raised yet</span>
+          )}
+        </div>
+      )}
 
       {/* Linked documents: Work Order → Material Request → Quotation → PO → GRN → Invoice */}
       <div className="rounded-xl border border-border bg-card px-4 sm:px-5 pb-4 sm:pb-5">
