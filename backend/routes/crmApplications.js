@@ -1187,10 +1187,9 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     await releaseAllHoldsForApplication(pool, id, actor);
     await releaseAllParkingForApplication(pool, id);
 
-    await pool.request().input("aid", sql.Int, id).query(`
-      UPDATE dbo.CrmApplicationPlot SET Status = N'Cancelled'
-      WHERE ApplicationId = @aid AND Status = N'Active'
-    `);
+    // Its unit and plot lines both — leaving the unit line Active kept the
+    // flat or villa from ever being applied for again.
+    await require("../services/crmApplicationWorkflow").releaseApplicationLines(pool, id);
 
     await pool.request()
       .input("id", sql.Int, id)

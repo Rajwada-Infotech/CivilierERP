@@ -28,6 +28,12 @@ async function releaseBookingInventoryLines(executor, bookingId, lineStatus = "C
     UPDATE ap SET Status = @st
     FROM dbo.CrmApplicationPlot ap JOIN dbo.CrmBooking b ON b.ApplicationId = ap.ApplicationId
     WHERE b.Id = @bid AND ap.Status = N'Active';
+    -- The application's unit line too: one Active line per unit is enforced
+    -- (UX_CrmApplicationUnit_ActiveUnit), so leaving it Active kept a
+    -- cancelled flat or villa from ever being applied for again.
+    UPDATE au SET Status = @st
+    FROM dbo.CrmApplicationUnit au JOIN dbo.CrmBooking b ON b.ApplicationId = au.ApplicationId
+    WHERE b.Id = @bid AND au.Status = N'Active';
   `);
 }
 
