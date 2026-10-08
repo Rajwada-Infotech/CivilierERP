@@ -2489,6 +2489,12 @@ router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-set
     if (work.Steps || work.Labour || work.Drawings || work.Blueprints) {
       return fail(409, `Work has started on ${unit.UnitName} (${work.Steps} step(s), ${work.Labour} labour entr(ies), ${work.Drawings + work.Blueprints} drawing(s)) — its rooms can't be re-cut now`);
     }
+    // Each chain's naming style, read now while its name still matches its room.
+    const { aliasFormatOf, buildAlias } = require("../services/autoDprChains");
+    const styleByChain = new Map((await q(`
+      SELECT d.Id, d.Alias, r.RoomName, u.UnitName FROM dbo.DependencyMaster d
+      JOIN dbo.RoomMaster r ON r.Id = d.RoomId JOIN dbo.UnitMaster u ON u.Id = d.FlatId
+      WHERE d.FlatId = @u`)).recordset.map((c) => [c.Id, aliasFormatOf(c)]));
     // 1. Retire the untouched stubs (steps cancelled the way a manual cancel records it).
     await q(`UPDATE a SET PreCancelStatus = a.Status, Status = N'CANCELLED', UpdatedAt = SYSDATETIME()
              FROM dbo.DependencyActivityAssignment a
@@ -2505,13 +2511,24 @@ router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-set
     await require("../services/villaComposition").applyStoreys(tx, unitId);
     // 4. A returning room gets its own chain back (steps restored, alias renamed with the room).
     const revived = await q(`
-      UPDATE d SET IsActive = 1, Alias = LEFT(u.UnitName + N'/' + r.RoomName, 200), UpdatedAt = SYSDATETIME()
+      UPDATE d SET IsActive = 1, UpdatedAt = SYSDATETIME()
       OUTPUT INSERTED.Id
       FROM dbo.DependencyMaster d
       JOIN dbo.RoomMaster r ON r.Id = d.RoomId AND r.IsActive = 1
-      JOIN dbo.UnitMaster u ON u.Id = d.FlatId
       WHERE d.FlatId = @u AND d.IsActive = 0
         AND d.Id = (SELECT MAX(d2.Id) FROM dbo.DependencyMaster d2 WHERE d2.RoomId = d.RoomId)`);
+    // Renamed after its room (the sync may have renumbered it), in the chain's own style.
+    if (revived.recordset.length) {
+      const named = (await tx.request().query(`
+        SELECT d.Id, r.RoomName, u.UnitName FROM dbo.DependencyMaster d
+        JOIN dbo.RoomMaster r ON r.Id = d.RoomId JOIN dbo.UnitMaster u ON u.Id = d.FlatId
+        WHERE d.Id IN (${revived.recordset.map((r) => r.Id).join(",")})`)).recordset;
+      for (const c of named) {
+        const style = styleByChain.get(c.Id) || { sep: "/", unitCase: "asIs", roomCase: "asIs" };
+        await tx.request().input("id", sql.Int, c.Id).input("a", sql.NVarChar(200), buildAlias(style, c.UnitName, c.RoomName).slice(0, 200))
+          .query("UPDATE dbo.DependencyMaster SET Alias = @a WHERE Id = @id");
+      }
+    }
     if (revived.recordset.length) {
       await tx.request().query(`
         UPDATE a SET Status = ISNULL(a.PreCancelStatus, N'PENDING'), PreCancelStatus = NULL, UpdatedAt = SYSDATETIME()
