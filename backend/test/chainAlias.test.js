@@ -1,8 +1,7 @@
 // A new DPR chain is named in its donor chain's style, so a project's chains
 // read alike whoever (script or app) created them.
-// The real db module needs DB settings that CI doesn't have; these tests pass
-// their own fake pool, so a stub is all that's needed.
-jest.mock("../db", () => ({ sql: { Int: "Int", NVarChar: () => "NVarChar" }, getPool: () => { throw new Error("no db in tests"); } }));
+// The helpers under test are pure; keep db.js (which demands real env vars) out of the unit test.
+jest.mock("../db", () => ({ sql: {}, getPool: () => ({}) }));
 const { chainAlias, aliasFormatOf } = require("../services/autoDprChains");
 
 describe("chain naming follows the donor", () => {
