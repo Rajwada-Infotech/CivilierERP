@@ -208,7 +208,7 @@ export function VillaRoomPlanEditor({
         `${type.Name}: ${body.roomCount} rooms saved` +
           (body.villasUpdated
             ? ` — ${body.villasUpdated} villa(s) updated, ${body.roomsAdded} room(s) added`
-            : "")
+            : " — villas converted from now on get this plan; villas already built keep their rooms")
       );
       onSaved();
     } catch (e: any) {
@@ -228,7 +228,7 @@ export function VillaRoomPlanEditor({
             Rooms by floor — {type.Code} · {type.Name}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Each villa built to this type gets these rooms on these floors, with their DPR steps.
+            Each plot converted to this type gets these rooms on these floors, with their DPR steps. Villas already built keep theirs.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">

@@ -2,17 +2,21 @@
 // reading) — the same thing Plot Master > Villa types > Rooms saves by hand.
 // Creates any room categories the spec names that don't exist yet, then saves
 // each listed villa type's plan (services/villaComposition.savePlan), which
-// rebuilds the type's own layout and brings villas already built to it in
-// line. One transaction; dry run by default.
+// builds the type's own layout. Villas ALREADY BUILT are left exactly as they
+// are — the plan applies to villas converted from now on. --update-villas
+// also brings existing villas of each type in line (normally not wanted).
+// One transaction; dry run by default.
 //
 //   node scripts/loadVillaPlans.js --spec scripts/silverwoods_villa_plans.json            # dry run
 //   node scripts/loadVillaPlans.js --spec scripts/silverwoods_villa_plans.json --apply
+//   ... --apply --update-villas   # also re-cut villas already built (normally NOT wanted)
 const fs = require("fs");
 const { connectDB, getPool, closeDB, sql } = require("../db");
 const { savePlan, applyStoreys } = require("../services/villaComposition");
 const { syncUnitRooms } = require("../services/unitLayout");
 
 const APPLY = process.argv.includes("--apply");
+const UPDATE_VILLAS = process.argv.includes("--update-villas");
 const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
 
 async function main() {
@@ -62,7 +66,9 @@ async function main() {
         }
       }
       const saved = await savePlan(tx, t.Id, rooms, "loadVillaPlans");
-      const villas = (await q(`UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @l, UpdatedAt = SYSDATETIME() OUTPUT INSERTED.Id, INSERTED.UnitName
+      // Villas already built keep their rooms unless --update-villas is given.
+      const built = (await q("SELECT Id, UnitName FROM dbo.UnitMaster WHERE VillaTypeId = @v AND IsActive = 1", { v: [sql.Int, t.Id] })).recordset;
+      const villas = !UPDATE_VILLAS ? [] : (await q(`UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @l, UpdatedAt = SYSDATETIME() OUTPUT INSERTED.Id, INSERTED.UnitName
                                WHERE VillaTypeId = @v AND IsActive = 1`,
         { lt: [sql.Int, saved.layoutTypeId], l: [sql.NVarChar(50), saved.label], v: [sql.Int, t.Id] })).recordset;
       let added = 0;
@@ -72,7 +78,8 @@ async function main() {
         await applyStoreys(tx, v.Id);
       }
       const perFloor = Object.entries(floors).sort(([a], [b]) => require("../services/villaComposition").storeyOrder(a) - require("../services/villaComposition").storeyOrder(b)).map(([f, cats]) => `${f}: ${Object.values(cats).reduce((a, b) => a + b, 0)}`).join(", ");
-      console.log(`  ${code} ${t.Name}: ${saved.roomCount} rooms (${perFloor})${villas.length ? ` — ${villas.length} villa(s) updated, ${added} room(s) added: ${villas.map((v) => v.UnitName).join(", ")}` : ""}`);
+      const keptNote = !UPDATE_VILLAS && built.length ? ` — ${built.length} built villa(s) left as they are: ${built.map((v) => v.UnitName).join(", ")}` : "";
+      console.log(`  ${code} ${t.Name}: ${saved.roomCount} rooms (${perFloor})${villas.length ? ` — ${villas.length} villa(s) updated, ${added} room(s) added: ${villas.map((v) => v.UnitName).join(", ")}` : keptNote}`);
       totals.types++; totals.rooms += saved.roomCount; totals.villas += villas.length; totals.roomsAdded += added;
     }
 

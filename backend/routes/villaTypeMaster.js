@@ -222,7 +222,10 @@ router.put("/:id/plan", requirePageRight(PAGE, "edit"), async (req, res) => {
   await tx.begin();
   try {
     const saved = await savePlan(tx, id, req.body?.rooms, req.user?.email || null);
-    const villas = (await tx.request().input("v", sql.Int, id).input("lt", sql.Int, saved.layoutTypeId).input("l", sql.NVarChar(50), saved.label).query(`
+    // The plan is for villas converted from now on. Villas already built keep
+    // their rooms (and the DPR work on them) — one is changed only on purpose,
+    // with Villa type > Apply on that villa, or when updateVillas is sent.
+    const villas = req.body?.updateVillas !== true ? [] : (await tx.request().input("v", sql.Int, id).input("lt", sql.Int, saved.layoutTypeId).input("l", sql.NVarChar(50), saved.label).query(`
       UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @l, UpdatedAt = SYSDATETIME()
       OUTPUT INSERTED.Id
       WHERE VillaTypeId = @v AND IsActive = 1`)).recordset;
