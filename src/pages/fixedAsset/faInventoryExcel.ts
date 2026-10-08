@@ -7,6 +7,7 @@
 // happens in FixedAssetTagging.tsx's importer; this file builds the workbook and
 // turns an uploaded .xlsx / .csv into plain rows for it.
 import { parseCsv } from "@/lib/export";
+import { projectCompanyIds, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { buildWorkbook, downloadBlob, readWorkbook, type XlsxCell, type XlsxSheet } from "@/lib/xlsxBook";
 
 export type FaImportMode = "bulk" | "individual";
@@ -23,7 +24,7 @@ export const sameName = (a: unknown, b: unknown): boolean => {
 
 export interface FaImportMasters {
   companies: { id: number; label: string }[];
-  projects: { id: number; label: string; company_id: number | null }[];
+  projects: (ProjectCompanyLike & { id: number; label: string })[];
   godowns: { GodownName: string; EnterpriseID: number | null; ProjectID: number | null }[];
   /** Fixed Asset items of the Item Master only. */
   faItems: { code: string; name: string; uom: string }[];
@@ -65,25 +66,28 @@ const opt = (v: string): XlsxCell => ({ v, s: "header" });
 
 export async function downloadFaInventoryTemplate(mode: FaImportMode, m: FaImportMasters) {
   const bulk = mode === "bulk";
-  const projectRows = m.projects.map((p) => ({
-    project: p.label,
-    company: m.companies.find((c) => c.id === p.company_id)?.label ?? "",
-  }));
+  // One row per (project, linked company) — a project can be tagged to several companies.
+  const projectRows = m.projects.flatMap((p) => {
+    const linked = projectCompanyIds(p)
+      .map((cid) => m.companies.find((c) => String(c.id) === cid)?.label)
+      .filter((l): l is string => !!l);
+    return (linked.length ? linked : [""]).map((company) => ({ project: p.label.trim(), company: company.trim() }));
+  });
   const godownRows = m.godowns.map((g) => ({
-    godown: g.GodownName,
+    godown: g.GodownName.trim(),
     company: m.companies.find((c) => c.id === g.EnterpriseID)?.label ?? "",
     project: m.projects.find((p) => p.id === g.ProjectID)?.label ?? "",
   }));
 
   const cols: string[][] = [
-    ["Company", ...m.companies.map((c) => c.label)], // A
+    ["Company", ...m.companies.map((c) => c.label.trim())], // A
     ["Project", ...projectRows.map((p) => p.project)], // B
     ["Project's Company", ...projectRows.map((p) => p.company)], // C
     ["Godown", ...godownRows.map((g) => g.godown)], // D
     ["Godown's Company", ...godownRows.map((g) => g.company)], // E
     ["Godown's Project", ...godownRows.map((g) => g.project)], // F
-    ["Fixed Asset Item Code", ...m.faItems.map((i) => i.code)], // G
-    ["Fixed Asset Item Name", ...m.faItems.map((i) => i.name)], // H
+    ["Fixed Asset Item Code", ...m.faItems.map((i) => i.code.trim())], // G
+    ["Fixed Asset Item Name", ...m.faItems.map((i) => i.name.trim())], // H
     ["Item's UOM", ...m.faItems.map((i) => i.uom)], // I
   ];
   const depth = Math.max(...cols.map((c) => c.length));
@@ -111,7 +115,7 @@ export async function downloadFaInventoryTemplate(mode: FaImportMode, m: FaImpor
     rows: [head],
     lists: [
       { sqref: "A2:A2000", formula: range("A", m.companies.length) },
-      { sqref: "B2:B2000", formula: range("B", m.projects.length) },
+      { sqref: "B2:B2000", formula: range("B", projectRows.length) },
       { sqref: "C2:C2000", formula: range("D", m.godowns.length) },
       { sqref: "D2:D2000", formula: range("G", m.faItems.length) },
       { sqref: "E2:E2000", formula: range("H", m.faItems.length) },
