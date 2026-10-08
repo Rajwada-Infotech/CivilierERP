@@ -263,6 +263,7 @@ const ALL_ROUTES = [
   { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
   { path: "/api/fixed-asset-quality-check", file: "./routes/fixedAssetQualityCheck" },
   { path: "/api/fixed-asset-maintenance", file: "./routes/fixedAssetMaintenance" },
+  { path: "/api/fixed-asset-depreciation-generate", file: "./routes/fixedAssetDepreciationGenerate" },
   { path: "/api/home", file: "./routes/homeActivity" },
   { path: "/api/id-template-master", file: "./routes/idTemplateMaster" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
