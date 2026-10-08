@@ -129,7 +129,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
         SELECT
           rm.Id AS id,
           -- a villa room carries its own floor inside the villa
-          CONCAT(CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, rm.RoomName) AS label,
+          CONCAT(CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN UPPER(rm.Storey) = 'ROOF' THEN 'Roof terrace · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, rm.RoomName) AS label,
           dm.Alias AS linkedAlias
         FROM dbo.RoomMaster rm
         LEFT JOIN dbo.DependencyMaster dm
@@ -171,7 +171,7 @@ router.get("/", authMiddleware, async (req, res) => {
         CONCAT(
           ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
           ' > ', ISNULL(um.UnitName, '—'), ' > ',
-            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
+            CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN UPPER(rm.Storey) = 'ROOF' THEN 'Roof terrace · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END, ISNULL(rm.RoomName, '—')
         ) AS scopePath
       FROM dbo.DependencyMaster dm
       LEFT JOIN dbo.enterprise   ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'

@@ -61,7 +61,7 @@ router.get("/activities", async (req, res) => {
           ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor, ' > ',
           ISNULL(um.UnitName, '—'), ' > ',
           -- a villa room's own floor inside the villa
-          CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END,
+          CASE WHEN rm.Storey = 'G' THEN 'Ground floor · ' WHEN rm.Storey = 'B' THEN 'Basement · ' WHEN UPPER(rm.Storey) = 'ROOF' THEN 'Roof terrace · ' WHEN TRY_CAST(rm.Storey AS INT) IS NOT NULL THEN CONCAT('Floor ', rm.Storey, ' · ') WHEN rm.Storey IS NOT NULL THEN CONCAT(rm.Storey, ' · ') ELSE '' END,
           ISNULL(rm.RoomName, '—'), ')'
         ) AS label,
         (SELECT COUNT(*) FROM dbo.WorkerActivityRoster war WHERE war.DependencyMasterActivityId = dma.Id AND war.IsActive = 1) AS rosterCount
