@@ -35,6 +35,8 @@ export interface InventoryImportPayload {
   quantity: number;
   rate?: number | null;
   remarks?: string;
+  /** Mandatory — must be a category with an active Depreciation Setup. */
+  assetCategory: string;
 }
 
 async function handleError(res: Response, fallback: string) {

@@ -316,10 +316,11 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       remarks, sourceTagId, pictureBase64, repairType,
     } = req.body;
 
-    if (!assetCategory)
-      return res.status(400).json({ error: "assetCategory is required" });
-
     const sourceTagIdVal = sourceTagId ? parseInt(sourceTagId, 10) : null;
+    // With an FA Item Code the category normally comes from FA Inventory (below), so the
+    // body may omit it; a record created without a code must still name one.
+    if (!assetCategory && !sourceTagIdVal)
+      return res.status(400).json({ error: "assetCategory is required" });
     if (!sourceTagIdVal && !assetName)
       return res.status(400).json({ error: "assetName is required when no FA Item Code is selected" });
 
@@ -335,12 +336,15 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       // unassigned resource, re-check under UPDLOCK, insert" pattern used
       // by Asset Transfer's eligibility check.
       let sourceItemName = null, sourceCompanyId = null, sourceProjectId = null, sourceGodownId = null, sourceCode = null;
+      let effectiveCategory = assetCategory;
+      let depSetupId = depreciationSetupId, depType = depreciationType, depRate = depreciationRate;
       if (sourceTagIdVal) {
         const tagRes = await tx.request().input("TagId", sql.Int, sourceTagIdVal).query(`
           SELECT t.TagId, t.FAItemCode, t.CompanyId, t.ProjectId, t.GodownId,
-                 im.M_Name AS ItemName
+                 im.M_Name AS ItemName, batch.AssetCategory AS BatchCategory
           FROM dbo.FixedAssetTagging t WITH (UPDLOCK, HOLDLOCK)
           LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
+          LEFT JOIN dbo.FixedAssetRecord batch ON batch.AssetId = t.AssetId
           WHERE t.TagId = @TagId AND t.FAItemCode IS NOT NULL AND t.Status = 'Tagged'
             AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId AND fa.Status <> 'Deleted')
         `);
@@ -351,13 +355,34 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         sourceProjectId  = tag.ProjectId;
         sourceGodownId   = tag.GodownId;
         sourceCode       = tag.FAItemCode;
+
+        // The Asset Category was captured when the stock entered FA Inventory — use it, so the
+        // right depreciation rate applies without anyone re-selecting it (and nobody can pick a
+        // different one). Only when that category has an active Depreciation Setup; stock
+        // received through a GRN may carry an item-group name instead, which stays selectable.
+        if (tag.BatchCategory && String(tag.BatchCategory).trim()) {
+          const setupRes = await tx.request().input("Cat", sql.NVarChar(100), String(tag.BatchCategory).trim()).query(`
+            SELECT TOP 1 SetupId, AssetCategory, DepreciationType, DepreciationRate FROM dbo.DepreciationSetup
+            WHERE Status = 'Active' AND LOWER(LTRIM(RTRIM(AssetCategory))) = LOWER(LTRIM(RTRIM(@Cat)))
+            ORDER BY EffectiveFrom DESC, SetupId DESC
+          `);
+          const setup = setupRes.recordset[0];
+          if (setup) {
+            effectiveCategory = setup.AssetCategory.trim();
+            // The rate follows the category, so take it from the setup, not from whatever the client sent.
+            depSetupId = setup.SetupId;
+            depType = setup.DepreciationType;
+            depRate = setup.DepreciationRate;
+          }
+        }
       }
+      if (!effectiveCategory) { await tx.rollback(); return res.status(400).json({ error: "assetCategory is required" }); }
 
       const docTypeId = await resolveDocTypeId(pool, sql, "FA");
       const docNo     = await lockNextDocNumber(pool, sql, {
         docTypeId, finYear, tableName: "FixedAssetRecord", issuedBy: email,
       });
-      const assetCode = await generateAssetCode(pool, assetCategory);
+      const assetCode = await generateAssetCode(pool, effectiveCategory);
 
       const insert = await tx.request()
         .input("DocNo",               sql.NVarChar(100), docNo)
@@ -366,7 +391,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         .input("ProjectId",           sql.Int,           sourceTagIdVal ? sourceProjectId : (projectId ? parseInt(projectId, 10) : null))
         .input("FinYear",             sql.NVarChar(20),  finYear || null)
         .input("AssetName",           sql.NVarChar(200), sourceTagIdVal ? sourceItemName : assetName)
-        .input("AssetCategory",       sql.NVarChar(100), assetCategory)
+        .input("AssetCategory",       sql.NVarChar(100), effectiveCategory)
         .input("AssetCode",           sql.NVarChar(50),  assetCode)
         .input("Brand",               sql.NVarChar(100), brand || null)
         .input("Model",               sql.NVarChar(100), model || null)
@@ -381,9 +406,9 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         .input("Department",          sql.NVarChar(100), department || null)
         .input("Custodian",           sql.NVarChar(200), custodianName)
         .input("CustodianUserId",     sql.Int,           custodianUserIdVal)
-        .input("DepreciationSetupId", sql.Int,           depreciationSetupId ? parseInt(depreciationSetupId, 10) : null)
-        .input("DepreciationType",    sql.NVarChar(50),  depreciationType || null)
-        .input("DepreciationRate",    sql.Decimal(5,2),  depreciationRate != null && depreciationRate !== "" ? parseFloat(depreciationRate) : null)
+        .input("DepreciationSetupId", sql.Int,           depSetupId ? parseInt(depSetupId, 10) : null)
+        .input("DepreciationType",    sql.NVarChar(50),  depType || null)
+        .input("DepreciationRate",    sql.Decimal(5,2),  depRate != null && depRate !== "" ? parseFloat(depRate) : null)
         .input("UsefulLife",          sql.Int,           usefulLife  ? parseInt(usefulLife, 10)  : null)
         .input("Remarks",             sql.NVarChar(sql.MAX), remarks || null)
         .input("PictureBase64",       sql.NVarChar(sql.MAX), pictureBase64 || null)

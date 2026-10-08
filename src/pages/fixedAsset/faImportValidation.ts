@@ -21,6 +21,7 @@ export interface FaImportResultRow {
   itemId: string | null;
   itemCode: string;
   itemName: string;
+  assetCategory: string;
   docDate: string;
   quantity: number;
   rate: number | null;
@@ -45,6 +46,8 @@ export interface FaImportContext {
   /** Active, non-deleted godowns. */
   godowns: FaGodownLike[];
   itemMaster: { M_Id: string; M_Name: string; M_code: string | null; M_Type: string | null }[];
+  /** Categories with an active Depreciation Setup. */
+  assetCategories: string[];
   /** Financial Year label for an ISO date, "" when none covers it. */
   deriveFinYear: (isoDate: string) => string;
 }
@@ -101,6 +104,7 @@ export function validateFaImportRows(rawRows: FaImportFileRow[], ctx: FaImportCo
       itemId: null,
       itemCode: raw.ItemCode,
       itemName: raw.ItemName || "—",
+      assetCategory: raw.AssetCategory,
       docDate: raw.Date,
       quantity: 0,
       rate: null,
@@ -113,6 +117,7 @@ export function validateFaImportRows(rawRows: FaImportFileRow[], ctx: FaImportCo
       !raw.Project && "Project",
       !raw.Godown && "Godown",
       !raw.ItemCode && !raw.ItemName && "Item Code / Item Name",
+      !raw.AssetCategory && "Asset Category",
       !raw.Date && "Date",
       ctx.mode === "bulk" && !raw.Quantity && "Quantity",
     ].filter(Boolean);
@@ -179,6 +184,14 @@ export function validateFaImportRows(rawRows: FaImportFileRow[], ctx: FaImportCo
       } else if (named.length === 1) {
         row.godownLabel = named[0].GodownName.trim(); // company / project problem already reported
       }
+    }
+
+    // ── Asset Category: must be one Depreciation Setup knows (so a rate applies) ──
+    if (raw.AssetCategory) {
+      const cat = ctx.assetCategories.find((c) => normText(c) === normText(raw.AssetCategory));
+      if (cat) row.assetCategory = cat.trim();
+      else if (ctx.assetCategories.length === 0) problems.push("No active Asset Category exists — add categories in Depreciation Setup first");
+      else problems.push(`Asset Category "${raw.AssetCategory}" has no active Depreciation Setup${didYouMean(raw.AssetCategory, ctx.assetCategories)}`);
     }
 
     // ── Date ──
