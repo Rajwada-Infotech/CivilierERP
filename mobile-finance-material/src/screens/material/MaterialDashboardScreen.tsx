@@ -14,6 +14,7 @@
 // web-only" convention as admin/**) — same "one page at a time" scoping
 // as the rest of this app. Tapping one of those still shows the standard
 // "not built on mobile yet" alert.
+import { fmtIstClock } from "@/utils/istTime";
 import { useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
@@ -190,7 +191,7 @@ export default function MaterialDashboardScreen() {
   });
 
   const lastUpdated = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+    ? fmtIstClock(dataUpdatedAt)
     : null;
 
   const onRefresh = async () => {

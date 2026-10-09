@@ -152,7 +152,7 @@ router.post("/login", async (req, res) => {
       const { getMaintenanceState } = require("../services/maintenanceMode");
       const { maintenanceBody, isSuperAdmin } = require("../middleware/maintenanceGate");
       const maintenance = await getMaintenanceState();
-      if (maintenance.active && !isSuperAdmin(normalizedRole)) {
+      if (maintenance.active && maintenance.enforced && !isSuperAdmin(normalizedRole)) {
         return res.status(503).json(maintenanceBody(maintenance));
       }
     }

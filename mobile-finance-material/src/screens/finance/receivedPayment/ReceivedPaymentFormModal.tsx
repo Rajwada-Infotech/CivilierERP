@@ -6,6 +6,7 @@
 // edit are supported (editingRecord prop, mirroring PaymentFormModal's
 // modal-prop pattern). Deliberately dropped vs. web: Contract-linking
 // (on-account advance tagging), print, and submit-for-approval.
+import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
@@ -46,7 +47,7 @@ function blankForm(): FormState {
   return {
     companyId: "", companyName: "", projectId: "", projectName: "", finYear: "",
     customerName: "", depositBankId: "", depositBankName: "",
-    date: new Date().toISOString().slice(0, 10), amount: "", mode: "",
+    date: istToday(), amount: "", mode: "",
     checkNumber: "", chequeDate: "", isPostDated: false, transactionId: "", bankName: "", remarks: "",
   };
 }
@@ -110,7 +111,7 @@ export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { 
         projectId: r.projectId != null ? String(r.projectId) : "", projectName: r.projectName,
         finYear: r.finYear || "", customerName: r.customerName || r.receivedFrom,
         depositBankId: r.depositBankId != null ? String(r.depositBankId) : "", depositBankName: r.depositBankName || "",
-        date: r.docDate || new Date().toISOString().slice(0, 10), amount: String(r.amount), mode: r.mode,
+        date: r.docDate || istToday(), amount: String(r.amount), mode: r.mode,
         checkNumber: r.checkNumber || "", chequeDate: r.chequeDate || "", isPostDated: !!r.isPostDated,
         transactionId: r.transactionId || "", bankName: r.bankName || "", remarks: r.remarks || "",
       });
@@ -164,7 +165,7 @@ export function ReceivedPaymentFormModal({ visible, onClose, editingRecord }: { 
   const needsBankRef = ["Check", "UPI", "NEFT", "RTGS", "Card"].includes(form.mode);
 
   const onChequeDateChange = (v: string) => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = istToday();
     set("chequeDate", v);
     set("isPostDated", !!v && v > today);
   };

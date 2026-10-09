@@ -6,6 +6,7 @@
 // type — PDFs, docs, etc — via expo-document-picker + expo-file-system's
 // base64 read, matching web's arbitrary file input), and Terms &
 // Conditions (multi-select from TC master).
+import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, TextInput, ActivityIndicator, Alert, Modal, Image } from "react-native";
@@ -39,7 +40,7 @@ const ACCENT = "#8b5cf6";
 const EMPTY_LIST: any[] = [];
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return istToday();
 }
 
 function fieldLabel(text: string) {

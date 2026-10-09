@@ -7,6 +7,7 @@
 // (2-col stat tiles), Totals (stacked), Recent Activity (two stacked row
 // lists in place of web's <table>s), Cheque Summary (2-col tiles), Quick
 // Actions (2-col nav buttons). No chart library — web doesn't use one either.
+import { fmtIstClock } from "@/utils/istTime";
 import { useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
@@ -173,7 +174,7 @@ export default function FinanceDashboardScreen() {
   });
 
   const lastUpdated = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+    ? fmtIstClock(dataUpdatedAt)
     : null;
 
   const onRefresh = async () => {
