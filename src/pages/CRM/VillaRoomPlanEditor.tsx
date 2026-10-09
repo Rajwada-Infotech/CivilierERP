@@ -64,6 +64,30 @@ export function VillaRoomPlanEditor({
   const [floors, setFloors] = useState<string[]>(["G", "1", "2"]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // After a save: built villas of this type that lack rooms of the new plan.
+  const [behind, setBehind] = useState<{ villas: number; rooms: number } | null>(null);
+  const [updatingVillas, setUpdatingVillas] = useState(false);
+  const villasUrl = `/api/crm/project-auto-setup/projects/${type.ProjectId}/villas/add-missing-rooms?villaTypeId=${type.Id}`;
+  const checkBuiltVillas = async () => {
+    if (!type.VillaCount) { setBehind(null); return; }
+    const r = await fetchWithAuth(`${villasUrl}&dryRun=1`, { method: "POST" });
+    const b = await r.json().catch(() => ({}));
+    setBehind(r.ok && b.roomsAdded ? { villas: (b.changed || []).length, rooms: b.roomsAdded } : null);
+  };
+  const updateBuiltVillas = async () => {
+    if (!behind) return;
+    if (!window.confirm(`Add ${behind.rooms} room(s) to ${behind.villas} built ${type.Code} villa(s)?
+Only missing rooms are added — existing rooms, their names and their DPR work stay exactly as they are.`)) return;
+    setUpdatingVillas(true);
+    try {
+      const r = await fetchWithAuth(villasUrl, { method: "POST" });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.error || "Could not update the villas");
+      toast.success(`${b.roomsAdded} room(s) added to ${(b.changed || []).length} villa(s)` + (b.failed?.length ? ` — ${b.failed.length} left unchanged: ${b.failed[0]}` : ""));
+      setBehind(null);
+      onSaved();
+    } catch (e: any) { toast.error(e.message); } finally { setUpdatingVillas(false); }
+  };
 
   // Floor-builder state
   const [upperCount, setUpperCount] = useState(2); // G + N upper floors
@@ -177,6 +201,9 @@ export function VillaRoomPlanEditor({
     setLines((ls) => ls.filter((l) => l.storey !== f));
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { checkBuiltVillas().catch(() => {}); }, [type.Id]);
+
   const save = async () => {
     const blank = lines.filter((l) => !l.categoryId);
     if (blank.length) {
@@ -211,6 +238,7 @@ export function VillaRoomPlanEditor({
             : " — villas converted from now on get this plan; villas already built keep their rooms")
       );
       onSaved();
+      await checkBuiltVillas();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -228,7 +256,7 @@ export function VillaRoomPlanEditor({
             Rooms by floor — {type.Code} · {type.Name}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Each plot converted to this type gets these rooms on these floors, with their DPR steps. Villas already built keep theirs.
+            Each plot converted to this type gets these rooms on these floors, with their DPR steps. Villas already built keep theirs — after saving you can add the new rooms to them.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -451,6 +479,17 @@ export function VillaRoomPlanEditor({
               </div>
             );
           })}
+        </div>
+      )}
+      {behind && canEdit && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300/60 bg-amber-50/50 dark:bg-amber-950/20 px-3 py-2">
+          <span className="text-xs text-amber-800 dark:text-amber-300">
+            {behind.villas} built {type.Code} villa{behind.villas === 1 ? " is" : "s are"} missing {behind.rooms} room{behind.rooms === 1 ? "" : "s"} of this plan.
+          </span>
+          <button type="button" onClick={updateBuiltVillas} disabled={updatingVillas}
+            className="h-8 px-3 text-xs font-semibold rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50">
+            {updatingVillas ? "Adding…" : "Add the new rooms to them"}
+          </button>
         </div>
       )}
       {/* ── Save footer ────────────────────────────────────────── */}

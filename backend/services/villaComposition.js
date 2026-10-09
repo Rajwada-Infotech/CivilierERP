@@ -175,7 +175,7 @@ async function addMissingPlanRooms(tx, unitId, actorUserId = null) {
       .query("UPDATE dbo.UnitMaster SET LayoutTypeId = @l, UpdatedAt = SYSDATETIME() WHERE Id = @u");
   }
   const { syncUnitRooms } = require("./unitLayout");
-  const r = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: actorUserId });
+  const r = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: actorUserId, villaTool: true });
   if (r.deactivated || r.renamed) {
     throw new VillaPlanError(`${u.UnitName}: bringing it to the plan would change ${r.renamed ? `${r.renamed} room name(s)` : ""}${r.renamed && r.deactivated ? " and " : ""}${r.deactivated ? `${r.deactivated} room(s)` : ""} that already exist — nothing was changed`, 409);
   }

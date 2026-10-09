@@ -327,8 +327,18 @@ async function chainFloorLabel(db, unit, { asLabel = true } = {}) {
 // syncs of the same unit (e.g. a composition save propagating while an
 // admin runs the bulk generate) serialize instead of both inserting.
 // `cache` (a Map) lets a batch caller share layout/composition lookups.
-async function syncUnitRooms(db, unitId, { removeUnused = false, createdBy = null, cache = null } = {}) {
+async function syncUnitRooms(db, unitId, { removeUnused = false, createdBy = null, cache = null, villaTool = false } = {}) {
   const result = { created: 0, reactivated: 0, deactivated: 0, renamed: 0, keptWithWork: [], layout: null, skipped: null };
+
+  // A villa built on a plot owns its rooms floor by floor (its villa type's
+  // plan). Generic room tools — Flat Master generate / bulk generate, layout
+  // overrides, Unit Master edits — leave it exactly as it is; only the villa
+  // tools (convert, change type, add missing rooms) pass villaTool.
+  if (!villaTool) {
+    const isVilla = (await db.request().input("u", sql.Int, unitId)
+      .query("SELECT TOP 1 1 AS v FROM dbo.PlotMaster WHERE ConvertedUnitId = @u AND IsActive = 1")).recordset.length > 0;
+    if (isVilla) { result.skipped = "villa"; return result; }
+  }
 
   const unitRes = await db.request().input("id", sql.Int, unitId).query(`
     SELECT Id, ProjectId, BlockId, FloorNo, UnitType, LayoutTypeId
@@ -552,7 +562,7 @@ async function inferRoomCategoryId(db, roomName) {
 // unit can't roll back (or block) the rest. Returns totals + per-unit
 // failures.
 async function syncRoomsForUnits(pool, unitIds, opts = {}) {
-  const totals = { units: 0, unitsChanged: 0, created: 0, reactivated: 0, renamed: 0, deactivated: 0, skippedNoLayout: 0, failed: [] };
+  const totals = { units: 0, unitsChanged: 0, created: 0, reactivated: 0, renamed: 0, deactivated: 0, skippedNoLayout: 0, skippedVillas: 0, failed: [] };
   const cache = new Map(); // layout + composition, shared across the batch
   for (const unitId of unitIds) {
     totals.units++;
@@ -561,7 +571,8 @@ async function syncRoomsForUnits(pool, unitIds, opts = {}) {
     try {
       const r = await syncUnitRooms(tx, unitId, { ...opts, cache });
       await tx.commit();
-      if (r.skipped) totals.skippedNoLayout++;
+      if (r.skipped === "villa") totals.skippedVillas++;
+      else if (r.skipped) totals.skippedNoLayout++;
       totals.created += r.created;
       totals.reactivated += r.reactivated;
       totals.renamed += r.renamed;

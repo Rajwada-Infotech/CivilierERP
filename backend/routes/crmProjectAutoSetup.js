@@ -2414,7 +2414,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
         .query(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, UnitType, LayoutTypeId, UnitKind, AreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, VillaTypeId, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
                 OUTPUT INSERTED.Id VALUES (@pid, @bid, @name, @type, @layoutTypeId, @kind, @area, @bua, @sbu, @villaType, @rate, 1, @by, SYSDATETIME())`);
       const unitId = created.recordset[0].Id;
-      await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
+      await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null, villaTool: true });
       await tx.request().input("uid", sql.Int, unitId)
         .query(`UPDATE dbo.PlotMaster SET ConvertedUnitId = @uid, ConvertedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
                 WHERE Id IN (${plotIds.join(",")})`);
@@ -2514,11 +2514,12 @@ router.post("/projects/:projectId/villas/add-missing-rooms", requirePageRight("c
   if (!assertProjectAllowed(req, res, projectId)) return;
   const dryRun = req.query.dryRun === "1" || req.body?.dryRun === true;
   const pool = getPool();
-  const villas = (await pool.request().input("p", sql.Int, projectId).query(`
+  const villaTypeId = req.query.villaTypeId ? Number(req.query.villaTypeId) : null;
+  const villas = (await pool.request().input("p", sql.Int, projectId).input("vt", sql.Int, Number.isInteger(villaTypeId) ? villaTypeId : null).query(`
     SELECT DISTINCT u.Id, u.UnitName FROM dbo.UnitMaster u
     JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
     JOIN dbo.VillaTypeMaster v ON v.Id = u.VillaTypeId AND v.IsActive = 1 AND v.LayoutTypeId IS NOT NULL
-    WHERE u.ProjectId = @p AND u.IsActive = 1 ORDER BY u.UnitName`)).recordset;
+    WHERE u.ProjectId = @p AND u.IsActive = 1 AND (@vt IS NULL OR u.VillaTypeId = @vt) ORDER BY u.UnitName`)).recordset;
   const { addMissingPlanRooms } = require("../services/villaComposition");
   const changed = []; const failed = [];
   let added = 0;
@@ -2660,7 +2661,7 @@ router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-set
     }
     await tx.request().input("u", sql.Int, unitId).input("l", sql.NVarChar(50), vt.LayoutLabel).query("UPDATE dbo.UnitMaster SET UnitType = @l WHERE Id = @u");
     // 3. Rooms from the plan (an inactive room of the same category comes back first), then their floors.
-    const sync = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
+    const sync = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null, villaTool: true });
     await require("../services/villaComposition").applyStoreys(tx, unitId);
     // 4. A returning room gets its own chain back (steps restored, alias renamed with the room).
     const revived = await q(`
