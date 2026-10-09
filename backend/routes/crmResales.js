@@ -485,6 +485,9 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
     const seller = bookings[0].CustomerId;
     if (bookings.some((x) => x.CustomerId !== seller)) return res.status(409).json({ error: "The plot and villa are held by different customers — they can't change hands as one" });
     if (kind === "Resale" && toCustomerId === seller) return res.status(400).json({ error: "The new buyer is the same customer as the seller" });
+    const { conveyedReason } = require("../services/crmResaleTransfer");
+    const conveyed = await conveyedReason(pool, bookings.map((x) => x.Id));
+    if (conveyed) return res.status(409).json({ error: conveyed });
     const open = await openResaleOn(pool, bookings.map((x) => x.Id));
     if (open) return res.status(409).json({ error: `This property already has an open ${open.Kind === "BuyBack" ? "buy-back" : "resale"} (#${open.Id})` });
     // The row names one thing (PlotId or UnitId): the villa or unit, else the plot.

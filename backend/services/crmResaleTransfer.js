@@ -37,6 +37,27 @@ async function movingBookings(db, bookingId) {
     WHERE b.Id IN (${ids.join(",")}) AND ${LIVE}`)).recordset;
 }
 
+/**
+ * A resale / buy-back moves a booking that is still the developer's to move.
+ * Once the property is conveyed — its sale deed registered, or its handover
+ * started — it belongs to the buyer outright; selling it on is a private sale
+ * between owners, outside the developer's booking. Returns the reason, or null.
+ */
+async function conveyedReason(db, bookingIds) {
+  const ids = (bookingIds || []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return null;
+  const r = (await db.request().query(`
+    SELECT TOP 1 b.BookingNo,
+      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmSalesDeed d WHERE d.BookingId = b.Id AND d.Status = N'Registered') THEN N'its sale deed is registered'
+           WHEN EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id) THEN N'its handover has started'
+      END AS Why
+    FROM dbo.CrmBooking b
+    WHERE b.Id IN (${ids.join(",")})
+      AND (EXISTS (SELECT 1 FROM dbo.CrmSalesDeed d WHERE d.BookingId = b.Id AND d.Status = N'Registered')
+        OR EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id))`)).recordset[0];
+  return r ? `${r.BookingNo}: ${r.Why} — the property is conveyed to its owner, so it can no longer be resold or bought back through its booking` : null;
+}
+
 /** An open resale or buy-back already on any of these bookings. */
 async function openResaleOn(db, bookingIds) {
   if (!bookingIds.length) return null;
@@ -64,6 +85,8 @@ async function endorseToBuyer(tx, resale, actorUserId) {
     FROM dbo.CrmBooking b WITH (UPDLOCK, HOLDLOCK) JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
     WHERE b.Id IN (${ids.join(",")}) AND ${LIVE}`)).recordset;
   if (bookings.length !== ids.length) throw new ResaleError("A booking in this resale is no longer live — it can't be transferred", 409);
+  const conveyed = await conveyedReason(tx, ids);
+  if (conveyed) throw new ResaleError(conveyed, 409);
   if (bookings.some((b) => b.CustomerId !== resale.FromCustomerId)) throw new ResaleError("The property no longer belongs to the seller on this resale", 409);
   if (resale.ToCustomerId === resale.FromCustomerId) throw new ResaleError("The new buyer is the same customer as the seller");
 
@@ -129,6 +152,8 @@ async function raiseBuyBackVoucher(tx, resale, { bankId, paymentMode = "", actor
     FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
     WHERE b.Id IN (${ids.join(",") || "0"}) AND ${LIVE}`)).recordset;
   if (!bookings.length || bookings.length !== ids.length) throw new ResaleError("A booking in this buy-back is no longer live", 409);
+  const conveyed = await conveyedReason(tx, ids);
+  if (conveyed) throw new ResaleError(conveyed, 409);
   if (bookings.some((b) => b.CustomerId !== resale.FromCustomerId)) throw new ResaleError("The property no longer belongs to the seller on this buy-back", 409);
   const unapplied = bookings.reduce((s, b) => s + Number(b.Unapplied || 0), 0);
   if (unapplied > 0.009) throw new ResaleError(`₹${unapplied.toLocaleString("en-IN")} is still on account (not yet adjusted to a milestone). Adjust it first, so the buy-back counts every rupee paid.`, 409);
@@ -232,4 +257,4 @@ async function buyBackVoucherRejected(pool, resaleId, newPaymentId, note) {
             WHERE Id = @id AND PayoutNewPaymentId = @np AND Status = N'Approved'`);
 }
 
-module.exports = { movingBookings, openResaleOn, endorseToBuyer, raiseBuyBackVoucher, completeBuyBack, buyBackVoucherRejected, ResaleError };
+module.exports = { movingBookings, openResaleOn, conveyedReason, endorseToBuyer, raiseBuyBackVoucher, completeBuyBack, buyBackVoucherRejected, ResaleError };
