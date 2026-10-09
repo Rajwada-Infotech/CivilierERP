@@ -1,8 +1,15 @@
 import { QueryClient } from "@tanstack/react-query";
 
-function shouldRetry(failureCount: number, error: unknown, maxRetries: number) {
+// Many API helpers throw a plain Error carrying only the server's message ("Too many requests, please try again
+// later."), with no status - so the status check alone never saw their 429s, and every one was retried twice more,
+// which made the rate limit worse. Recognise the message as well.
+const RATE_LIMITED_MESSAGE = /too many requests|(^|[^0-9])429([^0-9]|$)/i;
+
+export function shouldRetry(failureCount: number, error: unknown, maxRetries: number) {
   const status = (error as { status?: number } | null)?.status;
   if (status === 401 || status === 403 || status === 429) return false;
+  const message = (error as { message?: unknown } | null)?.message;
+  if (typeof message === "string" && RATE_LIMITED_MESSAGE.test(message)) return false;
   return failureCount < maxRetries;
 }
 
