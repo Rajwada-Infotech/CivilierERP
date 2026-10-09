@@ -102,4 +102,24 @@ async function villaBookedOnLandOf(poolOrTx, bookingId) {
   return r.recordset[0]?.BookingNo || null;
 }
 
-module.exports = { landPositionOfUnits, assertVillaBuyerOwnsLand, villaBookedOnLandOf, VillaLandError };
+/**
+ * Land part of a DIRECT villa sale: the area x rate (Plot Master) of the plots
+ * under those villas that nobody owns. A villa whose plots were sold first
+ * adds nothing — its buyer already owns the land, so its price is
+ * construction only. Returns 0 when no unit is a villa on unsold plots.
+ */
+async function directSaleLandValue(poolOrTx, unitIds) {
+  const ids = (unitIds || []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return 0;
+  const r = await poolOrTx.request().query(`
+    SELECT ISNULL(SUM(ISNULL(p.AreaSqFt, 0) * ISNULL(p.RatePerSqFt, 0)), 0) AS Land
+    FROM dbo.PlotMaster p
+    WHERE p.ConvertedUnitId IN (${ids.join(",")}) AND p.IsActive = 1
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.CrmBookingPlot bp JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
+        WHERE bp.PlotId = p.Id AND bp.Status = N'Active' AND b.IsActive = 1
+          AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred'))`);
+  return Math.round(Number(r.recordset[0].Land || 0) * 100) / 100;
+}
+
+module.exports = { landPositionOfUnits, assertVillaBuyerOwnsLand, villaBookedOnLandOf, directSaleLandValue, VillaLandError };

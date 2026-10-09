@@ -336,6 +336,21 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
   const hasLand = lines.some((l) => isLandLine(l));
   const isPureLand = hasLand && constructionValue === 0;
 
+  // A villa sold directly carries its land inside the villa price
+  // (CrmBooking.LandValue, migration 549) rather than on a plot line. Its share
+  // of the booking applies to whatever amount is asked about — the whole
+  // booking for GST, one invoice for the ledger.
+  if (!hasLand) {
+    const own = (await pool.request().input("bid", sql.Int, bookingId).query(
+      "IF COL_LENGTH('dbo.CrmBooking', 'LandValue') IS NOT NULL EXEC sp_executesql N'SELECT LandValue, TotalValue FROM dbo.CrmBooking WHERE Id = @bid', N'@bid INT', @bid = @bid",
+    )).recordset?.[0];
+    const land = Number(own?.LandValue || 0), bookingTotal = Number(own?.TotalValue || 0);
+    if (land > 0 && bookingTotal > 0) {
+      const landValue = round2(Number(totalValue || 0) * Math.min(land / bookingTotal, 1));
+      return { landValue, constructionValue: round2(Number(totalValue || 0) - landValue), isPureLand: false, hasLand: true };
+    }
+  }
+
   // AllocatedValue can lag a booking edit (it is written when lines are priced).
   // For a pure-land booking the split is unambiguous regardless of that, so trust
   // the booking's own TotalValue rather than a possibly stale allocation.

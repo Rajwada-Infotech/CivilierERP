@@ -1064,6 +1064,18 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
     bookingId = result.recordset[0].Id;
 
+    // A villa sold directly on plots nobody bought carries its land in its one
+    // villa price: that land part (Plot Master area x rate, at most the price)
+    // is recorded so GST and the ledger keep it out of construction (549).
+    if (!isPlotBooking) {
+      const land = await require("./villaLand").directSaleLandValue(tx, unitIds);
+      if (land > 0) {
+        await tx.request().input("bid", sql.Int, bookingId)
+          .input("land", sql.Decimal(18, 2), Math.min(land, Number(total) || 0))
+          .query("IF COL_LENGTH('dbo.CrmBooking', 'LandValue') IS NOT NULL EXEC sp_executesql N'UPDATE dbo.CrmBooking SET LandValue = @land WHERE Id = @bid', N'@land DECIMAL(18,2), @bid INT', @land = @land, @bid = @bid");
+      }
+    }
+
     // Insert unit lines (Migration 505 support for multi-plot sales)
     // Primary flag set on the first unit in the array.
     //
