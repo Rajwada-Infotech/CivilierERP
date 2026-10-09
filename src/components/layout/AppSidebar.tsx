@@ -35,7 +35,8 @@ import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
 import { buildFinanceNavItems } from "./sidebars/FinanceSidebar";
 import { materialNavItems } from "./sidebars/MaterialSidebar";
 import { followupNavItems } from "./sidebars/FollowupSidebar";
-import { buildAdminNavItems } from "./sidebars/AdminSidebar";
+import { buildAdminNavItems, filterAdminNavItems } from "./sidebars/AdminSidebar";
+import { hasAnyAdminPageRight } from "@/contexts/module.utils";
 import { dbaNavItems } from "./sidebars/DbaSidebar";
 import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
@@ -378,9 +379,10 @@ export const AppSidebar = () => {
     role === "super_admin" && location.pathname.startsWith("/superadmin");
   // marketing_head cannot access DBA or system admin panels
   const isDbaPage = isAdminTier && location.pathname.startsWith("/dba");
-  const canAccessApprovalInbox = canAccessPage("approval-inbox" as any);
+  // Anyone with at least one Admin page ticked in Menu Rights can be on the Admin pages (they see only those).
+  const canAccessAnyAdminPage = hasAnyAdminPageRight((pk) => canAccessPage(pk as any));
   const isAdminPage =
-    (isAdminTier || canAccessApprovalInbox) &&
+    (isAdminTier || canAccessAnyAdminPage) &&
     (location.pathname.startsWith("/admin") ||
       location.pathname.startsWith("/users") ||
       ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p)));
@@ -397,20 +399,8 @@ export const AppSidebar = () => {
     if (isDbaPage) return dbaNavItems;
     if (isUserProfilePage) return userNavItems;
     if (isAdminPage && !isAdminTier) {
-      // Non-admin-tier users with approval-inbox access see only that item
-      return [
-        {
-          label: "Approval",
-          icon: TickCircle,
-          children: [
-            {
-              label: "Inbox",
-              path: "/admin/approval/inbox",
-              badge: pendingApprovalCount > 0 ? pendingApprovalCount : undefined,
-            },
-          ],
-        },
-      ];
+      // Not admin-tier: only the Admin pages ticked for this role / user in Menu Rights.
+      return filterAdminNavItems(buildAdminNavItems(pendingApprovalCount), (pk) => canAccessPage(pk as any));
     }
     if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
 
