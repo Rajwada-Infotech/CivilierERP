@@ -147,6 +147,13 @@ describe("filters", () => {
     expect(q.text).not.toMatch(/cu\.Photo AS/); // the photo itself is never pulled into a report
   });
 
+  test("daily updates: the checkpoint column is bracketed - CHECKPOINT is a reserved word and unbracketed it breaks the paged query", async () => {
+    await get("daily-updates");
+    const q = rowsQuery();
+    expect(q.text).toMatch(/c\.FieldName AS \[checkpoint\]/);
+    expect(q.text).not.toMatch(/AS checkpoint/i);
+  });
+
   test("daily reports: progress made is worked out over the whole logbook, then the date range is applied", async () => {
     await get("daily-reports?projectId=3&dateFrom=2026-10-07&dateTo=2026-10-08");
     const q = rowsQuery();
