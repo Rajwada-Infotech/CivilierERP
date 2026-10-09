@@ -24,15 +24,16 @@ function maintenanceBody(state) {
     title: state.title,
     message: state.message,
     startedAt: state.startedAt,
+    startsAt: state.startsAt,
     endsAt: state.endsAt,
   };
 }
 
-/** Mounted on /api before everything else. Only a valid super-admin token gets through while maintenance is on. */
+/** Mounted on /api before everything else. Once maintenance has started, only a valid super-admin token gets through. */
 async function maintenanceGate(req, res, next) {
   if (req.method === "OPTIONS") return next();
   const state = await getMaintenanceState();
-  if (!state.active) return next();
+  if (!state.active || !state.enforced) return next(); // announced but not started yet: people can still finish
   if (OPEN_PATHS.some((re) => re.test(req.path))) return next();
 
   const header = req.headers.authorization || "";

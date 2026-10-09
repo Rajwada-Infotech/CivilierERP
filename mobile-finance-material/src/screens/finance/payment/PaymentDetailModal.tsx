@@ -6,6 +6,7 @@
 // Posting tab opens — a background side-effecting write; here it's an
 // explicit button with a confirm, so nothing gets posted to the ledger
 // without the user actually choosing to).
+import { fmtIstStamp } from "@/utils/istTime";
 import { useEffect, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, ActivityIndicator, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -47,7 +48,7 @@ function Field({ label, value }: { label: string; value: string }) {
 function buildPaymentHtml(r: PaymentRecord, supplier: ChainSummary["supplier"] | null): string {
   const row = (label: string, value?: string | null) => (value ? `<tr><td class="lbl">${label}</td><td class="val">${value}</td></tr>` : "");
   const ref = r.chequeNo ? `Cheque #${r.chequeNo}` : r.neftNumber || r.upiTransactionId || r.rtgsReference || r.impsReference || r.cardReference || null;
-  const printedAt = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const printedAt = fmtIstStamp(Date.now());
 
   const supplierRows = supplier
     ? [

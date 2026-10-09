@@ -2,9 +2,13 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 export interface MaintenanceState {
   active: boolean;
+  /** False while it is only announced (people can still finish their work), true once everyone is held. */
+  enforced: boolean;
   title: string | null;
   message: string | null;
   startedAt: string | null;
+  /** When maintenance begins holding people; null = at once. */
+  startsAt: string | null;
   endsAt: string | null;
   updatedBy: string | null;
 }
@@ -21,6 +25,8 @@ export async function setMaintenanceMode(input: {
   title?: string;
   message?: string;
   endsAt?: string | null;
+  /** Minutes of warning before everyone is held (0 = at once). */
+  startInMinutes?: number;
 }): Promise<MaintenanceState> {
   const res = await fetchWithAuth("/api/system-maintenance", {
     method: "PUT",

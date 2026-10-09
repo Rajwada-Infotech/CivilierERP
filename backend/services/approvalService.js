@@ -35,6 +35,7 @@ const GL_POSTERS = {
 const MAKER_COLUMNS = {
   "crm-cancellations": "RequestedBy",
   "crm-refunds": "RequestedBy",
+  "crm-resales": "CreatedBy",
   "crm-brokerage": "CreatedBy",
 };
 
@@ -140,6 +141,7 @@ const MODULE_MAP = {
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
   "crm-refunds": { table: "dbo.CrmRefund", pk: "Id", status: "Status" },
+  "crm-resales": { table: "dbo.CrmUnitResale", pk: "Id", status: "Status" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
   contracts: { table: "dbo.Contract", pk: "ContractId", status: "Status" },
   // Same ApprovalAuditLog caveat as crm-agreement-date above: no Module
@@ -211,6 +213,8 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,
   "crm-refunds": CRM_APPROVER_ROLES,
+  // crm-resales has no code-level role list on purpose: who approves each
+  // level (e.g. marketing head, then director) is set in Approval Setup.
   "crm-noc": CRM_APPROVER_ROLES,
   // Same default CRM approver set as crm-brokerage/crm-cancellations/crm-noc
   // — no legal_head carve-out here, that's specific to crm-agreements (see
@@ -847,16 +851,23 @@ async function transition(
       // is fully backward compatible with workflows that don't use it yet.
       const levelDef = levelDefs[nextLevel - 1];
       if (levelDef) {
-        const roleOk =
-          !Array.isArray(levelDef.roles) || levelDef.roles.length === 0 ||
-          levelDef.roles.map((r) => String(r).toLowerCase()).includes((userRole || "").toLowerCase());
+        // admin / super_admin hold every right and may act at any level.
+        // Anyone else passes when the level names their role OR names them —
+        // a level that lists both (e.g. role "director" plus today's
+        // directors) still admits a director added later. A level naming
+        // only roles, or only people, behaves exactly as before.
+        const role = (userRole || "").toLowerCase();
+        const levelRoles = Array.isArray(levelDef.roles) ? levelDef.roles.map((r) => String(r).toLowerCase()) : [];
+        const levelUsers = Array.isArray(levelDef.userIds) ? levelDef.userIds.map(Number) : [];
+        const superUser = role === "admin" || role === "super_admin";
         // userIds is only enforced when the caller actually passed a userId --
         // callers that don't pass one (older call sites) skip this check
         // rather than being denied, so this can't regress any existing module.
-        const userOk =
-          !Array.isArray(levelDef.userIds) || levelDef.userIds.length === 0 ||
-          userId == null || levelDef.userIds.includes(userId);
-        if (!roleOk || !userOk) {
+        const allowedHere = superUser
+          || (levelRoles.length === 0 && levelUsers.length === 0)
+          || levelRoles.includes(role)
+          || (levelUsers.length > 0 && (userId == null || levelUsers.includes(Number(userId))));
+        if (!allowedHere) {
           const levelErr = new Error(
             `You are not authorized to approve level ${nextLevel}${levelDef.label ? ` (${levelDef.label})` : ""} of this workflow.`,
           );

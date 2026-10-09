@@ -20,6 +20,13 @@ import { formatIst, fromIstInputValue, toIstInputValue } from "@/lib/maintenance
 const inp =
   "w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
 
+const WARNINGS: { label: string; minutes: number }[] = [
+  { label: "Right now", minutes: 0 },
+  { label: "In 2 min", minutes: 2 },
+  { label: "In 5 min", minutes: 5 },
+  { label: "In 10 min", minutes: 10 },
+];
+
 const PRESETS: { label: string; minutes: number }[] = [
   { label: "30 min", minutes: 30 },
   { label: "1 hour", minutes: 60 },
@@ -40,6 +47,7 @@ const SystemMaintenance = () => {
   const [message, setMessage] = useState("");
   const [endsAtInput, setEndsAtInput] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [startIn, setStartIn] = useState(2);
 
   // Start the form from what is live, so changing the end time is a small edit.
   useEffect(() => {
@@ -56,10 +64,16 @@ const SystemMaintenance = () => {
 
   const apply = useMutation({
     mutationFn: (active: boolean) =>
-      setMaintenanceMode({ active, title, message, endsAt: active && endsAt ? endsAt.toISOString() : null }),
+      setMaintenanceMode({ active, title, message, endsAt: active && endsAt ? endsAt.toISOString() : null, startInMinutes: startIn }),
     onSuccess: (next) => {
       qc.setQueryData(["system-maintenance"], next);
-      toast.success(next.active ? "Maintenance is on. Everyone except super admins is held on the Maintenance page." : "Maintenance is over. Everyone can sign in again.");
+      toast.success(
+        !next.active
+          ? "Maintenance is over. Everyone can sign in again."
+          : next.enforced
+            ? "Maintenance is on. Everyone except super admins is held on the Maintenance page."
+            : "Maintenance announced. Everyone sees a countdown and is held when it reaches zero.",
+      );
       setConfirmOpen(false);
     },
     onError: (e: Error) => {
@@ -90,11 +104,13 @@ const SystemMaintenance = () => {
               <div>
                 <p className="flex items-center gap-2 font-heading font-semibold">
                   <span className={`h-2.5 w-2.5 rounded-full ${state.active ? "bg-amber-500" : "bg-emerald-500"}`} />
-                  {state.active ? "Maintenance is ON" : "System is live"}
+                  {!state.active ? "System is live" : state.enforced ? "Maintenance is ON" : "Maintenance announced - not started yet"}
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {state.active
-                    ? state.endsAt
+                    ? !state.enforced && state.startsAt
+                      ? `Everyone is held from ${formatIst(state.startsAt)}${state.endsAt ? ` · expected back ${formatIst(state.endsAt)}` : ""}`
+                      : state.endsAt
                       ? `Expected back ${formatIst(state.endsAt)}${state.updatedBy ? ` · started by ${state.updatedBy}` : ""}`
                       : `No end time set${state.updatedBy ? ` · started by ${state.updatedBy}` : ""}`
                     : "Everyone can use the system."}
@@ -171,6 +187,32 @@ const SystemMaintenance = () => {
                 )}
               </div>
 
+              {!state.active && (
+                <div className="grid gap-1.5 text-sm">
+                  <span className="font-medium">Hold everyone</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {WARNINGS.map((w) => (
+                      <button
+                        key={w.minutes}
+                        type="button"
+                        aria-pressed={startIn === w.minutes}
+                        onClick={() => setStartIn(w.minutes)}
+                        className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                          startIn === w.minutes ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"
+                        }`}
+                      >
+                        {w.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {startIn === 0
+                      ? "Everyone is held at once - anything unsaved is lost."
+                      : `Everyone sees a countdown strip now (also on the login page) and is held when it ends, so they can finish and save what they are doing.`}
+                  </p>
+                </div>
+              )}
+
               <div className="flex justify-end">
                 <button
                   type="button"
@@ -192,8 +234,9 @@ const SystemMaintenance = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Start maintenance?</AlertDialogTitle>
             <AlertDialogDescription>
-              Every user and role except super admin will be held on the Maintenance page straight away, on the web and in the
-              mobile apps. Anything they have not saved is lost.
+              {startIn === 0
+                ? "Every user and role except super admin will be held on the Maintenance page straight away, on the web and in the mobile apps. Anything they have not saved is lost."
+                : `Every user and role except super admin sees a countdown now and is held on the Maintenance page in ${startIn} minutes, on the web and in the mobile apps.`}
               {endsAt ? ` They will be told to expect the system back ${formatIst(endsAt.toISOString())}.` : " No end time is set."}
             </AlertDialogDescription>
           </AlertDialogHeader>

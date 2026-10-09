@@ -766,6 +766,7 @@ export const MobileNav: React.FC = () => {
     root: "#f59e0b",
     glass: "#fb7185",
     bw: "#111111",
+    sage: "#6b8f71",
   };
 
   const tabs: Array<{ id: "nav" | "setup" | "theme"; label: string }> = [
@@ -1372,7 +1373,9 @@ export const MobileNav: React.FC = () => {
                                     ? "Teal-accented slate"
                                     : t === "root"
                                       ? "Warm amber tone"
-                                      : "Soft glass tone"}
+                                      : t === "sage"
+                                        ? "Calm sage green"
+                                        : "Soft glass tone"}
                             </p>
                           </div>
                           {isSelected && (

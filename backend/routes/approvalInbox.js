@@ -1290,6 +1290,35 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
+    // Resale (to another buyer) or buy-back (to us) of a sold property.
+    if (!module || module === "crm-resales") {
+      queries.push(`
+        SELECT
+          'crm-resales'                          AS Module,
+          CASE WHEN r.Kind = N'BuyBack' THEN 'Property Buy-back' ELSE 'Property Resale' END AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                 AS RecordId,
+          CONCAT(CASE WHEN r.Kind = N'BuyBack' THEN 'BUYBACK-' ELSE 'RESALE-' END, r.Id, ' · ', ISNULL(b.UnitNo, b.BookingNo)) AS Reference,
+          r.CreatedAt                            AS RecordDate,
+          r.Status,
+          CAST(tc.CustomerName AS NVARCHAR(255)) AS ContractorName,
+          fc.CustomerName                        AS SupplierName,
+          r.AgreedValue                          AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.CreatedBy AS NVARCHAR(255))) AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ISNULL(CAST(r.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(r.UpdatedAt, r.CreatedAt)       AS LastModified
+        FROM dbo.CrmUnitResale r
+        LEFT JOIN dbo.CrmBooking b  ON b.Id = r.FromBookingId
+        LEFT JOIN dbo.CrmCustomer fc ON fc.Id = r.FromCustomerId
+        LEFT JOIN dbo.CrmCustomer tc ON tc.Id = r.ToCustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = r.CreatedBy
+        WHERE r.IsActive = 1 AND r.Status = 'Pending' AND r.BookingIds IS NOT NULL
+      `);
+    }
+
     // A refund has ONE Finance step: CRM approval raises its payout voucher,
     // which Finance approves in Payments (module crm-refund-payment above).
     // The separate 'crm-refunds-finance' tier listed here before was a second

@@ -272,10 +272,12 @@ router.get("/daily-updates", authMiddleware, guard, async (req, res) => {
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId`;
+    // [checkpoint] stays bracketed: CHECKPOINT is a reserved word, and unbracketed SQL Server rejects the whole
+    // paged query ("Invalid usage of the option NEXT in the FETCH statement").
     await sendPage(res, await getPool(), p, {
       core: `SELECT cu.Id AS updateId, cu.UpdateDate AS updateDate,
         CONVERT(VARCHAR(5), DATEADD(MINUTE, 330 - DATEDIFF(MINUTE, SYSUTCDATETIME(), SYSDATETIME()), COALESCE(cu.UpdatedAt, cu.CreatedAt)), 108) AS loggedTime,
-        c.FieldName AS checkpoint, cu.Note AS note, cu.CreatedBy AS loggedBy,
+        c.FieldName AS [checkpoint], cu.Note AS note, cu.CreatedBy AS loggedBy,
         CAST(CASE WHEN cu.Photo IS NULL THEN 0 ELSE 1 END AS BIT) AS hasPhoto,
         ${ACTIVITY_COLUMNS}
         ${from} ${where}`,

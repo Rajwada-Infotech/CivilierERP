@@ -7,9 +7,9 @@ import React, {
   useMemo,
 } from "react";
 
-export type Theme = "dark" | "light" | "midnight" | "root" | "glass" | "bw";
+export type Theme = "dark" | "light" | "midnight" | "root" | "glass" | "bw" | "sage";
 
-const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw"];
+const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw", "sage"];
 
 /**
  * Themes whose surface is light (white/near-white background). Components that
@@ -17,7 +17,7 @@ const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw"];
  * instead of `theme === "light"` so the BW theme (light background, black
  * accents) is treated correctly.
  */
-export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw" || t === "glass";
+export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw" || t === "glass" || t === "sage";
 
 /**
  * Fixed 3-tone chart palette for the BW theme: maroon / green / orange.
@@ -44,6 +44,7 @@ export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
   root: { bg: "#f0a500", label: "Root" },
   glass: { bg: "#f3e6cf", label: "Glass" },
   bw: { bg: "#111111", label: "BW" },
+  sage: { bg: "#9caf88", label: "Sage" },
 };
 
 interface ThemeContextType {

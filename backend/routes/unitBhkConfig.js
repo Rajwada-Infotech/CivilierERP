@@ -120,6 +120,11 @@ router.delete("/types/:typeKey", authMiddleware, requirePageRight("room-composit
       .query(`SELECT Id, Label, IsSystem FROM dbo.RoomLayoutType WHERE TypeKey = @typeKey AND IsActive = 1`);
     if (!typeRes.recordset.length) return res.status(404).json({ error: "Layout type not found" });
     const type = typeRes.recordset[0];
+    // A villa type's own layout follows its floor-by-floor plan (migration
+    // 539) — edited only in Plot Master > Villa types > Rooms, never here.
+    const owner = (await pool.request().input("lt", sql.Int, type.Id).query(
+      "IF COL_LENGTH('dbo.RoomLayoutType', 'OwnerVillaTypeId') IS NOT NULL EXEC sp_executesql N'SELECT OwnerVillaTypeId FROM dbo.RoomLayoutType WHERE Id = @lt', N'@lt INT', @lt = @lt")).recordset?.[0]?.OwnerVillaTypeId;
+    if (owner) return res.status(409).json({ error: "This is a villa type's own layout — edit its rooms floor by floor in Plot Master > Villa types > Rooms." });
 
     if (type.IsSystem) {
       return res.status(400).json({ error: `"${type.Label}" is a default layout type and can't be removed.` });
@@ -223,6 +228,11 @@ router.post(
         return res.status(404).json({ error: "This layout type isn't registered — add it first." });
       }
       const layoutTypeId = typeCheck.recordset[0].Id;
+      // A villa type's own layout follows its floor-by-floor plan (migration
+      // 539) — edited only in Plot Master > Villa types > Rooms, never here.
+      const owner = (await pool.request().input("lt", sql.Int, layoutTypeId).query(
+        "IF COL_LENGTH('dbo.RoomLayoutType', 'OwnerVillaTypeId') IS NOT NULL EXEC sp_executesql N'SELECT OwnerVillaTypeId FROM dbo.RoomLayoutType WHERE Id = @lt', N'@lt INT', @lt = @lt")).recordset?.[0]?.OwnerVillaTypeId;
+      if (owner) return res.status(409).json({ error: "This is a villa type's own layout — edit its rooms floor by floor in Plot Master > Villa types > Rooms." });
 
       // Config row + its composition rows are one atomic save.
       const tx = pool.transaction();

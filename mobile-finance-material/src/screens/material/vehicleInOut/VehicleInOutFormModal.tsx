@@ -3,6 +3,7 @@
 // page; mobile uses a full-screen modal, matching this app's established
 // convention (PaymentFormModal.tsx, ReceivedPaymentFormModal.tsx).
 // Deferred vs. web: CSV import/export, Print — both stay web-only.
+import { istNowInput, istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
@@ -44,10 +45,9 @@ type FormState = {
   attachments: FormAttachment[];
 };
 
+// India time, whatever zone the phone is set to (the server stores the IST digits as typed).
 function nowLocal() {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return istNowInput();
 }
 
 function blankForm(): FormState {
@@ -301,7 +301,7 @@ export function VehicleInOutFormModal({
       }
     }
     const payload: VehicleInOutPayload = {
-      docDate: new Date().toISOString().slice(0, 10),
+      docDate: istToday(),
       companyId: form.companyId ? Number(form.companyId) : null,
       projectId: form.projectId ? Number(form.projectId) : null,
       finYear: form.finYear || null,

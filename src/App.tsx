@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
 import { Toaster } from "sonner";
 import { SystemUpdateBanner } from "./components/SystemUpdateBanner";
-import { MaintenanceActiveBanner } from "./components/MaintenanceActiveBanner";
+import { MaintenanceWatcher } from "./components/MaintenanceWatcher";
 import {
   BrowserRouter as Router,
   Routes,
@@ -2646,7 +2646,7 @@ function App() {
               <ModuleProvider>
                 <ThemeProvider>
                   <AppRoutes />
-                  <MaintenanceActiveBanner />
+                  <MaintenanceWatcher />
                 </ThemeProvider>
               </ModuleProvider>
             </Router>

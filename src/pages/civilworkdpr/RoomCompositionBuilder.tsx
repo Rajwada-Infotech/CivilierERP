@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -38,11 +38,15 @@ export default function RoomCompositionBuilder() {
   const [removingTypeKey, setRemovingTypeKey] = useState<string | null>(null);
   const newTypeInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: layoutTypes = [], isLoading: loadingTypes } = useQuery({
+  const { data: allLayoutTypes = [], isLoading: loadingTypes } = useQuery({
     queryKey: LAYOUT_TYPES_QUERY_KEY,
     queryFn: getLayoutTypes,
     staleTime: 60 * 1000,
   });
+  // A villa type's own layout follows its floor-by-floor plan and is edited
+  // in Plot Master > Villa types > Rooms — not offered here as flat counts.
+  const layoutTypes = useMemo(() => allLayoutTypes.filter((t) => !t.ownerVillaTypeId), [allLayoutTypes]);
+  const villaLayoutCount = allLayoutTypes.length - layoutTypes.length;
 
   // Default to the first available type as soon as the list loads, so the
   // composition panel below always has something selected.
@@ -271,6 +275,12 @@ export default function RoomCompositionBuilder() {
                       )
                     )}
                   </div>
+                )}
+                {villaLayoutCount > 0 && (
+                  <p className="mt-2 text-[0.6875rem] text-muted-foreground">
+                    Villa type layouts ({villaLayoutCount}) aren't listed here — their rooms are planned floor by floor in{" "}
+                    <a href="/crm/setup/plot-master" className="text-primary hover:underline">Plot Master › Villa types › Rooms</a>.
+                  </p>
                 )}
               </div>
             </div>

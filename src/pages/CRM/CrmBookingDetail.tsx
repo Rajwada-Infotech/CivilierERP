@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
+import { PropertyCard } from "@/components/crm/PropertyCard";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -979,14 +980,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     DirectorApproval: "Director Approval (L2 — Final)",
     Confirmed: "Confirmed",
   };
-  const userRole = String(currentUser?.role || "").toLowerCase();
-  const stageRoles: Record<string, string[]> = {
-    MarketingHeadApproval: ["admin", "super_admin", "marketing_head"],
-    DirectorApproval: ["admin", "super_admin", "director"],
-  };
-  const canActOnStage = booking?.Status === CrmStatus.PENDING
-    && Array.isArray(stageRoles[currentStage])
-    && stageRoles[currentStage].includes(userRole);
+  // Who may act at this stage is decided on the server from Approval Setup
+  // (the booking workflow's levels: roles and named people).
+  const canActOnStage = booking?.Status === CrmStatus.PENDING && !!stageState?.CanActOnStage;
 
   const handleStageApprove = async () => {
     setStageActioning("approve");
@@ -1353,6 +1349,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 />
               );
             })()}
+
+            {/* ── Plot + villa on it: one property, one schedule ── */}
+            <PropertyCard bookingId={booking.Id} />
 
             {/* ── Booking Lifecycle Stepper ── */}
             <BookingLifecycleBar bookingId={booking.Id} />

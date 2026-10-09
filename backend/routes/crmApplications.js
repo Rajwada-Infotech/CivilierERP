@@ -448,6 +448,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     if (Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0) {
       try {
         await assertVillaBuyerOwnsLand(pool, b.PreferredUnitIds, existing.recordset[0].CustomerId);
+        await require("../services/villaLand").copyLandCoOwners(pool, id, b.PreferredUnitIds, req.user?.userId ?? null);
       } catch (e) {
         if (e instanceof VillaLandError) return res.status(e.status).json({ error: e.message });
         throw e;

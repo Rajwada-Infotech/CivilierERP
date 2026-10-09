@@ -40,6 +40,7 @@ jest.mock("../db", () => ({
               Title: inputs.title,
               Message: inputs.message,
               StartedAt: new Date("2026-10-08T10:00:00Z"),
+              StartsAt: inputs.startsAt,
               EndsAt: inputs.endsAt,
               UpdatedBy: inputs.by,
             };
@@ -113,7 +114,61 @@ describe("while maintenance is on", () => {
 
   test("the status check reports it, with no other detail", async () => {
     const res = await request(app).get("/api/system-maintenance/status");
-    expect(res.body).toEqual({ active: true, title: "Upgrade", message: "Back soon", startedAt: "2026-10-08T10:00:00.000Z", endsAt: "2026-10-08T12:00:00.000Z", updatedBy: null });
+    expect(res.body).toEqual({
+      active: true,
+      enforced: true,
+      title: "Upgrade",
+      message: "Back soon",
+      startedAt: "2026-10-08T10:00:00.000Z",
+      startsAt: null,
+      endsAt: "2026-10-08T12:00:00.000Z",
+      updatedBy: null,
+    });
+  });
+});
+
+describe("announced but not started yet", () => {
+  const announce = (minutes) => {
+    mockRow = { IsActive: true, Title: "Upgrade", Message: "Back soon", StartedAt: new Date(), StartsAt: new Date(Date.now() + minutes * 60000), EndsAt: null };
+    resetMaintenanceCache();
+  };
+
+  test("everyone can still work, and the status says it is announced, not enforced", async () => {
+    announce(5);
+    expect((await request(app).get("/api/things").set(bearer("user"))).status).toBe(200);
+    expect((await request(app).post("/api/users/login").send({})).status).toBe(200);
+    const status = (await request(app).get("/api/system-maintenance/status")).body;
+    expect(status).toMatchObject({ active: true, enforced: false, title: "Upgrade" });
+    expect(status.startsAt).toEqual(expect.any(String));
+  });
+
+  test("once the start time has passed everyone but a super admin is held", async () => {
+    announce(-1);
+    expect((await request(app).get("/api/things").set(bearer("user"))).status).toBe(503);
+    expect((await request(app).get("/api/things").set(bearer("super_admin"))).status).toBe(200);
+    expect((await request(app).get("/api/system-maintenance/status")).body.enforced).toBe(true);
+  });
+
+  test("a super admin can announce it with minutes of warning, and 0 holds at once", async () => {
+    const put = (body) => request(app).put("/api/system-maintenance").set(bearer("super_admin")).send(body);
+    let res = await put({ active: true, startInMinutes: 5 });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ active: true, enforced: false });
+    expect(Date.parse(res.body.startsAt) - Date.now()).toBeGreaterThan(4 * 60000);
+    expect((await request(app).get("/api/things").set(bearer("user"))).status).toBe(200);
+
+    res = await put({ active: true, startInMinutes: 0 });
+    expect(res.body).toMatchObject({ enforced: true, startsAt: null });
+    expect((await request(app).get("/api/things").set(bearer("user"))).status).toBe(503);
+  });
+
+  test("a bad warning, or an end before the start, is refused", async () => {
+    const put = (body) => request(app).put("/api/system-maintenance").set(bearer("super_admin")).send(body);
+    expect((await put({ active: true, startInMinutes: -1 })).status).toBe(400);
+    expect((await put({ active: true, startInMinutes: 61 })).status).toBe(400);
+    expect((await put({ active: true, startInMinutes: 2.5 })).status).toBe(400);
+    const soon = new Date(Date.now() + 3 * 60000).toISOString();
+    expect((await put({ active: true, startInMinutes: 10, endsAt: soon })).status).toBe(400);
   });
 });
 
@@ -128,7 +183,7 @@ describe("before migration 548 (no table)", () => {
     mockRow = null;
     const res = await request(app).put("/api/system-maintenance").set(bearer("super_admin")).send({ active: true, endsAt: ends() });
     expect(res.status).toBe(503);
-    expect(res.body.error).toMatch(/migration 548/);
+    expect(res.body.error).toMatch(/migrations 548 and 549/);
   });
 });
 

@@ -539,6 +539,9 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
       try { await tx.rollback(); } catch (_) { /* already rolled back */ }
       throw e;
     }
+    if (r.skipped === "villa") {
+      return res.status(400).json({ error: "This is a villa built on a plot — its rooms follow its villa type's floor plan. Use Plot Master (Change type / Add missing rooms)." });
+    }
     if (r.skipped === "no-layout") {
       return res.status(400).json({ error: `"${unit.UnitType}" isn't a registered layout type — add it in Unit Composition first.` });
     }
@@ -605,6 +608,7 @@ router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (
     res.json({
       message: baseMsg
         + (totals.skippedNoLayout ? ` — ${totals.skippedNoLayout} unit(s) skipped (no Unit Type / no layout defined)` : "")
+        + (totals.skippedVillas ? ` — ${totals.skippedVillas} villa(s) left as they are (their rooms follow their villa type; see Plot Master)` : "")
         + (totals.failed.length ? ` — ${totals.failed.length} unit(s) failed` : ""),
       unitsChecked: totals.units,
       unitsUpdated: totals.unitsChanged,

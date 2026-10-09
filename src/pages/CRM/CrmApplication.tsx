@@ -1262,6 +1262,28 @@ const CrmApplication: React.FC = () => {
     }
   }, [searchParams, appDeepLinkOpened]);
 
+  // "Start villa application" from the Bookings page's villa-offer list: a new
+  // application for the plot's owner, the villa already chosen.
+  const [villaOfferOpened, setVillaOfferOpened] = useState(false);
+  useEffect(() => {
+    if (villaOfferOpened) return;
+    const unit = searchParams.get("newVilla");
+    if (!unit) return;
+    setVillaOfferOpened(true);
+    resetWizard();
+    setSaleKindChoice("unit");
+    setForm((f) => ({
+      ...f,
+      CustomerId: searchParams.get("customer") || "",
+      CompanyId: searchParams.get("company") || "",
+      ProjectId: searchParams.get("project") || "",
+      BlockId: searchParams.get("block") || "",
+      PreferredUnitIds: [unit],
+    }));
+    setDialogOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, villaOfferOpened]);
+
   const loadApplicationIntoWizard = async (id: number) => {
     setLoadingApplication(true);
     try {

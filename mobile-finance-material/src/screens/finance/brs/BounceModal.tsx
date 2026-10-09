@@ -1,6 +1,7 @@
 // RN port of Brs.tsx's <BounceModal> — records a bounced/dishonoured
 // cheque or transfer against a BRS entry. Bottom sheet instead of web's
 // centered dialog, matching this app's established sheet convention.
+import { istToday } from "@/utils/istTime";
 import { useState } from "react";
 import { View, Text, Modal, Pressable, TextInput, ActivityIndicator, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,7 +18,7 @@ export function BounceModal({
   entry, onClose, onSaved,
 }: { entry: BrsEntry | null; onClose: () => void; onSaved: () => void }) {
   const insets = useSafeAreaInsets();
-  const [bounceDate, setBounceDate] = useState(new Date().toISOString().slice(0, 10));
+  const [bounceDate, setBounceDate] = useState(istToday());
   const [bounceReason, setBounceReason] = useState("");
   const [bounceRemarks, setBounceRemarks] = useState("");
   const [saving, setSaving] = useState(false);

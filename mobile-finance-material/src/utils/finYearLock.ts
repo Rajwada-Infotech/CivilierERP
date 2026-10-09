@@ -5,6 +5,8 @@
 // Forms used to leave the year on "Auto" or let it be picked by hand, so new
 // documents could land in an old year.
 
+import { istToday } from "./istTime";
+
 export interface FinYearWindow {
   /** YYYY-MM-DD (an ISO date-time is accepted; only the date part is used). */
   start: string;
@@ -14,11 +16,9 @@ export interface FinYearWindow {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const day = (s: string | null | undefined) => (s ? String(s).slice(0, 10) : "");
 
-/** Today as YYYY-MM-DD in the device's local calendar (not UTC). */
+/** Today as YYYY-MM-DD on the India calendar (not the phone's zone, not UTC). */
 export function localToday(now: Date = new Date()): string {
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${m}-${d}`;
+  return istToday(now.getTime());
 }
 
 export function pickLockedFinYear<T>(

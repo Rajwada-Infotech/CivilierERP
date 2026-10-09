@@ -4,6 +4,7 @@
 // Voucher" bottom sheet (company/project/date/narration + dynamic
 // debit/credit lines with a live balance indicator, same rule as web —
 // debit must equal credit before saving).
+import { istToday } from "@/utils/istTime";
 import { useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, TextInput, Modal, Alert } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -213,7 +214,7 @@ export default function JournalVoucherScreen() {
   const { data: allProjects = EMPTY_LIST } = useQuery({ queryKey: ["jv-projects"], queryFn: fetchProjectOptions, enabled: formOpen });
 
   // Form state
-  const [jvDate, setJvDate] = useState(new Date().toISOString().slice(0, 10));
+  const [jvDate, setJvDate] = useState(istToday());
   const [narration, setNarration] = useState("");
   const [companyId, setCompanyId] = useState("");
   const [companyLabel, setCompanyLabel] = useState("");
@@ -246,7 +247,7 @@ export default function JournalVoucherScreen() {
   }, [lines]);
 
   const resetForm = () => {
-    setJvDate(new Date().toISOString().slice(0, 10));
+    setJvDate(istToday());
     setNarration("");
     setCompanyId("");
     setCompanyLabel("");
@@ -262,7 +263,7 @@ export default function JournalVoucherScreen() {
     setEditLoadingId(v.JVID);
     try {
       const full = await getJournalVoucher(v.JVID);
-      setJvDate((full.JVDate || "").slice(0, 10) || new Date().toISOString().slice(0, 10));
+      setJvDate((full.JVDate || "").slice(0, 10) || istToday());
       setNarration(full.Narration || "");
       setCompanyId(full.CompanyId ? String(full.CompanyId) : "");
       setCompanyLabel(full.CompanyName || "");

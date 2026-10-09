@@ -153,4 +153,33 @@ async function applyStoreys(db, unitId) {
   return changed;
 }
 
-module.exports = { getPlan, savePlan, applyStoreys, storeyOrder, VillaPlanError };
+/**
+ * Brings a built villa up to its type's floor plan by ADDING the rooms the
+ * plan has and the villa lacks — never removing, renaming or touching a room
+ * that exists (so its DPR steps and work stay exactly as they are). New rooms
+ * get their floor and, where a step list exists, their DPR chains. Runs in the
+ * caller's transaction and throws VillaPlanError (the caller rolls back) if
+ * the sync would change any existing room. Returns { added, chains, withoutSteps }.
+ */
+async function addMissingPlanRooms(tx, unitId, actorUserId = null) {
+  const u = (await tx.request().input("u", sql.Int, unitId).query(`
+    SELECT u.UnitName, u.LayoutTypeId, v.Id AS TypeId, v.LayoutTypeId AS TypeLayout
+    FROM dbo.UnitMaster u LEFT JOIN dbo.VillaTypeMaster v ON v.Id = u.VillaTypeId AND v.IsActive = 1
+    WHERE u.Id = @u AND u.IsActive = 1
+      AND EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = u.Id AND p.IsActive = 1)`)).recordset[0];
+  if (!u) throw new VillaPlanError("That is not an active villa built on a plot", 404);
+  if (!u.TypeId) throw new VillaPlanError(`${u.UnitName} has no villa type — set its type first`);
+  if (!u.TypeLayout) throw new VillaPlanError("Its villa type has no floor plan yet");
+  if (u.LayoutTypeId !== u.TypeLayout) {
+    await tx.request().input("u", sql.Int, unitId).input("l", sql.Int, u.TypeLayout)
+      .query("UPDATE dbo.UnitMaster SET LayoutTypeId = @l, UpdatedAt = SYSDATETIME() WHERE Id = @u");
+  }
+  const { syncUnitRooms } = require("./unitLayout");
+  const r = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: actorUserId, villaTool: true });
+  if (r.deactivated || r.renamed) {
+    throw new VillaPlanError(`${u.UnitName}: bringing it to the plan would change ${r.renamed ? `${r.renamed} room name(s)` : ""}${r.renamed && r.deactivated ? " and " : ""}${r.deactivated ? `${r.deactivated} room(s)` : ""} that already exist — nothing was changed`, 409);
+  }
+  return { added: (r.created || 0) + (r.reactivated || 0), chains: r.dprChainsCreated || 0, withoutSteps: r.dprRoomsWithoutTemplate || [] };
+}
+
+module.exports = { getPlan, savePlan, applyStoreys, addMissingPlanRooms, storeyOrder, VillaPlanError };
