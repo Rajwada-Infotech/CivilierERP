@@ -29,9 +29,16 @@ const { sql } = require("../db");
 async function convertLead(pool, leadId, userId) {
   const leadResult = await pool.request()
     .input("lid", sql.Int, leadId)
-    .query("SELECT Id, Status, CrmApplicationId FROM dbo.SaLead WHERE Id = @lid");
+    .query("SELECT Id, Status, CrmApplicationId, IsActive FROM dbo.SaLead WHERE Id = @lid");
   const lead = leadResult.recordset[0];
-  if (!lead) throw new Error("Lead not found");
+  if (!lead || lead.IsActive === false || lead.IsActive === 0) throw new Error("Lead not found");
+  // "Lost" is final in the lead lifecycle (routes/saLeads.js STATUS_TRANSITIONS
+  // allows nothing out of it), so it can't be pushed into the CRM pool either.
+  if (lead.Status === "Lost") {
+    const e = new Error("This lead is marked Lost — it can't be converted.");
+    e.status = 409;
+    throw e;
+  }
   if (lead.Status === "Converted") {
     return { alreadyConverted: true };
   }

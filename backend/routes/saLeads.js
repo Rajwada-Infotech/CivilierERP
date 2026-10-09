@@ -496,7 +496,7 @@ router.put("/:id/convert", requirePageRight("sa-leads", "edit"), async (req, res
     res.json({ success: true, message: "Lead converted — now available in the CRM Leads pool" });
   } catch (e) {
     console.error("[sa-leads] convert error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async (req, res) => {
@@ -514,7 +514,7 @@ router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async
     res.json({ success: true, message: "Lead converted — now available in the CRM Leads pool" });
   } catch (e) {
     console.error("[sa-leads] convert error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
