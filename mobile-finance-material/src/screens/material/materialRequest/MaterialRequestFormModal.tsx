@@ -3,6 +3,7 @@
 // for a plain UOM picker (any active UOM, no category filtering) — the
 // most complex part of the web form and not needed for correctness, since
 // quantity/UOM are stored as entered either way.
+import { istToday } from "@/utils/istTime";
 import { DateTimeField } from "@/components/DateTimeField";
 import { filterProjectsByCompany } from "@/utils/projectBelongsTo";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
@@ -38,7 +39,7 @@ type FormState = {
   priority: string; reason: string; remarks: string;
 };
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() { return istToday(); }
 
 function blankForm(): FormState {
   return {

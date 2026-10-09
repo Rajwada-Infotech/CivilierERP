@@ -7,6 +7,7 @@
 //     receivedQty/rate/billing-qty, capped at what's still on the PO.
 // A PO only shows up in the picker once ≥1 Vehicle In/Out has been logged
 // against it (goods can't be receipted before a vehicle brought them in).
+import { istToday } from "@/utils/istTime";
 import { useLockedFinYear } from "@/hooks/useLockedFinYear";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
@@ -40,7 +41,7 @@ type FormState = {
   poTotalAmount: number;
 };
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() { return istToday(); }
 
 function blankForm(): FormState {
   return {

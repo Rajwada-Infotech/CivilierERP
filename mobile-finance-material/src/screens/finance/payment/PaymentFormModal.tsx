@@ -22,6 +22,7 @@
 // the invoice's billing terms via computeBreakdown to arrive at the true
 // net payable — same math as web's applyGrnBreakdown/
 // applyMultiGrnBreakdown, shown here as a read-only Tax Details card.
+import { istToday } from "@/utils/istTime";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -74,7 +75,7 @@ type FormState = {
 
 function blankForm(): FormState {
   return {
-    paymentName: "", mode: "", amount: "", date: new Date().toISOString().slice(0, 10),
+    paymentName: "", mode: "", amount: "", date: istToday(),
     company: "", project: "", bankId: null, bankName: "",
     expenseId: "", expenseRef: "", parentDocNo: "", paidTo: "", partyId: null,
     chequeNo: "", chequeLotId: null, chequeLotNumber: "", chequeAccountNumber: "", chequeIfsc: "",
@@ -133,11 +134,9 @@ function validateForm(f: FormState): string | null {
     if (!f.chequeNo) return "Please select a cheque number from the lot.";
     if (f.mode === "Post-Dated Cheque") {
       if (!f.chequeDate) return "Post-dated cheque requires a cheque date.";
-      const validUntil = new Date(f.chequeDate);
-      validUntil.setMonth(validUntil.getMonth() + 3);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      if (validUntil < today) return "This post-dated cheque has expired. Please select a valid cheque date.";
+      const validUntil = new Date(f.chequeDate); // "YYYY-MM-DD" reads as UTC midnight, so use the UTC month calendar
+      validUntil.setUTCMonth(validUntil.getUTCMonth() + 3);
+      if (validUntil.toISOString().slice(0, 10) < istToday()) return "This post-dated cheque has expired. Please select a valid cheque date.";
     }
   }
 
@@ -184,7 +183,7 @@ export function PaymentFormModal({
       const r = editingRecord;
       setForm({
         paymentName: r.paymentName, mode: r.mode, amount: r.amount != null ? String(r.amount) : "",
-        date: r.date || new Date().toISOString().slice(0, 10),
+        date: r.date || istToday(),
         company: r.company, project: r.projectSite, bankId: null, bankName: r.bankName,
         expenseId: r.expenseId, expenseRef: r.expenseRef, parentDocNo: r.parentDocNo,
         paidTo: r.paidTo, partyId: null,

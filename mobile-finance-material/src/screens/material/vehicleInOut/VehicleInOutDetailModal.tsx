@@ -3,6 +3,7 @@
 // messaging, out of scope), the stacked PO-preview sub-modal (shown here as
 // a plain PO-number field instead), the per-line quality debit-note flow,
 // and Print.
+import { fmtWallClock } from "@/utils/istTime";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { View, Text, Modal, Pressable, ScrollView, ActivityIndicator } from "react-native";
@@ -21,10 +22,9 @@ function fmtDate(d: string | null | undefined) {
   return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+// Entry / exit times are stored as the IST digits that were typed; show those digits, not the phone's zone.
 function fmtDateTime(d: string | null | undefined) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  return isNaN(dt.getTime()) ? d : dt.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  return fmtWallClock(d, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function Field({ label, value }: { label: string; value: string }) {

@@ -44,8 +44,10 @@ export function toLocalString(v: LocalDateTime): string {
   return `${v.y}-${pad(v.m)}-${pad(v.d)}T${pad(v.h)}:${pad(v.min)}`;
 }
 
+/** The India wall clock at a moment (default now) - not the phone's zone, which can differ. */
 export function fromDate(date: Date = new Date()): LocalDateTime {
-  return { y: date.getFullYear(), m: date.getMonth() + 1, d: date.getDate(), h: date.getHours(), min: date.getMinutes() };
+  const ist = new Date(date.getTime() + 330 * 60 * 1000);
+  return { y: ist.getUTCFullYear(), m: ist.getUTCMonth() + 1, d: ist.getUTCDate(), h: ist.getUTCHours(), min: ist.getUTCMinutes() };
 }
 
 export function to12h(h: number): { hour12: number; pm: boolean } {

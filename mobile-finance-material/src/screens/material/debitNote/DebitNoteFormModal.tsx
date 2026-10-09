@@ -7,6 +7,7 @@
 // them from, unlike GRN/PO line items. Reason is a mobile addition (see
 // debitNoteApi.ts header comment); the web discount-preview panel is
 // dropped since it's never persisted.
+import { istToday } from "@/utils/istTime";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Switch } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -30,7 +31,7 @@ function blankCartItem(): CartItem {
   return { key: uid(), description: "", quantity: "", uom: "", rate: "", amount: "" };
 }
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() { return istToday(); }
 
 type FormState = {
   finYear: string;

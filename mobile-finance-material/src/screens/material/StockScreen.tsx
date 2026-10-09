@@ -8,6 +8,7 @@
 // matching web exactly. Tapping a card opens the ledger drill-down
 // (StockLedgerScreen) scoped to that item+godown — a mobile-only addition
 // since web never wired up its own (otherwise unused) ledger endpoint.
+import { istToday } from "@/utils/istTime";
 import { useEffect, useMemo, useState } from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,7 +23,7 @@ import { getGodowns, getCompanies, getProjects, getInventoryMaster, type Godown,
 import { PickerRow, OptionPickerModal, type PickerOption } from "@/screens/finance/payment/OptionPicker";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() { return istToday(); }
 
 function fmtNum(n: number | null | undefined) {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(Number(n) || 0);

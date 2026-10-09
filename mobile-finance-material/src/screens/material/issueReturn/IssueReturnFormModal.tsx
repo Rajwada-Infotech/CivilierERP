@@ -5,6 +5,7 @@
 // matching web's `!editId` guard). Each row's Return Qty is capped at the
 // ORIGINAL issued quantity (`maxQty`) — replicated as-is from web, which
 // does not subtract quantity already returned in earlier Return docs.
+import { istToday } from "@/utils/istTime";
 import { useEffect, useState } from "react";
 import { View, Text, Modal, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -30,7 +31,7 @@ type FormState = {
   reason: string; remarks: string;
 };
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() { return istToday(); }
 
 function blankForm(): FormState {
   return { returnDate: todayISO(), companyId: "", companyName: "", projectId: "", projectName: "", issueId: "", issueDocNo: "", reason: "", remarks: "" };

@@ -1,6 +1,7 @@
 // Ported near-verbatim from src/api/homeDashboardApi.ts (web) — pure
 // fetch + aggregation logic, no DOM/React dependency, so only the
 // fetchWithAuth import path changes.
+import { istToday } from "@/utils/istTime";
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
 export interface FinanceDashboardData {
@@ -349,8 +350,7 @@ export async function fetchHomeDashboard(
     const d = saleOrdersRes.data;
     return Array.isArray(d) ? d : Array.isArray((d as any)?.data) ? (d as any).data : [];
   })();
-  const soNow = new Date();
-  const soMonthPrefix = `${soNow.getFullYear()}-${String(soNow.getMonth() + 1).padStart(2, "0")}`;
+  const soMonthPrefix = istToday().slice(0, 7); // this month, on the India calendar
   const sales: SalesSummaryData = {
     total: soList.length,
     approved: soList.filter((o) => (o.Status ?? "").toLowerCase().includes("approved")).length,
