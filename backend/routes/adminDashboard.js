@@ -4,15 +4,26 @@ const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 const { getPool } = require("../db");
-const allowRoles = require("../middleware/role");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { redisGet, redisSet } = require("../redis");
 
 // Cache key
 const CACHE_KEY = "admin_dashboard";
 const CACHE_TTL = 60; // seconds
 
+// Control Center totals: admin-tier roles always, and any other role that has the "Admin Dashboard" page ticked in
+// Menu Rights. The page itself opens for those roles (Admin pages follow Menu Rights), so the data behind it has to
+// answer them too - it used to refuse with 403 and the page showed "Failed to load dashboard data". Read-only totals
+// and the five newest users, nothing that changes anything.
+const ADMIN_TIER = new Set(["admin", "super_admin", "dba"]);
+const canViewAdminDashboard = (req, res, next) => {
+  const role = String(req.user?.role || "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (ADMIN_TIER.has(role)) return next();
+  return requirePageRight("admin-dashboard", "view")(req, res, next);
+};
+
 // GET /api/admin-dashboard
-router.get("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.get("/", canViewAdminDashboard, async (req, res) => {
   try {
     // 1. Try cache first
     try {
