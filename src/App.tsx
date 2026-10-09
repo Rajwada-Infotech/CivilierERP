@@ -259,6 +259,8 @@ const FixedAssetAssignment = lazy(() => import("./pages/fixedAsset/FixedAssetAss
 const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
 const FixedAssetQualityCheck = lazy(() => import("./pages/fixedAsset/FixedAssetQualityCheck"));
 const FixedAssetMaintenance = lazy(() => import("./pages/fixedAsset/FixedAssetMaintenance"));
+const EmployeeAttendance = lazy(() => import("./pages/hrpayroll/EmployeeAttendance"));
+const HrAttendanceManagement = lazy(() => import("./pages/hrpayroll/HrAttendanceManagement"));
 const FixedAssetDepreciationGenerate = lazy(() => import("./pages/fixedAsset/FixedAssetDepreciationGenerate"));
 const IDTemplateMaster = lazy(() => import("./pages/fixedAsset/IDTemplateMaster"));
 const ShortClose = lazy(() => import("./pages/material/ShortClose"));
@@ -1059,6 +1061,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="payroll-run">
             <Payslip />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/attendance"
+        element={
+          <ProtectedRoute pageKey="employee-attendance">
+            <EmployeeAttendance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/hr-attendance"
+        element={
+          <ProtectedRoute pageKey="hr-attendance-management">
+            <HrAttendanceManagement />
           </ProtectedRoute>
         }
       />
