@@ -280,3 +280,37 @@ export const parseSheetDate = (raw: string): string | null => {
   return null;
 };
 
+
+// ─── Table reading ───────────────────────────────────────────────────────────
+
+const headerKey = (v: unknown) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * Turns a sheet's rows into records keyed by canonical field. The first non-empty row is the
+ * header; each field lists the header spellings it accepts (letters/digits only, lower-case,
+ * so "Total Rate (Rs) *" matches "totalraters"). Fully blank rows are skipped; `rowNo` is the
+ * 1-based row number in the sheet, for error messages. `missing` lists fields with no column.
+ */
+export function readSheetTable(
+  rows: string[][],
+  aliases: Record<string, string[]>,
+): { table: { rowNo: number; cells: Record<string, string> }[]; missing: string[] } {
+  const hdrIdx = rows.findIndex((r) => (r ?? []).some((c) => headerKey(c) !== ""));
+  if (hdrIdx === -1) return { table: [], missing: Object.keys(aliases) };
+  const colOf: Record<string, number> = {};
+  rows[hdrIdx].forEach((h, ci) => {
+    const k = headerKey(h);
+    for (const [field, names] of Object.entries(aliases)) {
+      if (colOf[field] === undefined && names.includes(k)) colOf[field] = ci;
+    }
+  });
+  const table: { rowNo: number; cells: Record<string, string> }[] = [];
+  for (let r = hdrIdx + 1; r < rows.length; r++) {
+    const row = rows[r] ?? [];
+    if (!row.some((c) => String(c ?? "").trim() !== "")) continue;
+    const cells: Record<string, string> = {};
+    for (const f of Object.keys(aliases)) cells[f] = colOf[f] === undefined ? "" : String(row[colOf[f]] ?? "").trim();
+    table.push({ rowNo: r + 1, cells });
+  }
+  return { table, missing: Object.keys(aliases).filter((f) => colOf[f] === undefined) };
+}

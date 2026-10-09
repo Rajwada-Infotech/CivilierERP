@@ -77,6 +77,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { getDocumentChain } from "@/api/materialChainApi";
 import { getHsn } from "@/api/hsnApi";
+import { WorkOrderImportButtons } from "./WorkOrderImportModal";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import {
@@ -4101,6 +4102,7 @@ const WorkOrderMaster: React.FC = () => {
 
   // ── Tab state ─────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("create");
+  const [listKey, setListKey] = useState(0);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
 
   // Deep link from the document chain: /engineering/work-order?view=<id> opens that Work Order.
@@ -4511,6 +4513,15 @@ const WorkOrderMaster: React.FC = () => {
         icon={ClipboardList}
         action={
           <div className="flex items-center gap-2 shrink-0">
+            {/* Excel import — Work Orders without a BOQ */}
+            {woRights.canCreate && (
+              <WorkOrderImportButtons
+                onImported={() => {
+                  setListKey((k) => k + 1);
+                  setViewMode("list");
+                }}
+              />
+            )}
             {/* Tab toggle */}
             <div className="flex items-center rounded-lg border border-border bg-muted/30 p-0.5">
               {woRights.canCreate && (
@@ -4581,6 +4592,7 @@ const WorkOrderMaster: React.FC = () => {
         {/* ── VIEW ALL ── */}
         {viewMode === "list" && (
           <WorkOrdersList
+            key={listKey}
             onViewDetail={(id) => {
               setSelectedOrderId(id);
               setViewMode("detail");
