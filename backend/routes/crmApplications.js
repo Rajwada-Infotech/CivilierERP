@@ -377,7 +377,7 @@ router.get("/:id/pdf", requirePageRight("crm-applications", "view"), async (req,
     // Level 1 gate: a live booking must exist (Booking not Cancelled/Rejected),
     // which only happens after the Application is Approved.
     const hasLiveBooking = app.BookingId
-      && !["Cancelled", "Rejected"].includes(app.BookingStatus);
+      && !require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(app.BookingStatus);
     if (!hasLiveBooking) {
       return res.status(403).json({
         error: "Application Form PDF is only available after Level 1 verification (Application Approved). Please complete the review process first.",

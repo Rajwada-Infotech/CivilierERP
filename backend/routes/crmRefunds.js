@@ -1003,7 +1003,7 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     `);
     const to = toRes.recordset[0];
     if (!to) return res.status(404).json({ error: "Target booking not found" });
-    if (!to.IsActive || ["Cancelled", "Rejected"].includes(to.Status)) {
+    if (!to.IsActive || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(to.Status)) {
       return res.status(400).json({ error: "Target booking is not active" });
     }
     if (Number(to.ToCustomerId) !== Number(held.FromCustomerId)) {

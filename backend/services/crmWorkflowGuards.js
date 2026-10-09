@@ -53,11 +53,12 @@ async function requireActiveBooking(pool, bookingId) {
   if (!row.recordset.length) return "Booking not found";
   const b = row.recordset[0];
   if (!b.IsActive) return "This booking is no longer active";
-  if (["Cancelled", "Rejected"].includes(b.Status)) {
-    return `This booking has been ${b.Status} — no further workflow actions are allowed on it`;
-  }
   if (b.Status === "Transferred") {
     return "This booking was transferred to a new owner by a resale — no further workflow actions are allowed on it";
+  }
+  // Every dead status (Cancelled, Rejected, Expired, Transferred) — one list, constants/crmStatuses.js.
+  if (require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(b.Status)) {
+    return `This booking has been ${b.Status} — no further workflow actions are allowed on it`;
   }
   if (b.IsFrozen) {
     // Auto-lift the freeze if its expiry has passed — fire-and-forget, don't

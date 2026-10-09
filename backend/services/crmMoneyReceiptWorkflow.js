@@ -66,7 +66,7 @@ async function assertDataReviewComplete(pool, bookingId) {
   `);
   const row = booking.recordset[0];
   if (!row) throw new MoneyReceiptError("Booking not found", 404);
-  if (row.IsActive === 0 || ["Cancelled", "Rejected"].includes(row.Status)) {
+  if (row.IsActive === 0 || row.IsActive === false || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(row.Status)) {
     throw new MoneyReceiptError(`This booking has been ${row.Status} - money receipt actions are blocked`);
   }
   // The booking must have been submitted for approval (Confirm & Book /
