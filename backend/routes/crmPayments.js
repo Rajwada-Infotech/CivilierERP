@@ -115,6 +115,13 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   if (earlier.recordset.length) {
     return { error: `Cannot apply to "${targetRow.MilestoneName}" — "${earlier.recordset[0].MilestoneName}" is still due first` };
   }
+  // A villa on the buyer's own plot is one property: the plot's balance is the
+  // first part of the villa's schedule, so it is settled before any villa milestone.
+  const landFirst = (await require("../services/villaLand").propertyOfBooking(pool, targetRow.BookingId)).schedule
+    .find((m) => m.Part === "Land" && m.BookingId !== targetRow.BookingId && !["Paid", "Waived"].includes(m.Status));
+  if (landFirst) {
+    return { error: `Cannot apply to "${targetRow.MilestoneName}" — the plot's balance "${landFirst.MilestoneName}" (${landFirst.BookingNo}) is settled first` };
+  }
 
   // Required flow: Payment -> On Account -> Demand -> On Account Adjustment
   // -> Milestone Settlement -> Invoice. Gated on the Demand having been

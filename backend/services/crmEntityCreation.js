@@ -457,6 +457,10 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     throw e;
   }
   const applicationId = result.recordset[0].Id;
+  // The plot's owner applying for the villa on it brings the plot's co-owners along.
+  if (rawAppUnitIds.length > 0) {
+    await require("./villaLand").copyLandCoOwners(pool, applicationId, rawAppUnitIds, actorUserId);
+  }
   // Starts Draft, not Pending — the wizard's own PUT /:id/submit (see
   // crmApplications.js) is the real Draft->Pending gate (approvalTransition
   // only allows that transition from Draft/Rejected). Inserting straight as

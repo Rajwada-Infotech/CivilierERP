@@ -122,4 +122,86 @@ async function directSaleLandValue(poolOrTx, unitIds) {
   return Math.round(Number(r.recordset[0].Land || 0) * 100) / 100;
 }
 
-module.exports = { landPositionOfUnits, assertVillaBuyerOwnsLand, villaBookedOnLandOf, directSaleLandValue, VillaLandError };
+/**
+ * The plot's owners own the villa together: when the plot's owner applies for
+ * the villa on it, the co-applicants of the land (its booking, or the
+ * application behind it) are copied onto the villa application. People
+ * already on it (same name + mobile) are not added twice. Returns the count.
+ */
+async function copyLandCoOwners(poolOrTx, applicationId, unitIds, actorUserId = null) {
+  const ids = (unitIds || []).map(Number).filter(Number.isInteger);
+  if (!ids.length || !applicationId) return 0;
+  const r = await poolOrTx.request().input("aid", sql.Int, applicationId).input("by", sql.Int, actorUserId).query(`
+    INSERT INTO dbo.CrmCoApplicant
+      (ApplicationId, Name, Relation, Mobile, Email, PanNo, AadhaarNo, DateOfBirth, Gender, Occupation, AnnualIncome,
+       Address, City, [State], Pincode, Notes, SourceType, CreatedBy, CreatedAt)
+    SELECT @aid, c.Name, c.Relation, c.Mobile, c.Email, c.PanNo, c.AadhaarNo, c.DateOfBirth, c.Gender, c.Occupation, c.AnnualIncome,
+           c.Address, c.City, c.[State], c.Pincode, N'Co-owner of the plot under this villa', N'PlotOwner', @by, SYSDATETIME()
+    FROM (
+      SELECT c.*, ROW_NUMBER() OVER (PARTITION BY c.Name, ISNULL(c.Mobile, N'') ORDER BY c.Id) AS rn
+      FROM dbo.CrmCoApplicant c
+      JOIN dbo.CrmBooking b ON (c.BookingId = b.Id OR c.ApplicationId = b.ApplicationId)
+      JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id AND bp.Status = N'Active'
+      JOIN dbo.PlotMaster p ON p.Id = bp.PlotId AND p.IsActive = 1
+      WHERE p.ConvertedUnitId IN (${ids.join(",")}) AND c.IsActive = 1
+        AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
+    ) c
+    WHERE c.rn = 1 AND NOT EXISTS (
+      SELECT 1 FROM dbo.CrmCoApplicant x WHERE x.ApplicationId = @aid AND x.IsActive = 1
+        AND x.Name = c.Name AND ISNULL(x.Mobile, N'') = ISNULL(c.Mobile, N''))`);
+  return r.rowsAffected?.[0] || 0;
+}
+
+/**
+ * A plot converted to a villa is ONE property to its owner: the land booking
+ * and the villa booking on it, held by the same customer. Given either
+ * booking, returns both (land first) with one schedule — the land's unpaid
+ * milestones ahead of the villa's, so money paid against the land balance
+ * lands on the land booking (no GST) and the rest on the villa — and the
+ * property's totals. A booking with no partner is returned on its own.
+ */
+async function propertyOfBooking(poolOrTx, bookingId) {
+  const live = "b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')";
+  const bookings = (await poolOrTx.request().input("b", sql.Int, bookingId).query(`
+    WITH me AS (
+      SELECT b.Id, b.UnitId, a.CustomerId FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @b
+    ),
+    villa AS (   -- the villa this booking is (UnitId), or the villa built on the plots this booking holds
+      SELECT me.UnitId AS UnitId FROM me WHERE EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = me.UnitId AND p.IsActive = 1)
+      UNION
+      SELECT p.ConvertedUnitId FROM me JOIN dbo.CrmBookingPlot bp ON bp.BookingId = me.Id AND bp.Status = N'Active'
+      JOIN dbo.PlotMaster p ON p.Id = bp.PlotId AND p.IsActive = 1 WHERE p.ConvertedUnitId IS NOT NULL
+    )
+    SELECT DISTINCT b.Id, b.BookingNo, b.UnitNo, b.TotalValue, b.Status,
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmBookingPlot x WHERE x.BookingId = b.Id AND x.Status = N'Active') THEN 1 ELSE 0 END AS IsLand
+    FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    WHERE b.Id = @b
+       OR (${live} AND a.CustomerId = (SELECT CustomerId FROM me) AND (
+            b.UnitId IN (SELECT UnitId FROM villa)
+         OR EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp JOIN dbo.PlotMaster p ON p.Id = bp.PlotId
+                    WHERE bp.BookingId = b.Id AND bp.Status = N'Active' AND p.ConvertedUnitId IN (SELECT UnitId FROM villa))))`)).recordset
+    .sort((x, y) => y.IsLand - x.IsLand || x.Id - y.Id);
+  const ids = bookings.map((b) => b.Id);
+  const milestones = ids.length ? (await poolOrTx.request().query(`
+    SELECT m.Id, m.BookingId, m.MilestoneNo, m.MilestoneName, m.AmountDue, ISNULL(m.AmountPaid, 0) AS AmountPaid, m.DueDate, m.Status, m.DemandStatus
+    FROM dbo.CrmPaymentMilestone m WHERE m.BookingId IN (${ids.join(",")})`)).recordset : [];
+  const order = new Map(ids.map((id, i) => [id, i]));
+  milestones.sort((a, b) => order.get(a.BookingId) - order.get(b.BookingId) || a.MilestoneNo - b.MilestoneNo);
+  const byId = new Map(bookings.map((b) => [b.Id, b]));
+  const schedule = milestones.map((m) => ({
+    ...m,
+    BookingNo: byId.get(m.BookingId).BookingNo,
+    Part: byId.get(m.BookingId).IsLand ? "Land" : "Villa",
+    Label: byId.get(m.BookingId).IsLand && bookings.length > 1 ? `Land balance – ${byId.get(m.BookingId).UnitNo || "plot"} · ${m.MilestoneName}` : m.MilestoneName,
+  }));
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const counted = schedule.filter((m) => m.Status !== "Waived");
+  const totals = {
+    price: r2(bookings.reduce((s, b) => s + Number(b.TotalValue || 0), 0)),
+    paid: r2(counted.reduce((s, m) => s + Number(m.AmountPaid || 0), 0)),
+  };
+  totals.due = r2(counted.reduce((s, m) => s + Math.max(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0), 0), 0));
+  return { combined: bookings.length > 1, bookings, schedule, totals };
+}
+
+module.exports = { landPositionOfUnits, assertVillaBuyerOwnsLand, villaBookedOnLandOf, directSaleLandValue, copyLandCoOwners, propertyOfBooking, VillaLandError };
