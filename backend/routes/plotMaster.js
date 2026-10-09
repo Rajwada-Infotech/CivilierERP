@@ -48,6 +48,12 @@ const PLOT_SELECT = `
             FROM (SELECT rp.RoomCategoryId, SUM(rp.Quantity) AS Qty FROM dbo.VillaTypeRoomPlan rp WHERE rp.VillaTypeId = converted.VillaTypeId GROUP BY rp.RoomCategoryId) pl
             OUTER APPLY (SELECT COUNT(*) AS n FROM dbo.RoomMaster vr WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1 AND vr.RoomCategoryId = pl.RoomCategoryId) have) AS ConvertedMissingRooms,
          (SELECT ISNULL(SUM(rp.Quantity), 0) FROM dbo.VillaTypeRoomPlan rp WHERE rp.VillaTypeId = converted.VillaTypeId) AS ConvertedPlanRoomCount,
+         -- rooms whose room type has no DPR step list yet (they get steps once one is set)
+         (SELECT COUNT(*) FROM dbo.RoomMaster vr WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1 AND vr.RoomCategoryId IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = vr.Id AND d.IsActive = 1)) AS ConvertedRoomsWithoutSteps,
+         (SELECT STRING_AGG(CAST(t.Alias AS NVARCHAR(MAX)), ', ') FROM (SELECT DISTINCT c.Alias FROM dbo.RoomMaster vr JOIN dbo.RoomCategoryMaster c ON c.Id = vr.RoomCategoryId
+            WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1
+              AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = vr.Id AND d.IsActive = 1)) t) AS ConvertedTypesWithoutSteps,
          (SELECT COUNT(*) FROM dbo.PlotAdjacency pa
             JOIN dbo.PlotMaster o ON o.Id = CASE WHEN pa.PlotId = p.Id THEN pa.AdjacentPlotId ELSE pa.PlotId END
            WHERE (pa.PlotId = p.Id OR pa.AdjacentPlotId = p.Id) AND o.IsActive = 1) AS AdjacentPlotCount,
