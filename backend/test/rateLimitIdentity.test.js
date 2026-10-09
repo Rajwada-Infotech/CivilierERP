@@ -89,3 +89,32 @@ describe("login attempts are counted per account, not per IP", () => {
     }
   });
 });
+
+describe("customer-portal logins and the log header", () => {
+  const portalToken = (portalUserId, secret = process.env.JWT_SECRET) => jwt.sign({ type: "crm_portal", portalUserId, customerId: 9 }, secret);
+  const run = (headers) => {
+    const req = { headers, ip: "172.30.0.1" };
+    const res = { headers: {}, setHeader(k, v) { this.headers[k] = v; } };
+    attachRateLimitUser(req, res, () => {});
+    return { key: rateLimitKey(req), header: res.headers["X-Auth-User"] };
+  };
+
+  test("a portal customer gets their own bucket, a staff user keeps theirs", () => {
+    expect(run({ authorization: `Bearer ${portalToken(31)}` })).toEqual({ key: "portal:31", header: "portal-31" });
+    expect(run({ authorization: `Bearer ${token(42)}` })).toEqual({ key: "user:42", header: "user-42" });
+  });
+
+  test("a forged portal token is just an IP, and names nobody in the log", () => {
+    expect(run({ authorization: `Bearer ${portalToken(31, "forged")}` })).toEqual({ key: "172.30.0.1", header: undefined });
+    expect(run({})).toEqual({ key: "172.30.0.1", header: undefined });
+  });
+
+  test("two portal customers behind one address do not share a limit", async () => {
+    const app = appWithLimit(2);
+    const a = bearer(portalToken(1));
+    const b = bearer(portalToken(2));
+    for (let i = 0; i < 2; i++) expect((await request(app).get("/ping").set(a)).status).toBe(200);
+    expect((await request(app).get("/ping").set(a)).status).toBe(429);
+    expect((await request(app).get("/ping").set(b)).status).toBe(200);
+  });
+});

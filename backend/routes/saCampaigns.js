@@ -6,7 +6,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("../services/docNumber");
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 
 const router = express.Router();
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));

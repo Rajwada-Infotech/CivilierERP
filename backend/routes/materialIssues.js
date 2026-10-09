@@ -22,7 +22,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 const routeLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, message: { error: "Too many requests, please try again later." } });
 router.use(routeLimiter);
 const { cache } = require("../middleware/cache");

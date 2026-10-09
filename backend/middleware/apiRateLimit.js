@@ -1,4 +1,4 @@
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("./rateLimiter");
 
 // Router-level rate limiter — satisfies static analysis tooling that can't
 // trace the global app.use("/api", apiLimiter) registration in server.js.
