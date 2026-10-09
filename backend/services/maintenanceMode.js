@@ -71,8 +71,8 @@ async function setMaintenance({ active, title, message, startsAt, endsAt, by }) 
         VALUES (1, @active, @title, @message, CASE WHEN @active = 1 THEN SYSUTCDATETIME() END, @startsAt, @endsAt, @by);
     `);
   } catch (err) {
-    if (/Invalid object name/i.test(err.message)) {
-      const e = new Error("Maintenance mode needs migration 548 - ask an administrator to run the database migrations.");
+    if (/Invalid object name|Invalid column name 'StartsAt'/i.test(err.message)) {
+      const e = new Error("Maintenance mode needs migrations 548 and 549 - ask an administrator to run the database migrations.");
       e.status = 503;
       throw e;
     }
