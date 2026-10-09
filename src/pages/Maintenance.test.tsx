@@ -112,6 +112,14 @@ describe("Maintenance page", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it("uses no header / main / section elements: the app's themes restyle those globally (it made the top bar white)", async () => {
+    status.mockResolvedValue(live());
+    const { container } = renderPage();
+    await screen.findByText("Database upgrade");
+    expect(container.querySelector("header, main, section")).toBeNull();
+    expect(screen.getByRole("main")).toBeInTheDocument();
+  });
+
   it("offers administrator sign-in", async () => {
     status.mockResolvedValue(live());
     renderPage();
