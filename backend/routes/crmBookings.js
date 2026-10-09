@@ -277,7 +277,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
       req0.input("st", sql.NVarChar(30), status);
       conds.push("b.Status = @st");
     } else if (!includeCancelled) {
-      conds.push("b.Status NOT IN ('Cancelled', 'Rejected', 'Expired')");
+      conds.push(`b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`);
     }
     if (applicationId) { req0.input("appId", sql.Int, parseInt(applicationId)); conds.push("b.ApplicationId = @appId"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }

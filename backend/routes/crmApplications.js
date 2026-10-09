@@ -1104,7 +1104,7 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     // for the rare case of an Approved Application with an active Booking
     // where someone hits this endpoint directly.
     const activeBooking = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired')");
+      .query(`SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`);
     if (activeBooking.recordset.length) {
       const bk = activeBooking.recordset[0];
       return res.status(400).json({
@@ -1156,7 +1156,7 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     const activeBooking = await pool.request().input("id", sql.Int, id).query(`
       SELECT TOP 1 Id, BookingNo, Status
       FROM dbo.CrmBooking
-      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired')
+      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
     `);
     if (activeBooking.recordset.length) {
       const b = activeBooking.recordset[0];
