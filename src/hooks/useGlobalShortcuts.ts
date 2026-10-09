@@ -5,6 +5,7 @@ import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   MODULE_DASHBOARD_ROUTES,
+  firstAccessibleAdminPath,
   isAdminTierRole,
   userHasModuleAccess,
   type Module,
@@ -179,7 +180,7 @@ export function useModuleSwitchShortcut(): void {
         setActiveModule(shortcut.module);
         const dest =
           shortcut.module === "admin" && !isAdminTier
-            ? "/admin/approval/inbox"
+            ? firstAccessibleAdminPath((pk) => canAccessPage(pk as never)) ?? "/admin/approval/inbox"
             : MODULE_DASHBOARD_ROUTES[shortcut.module];
         navigate(dest);
         setTimeout(() => setModuleSwitching(false), 60);

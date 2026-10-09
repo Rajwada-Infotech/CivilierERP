@@ -71,7 +71,7 @@ import {
 } from "iconsax-react";
 
 import { useModule } from "@/contexts/ModuleContext";
-import { MODULE_DASHBOARD_ROUTES, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
+import { MODULE_DASHBOARD_ROUTES, firstAccessibleAdminPath, hasAnyAdminPageRight, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
 import { ALL_MODULES, hexToHsl } from "./moduleDefs";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
@@ -755,7 +755,7 @@ export const MobileNav: React.FC = () => {
   const isAdminTier = isAdminTierRole(currentUser?.role ?? "");
   const moduleModules = Object.entries(MODULE_META).filter(([id]) => {
     if (id === "__none__") return false;
-    if (id === "admin") return isAdminTier || canAccessPage("approval-inbox" as any);
+    if (id === "admin") return isAdminTier || hasAnyAdminPageRight((pk) => canAccessPage(pk as any));
     return sharedUserHasModuleAccess(id, isAdminTier, (pk) => canAccessPage(pk as any));
   });
 
@@ -958,7 +958,11 @@ export const MobileNav: React.FC = () => {
                       key={id}
                       onClick={() => {
                         if (id === "admin") {
-                          navigate("/admin/dashboard");
+                          navigate(
+                            isAdminTier
+                              ? "/admin/dashboard"
+                              : firstAccessibleAdminPath((pk) => canAccessPage(pk as any)) ?? "/admin/approval/inbox",
+                          );
                           setOpen(false);
                           return;
                         }

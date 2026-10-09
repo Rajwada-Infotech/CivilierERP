@@ -529,12 +529,15 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 function RequireRole({
   children,
   allowed,
+  alsoIf = false,
 }: {
   children: React.ReactNode;
   allowed: string[];
+  /** Lets the person in even when their role is not listed (a page right that stands in for the role). */
+  alsoIf?: boolean;
 }) {
   const { currentUser } = useAuth();
-  if (!currentUser || !allowed.includes(currentUser.role)) {
+  if (!currentUser || (!allowed.includes(currentUser.role) && !alsoIf)) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
@@ -562,10 +565,13 @@ function ProtectedProviders({ children }: { children: React.ReactNode }) {
 
 const ADMIN_ROLES = ["super_admin", "admin", "dba"] as const;
 
-function AdminRoute({ children }: { children: React.ReactNode }) {
+// Admin pages are for admin-tier roles. Any other role can open an Admin page too when that page is ticked for it in
+// Menu Rights - give the route its `pageKey` for that. A route with no pageKey stays admin-tier only.
+function AdminRoute({ children, pageKey }: { children: React.ReactNode; pageKey?: string }) {
+  const { canAccessPage } = useAuth();
   return (
     <RequireAuth>
-      <RequireRole allowed={[...ADMIN_ROLES]}>
+      <RequireRole allowed={[...ADMIN_ROLES]} alsoIf={!!pageKey && canAccessPage(pageKey as any)}>
         <ProtectedProviders>
           <Suspense fallback={<PageSkeleton />}>
             <AppLayout>
@@ -1977,7 +1983,7 @@ function AppRoutes() {
       <Route
         path="/admin/masters/role-master"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="role-master">
             <RoleMaster />
           </AdminRoute>
         }
@@ -1985,7 +1991,7 @@ function AppRoutes() {
       <Route
         path="/admin/masters/menu-types"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="menu-types">
             <MenuMasterPage />
           </AdminRoute>
         }
@@ -2076,7 +2082,7 @@ function AppRoutes() {
       <Route
         path="/admin"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="admin-dashboard">
             <AdminDashboard />
           </AdminRoute>
         }
@@ -2084,7 +2090,7 @@ function AppRoutes() {
       <Route
         path="/admin/dashboard/:userId?"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="admin-dashboard">
             <AdminDashboard />
           </AdminRoute>
         }
@@ -2092,7 +2098,7 @@ function AppRoutes() {
       <Route
         path="/users"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="users">
             <Users />
           </AdminRoute>
         }
@@ -2100,7 +2106,7 @@ function AppRoutes() {
       <Route
         path="/admin/rights/menu"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="menu-rights">
             <MenuRights />
           </AdminRoute>
         }
@@ -2108,7 +2114,7 @@ function AppRoutes() {
       <Route
         path="/admin/rights/widgets"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="widget-rights">
             <WidgetRights />
           </AdminRoute>
         }
@@ -2116,7 +2122,7 @@ function AppRoutes() {
       <Route
         path="/admin/widget-catalog"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="widget-catalog">
             <WidgetCatalogAdmin />
           </AdminRoute>
         }
@@ -2124,7 +2130,7 @@ function AppRoutes() {
       <Route
         path="/admin/page-definitions"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="page-definitions">
             <PageDefinitionsAdmin />
           </AdminRoute>
         }
@@ -2132,7 +2138,7 @@ function AppRoutes() {
       <Route
         path="/admin/masters/integration-channels"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="integration-channels">
             <IntegrationChannelsAdmin />
           </AdminRoute>
         }
@@ -2140,7 +2146,7 @@ function AppRoutes() {
       <Route
         path="/admin/masters/contractor-categories"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="contractor-categories">
             <ContractorCategoryAdmin />
           </AdminRoute>
         }
@@ -2148,7 +2154,7 @@ function AppRoutes() {
       <Route
         path="/admin/masters/godowns"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="godowns">
             <GodownAdmin />
           </AdminRoute>
         }
@@ -2156,7 +2162,7 @@ function AppRoutes() {
       <Route
         path="/admin/rights/fin-year"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="fin-year-rights">
             <FinYearRights />
           </AdminRoute>
         }
@@ -2164,7 +2170,7 @@ function AppRoutes() {
       <Route
         path="/admin/approval/setup"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="approval-setup">
             <ApprovalSetup />
           </AdminRoute>
         }
@@ -2172,7 +2178,7 @@ function AppRoutes() {
       <Route
         path="/admin/approval/post-rights"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="post-approval-rights">
             <PostApprovalRights />
           </AdminRoute>
         }
@@ -2180,7 +2186,7 @@ function AppRoutes() {
       <Route
         path="/admin/rights/project-access"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="project-access">
             <ProjectAccess />
           </AdminRoute>
         }
@@ -2196,7 +2202,7 @@ function AppRoutes() {
       <Route
         path="/admin/api-integration"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="api-integration">
             <ApiIntegrationPage />
           </AdminRoute>
         }
@@ -2204,7 +2210,7 @@ function AppRoutes() {
       <Route
         path="/admin/signature"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="signature">
             <SignaturePage />
           </AdminRoute>
         }
@@ -2252,7 +2258,7 @@ function AppRoutes() {
       <Route
         path="/admin/masters/business-unit"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="business-unit-master">
             <EnterpriseMasterPage />
           </AdminRoute>
         }
@@ -2260,7 +2266,7 @@ function AppRoutes() {
       <Route
         path="/admin/masters/project"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="project-master">
             <ProjectMaster />
           </AdminRoute>
         }
@@ -2268,7 +2274,7 @@ function AppRoutes() {
       <Route
         path="/admin/masters/company"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="company-master">
             <CompanyMaster />
           </AdminRoute>
         }
@@ -2276,7 +2282,7 @@ function AppRoutes() {
       <Route
         path="/admin/security/password-reset"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="password-reset">
             <PasswordResetPage />
           </AdminRoute>
         }
@@ -2284,7 +2290,7 @@ function AppRoutes() {
       <Route
         path="/admin/activity-browser"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="activity-browser">
             <ActivityBrowserPage />
           </AdminRoute>
         }
@@ -2292,7 +2298,7 @@ function AppRoutes() {
       <Route
         path="/admin/communicator/sms-setup"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="sms-setup">
             <SmsSetup />
           </AdminRoute>
         }
@@ -2300,7 +2306,7 @@ function AppRoutes() {
       <Route
         path="/admin/communicator/email-setup"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="email-setup">
             <EmailSetup />
           </AdminRoute>
         }
@@ -2308,7 +2314,7 @@ function AppRoutes() {
       <Route
         path="/admin/communicator/whatsapp-setup"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="whatsapp-setup">
             <WhatsAppSetup />
           </AdminRoute>
         }
@@ -2316,7 +2322,7 @@ function AppRoutes() {
       <Route
         path="/admin/metrics"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="metrics-dashboard">
             <MetricsDashboard />
           </AdminRoute>
         }
@@ -2324,7 +2330,7 @@ function AppRoutes() {
       <Route
         path="/admin/control-panel"
         element={
-          <AdminRoute>
+          <AdminRoute pageKey="admin-control-panel">
             <AdminControlPanel />
           </AdminRoute>
         }
