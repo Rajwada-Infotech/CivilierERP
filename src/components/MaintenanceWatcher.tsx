@@ -1,28 +1,32 @@
-import { useCallback, useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Construction } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getMaintenanceStatus } from "@/api/maintenanceModeApi";
-import { MAINTENANCE_EVENT } from "@/lib/maintenanceRedirect";
+import { MAINTENANCE_EVENT, MAINTENANCE_STORAGE_KEY } from "@/lib/maintenanceRedirect";
 import { formatCountdown, formatIst } from "@/lib/maintenanceTime";
 import Maintenance from "@/pages/Maintenance";
 
 const POLL_MS = 15_000;
+const LOGOUT_WAIT_MS = 4000;
+/** Remembers, across reloads of the tab, that this person was held by maintenance - only they are signed out at the end. */
+const HELD_KEY = "maintenance:held";
 
 /**
  * Everything the app shows about maintenance, on every page - including the login page:
  *  - announced, not started yet: an amber strip with a countdown, so people can finish and save what they are doing;
  *  - started: a full-screen Maintenance page over the app (nothing is reloaded, so nothing on screen is lost) for
  *    everyone except a super admin;
- *  - a super admin, who is never held, sees a small reminder that it is on.
+ *  - a super admin, who is never held, sees a small reminder that it is on;
+ *  - when maintenance ends, everyone who was held is signed out and the site is reloaded from scratch (so they get
+ *    whatever was deployed meanwhile, and nobody carries on with a screen from before).
  */
 export function MaintenanceWatcher() {
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
   const isSuperAdmin = currentUser?.role === "super_admin";
   const navigate = useNavigate();
   const location = useLocation();
-  const queryClient = useQueryClient();
 
   const { data, refetch } = useQuery({
     queryKey: ["system-maintenance"],
@@ -60,32 +64,71 @@ export function MaintenanceWatcher() {
     if (announced && startsAtMs !== null && now >= startsAtMs) void refetch();
   }, [announced, startsAtMs, now, refetch]);
 
-  // Maintenance ended: forget the block.
-  useEffect(() => {
-    if (data && !data.active) setBlocked(false);
-  }, [data]);
-
-  const handleOver = useCallback(() => {
-    setBlocked(false);
-    void queryClient.invalidateQueries(); // screens that failed while it was on load again
-  }, [queryClient]);
+  const endHeldSessionRef = useRef<() => Promise<void>>(async () => {});
+  // One stable object, so the screen's own status check is not restarted every time this component renders.
+  const overlayProps = useMemo(
+    () => ({
+      onOver: () => void endHeldSessionRef.current(),
+      onAdminSignIn: () => {
+        setLoginOpen(true);
+        navigate("/login");
+      },
+    }),
+    [navigate],
+  );
 
   const held = !isSuperAdmin && (blocked || (!!data?.active && data.enforced));
+
+  // Remember that this tab was held (a reload during maintenance must not forget it). A super admin never is.
+  useEffect(() => {
+    try {
+      if (held) sessionStorage.setItem(HELD_KEY, "1");
+      else if (isSuperAdmin) sessionStorage.removeItem(HELD_KEY);
+    } catch {
+      /* storage can be blocked */
+    }
+  }, [held, isSuperAdmin]);
+
+  // Maintenance is over. Anyone who was held is signed out, then the whole site reloads: a signed-in person lands
+  // on the login page, a signed-out visitor stays where they were. People who only saw the countdown (it was called
+  // off before it started) are left alone.
+  const finishing = useRef(false);
+  const endHeldSession = useCallback(async () => {
+    if (finishing.current) return;
+    let wasHeld = false;
+    try {
+      wasHeld = sessionStorage.getItem(HELD_KEY) === "1";
+    } catch {
+      /* ignore */
+    }
+    setBlocked(false);
+    if (!wasHeld) return;
+    finishing.current = true;
+    try {
+      sessionStorage.removeItem(HELD_KEY);
+      sessionStorage.removeItem(MAINTENANCE_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    const signedIn = !!currentUser;
+    if (signedIn) {
+      try {
+        await Promise.race([Promise.resolve(logout()), new Promise((resolve) => setTimeout(resolve, LOGOUT_WAIT_MS))]);
+      } catch {
+        /* the token is cleared below anyway */
+      }
+    }
+    window.location.replace(signedIn ? "/login" : window.location.pathname + window.location.search);
+  }, [currentUser, logout]);
+
+  useEffect(() => {
+    if (data && !data.active) void endHeldSession();
+  }, [data, endHeldSession]);
+
+  endHeldSessionRef.current = endHeldSession;
   const overlayVisible = held && !(loginOpen && location.pathname === "/login");
 
-  if (overlayVisible) {
-    return (
-      <Maintenance
-        overlay={{
-          onOver: handleOver,
-          onAdminSignIn: () => {
-            setLoginOpen(true);
-            navigate("/login");
-          },
-        }}
-      />
-    );
-  }
+  if (overlayVisible) return <Maintenance overlay={overlayProps} />;
 
   if (!data?.active) return null;
 

@@ -183,7 +183,7 @@ describe("before migration 548 (no table)", () => {
     mockRow = null;
     const res = await request(app).put("/api/system-maintenance").set(bearer("super_admin")).send({ active: true, endsAt: ends() });
     expect(res.status).toBe(503);
-    expect(res.body.error).toMatch(/migration 548/);
+    expect(res.body.error).toMatch(/migrations 548 and 549/);
   });
 });
 
