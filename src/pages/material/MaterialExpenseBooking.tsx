@@ -1,3 +1,4 @@
+import { useLiveData } from "@/hooks/useLiveData";
 import React, {
   useState,
   useEffect,
@@ -638,30 +639,9 @@ export default function MaterialExpenseBooking() {
     fetchRecords(1);
   }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, debouncedDocNoFilter, vendorFilter, fetchRecords]);
 
-  useEffect(() => {
-    fetchRecords(1);
-    fetchBookedSources();
-    apiFetch("/api/enterprises/options?business_type=C")
-      .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
-      .catch((err) => {
-        toast.error(
-          err instanceof Error ? err.message : "Something went wrong",
-        );
-      });
-    apiFetch("/api/enterprises/options?business_type=P")
-      .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
-      .catch((err) => {
-        toast.error(
-          err instanceof Error ? err.message : "Something went wrong",
-        );
-      });
-    apiFetch("/api/enterprises/options?business_type=S")
-      .then((list: { id: number; label: string }[]) => setSuppliers(list ?? []))
-      .catch((err) => {
-        toast.error(
-          err instanceof Error ? err.message : "Something went wrong",
-        );
-      });
+  // Payable-to pickers: vendors / suppliers, contractors, brokers, customers, partners. Loaded with the page and again,
+  // live, whenever a ledger or vendor is added or changed anywhere (no refresh needed).
+  const loadPartyHeads = useCallback(() => {
     // Invoices/expense bookings can be Payable To a Vendor, Supplier, or
     // Landlord (all stored as LHeadType 'S'/'V', Landlord distinguished only
     // by LHeadCategory) — so no excludeCategory here, unlike PO/GRN.
@@ -739,6 +719,34 @@ export default function MaterialExpenseBooking() {
           err instanceof Error ? err.message : "Something went wrong",
         );
       });
+  }, []);
+  useLiveData("ledgers", loadPartyHeads);
+
+  useEffect(() => {
+    fetchRecords(1);
+    fetchBookedSources();
+    apiFetch("/api/enterprises/options?business_type=C")
+      .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/enterprises/options?business_type=P")
+      .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/enterprises/options?business_type=S")
+      .then((list: { id: number; label: string }[]) => setSuppliers(list ?? []))
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    loadPartyHeads();
     apiFetch("/api/billing-terms")
       .then((list: BillingTermOption[]) =>
         setBillingTerms(
@@ -767,7 +775,7 @@ export default function MaterialExpenseBooking() {
         ),
       )
       .catch(() => {});
-  }, [fetchRecords]);
+  }, [fetchRecords, loadPartyHeads]);
 
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
     field: K,

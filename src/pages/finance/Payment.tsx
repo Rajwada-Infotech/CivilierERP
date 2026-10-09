@@ -1,3 +1,4 @@
+import { useLiveData } from "@/hooks/useLiveData";
 import { autoPostKey, autoPostUrl, nextEntryToAutoPost } from "./paymentAutoPost";
 import React from "react";
 import { printPayment, downloadPaymentPdf } from "@/utils/paymentDocument";
@@ -733,6 +734,10 @@ const Payment: React.FC = () => {
   >({
     queryKey: ["supplier-options-payment-filter"],
     queryFn: fetchSupplierOptions,
+  });
+  // A ledger, vendor, contractor, broker, customer or partner added anywhere appears in the Payee / filter pickers at once.
+  useLiveData("ledgers", () => {
+    void queryClient.invalidateQueries({ queryKey: ["supplier-options-payment-filter"] });
   });
 
   const { data: finYearOptions = [] } = useQuery<
