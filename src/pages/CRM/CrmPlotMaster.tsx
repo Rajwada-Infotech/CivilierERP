@@ -29,6 +29,7 @@ type Plot = {
   ConvertedVillaTypeId?: number | null; ConvertedVillaTypeCode?: string | null; ConvertedVillaTypeName?: string | null;
   ConvertedBuiltUpAreaSqFt?: number | null; ConvertedRoomCount?: number | null; ConvertedFloorCount?: number | null;
   ConvertedMissingRooms?: number | null; ConvertedPlanRoomCount?: number | null;
+  ConvertedRoomsWithoutSteps?: number | null; ConvertedTypesWithoutSteps?: string | null;
   LockBookingNo?: string | null; LockApplicationNo?: string | null; LockHoldId?: number | null; AdjacentPlotCount?: number;
 };
 type PlotBlock = { BlockId: number; BlockName: string; ProjectId: number; ProjectName: string };
@@ -1041,6 +1042,13 @@ const CrmPlotMaster: React.FC = () => {
                           )}
                         </div>
                       ) : null}
+                      {Number(detailPlot.ConvertedRoomsWithoutSteps || 0) > 0 && (
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                          {detailPlot.ConvertedRoomsWithoutSteps} room{Number(detailPlot.ConvertedRoomsWithoutSteps) === 1 ? "" : "s"} have no DPR steps yet
+                          {detailPlot.ConvertedTypesWithoutSteps ? ` (${detailPlot.ConvertedTypesWithoutSteps})` : ""} — they get steps automatically once their room type has a step list in{" "}
+                          <a href="/civilworkdpr/dependency" className="text-primary hover:underline">Dependency</a>. They are not counted as pending or done work until then.
+                        </p>
+                      )}
                       {detailPlot.ConvertedVillaTypeId ? null : (
                         <p className="text-sm text-amber-700 dark:text-amber-300">Not set — {detailPlot.ConvertedRoomCount ?? 0} rooms from a generic layout, no floors. Set its type so its rooms follow the type's floor plan.</p>
                       )}
