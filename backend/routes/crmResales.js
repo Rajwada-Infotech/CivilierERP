@@ -57,7 +57,7 @@ const SELECT = `
          r.ApprovedAt, r.RejectionNote, r.CompletedAt, r.PayoutNewPaymentId,
          p.PlotNo, p.PlotName, p.AreaSqFt AS PlotAreaSqFt,
          u.UnitName,
-         fb.BookingNo AS FromBookingNo,
+         fb.BookingNo AS FromBookingNo, fb.ProjectId AS ProjectId,
          tb.BookingNo AS ToBookingNo,
          fc.CustomerName AS FromCustomerName,
          tc.CustomerName AS ToCustomerName,
@@ -602,6 +602,38 @@ router.put("/:id/transfer", requirePageRight("crm-resales", "edit"), async (req,
     try { await tx.rollback(); } catch { /* already rolled back */ }
     console.error("[crm-resales] PUT /:id/transfer:", e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to transfer the property" });
+  }
+});
+
+// PUT /:id/send-to-finance — an approved buy-back: its payout voucher goes to
+// Finance -> Payments. Approving that voucher brings the property back to stock.
+router.put("/:id/send-to-finance", requirePageRight("crm-resales", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  const bankId = req.body?.BankLHeadId != null && req.body.BankLHeadId !== "" ? parseInt(req.body.BankLHeadId, 10) : null;
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+    const resale = (await tx.request().input("id", sql.Int, id).query(
+      "SELECT * FROM dbo.CrmUnitResale WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id AND IsActive = 1")).recordset[0];
+    if (!resale) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+    if (resale.Kind !== "BuyBack") { await tx.rollback(); return res.status(400).json({ error: "Only a buy-back is paid by Finance" }); }
+    if (resale.Status !== "Approved") { await tx.rollback(); return res.status(400).json({ error: `Approve it first (it is ${resale.Status})` }); }
+    if (resale.PayoutNewPaymentId) { await tx.rollback(); return res.status(409).json({ error: "Its payout voucher is already with Finance" }); }
+    const { raiseBuyBackVoucher } = require("../services/crmResaleTransfer");
+    const v = await raiseBuyBackVoucher(tx, resale, {
+      bankId: Number.isInteger(bankId) ? bankId : null,
+      paymentMode: req.body?.PaymentMode || "",
+      actorEmail: req.user?.email || req.user?.name || String(actorId(req)),
+    });
+    await tx.commit();
+    await bumpResales("new-payment");
+    res.json({ success: true, newPaymentId: v.newPaymentId, message: `Payout voucher ${v.docNo} is with Finance in Payments` });
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* already rolled back */ }
+    console.error("[crm-resales] PUT /:id/send-to-finance:", e.message);
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to send it to Finance" });
   }
 });
 

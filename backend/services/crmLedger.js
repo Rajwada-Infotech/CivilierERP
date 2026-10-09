@@ -1182,7 +1182,50 @@ async function postCrmResaleTransferToGL(pool, resaleId, userEmail) {
   return { posted: true };
 }
 
+/**
+ * A buy-back, once Finance has paid it. The payout voucher itself posted
+ *   Dr seller's ledger  price  /  Cr Bank (net of TDS) + TDS Payable
+ * against the seller's advance (what they had paid, a credit on their ledger),
+ * so their ledger is left at the difference. That difference is the buy-back's
+ * own cost (a premium) or gain (a discount):
+ *   premium:  Dr Property Buy-back Cost  /  Cr seller's ledger
+ *   discount: Dr seller's ledger          /  Cr Property Buy-back Cost
+ * Earlier invoices are left as they are. Idempotent per buy-back.
+ */
+async function postCrmBuyBackDifferenceToGL(pool, resaleId, userEmail) {
+  if (await hasPosting(pool, "CrmUnitResaleBuyBack", resaleId))
+    return { posted: true, reason: "already posted (idempotent)" };
+  const r = (await pool.request().input("id", sql.Int, resaleId).query(`
+    SELECT r.Id, r.AgreedValue, r.PaidAtTransfer, r.FromCustomerId, r.CompletedAt,
+           b.ProjectId, b.CompanyId, COALESCE(b.UnitNo, b.BookingNo) AS Item
+    FROM dbo.CrmUnitResale r LEFT JOIN dbo.CrmBooking b ON b.Id = r.FromBookingId WHERE r.Id = @id`)).recordset[0];
+  if (!r) return { posted: false, reason: `Buy-back ${resaleId} not found` };
+  const diff = Math.round((Number(r.AgreedValue || 0) - Number(r.PaidAtTransfer || 0)) * 100) / 100;
+  if (Math.abs(diff) < 0.01) return { none: true, reason: "Bought back at exactly what was paid — no difference to post" };
+  const costHeadId = await getGLHeadIdByCode(pool, "CRM-BUYBACK-COST", "Property Buy-back Cost");
+  const sellerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FromCustomerId, userEmail);
+  const voucherNo = `BYB-${resaleId}`;
+  const amt = Math.abs(diff);
+  const legs = diff > 0
+    ? [{ lHeadId: costHeadId, debit: amt, narration: `${voucherNo} — ${r.Item} bought back above what was paid` },
+       { lHeadId: sellerHeadId, credit: amt, narration: `${voucherNo} — buy-back premium` }]
+    : [{ lHeadId: sellerHeadId, debit: amt, narration: `${voucherNo} — ${r.Item} bought back below what was paid` },
+       { lHeadId: costHeadId, credit: amt, narration: `${voucherNo} — buy-back discount` }];
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate: r.CompletedAt || new Date(),
+    sourceType: "CrmUnitResaleBuyBack",
+    sourceId: resaleId,
+    companyId: r.CompanyId ?? null,
+    projectId: r.ProjectId ?? null,
+    createdBy: userEmail,
+    legs,
+  });
+  return { posted: true };
+}
+
 module.exports = {
+  postCrmBuyBackDifferenceToGL,
   postCrmResaleTransferToGL,
   postCrmResaleFeeToGL,
   CRM_COLLECTIONS_ACCOUNT,

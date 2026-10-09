@@ -1690,6 +1690,18 @@ router.put("/:id/approve", async (req, res) => {
       WHERE np.PPaymentID = @PPaymentID
     `);
     const refundRow = refundGate.recordset[0];
+    const buyBackGate = (await pool.request().input("PPaymentID", sql.Int, id).query(`
+      SELECT np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmResaleId, r.AgreedValue
+      FROM dbo.NewPayment np JOIN dbo.CrmUnitResale r ON r.Id = np.SourceCrmResaleId
+      WHERE np.PPaymentID = @PPaymentID`)).recordset[0];
+    if (buyBackGate) {
+      if (!buyBackGate.PDate || !String(buyBackGate.PMode || "").trim() || !normalizeBankId(buyBackGate.PBankID)) {
+        return res.status(400).json({ error: "Complete the buy-back payment date, payment mode, and bank before approval." });
+      }
+      if (Math.abs(Number(buyBackGate.PAmount || 0) - Number(buyBackGate.AgreedValue || 0)) > 0.01) {
+        return res.status(400).json({ error: `This buy-back voucher must pay the agreed price ₹${Number(buyBackGate.AgreedValue).toLocaleString("en-IN")} (TDS is deducted from it, not from the amount).` });
+      }
+    }
     if (refundRow?.SourceCrmRefundId) {
       if (!refundRow.PDate || !String(refundRow.PMode || "").trim() || !normalizeBankId(refundRow.PBankID)) {
         return res.status(400).json({
@@ -1791,7 +1803,7 @@ router.put("/:id/approve", async (req, res) => {
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
@@ -1862,6 +1874,18 @@ router.put("/:id/approve", async (req, res) => {
           await bumpCacheVersion("crm-refunds");
         } catch (refundErr) {
           console.warn("[new-payment] CRM refund paid-sync failed (non-fatal):", refundErr.message);
+        }
+      }
+
+      // Buy-back payout: this NewPayment pays the seller — approving it brings
+      // the property back to stock (services/crmResaleTransfer.js). Non-fatal.
+      if (approvedRow?.SourceCrmResaleId) {
+        try {
+          const { completeBuyBack } = require("../services/crmResaleTransfer");
+          await completeBuyBack(pool, approvedRow.SourceCrmResaleId, id, req.user?.userId ?? null, req.user?.email || req.user?.name || null);
+          for (const k of ["crm-resales", "crm-bookings", "unit-master"]) await bumpCacheVersion(k);
+        } catch (bbErr) {
+          console.warn("[new-payment] buy-back completion failed (non-fatal):", bbErr.message);
         }
       }
 
@@ -2034,7 +2058,7 @@ router.put("/:id/reject", async (req, res) => {
     // its own single-level workflow, not the Payments bundle.
     const pool = getPool();
     const src = await pool.request().input("id", sql.Int, id)
-      .query("SELECT SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @id");
+      .query("SELECT SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @id");
     const rejectModule = src.recordset[0]?.SourceCrmRefundId ? "crm-refund-payment" : "payments";
 
     const result = await transition(
@@ -2049,6 +2073,10 @@ router.put("/:id/reject", async (req, res) => {
     // A refund's payout voucher turned down by Finance sends the refund back
     // to CRM with Finance's note (and frees it to raise a fresh voucher) —
     // otherwise it sat 'with Finance' forever on a dead voucher.
+    if (src.recordset[0]?.SourceCrmResaleId && result?.newStatus === "Rejected") {
+      await require("../services/crmResaleTransfer").buyBackVoucherRejected(pool, src.recordset[0].SourceCrmResaleId, id, note);
+      await bumpCacheVersion("crm-resales");
+    }
     const refundId = src.recordset[0]?.SourceCrmRefundId;
     if (refundId && result?.newStatus === "Rejected") {
       await pool.request().input("rid", sql.Int, refundId).input("np", sql.Int, id)

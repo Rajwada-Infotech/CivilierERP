@@ -45,7 +45,7 @@ interface Deal {
   ResaleDate: string | null; AgreedValue: number | null; OriginalValue: number | null; PaidAtTransfer: number | null;
   DeveloperFeeAmount: number | null; DeveloperFeeGstAmount: number | null;
   TdsAmount: number | null; BuyBackGstAmount: number | null; StampDutyAmount: number | null;
-  Status: string; RejectionNote: string | null; Notes: string | null;
+  Status: string; RejectionNote: string | null; Notes: string | null; ProjectId: number | null; PayoutNewPaymentId: number | null;
 }
 interface Holding {
   BookingId: number; BookingIds: number[]; BookingNos: string; UnitNo: string; Kind: string;
@@ -68,6 +68,13 @@ const CrmResales: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ ...EMPTY });
+  const [paying, setPaying] = useState<Deal | null>(null);
+  const [pay, setPay] = useState({ BankLHeadId: "", PaymentMode: "" });
+  const { data: banks = [] } = useQuery<any[]>({
+    queryKey: ["crm-project-banks", paying?.ProjectId],
+    queryFn: () => getJson(`/api/crm/project-banks/for-project/${paying!.ProjectId}?excludeCash=1`),
+    enabled: !!paying?.ProjectId,
+  });
 
   const { data: deals = [], isLoading, dataUpdatedAt, isFetching } = useQuery<Deal[]>({ queryKey: ["crm-resales"], queryFn: () => getJson(API) });
   const { data: holdings = [] } = useQuery<Holding[]>({ queryKey: ["crm-resale-holdings"], queryFn: () => getJson(`${API}/holdings`), enabled: open });
@@ -130,7 +137,9 @@ const CrmResales: React.FC = () => {
       header: "Status", accessorKey: "Status",
       cell: ({ row }) => (
         <span title={row.original.RejectionNote || undefined} className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[row.original.Status] || ""}`}>
-          {row.original.Status === "Pending" ? "Awaiting approval" : row.original.Status}
+          {row.original.Status === "Pending" ? "Awaiting approval"
+            : row.original.Status === "Approved" && row.original.Kind === "BuyBack" && row.original.PayoutNewPaymentId ? "With Finance"
+            : row.original.Status}
         </span>
       ),
     },
@@ -147,10 +156,16 @@ const CrmResales: React.FC = () => {
                 Transfer to buyer
               </button>
             )}
-            <button onClick={() => act(d, "cancel", undefined, "Cancelled")}
+            {d.Status === "Approved" && d.Kind === "BuyBack" && !d.PayoutNewPaymentId && (
+              <button onClick={() => { setPay({ BankLHeadId: "", PaymentMode: "" }); setPaying(d); }}
+                className="px-2 h-7 text-[0.6875rem] rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">
+                Send to Finance
+              </button>
+            )}
+            {!(d.Kind === "BuyBack" && d.PayoutNewPaymentId) && <button onClick={() => act(d, "cancel", undefined, "Cancelled")}
               className="px-2 h-7 text-[0.6875rem] rounded-lg border border-border text-muted-foreground hover:bg-muted">
               Cancel
-            </button>
+            </button>}
           </div>
         );
       },
@@ -291,6 +306,48 @@ const CrmResales: React.FC = () => {
               </button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!paying} onOpenChange={(o) => { if (!o) setPaying(null); }}>
+        <DialogContent accent="crm" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Send buy-back to Finance</DialogTitle>
+          </DialogHeader>
+          {paying && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs grid grid-cols-2 gap-x-3 gap-y-0.5">
+                <span className="text-muted-foreground">Property</span><span className="text-foreground">{paying.UnitName || paying.PlotName}</span>
+                <span className="text-muted-foreground">Seller</span><span className="text-foreground">{paying.FromCustomerName}</span>
+                <span className="text-muted-foreground">Agreed price</span><span className="tabular-nums">{fmt(paying.AgreedValue)}</span>
+                <span className="text-muted-foreground">TDS</span><span className="tabular-nums">{fmt(paying.TdsAmount || 0)}</span>
+                <span className="text-muted-foreground">Seller receives</span><span className="tabular-nums font-medium">{fmt(Number(paying.AgreedValue || 0) - Number(paying.TdsAmount || 0))}</span>
+              </div>
+              <div>
+                <label className={label}>Pay from</label>
+                <select value={pay.BankLHeadId} onChange={(e) => setPay((p) => ({ ...p, BankLHeadId: e.target.value }))} className={input}>
+                  <option value="">Choose the company bank</option>
+                  {banks.map((b: any) => (
+                    <option key={b.BId} value={b.BId}>{[b.BName, b.BBranch, b.BAccountLast4 ? `····${b.BAccountLast4}` : null].filter(Boolean).join(" · ")}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={label}>Payment mode (optional)</label>
+                <select value={pay.PaymentMode} onChange={(e) => setPay((p) => ({ ...p, PaymentMode: e.target.value }))} className={input}>
+                  <option value="">Finance will set it</option>
+                  {["NEFT", "RTGS", "IMPS", "UPI", "Cheque"].map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <p className="text-[0.6875rem] text-muted-foreground">When Finance approves the voucher in Payments, the booking closes and the property returns to stock.</p>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setPaying(null)} className="px-3 h-9 text-sm rounded-lg border border-border hover:bg-muted">Close</button>
+                <button disabled={!pay.BankLHeadId} onClick={async () => { await act(paying, "send-to-finance", pay, "Sent to Finance"); setPaying(null); }}
+                  className="px-4 h-9 text-sm rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-60">
+                  Send to Finance
+                </button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </CrmShell>
