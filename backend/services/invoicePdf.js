@@ -53,6 +53,7 @@ const INVOICE_TYPE_LABEL = {
   Maintenance: "Maintenance Charges",
   Other: "Other Charges",
   OnAccount: "On-Account Payment",
+  Final: "Final Invoice (Grand Total)",
 };
 
 // Data-URL ("data:image/png;base64,....") -> Buffer pdfkit can embed, or

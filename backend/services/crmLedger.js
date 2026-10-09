@@ -1007,7 +1007,8 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
   `);
   const row = r.recordset[0];
   if (!row) return { posted: false, reason: `CrmInvoice ${invoiceId} not found` };
-  if (row.InvoiceType !== "Milestone" && row.InvoiceType !== "Booking")
+  // "Final" = a Non-Invoice customer's one invoice for the grand total.
+  if (row.InvoiceType !== "Milestone" && row.InvoiceType !== "Booking" && row.InvoiceType !== "Final")
     return { none: true, reason: `Invoice type "${row.InvoiceType}" is not a flat/parking sale invoice — no income to recognise` };
 
   const invoiceAmount = Number(row.Amount) || 0;

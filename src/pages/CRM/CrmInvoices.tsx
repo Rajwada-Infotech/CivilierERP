@@ -363,6 +363,23 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
     (m) => m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)) > 0
   );
   const outstandingTotal = outstandingMilestones.reduce((s, m) => s + (Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)), 0);
+  // Non-Invoice customers get ONE final invoice for the grand total once
+  // everything is paid, instead of milestone invoices.
+  const isNonInvoice = bookingDetail?.customer?.InvoiceMode === "NonInvoice";
+  const finalInvoice = (existingInvoices as any[]).find((inv) => inv.InvoiceType === "Final" && inv.Status !== "Void");
+  const [finalBusy, setFinalBusy] = useState(false);
+  const generateFinal = async () => {
+    if (bookingId == null) return;
+    setFinalBusy(true);
+    try {
+      const r = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices/final`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Could not generate the final invoice");
+      toast.success(d.message || "Final invoice generated");
+      await refetchExisting();
+      onGenerated(bookingId as number);
+    } catch (e: any) { toast.error(translateError(e.message)); } finally { setFinalBusy(false); }
+  };
   const showUnlinkedWarning = (form.InvoiceType === "Maintenance" || form.InvoiceType === "Other") && outstandingMilestones.length > 0;
 
   // Once this booking's eligibility is known, land on whichever type
@@ -604,6 +621,25 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                 <div><span className="text-muted-foreground">Block / Unit</span><div className="font-medium truncate">{[booking.BlockName, booking.UnitNo].filter(Boolean).join(" / ") || booking.UnitNo || "—"}</div></div>
               </div>
             </div>
+
+            {isNonInvoice && (
+              <div className="rounded-lg border border-amber-300/60 bg-amber-50/50 dark:bg-amber-950/20 px-3 py-2.5 space-y-2">
+                <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">Non-Invoice customer — one final invoice</p>
+                <p className="text-xs text-muted-foreground">
+                  No milestone invoices for this customer. One final invoice for the grand total ({fmtMoney(Number(booking?.GrandTotal || 0))}) is generated once everything is paid.
+                </p>
+                {finalInvoice ? (
+                  <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Final invoice {finalInvoice.InvoiceNo} generated.</p>
+                ) : outstandingMilestones.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">{fmtMoney(outstandingTotal)} still outstanding — the final invoice becomes available when it is paid.</p>
+                ) : (
+                  <button type="button" onClick={generateFinal} disabled={finalBusy}
+                    className="h-8 px-3 text-xs font-semibold rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                    {finalBusy ? "Generating…" : "Generate final invoice"}
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Payment Plan, right here — the whole point is seeing real
                 status before picking what to invoice, not guessing from a

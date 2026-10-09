@@ -1697,7 +1697,7 @@ async function requireInvoiceableCustomer(pool, bookingId) {
   // explicitly opted into Non-Invoice, it never invents a new restriction
   // for records this feature doesn't know about.
   if (mode === "NonInvoice") {
-    return "This customer is set to Non-Invoice — no invoice can be generated for this booking. Change it on the Customer's record (CRM → Customers) if this is incorrect.";
+    return "This customer is set to Non-Invoice — they get one final invoice for the grand total once everything is paid (Generate final invoice), not milestone invoices. Change it on the Customer's record (CRM → Customers) if this is incorrect.";
   }
   return null;
 }
@@ -2060,6 +2060,87 @@ async function generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, 
 
   return { id: invoiceId, InvoiceNo: invoiceNo, MilestoneName: mRow.MilestoneName };
 }
+
+// ── Final invoice (Non-Invoice customers) ──────────────────────────────────
+// Two invoicing modes, set per customer (CrmCustomer.InvoiceMode):
+//   Invoice     one invoice per milestone (bulk-generate above)
+//   NonInvoice  no milestone invoices; ONE final invoice for the booking's
+//               grand total, generated only once everything is paid
+// One live Final invoice per booking (a voided one can be re-issued).
+async function invoiceModeOf(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT c.InvoiceMode FROM dbo.CrmBooking b
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+    WHERE b.Id = @bid`);
+  return r.recordset[0]?.InvoiceMode || null;
+}
+
+async function generateFinalInvoiceForBooking(pool, bookingId, actorUserId) {
+  const activeErr = await requireActiveBooking(pool, bookingId);
+  if (activeErr) { const e = new Error(activeErr); e.status = 400; throw e; }
+  if ((await invoiceModeOf(pool, bookingId)) !== "NonInvoice") {
+    const e = new Error("This customer is invoiced per milestone — generate the milestone invoices instead of a final invoice");
+    e.status = 400; throw e;
+  }
+  const bk = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT bk.BookingNo, bk.GrandTotal,
+           ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id), 0) AS TotalCleared,
+           (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id AND Status NOT IN ('Paid', 'Waived')) AS OpenMilestones
+    FROM dbo.CrmBooking bk WHERE bk.Id = @bid`)).recordset[0];
+  const grandTotal = Number(bk?.GrandTotal || 0);
+  if (!(grandTotal > 0)) { const e = new Error("This booking has no grand total to invoice"); e.status = 400; throw e; }
+  if (Number(bk.TotalCleared) < grandTotal || bk.OpenMilestones > 0) {
+    const shortfall = Math.max(grandTotal - Number(bk.TotalCleared), 0);
+    const e = new Error(`The final invoice is generated once everything is paid — ₹${shortfall.toLocaleString("en-IN")} still outstanding${bk.OpenMilestones ? ` (${bk.OpenMilestones} milestone(s) open)` : ""}.`);
+    e.status = 400; throw e;
+  }
+  const already = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 InvoiceNo FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Final' AND Status <> 'Void'");
+  if (already.recordset.length) { const e = new Error(`This booking already has its final invoice (${already.recordset[0].InvoiceNo})`); e.status = 409; throw e; }
+  // Milestone invoices already issued would be invoiced (and their income booked) twice.
+  const ms = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT COUNT(*) AS n FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType IN ('Milestone', 'Booking') AND Status <> 'Void'");
+  if (ms.recordset[0].n > 0) {
+    const e = new Error(`${ms.recordset[0].n} milestone invoice(s) are already issued for this booking — void them before issuing one final invoice, so nothing is invoiced twice`);
+    e.status = 409; throw e;
+  }
+
+  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+  const result = await pool.request()
+    .input("no", sql.NVarChar(30), invoiceNo).input("bid", sql.Int, bookingId)
+    .input("amt", sql.Decimal(18, 2), grandTotal)
+    .input("desc", sql.NVarChar(500), `Final invoice — ${bk.BookingNo}, grand total`)
+    .input("cb", sql.Int, actorUserId)
+    .query(`INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt)
+            OUTPUT INSERTED.Id
+            VALUES (@no, @bid, N'Final', @amt, CAST(SYSDATETIME() AS DATE), @desc, @cb, SYSDATETIME())`);
+  const invoiceId = result.recordset[0].Id;
+  try { await generateInvoicePdf(pool, invoiceId); } catch (pdfErr) { console.error("[crm-bookings] final invoice PDF failed:", pdfErr.message); }
+  const emailRow = await pool.request().input("uid", sql.Int, actorUserId).query("SELECT email FROM dbo.users WHERE id = @uid");
+  const actorEmail = emailRow.recordset[0]?.email || "system";
+  try {
+    const outcome = await postCrmInvoiceToGL(pool, invoiceId, actorEmail);
+    await recordGLPosting("crm-invoice", invoiceId, outcome, actorEmail);
+  } catch (glErr) {
+    console.error("[crm-bookings] final invoice GL posting failed:", glErr.message);
+    await recordGLPosting("crm-invoice", invoiceId, { failed: true, reason: glErr.message }, actorEmail);
+  }
+  return { id: invoiceId, InvoiceNo: invoiceNo, Amount: grandTotal };
+}
+
+// POST /:id/invoices/final — the one final invoice of a Non-Invoice booking.
+router.post("/:id/invoices/final", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const out = await generateFinalInvoiceForBooking(getPool(), id, actorId(req));
+    res.status(201).json({ success: true, ...out, message: `Final invoice ${out.InvoiceNo} generated` });
+  } catch (e) {
+    if (e.number === 2601 || e.number === 2627) return res.status(409).json({ error: "This booking already has its final invoice" });
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Could not generate the final invoice" });
+  }
+});
 
 // POST /bookings/invoices/bulk-generate — generate invoices for several
 // ready milestones (possibly across different bookings) in one call, for
