@@ -39,10 +39,12 @@ const STAGE_CONFIRMED = "Confirmed";
 
 const WORKFLOW_STAGES = [STAGE_REVIEW, STAGE_MARKETING, STAGE_DIRECTOR, STAGE_CONFIRMED];
 
-// Which roles may act at each approval stage. super_admin is a parallel
-// approver on BOTH levels (per requirement); the LevelData roles in
-// ApprovalWorkflows are the broader gate, this is the tighter per-stage
-// gate the booking page itself uses to decide what to render.
+// Who may act at each stage comes from Approval Setup: the "crm-bookings"
+// workflow's Level 1 is Marketing Head, Level 2 is Director, and a user may
+// act at a stage when their role is on that level OR they are named on it.
+// These role sets are only the fallback for a database with no workflow
+// configured (or a level with neither roles nor people set).
+const STAGE_LEVEL = { MarketingHeadApproval: 1, DirectorApproval: 2 };
 const STAGE_ROLES = {
   [STAGE_MARKETING]: ["admin", "super_admin", "marketing_head"],
   [STAGE_DIRECTOR]: ["admin", "super_admin", "director"],
@@ -99,7 +101,7 @@ async function logStageAction(pool, bookingId, stage, action, remarks, actorUser
 }
 
 // Read the full stage state for the booking detail page.
-async function getStageState(pool, bookingId) {
+async function getStageState(pool, bookingId, viewer = null) {
   const row = await getBookingStageRow(pool, bookingId);
   if (!row) return null;
 
@@ -125,6 +127,11 @@ async function getStageState(pool, bookingId) {
     DirectorApprovedBy: row.DirectorApprovedBy,
     ConfirmedAt: row.ConfirmedAt,
     ConfirmedBy: row.ConfirmedBy,
+    // Whether the viewer may approve / reject at the current stage — decided
+    // here from Approval Setup so the booking page holds no role list.
+    CanActOnStage: viewer && STAGE_LEVEL[row.WorkflowStage]
+      ? await canApproveStage(viewer.role, row.WorkflowStage, viewer.userId)
+      : false,
     history: history.recordset,
   };
 }
@@ -132,10 +139,23 @@ async function getStageState(pool, bookingId) {
 // Role gate used by the routes: the passed role may approve at the given
 // stage if it is the stage's own role set. super_admin is included on both
 // stages as the parallel approver.
-function canApproveStage(role, stage) {
-  const allowed = STAGE_ROLES[stage];
-  if (!allowed) return false;
-  return allowed.includes(String(role || "").toLowerCase());
+async function canApproveStage(role, stage, userId = null) {
+  const level = STAGE_LEVEL[stage];
+  if (!level) return false;
+  const r = String(role || "").toLowerCase();
+  // admin / super_admin hold every right: they may act at any stage.
+  if (r === "admin" || r === "super_admin") return true;
+  let def = null;
+  try {
+    const wf = await require("./approvalService").getWorkflow("crm-bookings");
+    def = wf?.LevelDefs?.[level - 1] || null;
+  } catch (_) { /* no workflow table / row: fall back below */ }
+  const roles = Array.isArray(def?.roles) ? def.roles.map((x) => String(x).toLowerCase()) : [];
+  const users = Array.isArray(def?.userIds) ? def.userIds.map(Number) : [];
+  if (roles.length || users.length) {
+    return roles.includes(r) || (userId != null && users.includes(Number(userId)));
+  }
+  return (STAGE_ROLES[stage] || []).includes(r);
 }
 
 // Shared guard: a booking must be live (not Cancelled/Rejected) and
@@ -229,7 +249,7 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
 
 async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, userId) {
   const row = await requireActiveStage(pool, bookingId, stage);
-  if (!canApproveStage(userRole, stage)) {
+  if (!(await canApproveStage(userRole, stage, userId))) {
     const e = new Error(`You are not authorized to approve at the '${stageLabel(stage)}' stage`);
     e.status = 403;
     throw e;
@@ -392,7 +412,7 @@ async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, u
     e.status = 400;
     throw e;
   }
-  if (!canApproveStage(userRole, stage)) {
+  if (!(await canApproveStage(userRole, stage, userId))) {
     const e = new Error(`You are not authorized to reject at the '${stageLabel(stage)}' stage`);
     e.status = 403;
     throw e;

@@ -420,7 +420,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
     const milestones = milRes.recordset;
     const totalDue = milestones.reduce((s, m) => s + (m.AmountDue || 0), 0);
     const totalPaid = milestones.reduce((s, m) => s + (m.AmountPaid || 0), 0);
-    const stageState = await getStageState(pool, id);
+    const stageState = await getStageState(pool, id, { role: req.user?.role, userId: req.user?.userId ?? null });
     res.json({
       booking: bkRes.recordset[0],
       milestones,

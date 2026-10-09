@@ -851,16 +851,23 @@ async function transition(
       // is fully backward compatible with workflows that don't use it yet.
       const levelDef = levelDefs[nextLevel - 1];
       if (levelDef) {
-        const roleOk =
-          !Array.isArray(levelDef.roles) || levelDef.roles.length === 0 ||
-          levelDef.roles.map((r) => String(r).toLowerCase()).includes((userRole || "").toLowerCase());
+        // admin / super_admin hold every right and may act at any level.
+        // Anyone else passes when the level names their role OR names them —
+        // a level that lists both (e.g. role "director" plus today's
+        // directors) still admits a director added later. A level naming
+        // only roles, or only people, behaves exactly as before.
+        const role = (userRole || "").toLowerCase();
+        const levelRoles = Array.isArray(levelDef.roles) ? levelDef.roles.map((r) => String(r).toLowerCase()) : [];
+        const levelUsers = Array.isArray(levelDef.userIds) ? levelDef.userIds.map(Number) : [];
+        const superUser = role === "admin" || role === "super_admin";
         // userIds is only enforced when the caller actually passed a userId --
         // callers that don't pass one (older call sites) skip this check
         // rather than being denied, so this can't regress any existing module.
-        const userOk =
-          !Array.isArray(levelDef.userIds) || levelDef.userIds.length === 0 ||
-          userId == null || levelDef.userIds.includes(userId);
-        if (!roleOk || !userOk) {
+        const allowedHere = superUser
+          || (levelRoles.length === 0 && levelUsers.length === 0)
+          || levelRoles.includes(role)
+          || (levelUsers.length > 0 && (userId == null || levelUsers.includes(Number(userId))));
+        if (!allowedHere) {
           const levelErr = new Error(
             `You are not authorized to approve level ${nextLevel}${levelDef.label ? ` (${levelDef.label})` : ""} of this workflow.`,
           );
