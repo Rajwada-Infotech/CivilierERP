@@ -910,8 +910,6 @@ const InboxRow: React.FC<{
             // named-on-the-level OR super_admin, never admin/dba generically).
             // Everyone else's button visibility comes from workflowVisible
             // (_canAct) below, not this role list.
-            // Resale / buy-back: CRM head, then Finance (approvalService "crm-resales").
-            : item.Module === "crm-resales" ? ["admin", "super_admin", "marketing_head", "accounts_head", "finance"]
             : item.Module === "civilworkdpr-approval" ? ["super_admin"]
             : undefined
           }

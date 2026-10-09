@@ -213,8 +213,8 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,
   "crm-refunds": CRM_APPROVER_ROLES,
-  // Resale / buy-back: CRM head, then Finance (levels set in Approval Setup).
-  "crm-resales": [...CRM_APPROVER_ROLES, "accounts_head", "finance"],
+  // crm-resales has no code-level role list on purpose: who approves each
+  // level (e.g. marketing head, then director) is set in Approval Setup.
   "crm-noc": CRM_APPROVER_ROLES,
   // Same default CRM approver set as crm-brokerage/crm-cancellations/crm-noc
   // — no legal_head carve-out here, that's specific to crm-agreements (see
