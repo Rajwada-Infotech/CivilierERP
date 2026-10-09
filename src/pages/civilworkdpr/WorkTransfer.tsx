@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
+import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
@@ -9,6 +11,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import {
   ASSIGNMENT_STATUS_META,
   getEngineers,
+  getRungAssignment,
   getTransferCandidateIds,
   getTransferCandidatesPage,
   transferWork,
@@ -34,6 +37,8 @@ export default function WorkTransfer() {
   const [search, setSearch] = useState("");
   const [remarks, setRemarks] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Opened from a report row: only that one activity is listed (and ticked) until the person asks for the rest.
+  const [focusRung, setFocusRung] = useState<number | null>(null);
 
   const { data: engineers = [] } = useQuery({
     queryKey: ["civilworkdpr-engineers"],
@@ -50,7 +55,7 @@ export default function WorkTransfer() {
 
   const PAGE = 50;
   const candQ = useInfiniteQuery({
-    queryKey: ["civilworkdpr-transfer-candidates", fromId, projectFilter, term],
+    queryKey: ["civilworkdpr-transfer-candidates", fromId, projectFilter, term, focusRung],
     queryFn: ({ pageParam }) =>
       getTransferCandidatesPage({
         engineerId: Number(fromId),
@@ -58,6 +63,7 @@ export default function WorkTransfer() {
         limit: PAGE,
         projectId: projectFilter ? Number(projectFilter) : undefined,
         search: term || undefined,
+        rungId: focusRung ?? undefined,
       }),
     initialPageParam: 1,
     getNextPageParam: (last, all) => (all.length * PAGE < last.total ? all.length + 1 : undefined),
@@ -78,6 +84,49 @@ export default function WorkTransfer() {
     setSelected(new Set());
     setProjectFilter("");
   }, [fromId]);
+
+  // ?rung= from a report row: take the activity's current engineer as "Transfer from" and show just that activity.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedRung = readChainLink(searchParams).rungId;
+  useEffect(() => {
+    if (!linkedRung || !rights.canView) return;
+    let cancelled = false;
+    getRungAssignment(linkedRung)
+      .then((detail) => {
+        if (cancelled) return;
+        const engineerId = detail.assignment?.engineerIds?.[0];
+        if (!engineerId) {
+          toast.error("That activity has no engineer to transfer work from.");
+          return;
+        }
+        setFocusRung(linkedRung);
+        setFromId(String(engineerId));
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : "Could not open that activity.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("rung");
+            next.delete("chain");
+            return next;
+          },
+          { replace: true },
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedRung, rights.canView]);
+
+  // Once the one activity is listed, tick it. (If it is not transferable - finished, say - the list is empty.)
+  useEffect(() => {
+    if (focusRung && visible.length === 1) setSelected(new Set([visible[0].assignmentId]));
+  }, [focusRung, visible]);
 
   const allVisibleSelected = visible.length > 0 && visible.every((c) => selected.has(c.assignmentId));
   const [selectingAll, setSelectingAll] = useState(false);
@@ -158,7 +207,10 @@ export default function WorkTransfer() {
                 <label className={labelCls}>Transfer from</label>
                 <SearchableNativeSelect
                   value={fromId}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFromId(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                    setFocusRung(null);
+                    setFromId(e.target.value);
+                  }}
                 >
                   <option value="">Select engineer…</option>
                   {engineers.map((e) => (
@@ -201,6 +253,18 @@ export default function WorkTransfer() {
                   </span>
                 )}
                 <div className="ml-auto flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  {focusRung && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusRung(null);
+                        setSelected(new Set());
+                      }}
+                      className="px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-xs font-medium text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/20 transition-colors"
+                    >
+                      Showing only the activity you opened - show all of {fromName ? `${fromName}'s` : "their"} work
+                    </button>
+                  )}
                   {projects.length > 1 && (
                     <select
                       value={projectFilter}

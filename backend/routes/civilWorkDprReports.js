@@ -88,7 +88,11 @@ const ENGINEER_NAMES = `(
     FROM dbo.DependencyActivityEngineer dae JOIN dbo.users u ON u.id = dae.EngineerId
     WHERE dae.AssignmentId = daa.Id)`;
 
+// rungId / chainId let the Reports screen open exactly this activity / chain in Work Allocation, Activity
+// Reporting or Work Transfer.
 const ACTIVITY_COLUMNS = `
+    dma.Id AS rungId,
+    dm.Id AS chainId,
     ep.name AS projectName,
     ${SCOPE_PATH} AS location,
     dm.Alias AS chain,
