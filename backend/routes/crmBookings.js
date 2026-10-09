@@ -2713,6 +2713,18 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
     // agRegistered is the strict gate Pre-Possession and Handover actually require.
     const agDone       = ag  && [CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(ag.Status);
     const agRegistered = ag  && ag.Status === CrmStatus.REGISTERED;
+    // An Executed agreement is not done until it is Registered: AFS stamp
+    // duty paid (AFS Query Payment Confirmed) -> Sub-Registrar visit
+    // (AFS Registry Completed) -> mark Registered. Say which one it waits on.
+    let agWaitingOn = null;
+    if (ag && ag.Status === CrmStatus.EXECUTED) {
+      const afs = (await pool.request().input("id", sql.Int, id).query(`
+        SELECT (SELECT TOP 1 Status FROM dbo.CrmAfsQueryPayment WHERE BookingId = @id ORDER BY CreatedAt DESC) AS QP,
+               (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC) AS Reg`)).recordset[0] || {};
+      agWaitingOn = afs.QP !== "Confirmed" ? "Executed — next: AFS stamp duty payment (AFS Query Payment) to be confirmed"
+        : afs.Reg !== "Completed" ? "Executed — next: Sub-Registrar visit (AFS Registry) to be completed"
+        : "Executed — next: mark the Agreement Registered";
+    }
     // Sale Deed "done" = director approved (full approval chain completed).
     const sdDone  = sd  && sd.DirectorApprovalStatus === CrmStatus.APPROVED;
     const qpDone  = qp  && qp.Status === "Confirmed";
@@ -2770,10 +2782,10 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         // Legal Milestones pages — this chip shows only the headline status.
         key: "agreement",
         label: "Agreement",
-        status: agDone ? "done" : ag ? "active" : wc ? "active" : "locked",
-        date: agDone ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
+        status: agRegistered ? "done" : ag ? "active" : wc ? "active" : "locked",
+        date: agRegistered ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
         link: `/crm/agreements?bookingId=${id}`,
-        blockedBy: wc ? null : "Welcome Call must be completed first",
+        blockedBy: wc ? agWaitingOn : "Welcome Call must be completed first",
       },
       {
         key: "noc",

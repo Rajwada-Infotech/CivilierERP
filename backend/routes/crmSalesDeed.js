@@ -1276,6 +1276,9 @@ router.post("/query-payment/:id/confirm", requirePageRight("crm-query-payment", 
     if (!(await canPerformCrmGatedAction("crm-query-payment-confirm", actorId(req), req.user?.role)))
       return res.status(403).json({ error: "You are not authorised to confirm query payment — requires Legal Head or CRM Administrator" });
 
+    // Staff attest the customer paid the government: the receipt and the amount are required.
+    if (!b.proof) return res.status(400).json({ error: "Attach the payment proof (challan / receipt) the customer paid to the Sub-Registrar" });
+    if (!(parseFloat(b.ConfirmedAmount) > 0)) return res.status(400).json({ error: "Enter the amount the customer paid" });
     let proof = null;
     if (b.proof) {
       try {
