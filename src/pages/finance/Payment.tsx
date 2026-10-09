@@ -507,6 +507,7 @@ const Payment: React.FC = () => {
     data: dbData,
     isLoading,
     isError,
+    error: loadError,
     refetch: refetchPayments,
   } = useQuery({
     queryKey: [
@@ -4555,8 +4556,21 @@ const Payment: React.FC = () => {
             )}
 
             {isError && (
-              <div className="text-center py-16 text-destructive text-sm">
-                Failed to load payments. Please log in and try again.
+              <div className="text-center py-16 text-sm space-y-3">
+                <p className="text-destructive">
+                  {/too many requests|429/i.test(loadError?.message ?? "")
+                    ? "Too many requests just now - the server asks for a short pause. Try again in a few seconds."
+                    : /log ?in|session|token|unauthori[sz]ed|401/i.test(loadError?.message ?? "")
+                      ? "Your session has ended. Please log in again."
+                      : `Could not load payments${loadError?.message ? `: ${loadError.message}` : "."}`}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void refetchPayments()}
+                  className="px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors"
+                >
+                  Try again
+                </button>
               </div>
             )}
 

@@ -13,6 +13,7 @@ const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
 const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const authMiddleware = require("./middleware/auth");
+const { attachRateLimitUser, rateLimitKey } = require("./middleware/rateLimitIdentity");
 const { attachProjectScope } = require("./services/projectScope");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
@@ -498,12 +499,14 @@ async function createApp() {
       return _cachedLimit;
     }
 
+    // The limiter runs before authentication, so req.user does not exist yet: the person is identified from a
+    // verified token by attachRateLimitUser (see middleware/rateLimitIdentity.js) and gets a bucket of their own.
     const apiLimiter = rateLimit({
       windowMs: 60 * 1000,
       max: async (req) => {
-        if (!req.user?.userId) return 1000;
+        if (req.rateLimitUserId == null) return 1000;
         try {
-          return await getDynamicLimitCached(req.user.userId);
+          return await getDynamicLimitCached(req.rateLimitUserId);
         } catch (err) {
           logger.warn(
             { event: "RATE_LIMIT_FALLBACK", err },
@@ -514,14 +517,14 @@ async function createApp() {
       },
       store: makeStore("rl:api:"),
       skip: (req) => req.path.startsWith("/api/user-activity"),
-      keyGenerator: (req) =>
-        req.user?.userId ? `user:${req.user.userId}` : req.ip,
+      keyGenerator: rateLimitKey,
       validate: false,
       standardHeaders: true,
       legacyHeaders: false,
     });
 
     app.use("/api/users/login", loginLimiter);
+    app.use("/api", attachRateLimitUser);
     app.use("/api", apiLimiter);
   }
 
