@@ -214,7 +214,7 @@ router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), asy
       ) hov
       WHERE b.IsActive = 1
         AND b.Status NOT IN ${DEAD_BOOKING_SQL}
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id)
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id AND ISNULL(Status, '') <> 'Cancelled')
         AND ag.Status = 'Registered'
         AND (b.ProjectId IS NULL OR proj.entity_type IS NULL
              OR proj.entity_type <> 'UnderConstruction'
@@ -308,7 +308,7 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "vi
     const loanBlockReason = await checkLoanProcessingCleared(pool, bookingId);
 
     const existingDeed = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT Id, DeedNo FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+      .query("SELECT Id, DeedNo FROM dbo.CrmSalesDeed WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Cancelled'");
 
     const queryPayment = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 Id AS QPId, QPNo, Status AS QPStatus, ConfirmedAmount FROM dbo.CrmQueryPayment WHERE BookingId = @bid");
@@ -533,7 +533,7 @@ router.post("/registry", requirePageRight("crm-registry", "create"), validateBod
     }
 
     const deed = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+      .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Cancelled'");
     const salesDeedId = deed.recordset[0]?.Id != null ? deed.recordset[0].Id : null;
 
     // The Sale Deed almost certainly already has its own executed copy on
@@ -1551,6 +1551,12 @@ router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (re
     if (lock) return res.status(400).json({ error: `Cannot approve deed because ${lock}` });
 
     if (!deed.LegalExecutiveId) return res.status(400).json({ error: "A Legal Executive must be assigned before approval" });
+    // The deed's figures are what the customer and the director sign off and
+    // what the query payment is drawn from — they can't be blank at approval.
+    if (!(Number(deed.DeedValue) > 0)) return res.status(400).json({ error: "Enter the Deed Value on the Sale Deed before approval" });
+    if (!(Number(deed.StampDuty) > 0) && !(Number(deed.RegistrationFee) > 0)) {
+      return res.status(400).json({ error: "Enter the Stamp Duty and/or Registration Fee on the Sale Deed before approval" });
+    }
     
     const prog = await deedDocumentProgress(pool, id);
     if (prog.required === 0) return res.status(400).json({ error: "No mandatory documents requested yet" });

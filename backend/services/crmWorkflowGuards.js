@@ -489,9 +489,20 @@ async function getProjectSaleGate(pool, bookingId) {
  * fresh on every call, but Handover completion is the only path that can
  * actually flip this from no-op to creating the deed.
  */
+// Every sale deed starts with its one mandatory document requested — the
+// DeedDraft, as the manual create (POST /crm/sales-deed) already seeds — the same way an agreement starts with its Sale Agreement
+// request. Without it senior approval refused ("No mandatory documents
+// requested yet") with nothing telling staff to add one.
+async function requestStandingSaleDeedDocument(executor, deedId, actorUserId) {
+  await executor.request().input("did", sql.Int, deedId).input("cb", sql.Int, actorUserId || null).query(`
+    IF NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @did AND IsMandatory = 1)
+      INSERT INTO dbo.CrmSalesDeedDocument (SalesDeedId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+      VALUES (@did, N'DeedDraft', N'Sale Deed Draft (Physical Legal Document)', 1, N'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())`);
+}
+
 async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+    .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Cancelled'");
   if (existing.recordset.length) return null;
 
   // Sale Deed is prepared after possession handover in the under-construction
@@ -534,6 +545,7 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
         VALUES (@no, @bid, @agid, 'Draft', @note, @cb, SYSDATETIME())
       `);
     deedId = result.recordset[0].Id;
+    await requestStandingSaleDeedDocument(pool, deedId, actorUserId);
   } catch (e) {
     // Same race guard as every sibling maybeAutoCreate* in this file
     // (maybeAutoCreateAgreement, maybeAutoCreateLegalMilestone) — this one
@@ -1386,7 +1398,7 @@ module.exports = { requireNotMidApproval, releaseBookingInventoryLines,
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateLegalMilestone,
-  maybeAutoCreateSalesDeed,
+  maybeAutoCreateSalesDeed, requestStandingSaleDeedDocument,
   getProjectSaleGate,
   maybeAutoCreateBrokerage,
   maybeUnlockBrokerageOnAgreementExecuted,

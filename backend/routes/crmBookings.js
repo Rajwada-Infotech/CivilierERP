@@ -2789,9 +2789,12 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
       },
       {
         key: "noc",
-        label: resolvedNocType === "Bank" ? "Bank NOC" : "NOC",
+        // Handover waits for an NOC only when one was requested, so a booking
+        // handed over with none never needed one — shown done, not open forever.
+        label: !activeNoc && possessionDone ? "NOC (not needed)" : resolvedNocType === "Bank" ? "Bank NOC" : "NOC",
         status: activeNoc && activeNoc.Status === "Issued" ? "done"
                : activeNoc ? "active"
+               : possessionDone ? "done"
                : agRegistered ? "active"
                : "locked",
         date: activeNoc ? d(activeNoc.CreatedAt) : null,

@@ -305,7 +305,7 @@ router.get("/timeline", async (req, res) => {
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT Id, DeedNo, Status, DeedValue, SubRegistrarOffice, RegistrationNo, DeedDate, RegistrationDate, SentToCustomerAt,
                CustomerApprovalStatus, CustomerApprovedAt, CustomerRecheckRemarks
-        FROM dbo.CrmSalesDeed WHERE BookingId = @bid
+        FROM dbo.CrmSalesDeed WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Cancelled'
       `),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, ScheduledDate, ActualHandoverDate FROM dbo.CrmHandover WHERE BookingId = @bid"),
       pool.request().input("bid", sql.Int, bk.Id).query(`
