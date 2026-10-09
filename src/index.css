@@ -2487,3 +2487,11 @@ select[aria-hidden="true"] {
     border: 1px solid rgba(255, 255, 255, 0.9) !important;
     box-shadow: 0 24px 54px -14px rgba(15, 40, 80, 0.35), inset 0 1px 0 #fff !important;
 }
+
+/* Module page headers (CrmShell, GlassShell, …): title + action buttons share a row only while both fit.
+   The title keeps a readable minimum width; when buttons don't fit they wrap onto the next line, right-aligned —
+   instead of squeezing the title to one letter per line. */
+.shell-head > :first-child { flex: 1 1 18rem; min-width: 0; }
+.shell-head > :not(:first-child) { flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: auto; }
+.shell-head > :not(:first-child):is(.flex, [class*="flex "], [class^="flex"]) { flex-wrap: wrap; justify-content: flex-end; }
+.shell-head > :not(:first-child) > .flex:only-child { flex-wrap: wrap; justify-content: flex-end; }

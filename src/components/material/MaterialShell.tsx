@@ -101,7 +101,7 @@ export const MaterialShell: React.FC<MaterialShellProps> = ({
           }}
         />
 
-        <div className="relative z-10 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="relative z-10 shell-head flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
           <div className="flex items-center gap-3">
             {/* Icon badge */}
             <div
