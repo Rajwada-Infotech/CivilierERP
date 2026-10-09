@@ -164,6 +164,11 @@ router.get("/", authMiddleware, async (req, res) => {
     const withActivities = req.query.withActivities !== "0";
     const listReq = pool.request();
     let extra = "";
+    // Retired chains (deleted, or replaced when a villa's type changed or its
+    // conversion was undone) are history, not work: every list shows live
+    // chains only unless a caller asks for the rest.
+    const includeInactive = req.query.includeInactive === "1";
+    const activeOnly = includeInactive ? "" : " AND dm.IsActive = 1";
     if (Number.isFinite(projectId)) { listReq.input("projectId", sql.Int, projectId); extra += " AND dm.ProjectId = @projectId"; }
     if (search) {
       listReq.input("search", sql.NVarChar(200), `%${search}%`);
@@ -195,7 +200,7 @@ router.get("/", authMiddleware, async (req, res) => {
       LEFT JOIN dbo.BlockMaster  bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster   um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster   rm ON rm.Id = dm.RoomId
-      WHERE 1=1${projectPredicate(req.projectScope, "dm.ProjectId")}${extra}
+      WHERE 1=1${projectPredicate(req.projectScope, "dm.ProjectId")}${activeOnly}${extra}
       ORDER BY dm.Id DESC${paged ? " OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY" : ""}
     `);
     if (!withActivities) return res.json(r.recordset.map((row) => ({ ...row, activities: [] })));
@@ -212,7 +217,7 @@ router.get("/", authMiddleware, async (req, res) => {
       FROM dbo.DependencyMasterActivity dma
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       JOIN dbo.DependencyMaster dmx ON dmx.Id = dma.DependencyMasterId
-      WHERE 1=1${projectPredicate(req.projectScope, "dmx.ProjectId")}${
+      WHERE 1=1${projectPredicate(req.projectScope, "dmx.ProjectId")}${includeInactive ? "" : " AND dmx.IsActive = 1"}${
         // A narrowed list only needs its own chains' rungs (ids come from the query above — integers).
         (extra || paged) ? ` AND dma.DependencyMasterId IN (${r.recordset.map((x) => Number(x.id)).filter(Number.isFinite).join(",") || "NULL"})` : ""
       }
