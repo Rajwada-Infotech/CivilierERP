@@ -2481,6 +2481,63 @@ async function fullVillaName(db, projectId, blockId, name) {
 // Rename a built villa. Its DPR chains are renamed with it (each in its own
 // naming style), and so are its live bookings / applications, so every screen
 // shows the new name; dead and transferred sales keep the name they had.
+// POST /villas/:unitId/add-missing-rooms — a built villa brought up to its
+// type's floor plan: the plan's rooms it lacks are ADDED (floor + DPR steps);
+// existing rooms, their names and their work are never touched.
+// ?dryRun=1 reports what would be added and changes nothing.
+router.post("/villas/:unitId/add-missing-rooms", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const unitId = Number(req.params.unitId);
+  if (!Number.isInteger(unitId) || unitId <= 0) return res.status(400).json({ error: "Invalid villa" });
+  const dryRun = req.query.dryRun === "1" || req.body?.dryRun === true;
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const { addMissingPlanRooms } = require("../services/villaComposition");
+    const r = await addMissingPlanRooms(tx, unitId, req.user?.userId || null);
+    if (dryRun || !r.added) await tx.rollback(); else await tx.commit();
+    if (!dryRun && r.added) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
+    res.json({ success: true, dryRun, ...r,
+      message: !r.added ? "Already has every room in its floor plan"
+        : `${dryRun ? "Would add" : "Added"} ${r.added} room(s)${r.withoutSteps.length ? ` — ${r.withoutSteps.length} without DPR steps yet (no step list for their room type)` : ""}` });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* rolled back */ }
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Could not add the rooms" });
+  }
+});
+
+// POST /projects/:projectId/villas/add-missing-rooms — the same for every
+// typed villa in the project, each in its own transaction. ?dryRun=1 reports only.
+router.post("/projects/:projectId/villas/add-missing-rooms", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ error: "Invalid project" });
+  if (!assertProjectAllowed(req, res, projectId)) return;
+  const dryRun = req.query.dryRun === "1" || req.body?.dryRun === true;
+  const pool = getPool();
+  const villas = (await pool.request().input("p", sql.Int, projectId).query(`
+    SELECT DISTINCT u.Id, u.UnitName FROM dbo.UnitMaster u
+    JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
+    JOIN dbo.VillaTypeMaster v ON v.Id = u.VillaTypeId AND v.IsActive = 1 AND v.LayoutTypeId IS NOT NULL
+    WHERE u.ProjectId = @p AND u.IsActive = 1 ORDER BY u.UnitName`)).recordset;
+  const { addMissingPlanRooms } = require("../services/villaComposition");
+  const changed = []; const failed = [];
+  let added = 0;
+  for (const v of villas) {
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const r = await addMissingPlanRooms(tx, v.Id, req.user?.userId || null);
+      if (dryRun || !r.added) await tx.rollback(); else await tx.commit();
+      if (r.added) { added += r.added; changed.push({ villa: v.UnitName, added: r.added, withoutSteps: r.withoutSteps.length }); }
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* rolled back */ }
+      failed.push(`${v.UnitName}: ${e.message}`);
+    }
+  }
+  if (!dryRun && added) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
+  res.json({ success: failed.length === 0, dryRun, villas: villas.length, roomsAdded: added, changed, failed });
+});
+
 router.post("/villas/:unitId/rename", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
   const unitId = Number(req.params.unitId);
   const raw = String(req.body?.UnitName || "").trim();

@@ -28,6 +28,7 @@ type Plot = {
   ConvertedUnitId?: number | null; ConvertedAt?: string | null; ConvertedUnitName?: string | null;
   ConvertedVillaTypeId?: number | null; ConvertedVillaTypeCode?: string | null; ConvertedVillaTypeName?: string | null;
   ConvertedBuiltUpAreaSqFt?: number | null; ConvertedRoomCount?: number | null; ConvertedFloorCount?: number | null;
+  ConvertedMissingRooms?: number | null; ConvertedPlanRoomCount?: number | null;
   LockBookingNo?: string | null; LockApplicationNo?: string | null; LockHoldId?: number | null; AdjacentPlotCount?: number;
 };
 type PlotBlock = { BlockId: number; BlockName: string; ProjectId: number; ProjectName: string };
@@ -418,6 +419,29 @@ const CrmPlotMaster: React.FC = () => {
       await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
       await queryClient.invalidateQueries({ queryKey: ["villa-types"] });
     } catch (e: any) { toast.error(e.message); } finally { setSettingVillaType(false); }
+  };
+
+  // Adds the rooms its type's floor plan has and this villa lacks (e.g. after
+  // the plan was completed from the brochure). Existing rooms and their DPR
+  // work are never touched; the server refuses if any would change.
+  const [addingRooms, setAddingRooms] = useState(false);
+  const addMissingRooms = async (plot: Plot) => {
+    if (!plot.ConvertedUnitId) return;
+    setAddingRooms(true);
+    try {
+      const url = `${SETUP_API}/villas/${plot.ConvertedUnitId}/add-missing-rooms`;
+      const preview = await fetchWithAuth(`${url}?dryRun=1`, { method: "POST" });
+      const pb = await preview.json().catch(() => ({}));
+      if (!preview.ok) throw new Error(pb.error || "Could not check the plan");
+      if (!pb.added) { toast.info(pb.message); return; }
+      const steps = pb.withoutSteps?.length ? `\n\n${pb.withoutSteps.length} of them have no DPR step list yet (${pb.withoutSteps.slice(0, 6).join(", ")}${pb.withoutSteps.length > 6 ? "…" : ""}) — they get steps once their room type has one.` : "";
+      if (!window.confirm(`Add ${pb.added} room(s) from the ${plot.ConvertedVillaTypeCode} floor plan to ${plot.ConvertedUnitName}?\nExisting rooms and their DPR work stay exactly as they are.${steps}`)) return;
+      const response = await fetchWithAuth(url, { method: "POST" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not add the rooms");
+      toast.success(body.message);
+      await queryClient.invalidateQueries({ queryKey: ["plot-master"] }); await queryClient.invalidateQueries({ queryKey: ["plot-summary"] });
+    } catch (e: any) { toast.error(e.message); } finally { setAddingRooms(false); }
   };
 
   // Reverses a conversion made by mistake. The server refuses once the villa is
@@ -1003,7 +1027,21 @@ const CrmPlotMaster: React.FC = () => {
                             {detailPlot.ConvertedBuiltUpAreaSqFt ? ` · ${Number(detailPlot.ConvertedBuiltUpAreaSqFt).toLocaleString("en-IN")} sq ft built-up` : ""}
                           </span>
                         </p>
-                      ) : (
+                      ) : null}
+                      {detailPlot.ConvertedVillaTypeId && Number(detailPlot.ConvertedMissingRooms || 0) > 0 ? (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-md border border-amber-300/60 bg-amber-50/50 dark:bg-amber-950/20 px-2 py-1.5">
+                          <span className="text-xs text-amber-800 dark:text-amber-300">
+                            {detailPlot.ConvertedMissingRooms} room(s) of the {detailPlot.ConvertedPlanRoomCount}-room floor plan are not built into this villa yet
+                          </span>
+                          {rights.canEdit && (
+                            <button type="button" onClick={() => addMissingRooms(detailPlot)} disabled={addingRooms}
+                              className="h-7 px-2.5 text-[0.6875rem] font-semibold rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50">
+                              {addingRooms ? "Checking…" : `Add ${detailPlot.ConvertedMissingRooms} missing room(s)`}
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
+                      {detailPlot.ConvertedVillaTypeId ? null : (
                         <p className="text-sm text-amber-700 dark:text-amber-300">Not set — {detailPlot.ConvertedRoomCount ?? 0} rooms from a generic layout, no floors. Set its type so its rooms follow the type's floor plan.</p>
                       )}
                     </div>

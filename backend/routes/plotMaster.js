@@ -43,6 +43,11 @@ const PLOT_SELECT = `
          converted.BuiltUpAreaSqFt AS ConvertedBuiltUpAreaSqFt,
          (SELECT COUNT(*) FROM dbo.RoomMaster vr WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1) AS ConvertedRoomCount,
          (SELECT COUNT(DISTINCT vr.Storey) FROM dbo.RoomMaster vr WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1 AND vr.Storey IS NOT NULL) AS ConvertedFloorCount,
+         -- rooms its type's floor plan has that the villa lacks (per room type)
+         (SELECT ISNULL(SUM(CASE WHEN pl.Qty > ISNULL(have.n, 0) THEN pl.Qty - ISNULL(have.n, 0) ELSE 0 END), 0)
+            FROM (SELECT rp.RoomCategoryId, SUM(rp.Quantity) AS Qty FROM dbo.VillaTypeRoomPlan rp WHERE rp.VillaTypeId = converted.VillaTypeId GROUP BY rp.RoomCategoryId) pl
+            OUTER APPLY (SELECT COUNT(*) AS n FROM dbo.RoomMaster vr WHERE vr.UnitId = p.ConvertedUnitId AND vr.IsActive = 1 AND vr.RoomCategoryId = pl.RoomCategoryId) have) AS ConvertedMissingRooms,
+         (SELECT ISNULL(SUM(rp.Quantity), 0) FROM dbo.VillaTypeRoomPlan rp WHERE rp.VillaTypeId = converted.VillaTypeId) AS ConvertedPlanRoomCount,
          (SELECT COUNT(*) FROM dbo.PlotAdjacency pa
             JOIN dbo.PlotMaster o ON o.Id = CASE WHEN pa.PlotId = p.Id THEN pa.AdjacentPlotId ELSE pa.PlotId END
            WHERE (pa.PlotId = p.Id OR pa.AdjacentPlotId = p.Id) AND o.IsActive = 1) AS AdjacentPlotCount,
