@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -7,365 +7,289 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, ArrowRightLeft, TrendingUp, Landmark, X, Info } from "lucide-react";
+import { ArrowRightLeft, Building2, Info, Plus, Undo2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 const API = "/api/crm/resales";
-const PLOT_API = "/api/plot-master";
 
-// Resale: a plot changing hands between two buyers, with the
-// developer facilitating rather than selling.
+// Resale & Buy-back — any sold property (plot, villa with its plot, flat, shop)
+// either passing to a new buyer or bought back by us.
 //
-// THE DISTINCTION THIS SCREEN HAS TO MAKE OBVIOUS
-// The developer is not selling the land here — the original buyer is. Their gain is
-// theirs, not company revenue; only the facilitation fee is. The two figures
-// are therefore shown in separate columns and never summed into a single
-// "total", because a combined number is exactly what would end up being read as
-// turnover.
+// RESALE is an endorsement: the seller's booking itself passes to the new
+// buyer, so what was paid stays credited to the property and the new buyer
+// continues the remaining schedule. What the two buyers agree between
+// themselves is theirs — never company revenue; only our transfer fee (paid
+// by the new buyer) is.
+// BUY-BACK is us buying the property back at an agreed price; Finance pays it
+// and the property returns to stock to be sold again at a new price.
+// Both go through the Approval Inbox (CRM head, then Finance).
 const statusColor: Record<string, string> = {
-  Pending: "text-orange-600 bg-orange-50 border-orange-200",
-  Approved: "text-blue-600 bg-blue-50 border-blue-200",
-  Completed: "text-emerald-600 bg-emerald-50 border-emerald-200",
-  Cancelled: "text-red-600 bg-red-50 border-red-200",
+  Pending: "text-orange-600 bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-900",
+  Approved: "text-blue-600 bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-900",
+  Completed: "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900",
+  Cancelled: "text-muted-foreground bg-muted border-border",
+  Rejected: "text-red-600 bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900",
 };
 
-const fmt = (n: any) =>
-  n == null || n === "" ? "—" : `₹${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+const fmt = (n: any) => (n == null || n === "" ? "—" : `₹${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
+const label = "text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5";
+const input = "w-full h-9 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30";
 
-interface Resale {
-  Id: number;
-  PlotId: number | null;
-  UnitId: number | null;
-  PlotNo: string | null;
-  PlotName: string | null;
-  UnitName: string | null;
-  FromBookingNo: string | null;
-  ToBookingNo: string | null;
-  FromCustomerName: string | null;
-  ToCustomerName: string | null;
-  ResaleDate: string | null;
-  AgreedValue: number | null;
-  OriginalValue: number | null;
-  ResaleGain: number | null;
-  DeveloperFeeAmount: number | null;
-  DeveloperFeeGstAmount: number | null;
-  Status: string;
-  Notes: string | null;
+interface Deal {
+  Id: number; Kind: "Resale" | "BuyBack" | null; BookingIds: string | null;
+  PlotName: string | null; PlotNo: string | null; UnitName: string | null;
+  FromBookingNo: string | null; FromCustomerName: string | null; ToCustomerName: string | null;
+  ResaleDate: string | null; AgreedValue: number | null; OriginalValue: number | null; PaidAtTransfer: number | null;
+  DeveloperFeeAmount: number | null; DeveloperFeeGstAmount: number | null;
+  TdsAmount: number | null; BuyBackGstAmount: number | null; StampDutyAmount: number | null;
+  Status: string; RejectionNote: string | null; Notes: string | null;
+}
+interface Holding {
+  BookingId: number; BookingIds: number[]; BookingNos: string; UnitNo: string; Kind: string;
+  ProjectName: string | null; BlockName: string | null; CustomerId: number; CustomerName: string | null; Mobile: string | null;
+  TotalValue: number; Paid: number; OpenDeal: { Id: number; Kind: string; Status: string } | null;
 }
 
-async function fetchResales(): Promise<Resale[]> {
-  const r = await fetchWithAuth(API);
-  if (!r.ok) throw new Error("Failed to load resales");
-  return r.json().catch(() => []);
-}
+const getJson = async (url: string) => {
+  const r = await fetchWithAuth(url);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Failed to load");
+  return r.json();
+};
 
-// Only plots someone currently holds can be resold — the API refuses the rest,
-// so the picker is narrowed to the same set rather than letting a user choose
-// something that can only fail on submit.
-async function fetchHeldPlots(): Promise<any[]> {
-  try {
-    const r = await fetchWithAuth(`${PLOT_API}?`);
-    if (!r.ok) return [];
-    const rows = await r.json().catch(() => []);
-    return (Array.isArray(rows) ? rows : []).filter((p: any) => p.LockBookingNo);
-  } catch {
-    return [];
-  }
-}
+const EMPTY = { Kind: "Resale" as "Resale" | "BuyBack", FromBookingId: "", ToCustomerId: "", AgreedValue: "", DeveloperFeeAmount: "",
+  TdsAmount: "", BuyBackGstAmount: "", StampDutyAmount: "", ResaleDate: new Date().toISOString().slice(0, 10), Notes: "" };
 
 const CrmResales: React.FC = () => {
   const rights = usePageRights("crm-resales");
   const qc = useQueryClient();
-  const [dialog, setDialog] = useState(false);
-  const [completing, setCompleting] = useState<Resale | null>(null);
+  const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    PlotId: "",
-    AgreedValue: "",
-    DeveloperFeeAmount: "",
-    ResaleDate: new Date().toISOString().slice(0, 10),
-    Notes: "",
-  });
-  const [toBookingId, setToBookingId] = useState("");
+  const [form, setForm] = useState({ ...EMPTY });
 
-  const { data: resales = [], isLoading, dataUpdatedAt, isFetching } = useQuery({ queryKey: ["crm-resales"], queryFn: fetchResales });
-  const { data: heldPlots = [] } = useQuery({ queryKey: ["crm-resale-held-plots"], queryFn: fetchHeldPlots });
+  const { data: deals = [], isLoading, dataUpdatedAt, isFetching } = useQuery<Deal[]>({ queryKey: ["crm-resales"], queryFn: () => getJson(API) });
+  const { data: holdings = [] } = useQuery<Holding[]>({ queryKey: ["crm-resale-holdings"], queryFn: () => getJson(`${API}/holdings`), enabled: open });
+  const { data: customers = [] } = useQuery<any[]>({ queryKey: ["crm-customers-dropdown"], queryFn: () => getJson("/api/crm/customers"), enabled: open, staleTime: 60_000 });
 
-  const invalidate = () => {
+  const refresh = () => {
     qc.invalidateQueries({ queryKey: ["crm-resales"] });
-    qc.invalidateQueries({ queryKey: ["crm-resale-held-plots"] });
-    // The plot changes hands, so every view of plot availability is stale.
-    qc.invalidateQueries({ queryKey: ["unit-matrix"] });
-    qc.invalidateQueries({ queryKey: ["plot-master"] });
+    qc.invalidateQueries({ queryKey: ["crm-resale-holdings"] });
   };
+  const holding = useMemo(() => holdings.find((h) => String(h.BookingId) === form.FromBookingId), [holdings, form.FromBookingId]);
+  const feeGstQ = useQuery<{ gstAmount: number; rate: number }>({
+    queryKey: ["crm-resale-fee-gst", form.DeveloperFeeAmount, holding?.Kind],
+    queryFn: () => getJson(`${API}/fee-gst?amount=${encodeURIComponent(form.DeveloperFeeAmount)}&plot=${holding?.Kind === "Plot" ? 1 : 0}`),
+    enabled: open && form.Kind === "Resale" && Number(form.DeveloperFeeAmount) > 0,
+  });
+  const premium = form.Kind === "BuyBack" && holding && Number(form.AgreedValue) > 0 ? Number(form.AgreedValue) - Number(holding.Paid || 0) : null;
+  const tdsHint = form.Kind === "BuyBack" && Number(form.AgreedValue) >= 5000000;
 
-  const selectedPlot = useMemo(
-    () => heldPlots.find((p: any) => String(p.Id) === form.PlotId),
-    [heldPlots, form.PlotId],
-  );
-
-  const create = async () => {
-    if (!form.PlotId) { toast.error("Which plot is changing hands?"); return; }
-    if (!form.AgreedValue) { toast.error("What is the new buyer paying the original buyer?"); return; }
-    setSaving(true);
+  const act = async (d: Deal, path: string, body?: object, done?: string) => {
     try {
-      const r = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error || "Could not record the resale");
-      toast.success("Resale recorded — complete it once the new buyer's booking exists");
-      setDialog(false);
-      setForm({ PlotId: "", AgreedValue: "", DeveloperFeeAmount: "", ResaleDate: new Date().toISOString().slice(0, 10), Notes: "" });
-      invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); } finally { setSaving(false); }
-  };
-
-  const complete = async () => {
-    if (!completing || !toBookingId) { toast.error("The new buyer's booking id is required"); return; }
-    setSaving(true);
-    try {
-      const r = await fetchWithAuth(`${API}/${completing.Id}/complete`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ToBookingId: toBookingId }),
-      });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error || "Could not complete the resale");
-      toast.success("Resale completed — the plot now sits with the new buyer");
-      setCompleting(null);
-      setToBookingId("");
-      invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); } finally { setSaving(false); }
-  };
-
-  const cancel = async (row: Resale) => {
-    try {
-      const r = await fetchWithAuth(`${API}/${row.Id}/cancel`, { method: "PUT" });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error || "Could not cancel");
-      toast.success("Resale cancelled");
-      invalidate();
+      const r = await fetchWithAuth(`${API}/${d.Id}/${path}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(out.error || "Could not do that");
+      toast.success(out.message || done || "Done");
+      if (out.ledgerWarning) toast.warning(out.ledgerWarning);
+      refresh();
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
 
-  const columns: ColumnDef<Resale>[] = [
+  const save = async () => {
+    if (!form.FromBookingId) return toast.error("Choose the property that is changing hands");
+    if (form.Kind === "Resale" && !form.ToCustomerId) return toast.error("Choose the new buyer");
+    if (form.Kind === "BuyBack" && !(Number(form.AgreedValue) > 0)) return toast.error("Enter the agreed buy-back price");
+    setSaving(true);
+    try {
+      const r = await fetchWithAuth(`${API}/deal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(out.error || "Could not record it");
+      toast.success(out.message || "Recorded");
+      setOpen(false);
+      setForm({ ...EMPTY });
+      refresh();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
+  };
+
+  const columns: ColumnDef<Deal>[] = [
     {
-      header: "Plot / Unit",
-      accessorKey: "PlotNo",
+      header: "Type", id: "kind",
+      cell: ({ row }) => row.original.Kind === "BuyBack"
+        ? <span className="inline-flex items-center gap-1 text-xs font-medium text-teal-700 dark:text-teal-300"><Undo2 size={11} /> Buy-back</span>
+        : <span className="inline-flex items-center gap-1 text-xs font-medium text-primary"><ArrowRightLeft size={11} /> Resale</span>,
+    },
+    { header: "Property", id: "prop", cell: ({ row }) => <span className="font-medium text-foreground">{row.original.UnitName || row.original.PlotName || row.original.PlotNo || "—"}<span className="block text-[0.6875rem] font-normal text-muted-foreground">{row.original.FromBookingNo}</span></span> },
+    { header: "From → To", id: "parties", cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.original.FromCustomerName || "—"}<ArrowRightLeft size={10} className="inline mx-1" />{row.original.Kind === "BuyBack" ? "Us (buy-back)" : row.original.ToCustomerName || "—"}</span> },
+    { header: "Paid by seller", id: "paid", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.PaidAtTransfer ?? row.original.OriginalValue)}</span> },
+    { header: "Agreed price", accessorKey: "AgreedValue", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.AgreedValue)}</span> },
+    { header: "Our fee", accessorKey: "DeveloperFeeAmount", cell: ({ row }) => <span className="tabular-nums">{row.original.Kind === "BuyBack" ? "—" : fmt(row.original.DeveloperFeeAmount)}</span> },
+    {
+      header: "Status", accessorKey: "Status",
       cell: ({ row }) => (
-        <span className="font-medium text-foreground">
-          {row.original.PlotName || row.original.PlotNo || row.original.UnitName || "—"}
+        <span title={row.original.RejectionNote || undefined} className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[row.original.Status] || ""}`}>
+          {row.original.Status === "Pending" ? "Awaiting approval" : row.original.Status}
         </span>
       ),
     },
     {
-      header: "From → To",
-      id: "parties",
-      cell: ({ row }) => (
-        <span className="text-xs text-muted-foreground">
-          {row.original.FromCustomerName || row.original.FromBookingNo || "—"}
-          <ArrowRightLeft size={10} className="inline mx-1" />
-          {row.original.ToCustomerName || row.original.ToBookingNo || "pending"}
-        </span>
-      ),
-    },
-    { header: "Original Buyer Paid", accessorKey: "OriginalValue", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.OriginalValue)}</span> },
-    { header: "Resold At", accessorKey: "AgreedValue", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.AgreedValue)}</span> },
-    {
-      header: "Resale Gain",
-      accessorKey: "ResaleGain",
+      header: "", id: "actions",
       cell: ({ row }) => {
-        const g = Number(row.original.ResaleGain || 0);
+        const d = row.original;
+        if (!rights.canEdit || !d.BookingIds || ["Completed", "Cancelled", "Rejected"].includes(d.Status)) return null;
         return (
-          <span className={`tabular-nums font-medium ${g > 0 ? "text-emerald-600" : g < 0 ? "text-red-600" : ""}`}>
-            {fmt(row.original.ResaleGain)}
-          </span>
-        );
-      },
-    },
-    { header: "Our Fee", accessorKey: "DeveloperFeeAmount", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.DeveloperFeeAmount)}</span> },
-    {
-      header: "Status",
-      accessorKey: "Status",
-      cell: ({ row }) => (
-        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[row.original.Status] || ""}`}>
-          {row.original.Status}
-        </span>
-      ),
-    },
-    {
-      header: "",
-      id: "actions",
-      cell: ({ row }) =>
-        rights.canEdit && row.original.Status !== "Completed" && row.original.Status !== "Cancelled" ? (
           <div className="flex gap-1.5 justify-end">
-            <button onClick={() => setCompleting(row.original)}
-              className="px-2 h-7 text-[0.6875rem] rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">
-              Complete
-            </button>
-            <button onClick={() => cancel(row.original)}
+            {d.Status === "Approved" && d.Kind === "Resale" && (
+              <button onClick={() => { if (window.confirm(`Pass ${d.UnitName || d.PlotName} to ${d.ToCustomerName}? The booking, its schedule and the ${fmt(d.OriginalValue)} paid move to the new buyer.`)) act(d, "transfer"); }}
+                className="px-2 h-7 text-[0.6875rem] rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">
+                Transfer to buyer
+              </button>
+            )}
+            <button onClick={() => act(d, "cancel", undefined, "Cancelled")}
               className="px-2 h-7 text-[0.6875rem] rounded-lg border border-border text-muted-foreground hover:bg-muted">
               Cancel
             </button>
           </div>
-        ) : null,
+        );
+      },
     },
   ];
 
   return (
-    <CrmShell title="Plot Resale" subtitle="A plot changing hands from its original buyer to a new buyer">
-      <Breadcrumbs items={["CRM", "Plot Resale"]} />
+    <CrmShell title="Resale & Buy-back" subtitle="A sold property passing to a new buyer, or bought back by us">
+      <Breadcrumbs items={["CRM", "Resale & Buy-back"]} />
 
-      {/* Stated plainly on the screen, because the distinction is the whole
-          point and is easy to get wrong when reading the numbers. */}
       <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2 mb-3">
         <Info size={13} className="text-muted-foreground mt-0.5 shrink-0" />
         <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-          The original buyer is selling, not the company. <span className="font-medium text-foreground">Resale Gain</span> is
-          theirs and is never company revenue — only <span className="font-medium text-foreground">Our Fee</span> is.
+          <span className="font-medium text-foreground">Resale:</span> the booking passes to the new buyer with everything paid so far; they continue the schedule. The price the buyers agree is theirs, not company revenue — only <span className="font-medium text-foreground">our fee</span> (paid by the new buyer) is.{" "}
+          <span className="font-medium text-foreground">Buy-back:</span> we pay the agreed price through Finance and the property returns to stock. Both are approved in the Approval Inbox — CRM head, then Finance.
         </p>
       </div>
 
       <div className="flex items-center justify-between gap-2 mb-3">
-        <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={invalidate} />
+        <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refresh} />
         {rights.canCreate && (
-          <button onClick={() => setDialog(true)}
+          <button onClick={() => { setForm({ ...EMPTY }); setOpen(true); }}
             className="inline-flex items-center gap-1.5 px-3 h-9 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
-            <Plus size={14} /> Record Resale
+            <Plus size={14} /> New resale or buy-back
           </button>
         )}
       </div>
 
-      <DataTable columns={columns} data={resales} loading={isLoading} />
+      <DataTable columns={columns} data={deals} loading={isLoading} />
 
-      {/* ── record ── */}
-      <Dialog open={dialog} onOpenChange={(o) => { if (!o) setDialog(false); }}>
+      <Dialog open={open} onOpenChange={(o) => { if (!o) setOpen(false); }}>
         <DialogContent accent="crm" className="max-w-xl">
           <DialogHeader>
-            <DialogTitle className="font-heading">Record a Plot Resale</DialogTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Only plots currently held by someone can be resold. The outgoing owner and what they
-              originally paid are taken from the live booking, not typed in.
-            </p>
+            <DialogTitle className="font-heading">{form.Kind === "BuyBack" ? "Buy back a property" : "Resell a property"}</DialogTitle>
           </DialogHeader>
-
           <div className="space-y-3">
+            <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/30" role="tablist">
+              {(["Resale", "BuyBack"] as const).map((k) => (
+                <button key={k} type="button" role="tab" aria-selected={form.Kind === k} onClick={() => setForm((f) => ({ ...f, Kind: k }))}
+                  className={`px-3 h-8 text-xs font-semibold rounded-md ${form.Kind === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                  {k === "Resale" ? "Resale to another buyer" : "Buy-back by us"}
+                </button>
+              ))}
+            </div>
+
             <div>
-              <label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5">Plot</label>
-              <select value={form.PlotId} onChange={(e) => setForm((f) => ({ ...f, PlotId: e.target.value }))}
-                className="w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background">
-                <option value="">Select a held plot…</option>
-                {heldPlots.map((p: any) => (
-                  <option key={p.Id} value={String(p.Id)}>
-                    {p.PlotName || p.PlotNo} — {p.BlockName} (held by {p.LockBookingNo})
-                  </option>
-                ))}
-              </select>
-              {heldPlots.length === 0 && (
-                <p className="mt-1 text-[0.6875rem] text-muted-foreground">
-                  No plot is currently held by anyone, so there is nothing to resell yet.
-                </p>
+              <label className={label}>Property</label>
+              <SearchableSelect
+                value={form.FromBookingId}
+                onChange={(v) => setForm((f) => ({ ...f, FromBookingId: v }))}
+                placeholder="Choose a sold property"
+                searchPlaceholder="Search unit, booking or owner…"
+                options={holdings.filter((h) => !h.OpenDeal).map((h) => ({
+                  value: String(h.BookingId),
+                  label: [h.UnitNo, h.Kind, h.CustomerName, h.BookingNos, h.ProjectName].filter(Boolean).join(" · "),
+                }))}
+              />
+              {holding && (
+                <div className="mt-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs grid grid-cols-2 gap-x-3 gap-y-0.5">
+                  <span className="col-span-2 flex items-center gap-1.5 font-medium text-foreground"><Building2 size={12} /> {holding.UnitNo} · {holding.Kind}</span>
+                  <span className="text-muted-foreground">Owner</span><span className="text-foreground">{holding.CustomerName}</span>
+                  <span className="text-muted-foreground">Price</span><span className="tabular-nums">{fmt(holding.TotalValue)}</span>
+                  <span className="text-muted-foreground">Paid so far</span><span className="tabular-nums">{fmt(holding.Paid)}</span>
+                  <span className="text-muted-foreground">Still due</span><span className="tabular-nums">{fmt(Math.max(0, holding.TotalValue - holding.Paid))}</span>
+                </div>
               )}
             </div>
 
-            {selectedPlot && (
-              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[0.6875rem] text-muted-foreground flex items-center gap-2">
-                <Landmark size={12} /> Currently held under <span className="font-medium text-foreground">{selectedPlot.LockBookingNo}</span>
-                {selectedPlot.AreaSqFt ? ` · ${selectedPlot.AreaSqFt} sq ft` : ""}
-              </div>
+            {form.Kind === "Resale" ? (
+              <>
+                <div>
+                  <label className={label}>New buyer</label>
+                  <SearchableSelect
+                    value={form.ToCustomerId}
+                    onChange={(v) => setForm((f) => ({ ...f, ToCustomerId: v }))}
+                    placeholder="Choose the new buyer"
+                    searchPlaceholder="Search name, mobile or customer no…"
+                    options={customers.filter((c: any) => !holding || c.Id !== holding.CustomerId).map((c: any) => ({
+                      value: String(c.Id), label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · "),
+                    }))}
+                  />
+                  <p className="mt-1 text-[0.6875rem] text-muted-foreground">Not listed? Add them in <a href="/crm/customers" target="_blank" rel="noreferrer" className="text-primary hover:underline">Customers</a> first.</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={label}>Price agreed between buyers</label>
+                    <input type="number" min={0} value={form.AgreedValue} onChange={(e) => setForm((f) => ({ ...f, AgreedValue: e.target.value }))} className={input} placeholder="For the record" />
+                  </div>
+                  <div>
+                    <label className={label}>Our transfer fee</label>
+                    <input type="number" min={0} value={form.DeveloperFeeAmount} onChange={(e) => setForm((f) => ({ ...f, DeveloperFeeAmount: e.target.value }))} className={input} placeholder="Paid by the new buyer" />
+                    {feeGstQ.data && <p className="mt-1 text-[0.6875rem] text-muted-foreground">+ GST {fmt(feeGstQ.data.gstAmount)} ({feeGstQ.data.rate}%)</p>}
+                    {feeGstQ.error && <p className="mt-1 text-[0.6875rem] text-red-600">{(feeGstQ.error as Error).message}</p>}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={label}>Agreed buy-back price</label>
+                    <input type="number" min={0} value={form.AgreedValue} onChange={(e) => setForm((f) => ({ ...f, AgreedValue: e.target.value }))} className={input} />
+                    {premium != null && <p className="mt-1 text-[0.6875rem] text-muted-foreground">{premium >= 0 ? `${fmt(premium)} above what was paid` : `${fmt(-premium)} below what was paid`}</p>}
+                  </div>
+                  <div>
+                    <label className={label}>TDS</label>
+                    <input type="number" min={0} value={form.TdsAmount} onChange={(e) => setForm((f) => ({ ...f, TdsAmount: e.target.value }))} className={input} />
+                    {tdsHint && <p className="mt-1 text-[0.6875rem] text-muted-foreground">₹50 lakh or more: 1% TDS (sec. 194-IA) — confirm with your CA</p>}
+                  </div>
+                  <div>
+                    <label className={label}>GST (as advised)</label>
+                    <input type="number" min={0} value={form.BuyBackGstAmount} onChange={(e) => setForm((f) => ({ ...f, BuyBackGstAmount: e.target.value }))} className={input} />
+                  </div>
+                  <div>
+                    <label className={label}>Stamp duty (as advised)</label>
+                    <input type="number" min={0} value={form.StampDutyAmount} onChange={(e) => setForm((f) => ({ ...f, StampDutyAmount: e.target.value }))} className={input} />
+                  </div>
+                </div>
+                <p className="text-[0.6875rem] text-muted-foreground">Any unpaid milestones are cancelled; we pay only the agreed price. Earlier invoices stay as they are.</p>
+              </>
             )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5">
-                  New buyer pays original buyer (₹)
-                </label>
-                <input type="number" value={form.AgreedValue}
-                  onChange={(e) => setForm((f) => ({ ...f, AgreedValue: e.target.value }))}
-                  className="w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background font-semibold tabular-nums" />
+                <label className={label}>Date</label>
+                <DateInput value={form.ResaleDate} onChange={(e) => setForm((f) => ({ ...f, ResaleDate: e.target.value }))} className={input} />
               </div>
               <div>
-                <label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5">
-                  Our facilitation fee (₹)
-                </label>
-                <input type="number" value={form.DeveloperFeeAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, DeveloperFeeAmount: e.target.value }))}
-                  className="w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background tabular-nums" />
+                <label className={label}>Notes</label>
+                <input value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))} className={input} />
               </div>
             </div>
 
-            <div>
-              <label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5">Resale Date</label>
-              <DateInput value={form.ResaleDate}
-                onChange={(e) => setForm((f) => ({ ...f, ResaleDate: e.target.value }))}
-                className="w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background" />
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setOpen(false)} className="px-3 h-9 text-sm rounded-lg border border-border hover:bg-muted">Close</button>
+              <button onClick={save} disabled={saving} className="px-4 h-9 text-sm rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-60">
+                {saving ? "Saving…" : "Send for approval"}
+              </button>
             </div>
-
-            <div>
-              <label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5">Notes</label>
-              <textarea value={form.Notes} rows={2}
-                onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none" />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setDialog(false)}
-              className="px-4 h-9 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={create} disabled={saving}
-              className="px-5 h-9 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Recording…" : "Record Resale"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── complete ── */}
-      <Dialog open={!!completing} onOpenChange={(o) => { if (!o) setCompleting(null); }}>
-        <DialogContent accent="crm" className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-heading">Complete the Resale</DialogTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              This moves the plot. The outgoing line is kept as history, marked Transferred —
-              nothing is cancelled, because the original sale stands and the original buyer was paid.
-            </p>
-          </DialogHeader>
-          {completing && (
-            <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-primary/80">Plot</p>
-                <p className="text-sm font-semibold text-foreground">{completing.PlotName || completing.PlotNo}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1 justify-end">
-                  <TrendingUp size={11} /> Resale gain
-                </p>
-                <p className="text-lg font-bold tabular-nums text-primary">{fmt(completing.ResaleGain)}</p>
-              </div>
-            </div>
-          )}
-          <div>
-            <label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5">
-              New buyer&apos;s booking id
-            </label>
-            <input type="number" value={toBookingId} onChange={(e) => setToBookingId(e.target.value)}
-              placeholder="The booking must already exist"
-              className="w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background" />
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => setCompleting(null)}
-              className="px-4 h-9 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-              <X size={13} className="inline mr-1" />Not yet
-            </button>
-            <button onClick={complete} disabled={saving}
-              className="px-5 h-9 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Completing…" : "Complete Resale"}
-            </button>
           </div>
         </DialogContent>
       </Dialog>

@@ -1108,7 +1108,7 @@ async function postCrmResaleFeeToGL(pool, resaleId, userEmail) {
   if (await hasPosting(pool, "CrmUnitResale", resaleId))
     return { posted: true, reason: "already posted (idempotent)" };
   const r = (await pool.request().input("id", sql.Int, resaleId).query(`
-    SELECT r.Id, r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, r.FromCustomerId, r.ResaleDate,
+    SELECT r.Id, r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, COALESCE(r.ToCustomerId, r.FromCustomerId) AS FeeCustomerId, r.ResaleDate,
            COALESCE(p.ProjectId, u.ProjectId) AS ProjectId, proj.company_id AS CompanyId,
            COALESCE(p.PlotName, u.UnitName) AS Item
     FROM dbo.CrmUnitResale r
@@ -1120,9 +1120,9 @@ async function postCrmResaleFeeToGL(pool, resaleId, userEmail) {
   const fee = Math.round(Number(r.DeveloperFeeAmount || 0) * 100) / 100;
   const gst = Math.round(Number(r.DeveloperFeeGstAmount || 0) * 100) / 100;
   if (fee <= 0) return { none: true, reason: "No developer fee on this resale — nothing to post" };
-  if (r.FromCustomerId == null) return { posted: false, reason: "Resale has no original buyer to charge the fee to" };
+  if (r.FeeCustomerId == null) return { posted: false, reason: "Resale has no buyer to charge the fee to" };
 
-  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FromCustomerId, userEmail);
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FeeCustomerId, userEmail);
   const feeHeadId = await getGLHeadIdByCode(pool, CRM_RESALE_FEE_CODE, CRM_RESALE_FEE_ACCOUNT);
   const voucherNo = `RSL-${resaleId}`;
   const legs = [
@@ -1146,7 +1146,44 @@ async function postCrmResaleFeeToGL(pool, resaleId, userEmail) {
   return { posted: true };
 }
 
+/**
+ * A resale by endorsement: the property's money paid so far moves with it.
+ *   Dr  seller's customer ledger   paid
+ *       Cr  buyer's customer ledger    paid
+ * No income, no GST — the developer received this money once already; only
+ * whose advance it is changes. Idempotent per resale.
+ */
+async function postCrmResaleTransferToGL(pool, resaleId, userEmail) {
+  if (await hasPosting(pool, "CrmUnitResaleTransfer", resaleId))
+    return { posted: true, reason: "already posted (idempotent)" };
+  const r = (await pool.request().input("id", sql.Int, resaleId).query(`
+    SELECT r.Id, r.PaidAtTransfer, r.FromCustomerId, r.ToCustomerId, r.CompletedAt,
+           b.ProjectId, b.CompanyId, COALESCE(b.UnitNo, b.BookingNo) AS Item
+    FROM dbo.CrmUnitResale r LEFT JOIN dbo.CrmBooking b ON b.Id = r.FromBookingId WHERE r.Id = @id`)).recordset[0];
+  if (!r) return { posted: false, reason: `Resale ${resaleId} not found` };
+  const paid = Math.round(Number(r.PaidAtTransfer || 0) * 100) / 100;
+  if (paid <= 0) return { none: true, reason: "Nothing paid yet — no advance to move" };
+  const sellerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FromCustomerId, userEmail);
+  const buyerHeadId = await ensureCrmCustomerLedgerHead(pool, r.ToCustomerId, userEmail);
+  const voucherNo = `RSL-T-${resaleId}`;
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate: r.CompletedAt || new Date(),
+    sourceType: "CrmUnitResaleTransfer",
+    sourceId: resaleId,
+    companyId: r.CompanyId ?? null,
+    projectId: r.ProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: sellerHeadId, debit: paid, narration: `${voucherNo} — ${r.Item} resold: advance passes to the new buyer` },
+      { lHeadId: buyerHeadId, credit: paid, narration: `${voucherNo} — ${r.Item} taken over by resale: advance from the previous buyer` },
+    ],
+  });
+  return { posted: true };
+}
+
 module.exports = {
+  postCrmResaleTransferToGL,
   postCrmResaleFeeToGL,
   CRM_COLLECTIONS_ACCOUNT,
   CRM_GST_OUTPUT_ACCOUNT,
