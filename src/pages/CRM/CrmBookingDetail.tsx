@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
+import { PropertyCard } from "@/components/crm/PropertyCard";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -1353,6 +1354,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 />
               );
             })()}
+
+            {/* ── Plot + villa on it: one property, one schedule ── */}
+            <PropertyCard bookingId={booking.Id} />
 
             {/* ── Booking Lifecycle Stepper ── */}
             <BookingLifecycleBar bookingId={booking.Id} />

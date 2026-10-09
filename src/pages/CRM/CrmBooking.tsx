@@ -28,6 +28,7 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { CrmBookingDetail } from "./CrmBookingDetail";
+import { VillaOffersPanel } from "@/components/crm/VillaOffersPanel";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
@@ -865,6 +866,8 @@ const CrmBooking: React.FC = () => {
         </div>
       }
     >
+      <div className="mb-3"><VillaOffersPanel /></div>
+
       {/* Search + status filter + table live in one continuous glass card,
           same convention as CrmLeads/CrmApplication, instead of a loose
           toolbar row floating above a separately-bordered table. */}
