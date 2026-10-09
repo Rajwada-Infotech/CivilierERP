@@ -63,8 +63,9 @@ async function landPositionOfUnits(poolOrTx, unitIds) {
 /**
  * Who may buy a villa built on plots. Two ways to sell one:
  *   - Direct: none of its plots is sold — the villa is sold whole, land and
- *     all, to any buyer (the plots are then taken by that sale, see
- *     plotsTakenByVillaSale).
+ *     all, to any buyer. Its plots get no booking line of their own: a
+ *     converted plot can no longer be sold as land, and the land part of
+ *     the villa price is kept on the booking (directSaleLandValue).
  *   - Plot first: its plots were sold — only the customer who owns every one
  *     of them can buy the villa on top.
  * Some plots sold and some not can't be sold either way. Throws

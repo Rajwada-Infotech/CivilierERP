@@ -522,7 +522,12 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
         SELECT Id, RefundNo, Status, CustomerId, CompanyId, ProjectId, NetAmount, GrossAmount,
                SourceOnAccountId, RefundBankLHeadId, CustomerBankName, CustomerAccountNo, FinanceNewPaymentId, PreferredPaymentMode
         FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id`)).recordset[0];
-      if (rf.FinanceNewPaymentId) throw new RefundPayoutError("A payout voucher already exists for this refund", 409);
+      // Already with Finance: leave it exactly as it is (never downgrade it to
+      // "voucher not raised" through the catch below).
+      if (rf.FinanceNewPaymentId) {
+        await tx.rollback();
+        return res.status(409).json({ error: "This refund's payout voucher is already with Finance in Payments" });
+      }
       const raised = await raisePayoutVoucher(tx, rf, { bankId, actorEmail: req.user?.email || req.user?.name || String(actorId(req)) });
       await tx.request().input("id", sql.Int, id).input("ab", sql.Int, actorId(req)).input("np", sql.Int, raised.newPaymentId).input("bank", sql.Int, raised.bankId)
         .query(`

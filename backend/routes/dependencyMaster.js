@@ -298,6 +298,15 @@ function validatePayload(body) {
 }
 
 // ── POST / — create ──────────────────────────────────────────────────────
+// A room type's step list just changed: villas built before it existed get it now.
+function fillVillasForChain(pool, chainId, actor) {
+  pool.request().input("id", sql.Int, chainId)
+    .query("SELECT r.RoomCategoryId FROM dbo.DependencyMaster d JOIN dbo.RoomMaster r ON r.Id = d.RoomId WHERE d.Id = @id AND d.IsActive = 1")
+    .then((q) => { const c = q.recordset[0]?.RoomCategoryId; return c ? require("../services/autoDprChains").fillChainlessVillaRooms(pool, { categoryId: c, actor }) : null; })
+    .then((r) => { if (r?.chainsCreated) console.log(`[dependency-master] gave ${r.chainsCreated} villa room(s) this step list`); })
+    .catch((e) => console.warn("[dependency-master] villa fill failed (non-fatal):", e.message));
+}
+
 router.post("/", authMiddleware, requirePageRight("dependency-master", "create"), async (req, res) => {
   const err = validatePayload(req.body);
   if (err) return res.status(400).json({ error: err });
@@ -364,6 +373,7 @@ router.post("/", authMiddleware, requirePageRight("dependency-master", "create")
       `);
     }
 
+    if (activities.length) fillVillasForChain(pool, newId, actor);
     res.status(201).json({ success: true, id: newId, message: "Dependency record created" });
   } catch (err2) {
     console.error("[POST /dependency-master]", err2);
@@ -507,6 +517,7 @@ router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit")
     }
 
     await tx.commit();
+    fillVillasForChain(getPool(), id, actor);
     res.json({ success: true, message: "Dependency record updated" });
   } catch (err2) {
     if (tx) {

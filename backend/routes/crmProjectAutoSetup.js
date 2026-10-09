@@ -2461,29 +2461,9 @@ router.post("/projects/:projectId/villas/fill-dpr", requirePageRight("crm-auto-p
   if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ error: "Invalid project" });
   if (!assertProjectAllowed(req, res, projectId)) return;
   const pool = getPool();
-  const villas = (await pool.request().input("p", sql.Int, projectId).query(`
-    SELECT DISTINCT u.Id, u.UnitName FROM dbo.UnitMaster u
-    JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
-    WHERE u.ProjectId = @p AND u.IsActive = 1
-      AND EXISTS (SELECT 1 FROM dbo.RoomMaster r WHERE r.UnitId = u.Id AND r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL
-                    AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id))`)).recordset;
-  const { createChainsForUnit } = require("../services/autoDprChains");
-  let created = 0; const still = new Set(); const failed = [];
-  for (const v of villas) {
-    const tx = pool.transaction();
-    await tx.begin();
-    try {
-      const r = await createChainsForUnit(tx, v.Id, req.user?.email || req.user?.name || null);
-      await tx.commit();
-      created += r.created;
-      r.skipped.forEach((n) => still.add(String(n).replace(/\s+\d+$/, "")));
-    } catch (e) {
-      try { await tx.rollback(); } catch (_) { /* rolled back */ }
-      failed.push(`${v.UnitName}: ${e.message}`);
-    }
-  }
-  if (created) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
-  res.json({ success: failed.length === 0, villas: villas.length, chainsCreated: created, stillWithoutSteps: [...still], failed });
+  const r = await require("../services/autoDprChains").fillChainlessVillaRooms(pool, { projectId, actor: req.user?.email || req.user?.name || null });
+  if (r.chainsCreated) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
+  res.json({ success: r.failed.length === 0, ...r });
 });
 
 // The full name a villa is stored under: a bare name ("V-21", "Rose Villa")
