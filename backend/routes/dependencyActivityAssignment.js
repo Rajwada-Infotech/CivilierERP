@@ -602,6 +602,12 @@ const transferFilters = (req, request) => {
     request.input("projectId", sql.Int, projectId);
     cond += " AND dm.ProjectId = @projectId";
   }
+  // One exact activity (a report row opened in Work Transfer).
+  const rungId = req.query.rungId ? parseInt(req.query.rungId, 10) : null;
+  if (Number.isFinite(rungId)) {
+    request.input("rungFilter", sql.Int, rungId);
+    cond += " AND dma.Id = @rungFilter";
+  }
   if (search) {
     request.input("search", sql.NVarChar(200), `%${search}%`);
     cond += " AND (am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search)";

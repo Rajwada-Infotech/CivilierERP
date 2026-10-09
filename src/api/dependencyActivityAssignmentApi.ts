@@ -345,8 +345,11 @@ export const getReportedAssignments = async (params?: {
   // with no room at all, instead of falling through to "every activity".
   roomId?: number | null;
   status?: AssignmentStatus;
+  /** Exactly one activity (its current attempt). */
+  rungId?: number;
 }): Promise<ReportedAssignment[]> => {
   const qs = new URLSearchParams();
+  if (params?.rungId) qs.set("rungId", String(params.rungId));
   if (params?.dependencyMasterId) qs.set("dependencyMasterId", String(params.dependencyMasterId));
   if (params && "roomId" in params && params.roomId !== undefined) {
     qs.set("roomId", params.roomId === null ? "null" : String(params.roomId));
@@ -859,10 +862,13 @@ export const getTransferCandidatesPage = async (params: {
   limit?: number;
   projectId?: number;
   search?: string;
+  /** Only this activity (a report row opened in Work Transfer). */
+  rungId?: number;
 }): Promise<TransferCandidatePage> => {
   const qs = new URLSearchParams({ engineerId: String(params.engineerId), page: String(params.page), limit: String(params.limit ?? 50) });
   if (params.projectId) qs.set("projectId", String(params.projectId));
   if (params.search) qs.set("search", params.search);
+  if (params.rungId) qs.set("rungId", String(params.rungId));
   const res = await fetchWithAuth(`${BASE}/transfer/candidates?${qs.toString()}`);
   return handleResponse<TransferCandidatePage>(res);
 };

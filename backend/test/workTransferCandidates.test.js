@@ -56,6 +56,24 @@ describe("GET /transfer/candidates (paged)", () => {
     expect(pageSql).toMatch(/dae\.EngineerId = @engineerId/);
   });
 
+  it("a report row opened in Work Transfer: ?rungId narrows the list (and the count) to that one activity", async () => {
+    const res = await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1&rungId=777");
+    expect(res.status).toBe(200);
+    expect(mockInputs.rungFilter).toBe(777);
+    const pageSql = mockQueries.find((q) => /OFFSET @offset/.test(q));
+    const countSql = mockQueries.find((q) => /COUNT\(\*\) AS total/.test(q));
+    expect(pageSql).toMatch(/AND dma\.Id = @rungFilter/);
+    expect(countSql).toMatch(/AND dma\.Id = @rungFilter/);
+  });
+
+  it("a junk ?rungId is ignored, never put in the SQL", async () => {
+    await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1&rungId=1;DROP");
+    // parseInt("1;DROP") is 1 - a number, bound as a parameter, never concatenated
+    expect(mockQueries.join(" ")).not.toMatch(/DROP/);
+    await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1&rungId=abc");
+    expect(mockInputs.rungFilter).toBe(1); // from the first request only; "abc" added nothing new
+  });
+
   it("restricts a scoped user to their projects", async () => {
     scope = [4, 7];
     await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1");

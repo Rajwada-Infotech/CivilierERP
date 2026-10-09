@@ -1,3 +1,4 @@
+import { chainLinksForRow } from "@/lib/civilWorkDprLinks";
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { fmtIstIso } from "@/lib/istTime";
 import { useNavigate } from "react-router-dom";
@@ -2823,6 +2824,10 @@ const ReportTable: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
+  // Civil Work DPR rows carry the activity / chain they are about: offer to open it in the pages that work on it.
+  const reportNavigate = useNavigate();
+  const { canAccessPage: canOpenPage } = useAuth();
+  const chainLinks = selectedRow ? chainLinksForRow(selectedRow, (pk) => canOpenPage(pk as never)) : [];
   const PAGE_SIZE = 20;
 
   // ── Godown switcher (stock-summary only) ─────────────────────────────────
@@ -3538,6 +3543,26 @@ const ReportTable: React.FC<{
             {report.label}
           </DialogTitle>
         </DialogHeader>
+        {chainLinks.length > 0 && (
+          <div className="rounded-lg border border-border bg-muted/30 p-3">
+            <p className="mb-2 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">Open this activity in</p>
+            <div className="flex flex-wrap gap-2">
+              {chainLinks.map((l) => (
+                <button
+                  key={l.label}
+                  type="button"
+                  onClick={() => {
+                    setSelectedRow(null);
+                    reportNavigate(l.to);
+                  }}
+                  className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {selectedRow && (
           <div className="divide-y divide-border">
             {effectiveColumns.map((col) => {

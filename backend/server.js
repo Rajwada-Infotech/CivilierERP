@@ -13,7 +13,7 @@ const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
 const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const authMiddleware = require("./middleware/auth");
-const { attachRateLimitUser, rateLimitKey } = require("./middleware/rateLimitIdentity");
+const { attachRateLimitUser, rateLimitKey, loginRateLimitKey } = require("./middleware/rateLimitIdentity");
 const { attachProjectScope } = require("./services/projectScope");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
@@ -462,12 +462,27 @@ async function createApp() {
   // including the Vercel serverless entry point (api/index.js) which calls
   // createApp() directly and never goes through startServer().
   if (!isTest) {
+    // Per account: 20 attempts / 15 min at one email address (see loginRateLimitKey for why not per IP).
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 20,
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
+      keyGenerator: loginRateLimitKey,
       skip: (req) => isDev && isLocalRequest(req),
+      validate: false,
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+    // Per IP, much higher: one machine trying many accounts. Everyone behind one address (an office, or this
+    // server's Docker gateway) shares it, so it must allow a whole company signing in together.
+    const loginIpLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 600,
+      message: { error: "Too many login attempts. Try again later." },
+      store: makeStore("rl:login-ip:"),
+      skip: (req) => isDev && isLocalRequest(req),
+      validate: false,
       standardHeaders: true,
       legacyHeaders: false,
     });
@@ -523,7 +538,7 @@ async function createApp() {
       legacyHeaders: false,
     });
 
-    app.use("/api/users/login", loginLimiter);
+    app.use("/api/users/login", loginIpLimiter, loginLimiter);
     app.use("/api", attachRateLimitUser);
     app.use("/api", apiLimiter);
   }

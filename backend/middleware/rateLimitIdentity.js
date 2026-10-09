@@ -29,4 +29,15 @@ function attachRateLimitUser(req, _res, next) {
 
 const rateLimitKey = (req) => (req.rateLimitUserId != null ? `user:${req.rateLimitUserId}` : req.ip);
 
-module.exports = { attachRateLimitUser, rateLimitKey };
+/**
+ * Login attempts are counted per email address, not per IP: behind Docker / the load balancer every request shares one
+ * address, so "20 attempts per IP" meant 20 logins for the whole company - and when maintenance ends and everyone signs
+ * back in at once, the 21st person was refused. Guessing one account's password is still capped at 20 tries per 15
+ * minutes; a separate, much higher per-IP cap (see server.js) still stops one machine spraying many accounts.
+ */
+const loginRateLimitKey = (req) => {
+  const email = String((req.body && req.body.email) || "").trim().toLowerCase();
+  return email ? `email:${email.slice(0, 254)}` : req.ip;
+};
+
+module.exports = { attachRateLimitUser, rateLimitKey, loginRateLimitKey };
