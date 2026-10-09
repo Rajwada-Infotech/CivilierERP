@@ -1070,7 +1070,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
     // A villa sold directly on plots nobody bought carries its land in its one
     // villa price: that land part (Plot Master area x rate, at most the price)
-    // is recorded so GST and the ledger keep it out of construction (549).
+    // is recorded so GST and the ledger keep it out of construction (552).
     if (!isPlotBooking) {
       const land = await require("./villaLand").directSaleLandValue(tx, unitIds);
       if (land > 0) {

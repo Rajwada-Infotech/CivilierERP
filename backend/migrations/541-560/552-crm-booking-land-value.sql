@@ -1,4 +1,4 @@
--- Migration 549: the land part of a villa sold directly.
+-- Migration 552: the land part of a villa sold directly.
 --
 -- A villa built on plots nobody bought is sold whole — land and villa — at one
 -- villa price, with no plot line on the booking. dbo.CrmBooking.LandValue holds

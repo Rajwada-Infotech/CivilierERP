@@ -337,7 +337,7 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
   const isPureLand = hasLand && constructionValue === 0;
 
   // A villa sold directly carries its land inside the villa price
-  // (CrmBooking.LandValue, migration 549) rather than on a plot line. Its share
+  // (CrmBooking.LandValue, migration 552) rather than on a plot line. Its share
   // of the booking applies to whatever amount is asked about — the whole
   // booking for GST, one invoice for the ledger.
   if (!hasLand) {
