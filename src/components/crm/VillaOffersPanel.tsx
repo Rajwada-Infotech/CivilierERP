@@ -4,7 +4,7 @@ import { Home } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 interface VillaOffer {
-  UnitId: number; UnitName: string; ProjectName: string | null; VillaTypeCode: string | null; VillaTypeName: string | null;
+  UnitId: number; UnitName: string; ProjectId: number; BlockId: number | null; CompanyId: number | null; CustomerId: number; ProjectName: string | null; VillaTypeCode: string | null; VillaTypeName: string | null;
   PlotName: string; LandBookingId: number; LandBookingNo: string; CustomerName: string | null; Mobile: string | null; LandDue: number;
 }
 
@@ -41,7 +41,8 @@ export function VillaOffersPanel() {
               <th className="py-1 pr-2 font-medium">Type</th>
               <th className="py-1 pr-2 font-medium">Plot owner</th>
               <th className="py-1 pr-2 font-medium text-right">Plot balance</th>
-              <th className="py-1 font-medium">Plot booking</th>
+              <th className="py-1 pr-2 font-medium">Plot booking</th>
+              <th className="py-1 font-medium"><span className="sr-only">Action</span></th>
             </tr>
           </thead>
           <tbody>
@@ -53,6 +54,13 @@ export function VillaOffersPanel() {
                 <td className="py-1 pr-2 text-right">{o.LandDue > 0 ? fmt(o.LandDue) : "Paid"}</td>
                 <td className="py-1">
                   <Link to={`/crm/bookings?view=${o.LandBookingId}`} className="text-primary underline-offset-2 hover:underline">{o.LandBookingNo}</Link>
+                </td>
+                <td className="py-1 pl-2 whitespace-nowrap">
+                  <Link
+                    to={`/crm/applications?newVilla=${o.UnitId}&customer=${o.CustomerId}&project=${o.ProjectId}&company=${o.CompanyId ?? ""}&block=${o.BlockId ?? ""}`}
+                    className="inline-flex items-center rounded-md border border-primary/40 px-2 py-0.5 font-medium text-primary hover:bg-primary/10">
+                    Start villa application
+                  </Link>
                 </td>
               </tr>
             ))}

@@ -344,7 +344,7 @@ router.get("/villa-offers", requirePageRight("crm-bookings", "view"), async (req
     }
     const live = (alias) => `${alias}.IsActive = 1 AND ${alias}.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')`;
     const rows = (await request.query(`
-      SELECT u.Id AS UnitId, u.UnitName, u.ProjectId, e.name AS ProjectName, vt.Code AS VillaTypeCode, vt.Name AS VillaTypeName,
+      SELECT u.Id AS UnitId, u.UnitName, u.ProjectId, u.BlockId, e.company_id AS CompanyId, e.name AS ProjectName, vt.Code AS VillaTypeCode, vt.Name AS VillaTypeName,
              p.PlotName, lb.Id AS LandBookingId, lb.BookingNo AS LandBookingNo, a.CustomerId, c.CustomerName, c.Mobile,
              (SELECT ISNULL(SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)), 0) FROM dbo.CrmPaymentMilestone m
                WHERE m.BookingId = lb.Id AND m.Status NOT IN (N'Paid', N'Waived')) AS LandDue
