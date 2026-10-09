@@ -1176,18 +1176,16 @@ function ConfigForm({
 
 // ─── Module group selector ─────────────────────────────────────────────────────
 
-function ModuleGroupSelector({
+export function ModuleGroupSelector({
   selectedModules,
   toggleModule,
 }: {
   selectedModules: string[];
   toggleModule: (id: string) => void;
 }) {
-  const [openGroups, setOpenGroups] = React.useState<string[]>(() =>
-    MODULE_GROUPS.filter((g) =>
-      g.modules.some((mid) => selectedModules.includes(mid)),
-    ).map((g) => g.id),
-  );
+  // Every group starts closed, even ones with areas already selected: the open list drops over the steps below it,
+  // so it only opens when the chevron is clicked. (The count badge on each chip already shows what is selected.)
+  const [openGroups, setOpenGroups] = React.useState<string[]>([]);
 
   const toggleGroup = (gid: string) =>
     setOpenGroups((prev) =>
