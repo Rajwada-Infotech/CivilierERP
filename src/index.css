@@ -185,6 +185,45 @@
         --sidebar-ring: 43 96% 52%;
     }
 
+    /* SAGE THEME — calm, light, built around sage green (#9CAF88).
+       Pale sage-tinted paper for the page, a deeper sage (#47674F) for anything that carries white text
+       (buttons, links, focus), sage itself kept for soft fills and highlights, and a warm clay as the one
+       complementary accent. Text contrast: foreground on background ~14:1, muted text ~5:1, white on primary ~6:1. */
+    [data-theme="sage"] {
+        --background: 94 20% 94%;
+        --foreground: 150 20% 11%;
+        --card: 90 26% 98%;
+        --card-foreground: 150 20% 11%;
+        --popover: 90 26% 98%;
+        --popover-foreground: 150 20% 11%;
+        --primary: 138 24% 33%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 22 42% 42%;
+        --secondary-foreground: 0 0% 100%;
+        --muted: 94 16% 89%;
+        --muted-foreground: 140 9% 35%;
+        --accent: 96 24% 82%;
+        --accent-foreground: 140 28% 20%;
+        --destructive: 0 62% 44%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 95 15% 80%;
+        --input: 95 15% 80%;
+        --ring: 138 24% 33%;
+        --radius: 0.625rem;
+        --surface: 93 18% 91%;
+        --accent-1: 138 24% 33%;
+        --accent-2: 22 42% 42%;
+        --accent-3: 205 32% 42%;
+        --sidebar-background: 96 18% 90%;
+        --sidebar-foreground: 150 18% 18%;
+        --sidebar-primary: 138 24% 33%;
+        --sidebar-primary-foreground: 0 0% 100%;
+        --sidebar-accent: 96 20% 84%;
+        --sidebar-accent-foreground: 140 28% 18%;
+        --sidebar-border: 95 15% 78%;
+        --sidebar-ring: 138 24% 33%;
+    }
+
     /* GLAS THEME — Premium Glassmorphism */
     /* Glass — light, cream, Apple-style frosted glass. Warm cream page,
        milky translucent surfaces (see the GLASS THEME block below for the
@@ -644,14 +683,29 @@
 /* All dark-background themes (dark/midnight/root/glass): icon is inverted via
    Tailwind class → white icon. Light theme needs a reset to keep the native
    dark icon visible on its white background. */
-:is([data-theme="light"], [data-theme="glass"]) input[type="date"]::-webkit-calendar-picker-indicator,
-:is([data-theme="light"], [data-theme="glass"])
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) input[type="date"]::-webkit-calendar-picker-indicator,
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"])
     input[type="datetime-local"]::-webkit-calendar-picker-indicator,
-:is([data-theme="light"], [data-theme="glass"]) input[type="month"]::-webkit-calendar-picker-indicator,
-:is([data-theme="light"], [data-theme="glass"]) input[type="week"]::-webkit-calendar-picker-indicator,
-:is([data-theme="light"], [data-theme="glass"]) input[type="time"]::-webkit-calendar-picker-indicator {
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) input[type="month"]::-webkit-calendar-picker-indicator,
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) input[type="week"]::-webkit-calendar-picker-indicator,
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) input[type="time"]::-webkit-calendar-picker-indicator {
     filter: none !important;
     opacity: 0.6;
+}
+
+/* ── Sage theme: small touches that tokens cannot do ──────────────────────── */
+[data-theme="sage"] ::selection {
+    background: hsl(96 26% 76%);
+    color: hsl(150 20% 11%);
+}
+[data-theme="sage"] * {
+    scrollbar-color: hsl(96 14% 66%) transparent;
+}
+[data-theme="sage"] body {
+    background-image:
+        radial-gradient(60rem 36rem at 8% -6%, hsl(96 30% 86% / 0.7), transparent 62%),
+        radial-gradient(48rem 30rem at 100% 0%, hsl(40 36% 88% / 0.55), transparent 60%);
+    background-attachment: fixed;
 }
 
 /* ── Sonner toast — close button top-right ────────────────────────────────── */
@@ -818,10 +872,10 @@
 .crm-dialog input[type="time"] {
     color-scheme: dark;
 }
-:is([data-theme="light"], [data-theme="glass"]) .crm-dialog input[type="date"],
-:is([data-theme="light"], [data-theme="glass"]) .crm-dialog input[type="number"],
-:is([data-theme="light"], [data-theme="glass"]) .crm-dialog input[type="datetime-local"],
-:is([data-theme="light"], [data-theme="glass"]) .crm-dialog input[type="time"],
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) .crm-dialog input[type="date"],
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) .crm-dialog input[type="number"],
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) .crm-dialog input[type="datetime-local"],
+:is([data-theme="light"], [data-theme="glass"], [data-theme="sage"]) .crm-dialog input[type="time"],
 [data-theme="bw"] .crm-dialog input[type="date"],
 [data-theme="bw"] .crm-dialog input[type="number"],
 [data-theme="bw"] .crm-dialog input[type="datetime-local"],
