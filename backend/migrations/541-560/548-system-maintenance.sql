@@ -1,6 +1,6 @@
 -- Migration 548: system maintenance switch.
 -- One row (Id = 1). While IsActive = 1 every API call except a super admin's is answered with a 503 carrying
--- the message and the expected end time, and the web app shows the Maintenance page.
+-- the message and the expected end time, and the web app shows a full-screen Maintenance page.
 
 IF OBJECT_ID('dbo.SystemMaintenance', 'U') IS NULL
 BEGIN
@@ -17,6 +17,12 @@ BEGIN
   );
   PRINT 'Migration 548: created dbo.SystemMaintenance.';
 END
+GO
+
+-- StartsAt: when maintenance actually begins. Switching it on announces it straight away (everyone sees a countdown
+-- and can finish what they are doing); the system is held from StartsAt on. NULL = held at once.
+IF COL_LENGTH('dbo.SystemMaintenance', 'StartsAt') IS NULL
+  ALTER TABLE dbo.SystemMaintenance ADD StartsAt DATETIME2 NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM dbo.SystemMaintenance WHERE Id = 1)

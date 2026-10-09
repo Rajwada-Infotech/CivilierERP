@@ -13,7 +13,14 @@ const DEFAULT_MESSAGE = "The system is offline for a short while so we can make 
  * Where everyone but a super admin lands while maintenance is on (Admin > System Maintenance). It shows the
  * message and the expected end, counts down, and sends people back in by itself the moment maintenance is over.
  */
-const Maintenance = () => {
+interface OverlayProps {
+  /** Maintenance is over: take the screen away without reloading the app. */
+  onOver: () => void;
+  /** The "Administrator sign in" button, which lets the overlay step aside on the login page. */
+  onAdminSignIn: () => void;
+}
+
+const Maintenance = ({ overlay }: { overlay?: OverlayProps }) => {
   const [state, setState] = useState<MaintenanceState | null>(() => readStoredMaintenance());
   const [now, setNow] = useState(() => Date.now());
   const [checking, setChecking] = useState(false);
@@ -32,7 +39,8 @@ const Maintenance = () => {
         } catch {
           /* ignore */
         }
-        window.location.replace("/");
+        if (overlay) overlay.onOver();
+        else window.location.replace("/");
         return;
       }
       setState(next);
@@ -41,7 +49,7 @@ const Maintenance = () => {
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [overlay]);
 
   useEffect(() => {
     void check();
@@ -59,7 +67,11 @@ const Maintenance = () => {
   const progress = state ? maintenanceProgress(state.startedAt, state.endsAt, now) : null;
 
   return (
-    <main className="relative flex min-h-screen flex-col bg-background text-foreground">
+    <main
+      className={`flex min-h-screen flex-col bg-background text-foreground ${
+        overlay ? "fixed inset-0 z-[3000] overflow-y-auto" : "relative"
+      }`}
+    >
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 opacity-[0.07]"
@@ -155,12 +167,22 @@ const Maintenance = () => {
               <RefreshCw size={15} className={checking ? "motion-safe:animate-spin" : ""} />
               Check now
             </button>
-            <Link
-              to="/login"
-              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              <ShieldCheck size={14} /> Administrator sign in
-            </Link>
+            {overlay ? (
+              <button
+                type="button"
+                onClick={overlay.onAdminSignIn}
+                className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                <ShieldCheck size={14} /> Administrator sign in
+              </button>
+            ) : (
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                <ShieldCheck size={14} /> Administrator sign in
+              </Link>
+            )}
           </div>
 
           <p className="mt-6 text-xs text-muted-foreground" role="status">
