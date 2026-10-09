@@ -73,7 +73,7 @@ async function main() {
         { lt: [sql.Int, saved.layoutTypeId], l: [sql.NVarChar(50), saved.label], v: [sql.Int, t.Id] })).recordset;
       let added = 0;
       for (const v of villas) {
-        const s = await syncUnitRooms(tx, v.Id, { removeUnused: false });
+        const s = await syncUnitRooms(tx, v.Id, { removeUnused: false, villaTool: true });
         added += s.created + (s.reactivated || 0);
         await applyStoreys(tx, v.Id);
       }

@@ -254,6 +254,12 @@ const MODULE_OPTIONS = [
     desc: "Booking cancellation",
   },
   {
+    id: "crm-resales",
+    label: "Property Resale & Buy-back",
+    icon: "🔁",
+    desc: "A sold property passing to a new buyer, or bought back by us",
+  },
+  {
     id: "crm-refunds",
     label: "CRM Refund",
     icon: "💸",
@@ -317,6 +323,7 @@ const MODULE_GROUPS = [
       "crm-noc",
       "crm-brokerage",
       "crm-refunds",
+      "crm-resales",
       "crm-cancellations",
     ],
   },

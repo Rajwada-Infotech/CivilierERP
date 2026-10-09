@@ -2414,7 +2414,7 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
         .query(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, UnitType, LayoutTypeId, UnitKind, AreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, VillaTypeId, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
                 OUTPUT INSERTED.Id VALUES (@pid, @bid, @name, @type, @layoutTypeId, @kind, @area, @bua, @sbu, @villaType, @rate, 1, @by, SYSDATETIME())`);
       const unitId = created.recordset[0].Id;
-      await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
+      await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null, villaTool: true });
       await tx.request().input("uid", sql.Int, unitId)
         .query(`UPDATE dbo.PlotMaster SET ConvertedUnitId = @uid, ConvertedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
                 WHERE Id IN (${plotIds.join(",")})`);
@@ -2461,29 +2461,9 @@ router.post("/projects/:projectId/villas/fill-dpr", requirePageRight("crm-auto-p
   if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ error: "Invalid project" });
   if (!assertProjectAllowed(req, res, projectId)) return;
   const pool = getPool();
-  const villas = (await pool.request().input("p", sql.Int, projectId).query(`
-    SELECT DISTINCT u.Id, u.UnitName FROM dbo.UnitMaster u
-    JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
-    WHERE u.ProjectId = @p AND u.IsActive = 1
-      AND EXISTS (SELECT 1 FROM dbo.RoomMaster r WHERE r.UnitId = u.Id AND r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL
-                    AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id))`)).recordset;
-  const { createChainsForUnit } = require("../services/autoDprChains");
-  let created = 0; const still = new Set(); const failed = [];
-  for (const v of villas) {
-    const tx = pool.transaction();
-    await tx.begin();
-    try {
-      const r = await createChainsForUnit(tx, v.Id, req.user?.email || req.user?.name || null);
-      await tx.commit();
-      created += r.created;
-      r.skipped.forEach((n) => still.add(String(n).replace(/\s+\d+$/, "")));
-    } catch (e) {
-      try { await tx.rollback(); } catch (_) { /* rolled back */ }
-      failed.push(`${v.UnitName}: ${e.message}`);
-    }
-  }
-  if (created) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
-  res.json({ success: failed.length === 0, villas: villas.length, chainsCreated: created, stillWithoutSteps: [...still], failed });
+  const r = await require("../services/autoDprChains").fillChainlessVillaRooms(pool, { projectId, actor: req.user?.email || req.user?.name || null });
+  if (r.chainsCreated) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
+  res.json({ success: r.failed.length === 0, ...r });
 });
 
 // The full name a villa is stored under: a bare name ("V-21", "Rose Villa")
@@ -2501,6 +2481,64 @@ async function fullVillaName(db, projectId, blockId, name) {
 // Rename a built villa. Its DPR chains are renamed with it (each in its own
 // naming style), and so are its live bookings / applications, so every screen
 // shows the new name; dead and transferred sales keep the name they had.
+// POST /villas/:unitId/add-missing-rooms — a built villa brought up to its
+// type's floor plan: the plan's rooms it lacks are ADDED (floor + DPR steps);
+// existing rooms, their names and their work are never touched.
+// ?dryRun=1 reports what would be added and changes nothing.
+router.post("/villas/:unitId/add-missing-rooms", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const unitId = Number(req.params.unitId);
+  if (!Number.isInteger(unitId) || unitId <= 0) return res.status(400).json({ error: "Invalid villa" });
+  const dryRun = req.query.dryRun === "1" || req.body?.dryRun === true;
+  const pool = getPool();
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const { addMissingPlanRooms } = require("../services/villaComposition");
+    const r = await addMissingPlanRooms(tx, unitId, req.user?.userId || null);
+    if (dryRun || !r.added) await tx.rollback(); else await tx.commit();
+    if (!dryRun && r.added) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
+    res.json({ success: true, dryRun, ...r,
+      message: !r.added ? "Already has every room in its floor plan"
+        : `${dryRun ? "Would add" : "Added"} ${r.added} room(s)${r.withoutSteps.length ? ` — ${r.withoutSteps.length} without DPR steps yet (no step list for their room type)` : ""}` });
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* rolled back */ }
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Could not add the rooms" });
+  }
+});
+
+// POST /projects/:projectId/villas/add-missing-rooms — the same for every
+// typed villa in the project, each in its own transaction. ?dryRun=1 reports only.
+router.post("/projects/:projectId/villas/add-missing-rooms", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ error: "Invalid project" });
+  if (!assertProjectAllowed(req, res, projectId)) return;
+  const dryRun = req.query.dryRun === "1" || req.body?.dryRun === true;
+  const pool = getPool();
+  const villaTypeId = req.query.villaTypeId ? Number(req.query.villaTypeId) : null;
+  const villas = (await pool.request().input("p", sql.Int, projectId).input("vt", sql.Int, Number.isInteger(villaTypeId) ? villaTypeId : null).query(`
+    SELECT DISTINCT u.Id, u.UnitName FROM dbo.UnitMaster u
+    JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
+    JOIN dbo.VillaTypeMaster v ON v.Id = u.VillaTypeId AND v.IsActive = 1 AND v.LayoutTypeId IS NOT NULL
+    WHERE u.ProjectId = @p AND u.IsActive = 1 AND (@vt IS NULL OR u.VillaTypeId = @vt) ORDER BY u.UnitName`)).recordset;
+  const { addMissingPlanRooms } = require("../services/villaComposition");
+  const changed = []; const failed = [];
+  let added = 0;
+  for (const v of villas) {
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const r = await addMissingPlanRooms(tx, v.Id, req.user?.userId || null);
+      if (dryRun || !r.added) await tx.rollback(); else await tx.commit();
+      if (r.added) { added += r.added; changed.push({ villa: v.UnitName, added: r.added, withoutSteps: r.withoutSteps.length }); }
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* rolled back */ }
+      failed.push(`${v.UnitName}: ${e.message}`);
+    }
+  }
+  if (!dryRun && added) { await bumpCacheVersion("unit-master"); await bumpFlatMasterCaches(); }
+  res.json({ success: failed.length === 0, dryRun, villas: villas.length, roomsAdded: added, changed, failed });
+});
+
 router.post("/villas/:unitId/rename", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
   const unitId = Number(req.params.unitId);
   const raw = String(req.body?.UnitName || "").trim();
@@ -2601,12 +2639,9 @@ router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-set
       SELECT d.Id, d.Alias, r.RoomName, u.UnitName FROM dbo.DependencyMaster d
       JOIN dbo.RoomMaster r ON r.Id = d.RoomId JOIN dbo.UnitMaster u ON u.Id = d.FlatId
       WHERE d.FlatId = @u`)).recordset.map((c) => [c.Id, aliasFormatOf(c)]));
-    // 1. Retire the untouched stubs (steps cancelled the way a manual cancel records it).
-    await q(`UPDATE a SET PreCancelStatus = a.Status, Status = N'CANCELLED', UpdatedAt = SYSDATETIME()
-             FROM dbo.DependencyActivityAssignment a
-             JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
-             JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
-             WHERE d.FlatId = @u AND d.IsActive = 1 AND a.Status = N'PENDING'`);
+    // 1. Retire the old chains. Their (untouched) steps keep their status —
+    //    nobody cancelled that work; the chain is simply no longer live, and
+    //    every list and count reads live chains only.
     await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
     await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1 AND RoomCategoryId IS NOT NULL");
     // 2. The type and its own layout. Its areas too when asked — never once
@@ -2623,7 +2658,7 @@ router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-set
     }
     await tx.request().input("u", sql.Int, unitId).input("l", sql.NVarChar(50), vt.LayoutLabel).query("UPDATE dbo.UnitMaster SET UnitType = @l WHERE Id = @u");
     // 3. Rooms from the plan (an inactive room of the same category comes back first), then their floors.
-    const sync = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
+    const sync = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null, villaTool: true });
     await require("../services/villaComposition").applyStoreys(tx, unitId);
     // 4. A returning room gets its own chain back (steps restored, alias renamed with the room).
     const revived = await q(`
@@ -2699,13 +2734,8 @@ router.post("/plots/unconvert", requirePageRight("crm-auto-project-setup", "dele
       return res.status(409).json({ error: `Work has started on this villa (${work.Steps} step(s) allocated or progressed, ${work.Labour} labour entr(ies), ${work.Drawings} drawing note(s)) — it can't be undone` });
     }
     const villaName = (await q("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @u")).recordset[0]?.UnitName || `Unit #${unitId}`;
-    // The (untouched) steps are cancelled the way a manual cancel records it,
-    // so a retired chain never shows as live Pending work.
-    await q(`UPDATE a SET PreCancelStatus = a.Status, Status = N'CANCELLED', UpdatedAt = SYSDATETIME()
-             FROM dbo.DependencyActivityAssignment a
-             JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
-             JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
-             WHERE d.FlatId = @u AND a.Status IN (N'PENDING', N'IN_PROGRESS')`);
+    // The chains are retired; their (untouched) steps keep their status —
+    // a retired chain is out of every list and count, not "cancelled" work.
     const retired = await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
     await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1");
     // Renamed as it retires: UnitMaster's name index also counts inactive rows,

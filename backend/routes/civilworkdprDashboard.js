@@ -33,10 +33,10 @@ router.get("/", async (req, res) => {
     // Project scoping: a restricted user's tiles/feeds only count their projects.
     const scope = req.projectScope;
     const caProject = projectPredicate(scope, "ProjectId");
-    const dmProject = projectPredicate(scope, "dm.ProjectId");
-    const rungInScope = scope
-      ? `AND DependencyMasterActivityId IN (SELECT dma2.Id FROM dbo.DependencyMasterActivity dma2 JOIN dbo.DependencyMaster dm2 ON dm2.Id = dma2.DependencyMasterId WHERE 1=1${projectPredicate(scope, "dm2.ProjectId")})`
-      : "";
+    // Live chains only — a retired chain's (auto-cancelled) steps are history, not work.
+    const dmProject = " AND dm.IsActive = 1" + projectPredicate(scope, "dm.ProjectId");
+    const rungInScope =
+      `AND DependencyMasterActivityId IN (SELECT dma2.Id FROM dbo.DependencyMasterActivity dma2 JOIN dbo.DependencyMaster dm2 ON dm2.Id = dma2.DependencyMasterId WHERE dm2.IsActive = 1${projectPredicate(scope, "dm2.ProjectId")})`;
 
     const [
       activityStats,
@@ -94,7 +94,8 @@ router.get("/", async (req, res) => {
           COUNT(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END)
                                                                                 AS TodayCount
         FROM dbo.DependencyActivityAssignment
-        WHERE 1=1 ${rungInScope}
+        -- One row per activity (its current attempt), the same count Reporting shows.
+        WHERE IsCurrent = 1 ${rungInScope}
         GROUP BY Status
       `),
 
@@ -314,6 +315,7 @@ router.get("/", async (req, res) => {
         totalCount: assignedWorkTotal,
         todayCount: assignedWorkToday,
         pendingCount: assignedWorkByStatus.PENDING || 0,
+        allocatedCount: assignedWorkByStatus.ALLOCATED || 0,
         inProgressCount: assignedWorkByStatus.IN_PROGRESS || 0,
         completedCount: assignedWorkByStatus.COMPLETED || 0,
         holdCount: assignedWorkByStatus.HOLD || 0,

@@ -231,7 +231,7 @@ router.put("/:id/plan", requirePageRight(PAGE, "edit"), async (req, res) => {
       WHERE VillaTypeId = @v AND IsActive = 1`)).recordset;
     let roomsAdded = 0;
     for (const v of villas) {
-      const s = await syncUnitRooms(tx, v.Id, { removeUnused: false, createdBy: req.user?.userId || null });
+      const s = await syncUnitRooms(tx, v.Id, { removeUnused: false, createdBy: req.user?.userId || null, villaTool: true });
       roomsAdded += s.created + (s.reactivated || 0);
       await applyStoreys(tx, v.Id);
     }

@@ -121,6 +121,7 @@ export const crmNavItems: NavItem[] = [
     children: [
       { label: "Service Tickets",    path: "/crm/service-tickets",    pageKey: "crm-service-tickets"    },
       { label: "Cancellations",      path: "/crm/cancellations",      pageKey: "crm-cancellations"      },
+      { label: "Resale & Buy-back", path: "/crm/resales",            pageKey: "crm-resales"            },
       { label: "Customer 360",       path: "/crm/customer-360",       pageKey: "crm-customer-360"       },
       { label: "Construction Updates", path: "/crm/construction-updates", pageKey: "crm-construction-updates" },
     ],

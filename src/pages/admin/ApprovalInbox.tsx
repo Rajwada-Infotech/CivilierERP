@@ -344,6 +344,13 @@ export const MODULE_CONFIG: Record<
   // centralized inbox, only via CrmRefunds.tsx's own inline actions —
   // inconsistent with every sibling CRM module (cancellations, agreements,
   // brokerage, NOC, booking amendments), which all appear in both places.
+  "crm-resales": {
+    icon: Undo2,
+    color: "text-teal-600 bg-teal-600/10",
+    navPath: "/crm/resales",
+    apiEndpoint: "/api/crm/resales",
+    label: "Property Resale & Buy-back",
+  },
   "crm-refunds": {
     icon: Undo2,
     color: "text-orange-600 bg-orange-600/10",
@@ -510,6 +517,7 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "crm-noc": "sales",
   "crm-booking-amendment": "sales",
   "crm-refunds": "sales",
+  "crm-resales": "sales",
 };
 
 export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
@@ -902,6 +910,8 @@ const InboxRow: React.FC<{
             // named-on-the-level OR super_admin, never admin/dba generically).
             // Everyone else's button visibility comes from workflowVisible
             // (_canAct) below, not this role list.
+            // Resale / buy-back: CRM head, then Finance (approvalService "crm-resales").
+            : item.Module === "crm-resales" ? ["admin", "super_admin", "marketing_head", "accounts_head", "finance"]
             : item.Module === "civilworkdpr-approval" ? ["super_admin"]
             : undefined
           }

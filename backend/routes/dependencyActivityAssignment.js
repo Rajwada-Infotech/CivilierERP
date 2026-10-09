@@ -441,7 +441,7 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 1 AND dm.IsActive = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
         GROUP BY daa.Status
       `);
       const roomsReq = pool.request();
@@ -464,7 +464,7 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 1 AND dm.IsActive = 1${searchCond}${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
           ${statusFilter && STATUS_VALUES.has(statusFilter) ? "AND daa.Status = @statusFilter" : ""}
         GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName, rm.Storey
       `);
@@ -505,7 +505,7 @@ router.get(
             FROM dbo.DependencyMaster dm
             JOIN dbo.DependencyMasterActivity dma ON dma.DependencyMasterId = dm.Id
             JOIN dbo.DependencyActivityAssignment daa ON daa.DependencyMasterActivityId = dma.Id AND daa.IsCurrent = 1
-            WHERE dm.ProjectId = ep.id
+            WHERE dm.ProjectId = ep.id AND dm.IsActive = 1
           )${projectPredicate(req.projectScope, "ep.id")}
         ORDER BY ep.name
       `);
@@ -634,7 +634,7 @@ router.get(
       const r = await request.query(`
         SELECT TOP 2000 daa.Id AS id
         ${TRANSFER_FROM}
-        WHERE dae.EngineerId = @engineerId AND daa.IsCurrent = 1
+        WHERE dae.EngineerId = @engineerId AND daa.IsCurrent = 1 AND dm.IsActive = 1
           AND daa.Status IN (${TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ")})${cond}${projectPredicate(req.projectScope, "dm.ProjectId")}
         ORDER BY daa.Id
       `);
@@ -664,7 +664,7 @@ router.get(
         const offset = (Math.max(1, parseInt(req.query.page, 10) || 1) - 1) * limit;
         const statuses = TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ");
         const scope = projectPredicate(req.projectScope, "dm.ProjectId");
-        const base = `WHERE dae.EngineerId = @engineerId AND daa.IsCurrent = 1 AND daa.Status IN (${statuses})${scope}`;
+        const base = `WHERE dae.EngineerId = @engineerId AND daa.IsCurrent = 1 AND dm.IsActive = 1 AND daa.Status IN (${statuses})${scope}`;
 
         const listReq = pool.request().input("engineerId", sql.Int, engineerId);
         const cond = transferFilters(req, listReq);
@@ -763,7 +763,7 @@ router.get(
         LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
         LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE daa.IsCurrent = 1
+        WHERE daa.IsCurrent = 1 AND dm.IsActive = 1
           AND daa.Status IN (${TRANSFERABLE_STATUSES.map((s) => `'${s}'`).join(", ")})${projectCond}${projectPredicate(req.projectScope, "dm.ProjectId")}
         ORDER BY ep.name, dm.ProjectId, scopePath, am.activity_name
       `);

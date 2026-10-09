@@ -35,6 +35,7 @@ const GL_POSTERS = {
 const MAKER_COLUMNS = {
   "crm-cancellations": "RequestedBy",
   "crm-refunds": "RequestedBy",
+  "crm-resales": "CreatedBy",
   "crm-brokerage": "CreatedBy",
 };
 
@@ -140,6 +141,7 @@ const MODULE_MAP = {
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
   "crm-refunds": { table: "dbo.CrmRefund", pk: "Id", status: "Status" },
+  "crm-resales": { table: "dbo.CrmUnitResale", pk: "Id", status: "Status" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
   contracts: { table: "dbo.Contract", pk: "ContractId", status: "Status" },
   // Same ApprovalAuditLog caveat as crm-agreement-date above: no Module
@@ -211,6 +213,8 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,
   "crm-refunds": CRM_APPROVER_ROLES,
+  // Resale / buy-back: CRM head, then Finance (levels set in Approval Setup).
+  "crm-resales": [...CRM_APPROVER_ROLES, "accounts_head", "finance"],
   "crm-noc": CRM_APPROVER_ROLES,
   // Same default CRM approver set as crm-brokerage/crm-cancellations/crm-noc
   // — no legal_head carve-out here, that's specific to crm-agreements (see

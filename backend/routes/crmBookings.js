@@ -327,6 +327,48 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
   }
 });
 
+// Villa ready — offer to plot owner: villas built on SOLD plots whose owner
+// has neither booked nor applied for the villa yet. Each row is one decision
+// for CRM: the owner buys the villa, sells the plot back, or resells it.
+router.get("/villa-offers", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    const conds = ["u.IsActive = 1"];
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "u.ProjectId", "").trim());
+    if (req.query.projectId != null) {
+      const pid = parseId(req.query.projectId);
+      if (pid === null) return res.status(400).json({ error: "Invalid projectId" });
+      request.input("pid", sql.Int, pid);
+      conds.push("u.ProjectId = @pid");
+    }
+    const live = (alias) => `${alias}.IsActive = 1 AND ${alias}.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')`;
+    const rows = (await request.query(`
+      SELECT u.Id AS UnitId, u.UnitName, u.ProjectId, u.BlockId, e.company_id AS CompanyId, e.name AS ProjectName, vt.Code AS VillaTypeCode, vt.Name AS VillaTypeName,
+             p.PlotName, lb.Id AS LandBookingId, lb.BookingNo AS LandBookingNo, a.CustomerId, c.CustomerName, c.Mobile,
+             (SELECT ISNULL(SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)), 0) FROM dbo.CrmPaymentMilestone m
+               WHERE m.BookingId = lb.Id AND m.Status NOT IN (N'Paid', N'Waived')) AS LandDue
+      FROM dbo.UnitMaster u
+      JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
+      JOIN dbo.CrmBookingPlot bp ON bp.PlotId = p.Id AND bp.Status = N'Active'
+      JOIN dbo.CrmBooking lb ON lb.Id = bp.BookingId AND ${live("lb")}
+      JOIN dbo.CrmApplication a ON a.Id = lb.ApplicationId
+      LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+      LEFT JOIN dbo.enterprise e ON e.id = u.ProjectId
+      LEFT JOIN dbo.VillaTypeMaster vt ON vt.Id = u.VillaTypeId
+      WHERE ${conds.join(" AND ")}
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking vb WHERE vb.UnitId = u.Id AND ${live("vb")})
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmApplication va WHERE va.PreferredUnitId = u.Id AND va.IsActive = 1
+                          AND va.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted'))
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmUnitResale r WHERE r.PlotId = p.Id AND r.IsActive = 1 AND r.Status NOT IN (N'Completed', N'Cancelled'))
+      ORDER BY e.name, u.UnitName`)).recordset;
+    res.json(rows);
+  } catch (e) {
+    console.error("[crm-bookings] GET villa-offers error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 // GET /:id — single booking with milestones, welcome calls, agreement,
 // full customer record (Details tab needs "all means all" — every KYC/
 // contact/co-applicant field, not just the denormalized name/mobile on the
@@ -850,6 +892,21 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
 });
 
 // GET /:id/unit-change-log — history of unit changes for a booking
+// One property: a plot and the villa built on it, held by the same customer,
+// shown as one schedule (land balance first) with one total price / paid / due.
+router.get("/:id/property", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const property = await require("../services/villaLand").propertyOfBooking(getPool(), id);
+    if (!property.bookings.length) return res.status(404).json({ error: "Booking not found" });
+    res.json(property);
+  } catch (e) {
+    console.error("[crm-bookings] GET property error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 router.get("/:id/unit-change-log", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();

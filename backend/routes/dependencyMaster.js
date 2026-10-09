@@ -164,6 +164,11 @@ router.get("/", authMiddleware, async (req, res) => {
     const withActivities = req.query.withActivities !== "0";
     const listReq = pool.request();
     let extra = "";
+    // Retired chains (deleted, or replaced when a villa's type changed or its
+    // conversion was undone) are history, not work: every list shows live
+    // chains only unless a caller asks for the rest.
+    const includeInactive = req.query.includeInactive === "1";
+    const activeOnly = includeInactive ? "" : " AND dm.IsActive = 1";
     if (Number.isFinite(projectId)) { listReq.input("projectId", sql.Int, projectId); extra += " AND dm.ProjectId = @projectId"; }
     if (search) {
       listReq.input("search", sql.NVarChar(200), `%${search}%`);
@@ -195,7 +200,7 @@ router.get("/", authMiddleware, async (req, res) => {
       LEFT JOIN dbo.BlockMaster  bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster   um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster   rm ON rm.Id = dm.RoomId
-      WHERE 1=1${projectPredicate(req.projectScope, "dm.ProjectId")}${extra}
+      WHERE 1=1${projectPredicate(req.projectScope, "dm.ProjectId")}${activeOnly}${extra}
       ORDER BY dm.Id DESC${paged ? " OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY" : ""}
     `);
     if (!withActivities) return res.json(r.recordset.map((row) => ({ ...row, activities: [] })));
@@ -212,7 +217,7 @@ router.get("/", authMiddleware, async (req, res) => {
       FROM dbo.DependencyMasterActivity dma
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       JOIN dbo.DependencyMaster dmx ON dmx.Id = dma.DependencyMasterId
-      WHERE 1=1${projectPredicate(req.projectScope, "dmx.ProjectId")}${
+      WHERE 1=1${projectPredicate(req.projectScope, "dmx.ProjectId")}${includeInactive ? "" : " AND dmx.IsActive = 1"}${
         // A narrowed list only needs its own chains' rungs (ids come from the query above — integers).
         (extra || paged) ? ` AND dma.DependencyMasterId IN (${r.recordset.map((x) => Number(x.id)).filter(Number.isFinite).join(",") || "NULL"})` : ""
       }
@@ -298,6 +303,15 @@ function validatePayload(body) {
 }
 
 // ── POST / — create ──────────────────────────────────────────────────────
+// A room type's step list just changed: villas built before it existed get it now.
+function fillVillasForChain(pool, chainId, actor) {
+  pool.request().input("id", sql.Int, chainId)
+    .query("SELECT r.RoomCategoryId FROM dbo.DependencyMaster d JOIN dbo.RoomMaster r ON r.Id = d.RoomId WHERE d.Id = @id AND d.IsActive = 1")
+    .then((q) => { const c = q.recordset[0]?.RoomCategoryId; return c ? require("../services/autoDprChains").fillChainlessVillaRooms(pool, { categoryId: c, actor }) : null; })
+    .then((r) => { if (r?.chainsCreated) console.log(`[dependency-master] gave ${r.chainsCreated} villa room(s) this step list`); })
+    .catch((e) => console.warn("[dependency-master] villa fill failed (non-fatal):", e.message));
+}
+
 router.post("/", authMiddleware, requirePageRight("dependency-master", "create"), async (req, res) => {
   const err = validatePayload(req.body);
   if (err) return res.status(400).json({ error: err });
@@ -364,6 +378,7 @@ router.post("/", authMiddleware, requirePageRight("dependency-master", "create")
       `);
     }
 
+    if (activities.length) fillVillasForChain(pool, newId, actor);
     res.status(201).json({ success: true, id: newId, message: "Dependency record created" });
   } catch (err2) {
     console.error("[POST /dependency-master]", err2);
@@ -507,6 +522,7 @@ router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit")
     }
 
     await tx.commit();
+    fillVillasForChain(getPool(), id, actor);
     res.json({ success: true, message: "Dependency record updated" });
   } catch (err2) {
     if (tx) {

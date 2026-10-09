@@ -95,4 +95,36 @@ async function createChainsForUnit(db, unitId, actor) {
   return { created, skipped };
 }
 
-module.exports = { createChainsForUnit, clearTemplateCache, chainAlias, aliasFormatOf, buildAlias };
+/**
+ * Villa rooms built before their room type had a step list get one as soon as
+ * it exists: every villa (on a plot) with a chainless room of that type — or,
+ * with no type given, of any type — gets its chains from the newest step
+ * list. Each villa in its own transaction; rooms with a chain are never
+ * touched. Returns { villas, chainsCreated, stillWithoutSteps, failed }.
+ */
+async function fillChainlessVillaRooms(pool, { projectId = null, categoryId = null, actor = null } = {}) {
+  const villas = (await pool.request().input("p", sql.Int, projectId).input("c", sql.Int, categoryId).query(`
+    SELECT DISTINCT u.Id, u.UnitName FROM dbo.UnitMaster u
+    JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
+    WHERE u.IsActive = 1 AND (@p IS NULL OR u.ProjectId = @p)
+      AND EXISTS (SELECT 1 FROM dbo.RoomMaster r WHERE r.UnitId = u.Id AND r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL
+                    AND (@c IS NULL OR r.RoomCategoryId = @c)
+                    AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id))`)).recordset;
+  let chainsCreated = 0; const still = new Set(); const failed = [];
+  for (const v of villas) {
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const r = await createChainsForUnit(tx, v.Id, actor);
+      await tx.commit();
+      chainsCreated += r.created;
+      r.skipped.forEach((n) => still.add(String(n).replace(/\s+\d+$/, "")));
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* rolled back */ }
+      failed.push(`${v.UnitName}: ${e.message}`);
+    }
+  }
+  return { villas: villas.length, chainsCreated, stillWithoutSteps: [...still], failed };
+}
+
+module.exports = { createChainsForUnit, fillChainlessVillaRooms, clearTemplateCache, chainAlias, aliasFormatOf, buildAlias };
