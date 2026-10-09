@@ -64,6 +64,7 @@ interface DashboardData {
     totalCount: number;
     todayCount: number;
     pendingCount: number;
+    allocatedCount?: number;
     inProgressCount: number;
     completedCount: number;
     holdCount: number;
@@ -129,6 +130,7 @@ function EmptyState({ label }: { label: string }) {
 // "least" to "most" resolved, so the bars read left-to-right sensibly.
 const ASSIGNED_WORK_STATUS_ORDER: (keyof typeof ASSIGNMENT_STATUS_META)[] = [
   "PENDING",
+  "ALLOCATED",
   "IN_PROGRESS",
   "HOLD",
   "REWORK",
@@ -141,6 +143,7 @@ const ASSIGNED_WORK_STATUS_ORDER: (keyof typeof ASSIGNMENT_STATUS_META)[] = [
 // Tailwind classes (recharts needs real color values, not class names).
 const STATUS_HEX: Record<string, string> = {
   PENDING: "#64748b",
+  ALLOCATED: "#6366f1",
   IN_PROGRESS: "#3b82f6",
   HOLD: "#f59e0b",
   REWORK: "#d946ef",
@@ -312,6 +315,7 @@ export default function CivilWorkDprDashboard() {
   const data = rawData ?? EMPTY_DATA;
   const assignedWorkCounts: Record<string, number> = {
     PENDING: data.assignedWork.pendingCount,
+    ALLOCATED: data.assignedWork.allocatedCount ?? 0,
     IN_PROGRESS: data.assignedWork.inProgressCount,
     HOLD: data.assignedWork.holdCount,
     REWORK: data.assignedWork.reworkCount,

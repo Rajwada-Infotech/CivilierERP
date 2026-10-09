@@ -2639,12 +2639,9 @@ router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-set
       SELECT d.Id, d.Alias, r.RoomName, u.UnitName FROM dbo.DependencyMaster d
       JOIN dbo.RoomMaster r ON r.Id = d.RoomId JOIN dbo.UnitMaster u ON u.Id = d.FlatId
       WHERE d.FlatId = @u`)).recordset.map((c) => [c.Id, aliasFormatOf(c)]));
-    // 1. Retire the untouched stubs (steps cancelled the way a manual cancel records it).
-    await q(`UPDATE a SET PreCancelStatus = a.Status, Status = N'CANCELLED', UpdatedAt = SYSDATETIME()
-             FROM dbo.DependencyActivityAssignment a
-             JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
-             JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
-             WHERE d.FlatId = @u AND d.IsActive = 1 AND a.Status = N'PENDING'`);
+    // 1. Retire the old chains. Their (untouched) steps keep their status —
+    //    nobody cancelled that work; the chain is simply no longer live, and
+    //    every list and count reads live chains only.
     await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
     await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1 AND RoomCategoryId IS NOT NULL");
     // 2. The type and its own layout. Its areas too when asked — never once
@@ -2737,13 +2734,8 @@ router.post("/plots/unconvert", requirePageRight("crm-auto-project-setup", "dele
       return res.status(409).json({ error: `Work has started on this villa (${work.Steps} step(s) allocated or progressed, ${work.Labour} labour entr(ies), ${work.Drawings} drawing note(s)) — it can't be undone` });
     }
     const villaName = (await q("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @u")).recordset[0]?.UnitName || `Unit #${unitId}`;
-    // The (untouched) steps are cancelled the way a manual cancel records it,
-    // so a retired chain never shows as live Pending work.
-    await q(`UPDATE a SET PreCancelStatus = a.Status, Status = N'CANCELLED', UpdatedAt = SYSDATETIME()
-             FROM dbo.DependencyActivityAssignment a
-             JOIN dbo.DependencyMasterActivity x ON x.Id = a.DependencyMasterActivityId
-             JOIN dbo.DependencyMaster d ON d.Id = x.DependencyMasterId
-             WHERE d.FlatId = @u AND a.Status IN (N'PENDING', N'IN_PROGRESS')`);
+    // The chains are retired; their (untouched) steps keep their status —
+    // a retired chain is out of every list and count, not "cancelled" work.
     const retired = await q("UPDATE dbo.DependencyMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE FlatId = @u AND IsActive = 1");
     await q("UPDATE dbo.RoomMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE UnitId = @u AND IsActive = 1");
     // Renamed as it retires: UnitMaster's name index also counts inactive rows,
