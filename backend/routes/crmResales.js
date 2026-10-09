@@ -38,7 +38,7 @@ const router = express.Router();
   SELECT COALESCE(p.ProjectId, u.ProjectId, b.ProjectId) AS ProjectId FROM dbo.CrmUnitResale r
   LEFT JOIN dbo.PlotMaster p ON p.Id = r.PlotId LEFT JOIN dbo.UnitMaster u ON u.Id = r.UnitId
   LEFT JOIN dbo.CrmBooking b ON b.Id = r.FromBookingId WHERE r.Id = @id`); }
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");

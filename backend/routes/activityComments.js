@@ -1,5 +1,5 @@
 const express = require("express");
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const { rungParamGuard } = require("../services/projectScope");

@@ -23,7 +23,7 @@ const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const CUSTOMER_TICKET_CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal priority
 
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // Per-account brute-force lockout — mirrors the staff login's own protection

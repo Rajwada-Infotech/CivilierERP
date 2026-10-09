@@ -531,7 +531,9 @@ async function createApp() {
         }
       },
       store: makeStore("rl:api:"),
-      skip: (req) => req.path.startsWith("/api/user-activity"),
+      // Inside app.use("/api", ...) req.path has the "/api" stripped ("/user-activity"), so this must read the full URL -
+      // comparing req.path with "/api/user-activity" never matched, and every logged action cost a second request.
+      skip: (req) => req.originalUrl.startsWith("/api/user-activity"),
       keyGenerator: rateLimitKey,
       validate: false,
       standardHeaders: true,

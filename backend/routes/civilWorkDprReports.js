@@ -18,7 +18,7 @@
 
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");

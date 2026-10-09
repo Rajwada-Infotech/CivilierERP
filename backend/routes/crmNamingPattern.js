@@ -5,7 +5,7 @@
 
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");

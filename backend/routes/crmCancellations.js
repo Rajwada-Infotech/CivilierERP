@@ -5,7 +5,7 @@ const router = express.Router();
 // Project access: a cancellation belongs to its booking's project.
 const { projectParamGuard, projectPredicate } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmCancellation c JOIN dbo.CrmBooking b ON b.Id = c.BookingId WHERE c.Id = @id"));
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
