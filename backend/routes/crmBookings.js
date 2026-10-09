@@ -2812,7 +2812,14 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
              : pn ? d(pn.OfferedDate || pn.CreatedAt)
              : pp ? d(pp.CreatedAt) : null,
         link: "/crm/handover",
-        blockedBy: agRegistered ? null : "Agreement must be Registered first",
+        // Say which possession step the handover is waiting on.
+        blockedBy: !agRegistered ? "Agreement must be Registered first"
+          : possessionDone ? null
+          : !pp || pp.Status !== "Ready" ? "Next: pre-possession check to be Ready (documents, quality inspection, utilities, dues)"
+          : !pn ? "Next: send the possession notice"
+          : pn.Status !== "Acknowledged" ? `Next: the customer to acknowledge the possession notice (it is ${pn.Status})`
+          : !ho ? "Next: schedule the handover"
+          : `Next: complete the handover (it is ${ho.Status}) — snags resolved, keys handed, dues confirmed`,
       },
       {
         key: "sales_deed",

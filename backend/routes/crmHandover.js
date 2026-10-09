@@ -334,6 +334,17 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       if (!b.FinalDuesCleared) {
         return res.status(400).json({ error: "FinalDuesCleared must be confirmed before completing handover" });
       }
+      // The tick is staff's word; the balance is checked too — a charge, parking
+      // or a bounced payment can appear after the handover was scheduled.
+      {
+        const due = (await pool.request().input("hid", sql.Int, id).query(`
+          SELECT COUNT(*) AS Cnt, ISNULL(SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)), 0) AS Balance
+          FROM dbo.CrmHandover h JOIN dbo.CrmPaymentMilestone m ON m.BookingId = h.BookingId
+          WHERE h.Id = @hid AND m.Status NOT IN ('Paid', 'Waived') AND m.AmountDue > ISNULL(m.AmountPaid, 0)`)).recordset[0];
+        if (due.Cnt > 0) {
+          return res.status(400).json({ error: `Cannot complete handover — ${due.Cnt} milestone(s) still owe ₹${Math.round(due.Balance).toLocaleString("en-IN")}` });
+        }
+      }
       if (!b.CustomerAcknowledged) {
         return res.status(400).json({ error: "CustomerAcknowledged must be confirmed before completing handover" });
       }
