@@ -376,6 +376,13 @@ export const civilWorkDprSetupItems: SetupItem[] = [
     pageKey: "activity-master",
   },
   {
+    icon: Tag,
+    label: "DPR Tag Master",
+    path: "/civilworkdpr/dpr-tag-master",
+    color: "text-cyan-500",
+    pageKey: "dpr-tag-master",
+  },
+  {
     icon: LayoutGrid,
     label: "Unit Composition",
     path: "/civilworkdpr/room-composition",

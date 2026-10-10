@@ -10,6 +10,7 @@
  *   GET /api/civilworkdpr-reports/daily-updates       daily checkpoint photo updates (date, time logged in IST, who)
  *   GET /api/civilworkdpr-reports/daily-reports       the daily logbook: which work was done where on which day, and how much progress that day
  *   GET /api/civilworkdpr-reports/user-daily-work     the same logbook, one row per allocated user: who had which work reported on a chosen date
+ *   GET /api/civilworkdpr-reports/tag-wise            the user-wise logbook limited to tagged activities, filterable by tag (DprTagMaster)
  *
  * Every route answers { data, total, page, totalPages } so the Reports page can page through it (it asks for
  * 500 rows at a time) and export everything. Filters: projectId (one id or a comma-separated list), dateFrom,
@@ -344,7 +345,10 @@ router.get("/daily-reports", authMiddleware, guard, async (req, res) => {
 // a date — `date` for one day, or dateFrom/dateTo for a range. With NO date given it shows today only
 // (never the whole history). "Progress" is the day's reported progress and, next to it, what was made
 // that day; status / dates / attempt are the activity's current allocation, QC its latest decision.
-router.get("/user-daily-work", authMiddleware, guard, async (req, res) => {
+// `byTag` turns it into the Tag-Wise report: every row carries its activity's tag, untagged activities are
+// left out, and a `tagId` filter (one id or a comma-separated list) narrows it to those tags. The tag is read
+// live from the activity, so re-tagging an activity moves its records straight away.
+const dailyWorkHandler = (byTag) => async (req, res) => {
   const p = parseCommon(req);
   const single = validDate(req.query.date);
   const userIds = [
@@ -359,6 +363,13 @@ router.get("/user-daily-work", authMiddleware, guard, async (req, res) => {
     } else conds.push(`dl.LogDate = ${TODAY}`);
     // Validated integers only, so inlining the list is injection-safe.
     if (userIds.length) conds.push(`u.id IN (${userIds.join(",")})`);
+    if (byTag) {
+      const tagIds = [
+        ...new Set(String(req.query.tagId ?? "").split(",").map((x) => parseInt(x.trim(), 10)).filter(Number.isInteger)),
+      ].slice(0, 200);
+      conds.push("am.TagId IS NOT NULL");
+      if (tagIds.length) conds.push(`am.TagId IN (${tagIds.join(",")})`);
+    }
     const where = `WHERE ${conds.join(" AND ")}`;
     const from = `
       FROM (
@@ -374,12 +385,13 @@ router.get("/user-daily-work", authMiddleware, guard, async (req, res) => {
       JOIN dbo.users u ON u.id = dae.EngineerId
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+      LEFT JOIN dbo.DprTagMaster tg ON tg.Id = am.TagId
       LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId`;
     await sendPage(res, await getPool(), p, {
-      core: `SELECT dl.Id AS logId, u.id AS userId, u.name AS userName, dl.LogDate AS logDate,
+      core: `SELECT dl.Id AS logId, tg.TagName AS tagName, u.id AS userId, u.name AS userName, dl.LogDate AS logDate,
         dma.Id AS rungId, dm.Id AS chainId, dm.Alias AS chain, ep.name AS projectName, ${SCOPE_PATH} AS location,
         um.UnitName AS flatName, rm.RoomName AS roomName, rm.Storey AS storey, am.activity_name AS activityName,
         daa.Status AS status, dl.ProgressPercent AS progressPercent, dl.ProgressMade AS progressMade,
@@ -387,15 +399,19 @@ router.get("/user-daily-work", authMiddleware, guard, async (req, res) => {
         (SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC) AS qcStatus
         ${from} ${where}`,
       countSql: `SELECT COUNT(*) AS total ${from} ${where}`,
-      orderBy: "u.name, dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC",
+      orderBy: byTag
+        ? "tg.TagName, u.name, dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC"
+        : "u.name, dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC",
       bind: bindFilters(p, (r) => {
         if (single) r.input("date", sql.Date, single);
       }),
     });
   } catch (err) {
-    fail(res, "user-daily-work", err);
+    fail(res, byTag ? "tag-wise" : "user-daily-work", err);
   }
-});
+};
+router.get("/user-daily-work", authMiddleware, guard, dailyWorkHandler(false));
+router.get("/tag-wise", authMiddleware, guard, dailyWorkHandler(true));
 
 module.exports = router;
 module.exports._test = { parseCommon, validDate };

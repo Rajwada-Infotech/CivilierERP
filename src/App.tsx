@@ -171,6 +171,7 @@ const CivilWorkDprAmendment = lazy(
 const CivilWorkDprWorkTransfer = lazy(
   () => import("./pages/civilworkdpr/WorkTransfer"),
 );
+const DprTagMaster = lazy(() => import("./pages/civilworkdpr/DprTagMaster"));
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
 );
@@ -1259,6 +1260,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-amendment">
             <CivilWorkDprAmendment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/dpr-tag-master"
+        element={
+          <ProtectedRoute pageKey="dpr-tag-master">
+            <DprTagMaster />
           </ProtectedRoute>
         }
       />

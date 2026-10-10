@@ -23,6 +23,7 @@ import { MultiSelectDropdown, type MultiSelectOption } from "@/components/ui/Mul
 import { dependencyAutoName } from "@/lib/dependencyAutoName";
 import { todayIstDate } from "@/lib/attendanceFormat";
 import { getEngineers } from "@/api/dependencyActivityAssignmentApi";
+import { getDprTags } from "@/api/dprTagMasterApi";
 import {
   Building2,
   Calendar,
@@ -74,6 +75,7 @@ import {
   ShieldCheck,
   Camera,
   UserCog,
+  Tag,
   CalendarDays,
 } from "lucide-react";
 import { DateInput } from "@/components/ui/date-input";
@@ -183,6 +185,7 @@ const CWD_INLINE_PROJECT_REPORTS = new Set([
   "cwd-daily-updates",
   "cwd-daily-reports",
   "cwd-user-daily-work",
+  "cwd-tag-wise",
 ]);
 
 // Civil Work DPR report cells.
@@ -1439,6 +1442,55 @@ const ALL_REPORTS: ReportDef[] = [
     ],
   },
   {
+    id: "cwd-tag-wise",
+    label: "Tag-Wise Civil Work DPR Report",
+    description: "Civil Work DPR records grouped by the activity's tag — filter by project, tag, user and date (shows only the selected day); Auto Name, progress, QC and attempt included",
+    icon: Tag,
+    color: "#0ea5e9",
+    apiPath: "/api/civilworkdpr-reports/tag-wise",
+    serverPaged: true,
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: "date",
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Tag", accessor: (r) => (r.tagName ?? "—") as string },
+      { header: "User", accessor: (r) => (r.userName ?? "—") as string },
+      { header: "Date", accessor: (r) => cwdDate(r.logDate) },
+      {
+        header: "Auto Name",
+        accessor: (r) =>
+          dependencyAutoName({
+            flatName: r.flatName as string | null,
+            alias: r.chain as string | null,
+            roomName: r.roomName as string | null,
+            storey: r.storey as string | null,
+            activityName: r.activityName as string | null,
+          }) || "—",
+      },
+      { header: "Activity", accessor: (r) => (r.activityName ?? "—") as string },
+      { header: "Status", accessor: (r) => cwdStatusLabel(r.status) },
+      { header: "Chain", accessor: (r) => (r.chain ?? "—") as string },
+      { header: "Location", accessor: (r) => (r.location ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.projectName ?? "—") as string },
+      {
+        header: "Progress",
+        accessor: (r) =>
+          r.progressPercent == null || r.progressPercent === ""
+            ? "—"
+            : `${cwdPercent(r.progressPercent)}${r.progressMade == null ? "" : ` (${Number(r.progressMade) > 0 ? "+" : ""}${Math.round(Number(r.progressMade) * 10) / 10}% that day)`}`,
+      },
+      { header: "Start Date", accessor: (r) => cwdDate(r.startDate) },
+      { header: "End Date", accessor: (r) => cwdDate(r.endDate) },
+      { header: "QC", accessor: (r) => cwdStatusLabel(r.qcStatus) },
+      { header: "Attempt", accessor: (r) => (r.attemptNo ?? "—") as string },
+    ],
+  },
+  {
     id: "cwd-daily-updates",
     label: "Daily Checkpoint Updates",
     description: "Daily photo updates per checkpoint, with the time logged in IST (date range = update date)",
@@ -2435,6 +2487,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "cwd-quality-checks",
       "cwd-daily-reports",
       "cwd-user-daily-work",
+      "cwd-tag-wise",
       "cwd-daily-updates",
       "worker-attendance",
       "cwd-daily-labour",
@@ -2937,7 +2990,17 @@ const ReportTable: React.FC<{
   // Civil Work DPR reports carry their own multi-select Project picker (supersedes the section bar's single one).
   const hasInlineProject = CWD_INLINE_PROJECT_REPORTS.has(report.id);
   // User-Wise Daily Work: a User multi-select next to the Project one.
-  const isUserWise = report.id === "cwd-user-daily-work";
+  // The Tag-Wise report is the same logbook plus a Tag multi-select, so it shares the User + inline Date fields.
+  const isTagWise = report.id === "cwd-tag-wise";
+  const isUserWise = report.id === "cwd-user-daily-work" || isTagWise;
+  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [tagOptions, setTagOptions] = useState<MultiSelectOption[]>([]);
+  useEffect(() => {
+    if (!isTagWise) return;
+    getDprTags()
+      .then((list) => setTagOptions(list.map((t) => ({ id: String(t.id), label: t.tagName }))))
+      .catch(() => {});
+  }, [isTagWise]);
   const [userIds, setUserIds] = useState<string[]>([]);
   // Its own Date field, right in the report's toolbar (starts on today): one day's records only.
   const [userDate, setUserDate] = useState<string>(() => todayIstDate());
@@ -3071,6 +3134,7 @@ const ReportTable: React.FC<{
     // Civil Work DPR reports: every picked project, comma-separated.
     if (hasInlineProject && projectIds.length) f[fc.projectParam ?? "projectId"] = projectIds.join(",");
     if (isUserWise && userIds.length) f["userId"] = userIds.join(",");
+    if (isTagWise && tagIds.length) f["tagId"] = tagIds.join(",");
     // The inline Date supersedes the section bar's Day / Range, the way the Expense Register's does.
     if (isUserWise && userDate) {
       delete f["dateFrom"];
@@ -3144,7 +3208,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, userDate, dateFrom, dateTo, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, tagIds, userDate, dateFrom, dateTo, projects]);
 
   // ── Server-paged reports: fetch just the page on screen ──────────────────
   // Fetching every page up front (fetchAllRows) meant hundreds of sequential
@@ -3411,6 +3475,20 @@ const ReportTable: React.FC<{
                   <X size={11} />
                 </button>
               )}
+            </div>
+          )}
+
+          {isTagWise && tagOptions.length > 0 && (
+            <div className="w-52">
+              <MultiSelectDropdown
+                options={tagOptions}
+                value={tagIds}
+                onChange={setTagIds}
+                placeholder="All Tags"
+                searchPlaceholder="Search tags…"
+                itemNoun="tag"
+                className="h-[30px] py-1"
+              />
             </div>
           )}
 
