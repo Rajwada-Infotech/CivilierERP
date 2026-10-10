@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
 import ActivityDetailModal from "./ActivityDetailModal";
+import { dependencyAutoName } from "@/lib/dependencyAutoName";
 
 // Purely presentational — icon + accent color per status, same colors as
 // ASSIGNMENT_STATUS_META's Tailwind classes just as hex for GlassCard's
@@ -426,6 +427,132 @@ function RoomActivities({
   return <ChainGroupList items={items} openDetail={openDetail} />;
 }
 
+const autoNameOf = (r: ReportedAssignment) =>
+  dependencyAutoName({ flatName: r.flatName, alias: r.alias, roomName: r.roomName, storey: r.storey, activityName: r.activityName });
+
+// A separate "find one activity" box: type an Auto Name (or any words of it), pick the match, and that
+// activity's details show in their own card below — without opening the location tree at all.
+function AutoNameLookup({
+  openDetail,
+}: {
+  openDetail: (row: ReportedAssignment, tab?: "overview" | "blueprint" | "photos") => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [picked, setPicked] = useState<ReportedAssignment | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const q = query.trim();
+      setDebounced(q.length >= 2 ? q : "");
+    }, 350);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const { data: matches = [], isFetching } = useQuery({
+    queryKey: ["civilworkdpr-activity-reporting", "auto-name-lookup", debounced],
+    queryFn: () => getReportedAssignments({ search: debounced, limit: 25 }),
+    enabled: !!debounced,
+    placeholderData: (prev) => prev,
+  });
+
+  // Keep what's shown fresh (status changes, new progress) by re-reading the picked activity.
+  const { data: fresh } = useQuery({
+    queryKey: ["civilworkdpr-activity-reporting", "auto-name-picked", picked?.rungId],
+    queryFn: async () => (await getReportedAssignments({ rungId: picked!.rungId }))[0] ?? null,
+    enabled: !!picked,
+  });
+  const shown = fresh ?? picked;
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden mb-4">
+      <div className="flex items-center gap-2 px-3.5 sm:px-5 py-3 border-b border-border bg-muted/30">
+        <Search size={13} className="text-cyan-600 dark:text-cyan-400" />
+        <span className="text-sm font-heading font-semibold text-foreground">Find an activity by Auto Name</span>
+        <span className="hidden sm:inline text-[0.6875rem] text-muted-foreground">flat, room and activity, in any order</span>
+      </div>
+      <div className="p-3.5 sm:p-5 space-y-3">
+        <div className="relative">
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && matches[0]) {
+                setPicked(matches[0]);
+                setQuery("");
+              }
+            }}
+            placeholder="e.g. NS/n1/101, Hall Room and 2.1 Column and Beam…"
+            className="w-full pl-8 pr-8 py-2 rounded-lg border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-cyan-500/30"
+          />
+          {query && (
+            <button onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear search">
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        {debounced && (
+          <div>
+            {isFetching && matches.length === 0 ? (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 size={12} className="animate-spin" /> Searching…</p>
+            ) : matches.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">No activity matches "{debounced}".</p>
+            ) : (
+              <>
+                <p className="text-[0.6875rem] text-muted-foreground mb-1.5">
+                  {matches.length}{matches.length === 25 ? "+" : ""} match{matches.length === 1 ? "" : "es"} — pick one to see its details
+                </p>
+                <ul className="divide-y divide-border/60 rounded-lg border border-border max-h-64 overflow-y-auto">
+                  {matches.map((m) => (
+                    <li key={m.assignmentId}>
+                      <button
+                        onClick={() => {
+                          setPicked(m);
+                          setQuery("");
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors"
+                      >
+                        <p className="text-sm font-medium text-foreground">{autoNameOf(m)}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground">
+                          {m.projectName ? `${m.projectName} > ` : ""}{m.scopePath} · {STATUS_META[m.status]?.label ?? m.status}
+                          {m.attemptNo > 1 ? ` · attempt ${m.attemptNo}` : ""}
+                        </p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+
+        {shown && (
+          <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/[0.04] overflow-hidden">
+            <div className="flex flex-wrap items-start justify-between gap-2 px-4 py-3 border-b border-border/60">
+              <div className="min-w-0">
+                <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Auto Name</p>
+                <p className="text-sm font-semibold text-foreground break-words">{autoNameOf(shown)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {shown.projectName ? `${shown.projectName} > ` : ""}{shown.scopePath}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-medium tabular-nums text-foreground">{Math.round(shown.progressPercent * 10) / 10}% done</span>
+                <button onClick={() => setPicked(null)} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                  <X size={12} /> Close
+                </button>
+              </div>
+            </div>
+            <ChainGroupList items={[shown]} openDetail={openDetail} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | "ALL">("ALL");
@@ -536,6 +663,8 @@ export default function ActivityReporting() {
             You don't have access to this page.
           </div>
         ) : (
+          <>
+          <AutoNameLookup openDetail={openDetail} />
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3 px-3.5 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-muted/30">
               <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
@@ -628,6 +757,7 @@ export default function ActivityReporting() {
               </div>
             )}
           </div>
+          </>
         )}
       </CivilWorkDprShell>
       {detailRow && (

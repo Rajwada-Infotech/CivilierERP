@@ -347,8 +347,14 @@ export const getReportedAssignments = async (params?: {
   status?: AssignmentStatus;
   /** Exactly one activity (its current attempt). */
   rungId?: number;
+  /** Words matched against activity, flat, room, project, chain alias or engineer (every word must match). */
+  search?: string;
+  /** Page size (server default applies when omitted). */
+  limit?: number;
 }): Promise<ReportedAssignment[]> => {
   const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.rungId) qs.set("rungId", String(params.rungId));
   if (params?.dependencyMasterId) qs.set("dependencyMasterId", String(params.dependencyMasterId));
   if (params && "roomId" in params && params.roomId !== undefined) {
