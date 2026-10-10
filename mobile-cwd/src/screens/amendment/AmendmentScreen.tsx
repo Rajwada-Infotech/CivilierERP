@@ -11,6 +11,10 @@ import { fonts } from "@/theme/fonts";
 import { usePageRights } from "@/hooks/usePageRights";
 import { STATUS_COLOR, STATUS_LABEL } from "@/components/StatusPill";
 import { getAmendments, type AmendmentRecord } from "@/api/cwdApi";
+import { dependencyAutoName, matchesAutoNameSearch } from "@/utils/dependencyAutoName";
+
+const autoNameOf = (r: AmendmentRecord) =>
+  dependencyAutoName({ flatName: r.flatName, alias: r.alias, roomName: r.roomName, storey: r.storey, activityName: r.activityName });
 import { ACCENT, Empty, ErrorText, Loading, card } from "@/screens/activities/tabs/ui";
 
 const SOURCE = {
@@ -38,7 +42,7 @@ function AmendmentCard({ r, onOpen }: { r: AmendmentRecord; onOpen: () => void }
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text numberOfLines={2} style={{ fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{r.sequenceNo}. {r.activityName}</Text>
-          <Text numberOfLines={1} style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{r.alias}</Text>
+          <Text numberOfLines={2} style={{ fontSize: 10.5, fontFamily: fonts.body.medium, color: ACCENT }}>{autoNameOf(r)}</Text>
         </View>
         {src && <Pill text={src.label} color={src.color} />}
       </View>
@@ -99,10 +103,10 @@ export default function AmendmentScreen() {
   }), [rows]);
 
   const shown = useMemo(() => {
-    const t = search.trim().toLowerCase();
+    // Auto Name wise: every word typed must appear somewhere in the record (words in any order).
     return rows.filter((r) =>
       (filter === "ALL" || r.reworkSource === filter) &&
-      (!t || [r.activityName, r.alias, r.scopePath, r.projectName, r.engineerNames, r.reworkReason].some((v) => (v || "").toLowerCase().includes(t))),
+      matchesAutoNameSearch(search, [autoNameOf(r), r.activityName, r.alias, r.scopePath, r.projectName, r.engineerNames, r.reworkReason]),
     );
   }, [rows, search, filter]);
 
@@ -122,7 +126,7 @@ export default function AmendmentScreen() {
         <TextInput
           value={search}
           onChangeText={setSearch}
-          placeholder="Search activity, location, engineer, reason…"
+          placeholder="Search by Auto Name, location, engineer, reason…"
           placeholderTextColor={`${colors.mutedForeground}99`}
           style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }}
         />

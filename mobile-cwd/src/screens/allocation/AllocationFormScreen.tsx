@@ -14,8 +14,10 @@ import { StatusPill, displayStatus } from "@/components/StatusPill";
 import { DateField, FormSection, MultiPickerField, NumberField, PickerField, RemarksField, TextField } from "@/components/form";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
-  getActivityAssignment, getEngineers, getProjectContractors, getRungDetail, saveAllocation, type ApprovalLevel, type SourceType,
+  ASSIGNMENT_PRIORITIES, type AssignmentPriority, getActivityAssignment, getEngineers, getProjectContractors, getRungDetail, saveAllocation, type ApprovalLevel, type SourceType,
 } from "@/api/cwdApi";
+import { PriorityBadge } from "@/components/PriorityBadge";
+import { dependencyAutoName } from "@/utils/dependencyAutoName";
 import { applyDefaultDays, changeDays, changeEnd, changeStart, type AllocDates } from "@/utils/allocationDates";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { ACCENT, Btn, ErrorText, Loading, card } from "../activities/tabs/ui";
@@ -83,6 +85,7 @@ export default function AllocationFormScreen() {
   const [description, setDescription] = useState("");
   const [descTouched, setDescTouched] = useState(false);
   const [remarks, setRemarks] = useState("");
+  const [priority, setPriority] = useState<AssignmentPriority | "">("");
   const [qty, setQty] = useState<Record<string, string>>({});
 
   const detail = detailQ.data;
@@ -109,6 +112,7 @@ export default function AllocationFormScreen() {
     setMaterialBy(givenByKey(a.materialSource as SourceType | null, a.materialContractorId ?? null));
     setDescription(a.description || defaultDescription);
     setRemarks(a.remarks || "");
+    setPriority(a.priority || "");
     const m: Record<string, string> = {};
     for (const x of a.materials) m[x.itemId] = String(x.quantity);
     setQty(m);
@@ -139,6 +143,7 @@ export default function AllocationFormScreen() {
         materialContractorId: material.contractorId,
         description: description || null,
         remarks: remarks || null,
+        priority: priority || null,
         materials: Object.entries(qty).map(([itemId, q]) => ({ itemId, quantity: parseFloat(q) })).filter((m) => Number.isFinite(m.quantity) && m.quantity > 0),
         checkpoints: a?.checkpoints ?? [],
       });
@@ -221,6 +226,29 @@ export default function AllocationFormScreen() {
         <View style={{ height: 12 }} />
         <PickerField label="Material given by" value={materialBy} options={givenByOptions} onSelect={setMaterialBy} clearable disabled={!canEdit} loading={contractorsQ.isLoading} />
         <SourceBadge source={parseGivenBy(materialBy).source} />
+      </FormSection>
+
+      {/* Activity Priority + the read-only Auto Name (flat, room and activity) */}
+      <FormSection title="Activity">
+        <PickerField
+          label="Priority"
+          value={priority}
+          options={ASSIGNMENT_PRIORITIES.map((p) => ({ key: p, label: p }))}
+          onSelect={(k) => setPriority(k as AssignmentPriority | "")}
+          placeholder="Select priority…"
+          clearable
+          searchable={false}
+          disabled={!canEdit}
+        />
+        {!!priority && <View style={{ alignSelf: "flex-start", marginTop: 6 }}><PriorityBadge priority={priority} /></View>}
+        <View style={{ height: 12 }} />
+        <Text style={{ fontSize: 10.5, fontFamily: fonts.heading.semibold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Auto Name</Text>
+        <View style={{ borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.muted, padding: 10 }}>
+          <Text selectable style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.foreground }}>
+            {dependencyAutoName({ flatName: row?.flatName, alias: row?.alias, roomName: row?.roomName, storey: row?.storey, activityName: row?.activityName }) || "—"}
+          </Text>
+        </View>
+        <Text style={{ fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginTop: 4 }}>Fetched from the dependency's flat, room and activity — not editable.</Text>
       </FormSection>
 
       <FormSection title="Description">
