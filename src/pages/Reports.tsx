@@ -21,6 +21,7 @@ import { VendorLedgerReportBody } from "@/pages/finance/VendorLedgerReport";
 import { getProjects as fetchProjectOptions } from "@/api/grnApi";
 import { MultiSelectDropdown, type MultiSelectOption } from "@/components/ui/MultiSelectDropdown";
 import { dependencyAutoName } from "@/lib/dependencyAutoName";
+import { todayIstDate } from "@/lib/attendanceFormat";
 import { getEngineers } from "@/api/dependencyActivityAssignmentApi";
 import {
   Building2,
@@ -2938,6 +2939,8 @@ const ReportTable: React.FC<{
   // User-Wise Daily Work: a User multi-select next to the Project one.
   const isUserWise = report.id === "cwd-user-daily-work";
   const [userIds, setUserIds] = useState<string[]>([]);
+  // Its own Date field, right in the report's toolbar (starts on today): one day's records only.
+  const [userDate, setUserDate] = useState<string>(() => todayIstDate());
   const [userOptions, setUserOptions] = useState<MultiSelectOption[]>([]);
   useEffect(() => {
     if (!isUserWise) return;
@@ -3068,6 +3071,12 @@ const ReportTable: React.FC<{
     // Civil Work DPR reports: every picked project, comma-separated.
     if (hasInlineProject && projectIds.length) f[fc.projectParam ?? "projectId"] = projectIds.join(",");
     if (isUserWise && userIds.length) f["userId"] = userIds.join(",");
+    // The inline Date supersedes the section bar's Day / Range, the way the Expense Register's does.
+    if (isUserWise && userDate) {
+      delete f["dateFrom"];
+      delete f["dateTo"];
+      f["date"] = userDate;
+    }
 
     // Expense Register: inline Date Range — supersedes the shared section
     // bar's Day/Range date filter the same way Company/Project above do.
@@ -3135,7 +3144,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, dateFrom, dateTo, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, userDate, dateFrom, dateTo, projects]);
 
   // ── Server-paged reports: fetch just the page on screen ──────────────────
   // Fetching every page up front (fetchAllRows) meant hundreds of sequential
@@ -3381,6 +3390,27 @@ const ReportTable: React.FC<{
                 itemNoun="project"
                 className="h-[30px] py-1"
               />
+            </div>
+          )}
+
+          {isUserWise && (
+            <div className="flex items-center gap-1.5">
+              <DateInput
+                value={userDate}
+                onChange={(e) => setUserDate(e.target.value)}
+                title="Date — only this day's work is shown"
+                className="h-[30px] px-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              />
+              {userDate && (
+                <button
+                  type="button"
+                  onClick={() => setUserDate("")}
+                  title="Clear the date (then the section bar's Day / Range applies, or today if none)"
+                  className="h-[30px] flex items-center px-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-all"
+                >
+                  <X size={11} />
+                </button>
+              )}
             </div>
           )}
 
