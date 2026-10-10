@@ -15,9 +15,8 @@ interface Props {
  * part of it — and jump straight to its allocation, instead of walking Project → Tower → Floor →
  * Flat → Room. Every word typed must match somewhere in the activity's name or location.
  */
-export function AutoNameFinder({ chains, onPick }: Props) {
-  const [query, setQuery] = useState("");
-
+/** Matching activities (by Auto Name or any part of it) for a query over a set of chains. */
+export function useAutoNameMatches(chains: DependencyMasterListRow[], query: string) {
   const entries = useMemo(
     () =>
       chains.flatMap((chain) =>
@@ -31,16 +30,49 @@ export function AutoNameFinder({ chains, onPick }: Props) {
       ),
     [chains],
   );
-
   const q = query.trim();
-  const results = useMemo(
+  return useMemo(
     () =>
       q.length < 2
         ? []
         : entries.filter((e) => matchesAutoNameSearch(q, [e.autoName, e.chain.alias, e.chain.projectName, e.chain.towerName, e.chain.scopePath])),
     [entries, q],
   );
+}
 
+/** The list of matches — each row shows the Auto Name and where it is; clicking one picks it. */
+export function AutoNameResults({ chains, query, onPick }: Props & { query: string }) {
+  const q = query.trim();
+  const results = useAutoNameMatches(chains, query);
+  if (q.length < 2) return null;
+  return (
+    <div className="mt-3">
+      {results.length === 0 ? (
+        <p className="text-xs text-muted-foreground italic">No activity matches "{q}".</p>
+      ) : (
+        <>
+          <p className="text-[0.6875rem] text-muted-foreground mb-1.5">
+            {results.length} activit{results.length === 1 ? "y" : "ies"} match
+            {results.length > MAX_RESULTS ? ` — showing the first ${MAX_RESULTS}, type more to narrow it down` : ""}
+          </p>
+          <ul className="divide-y divide-border/60 rounded-lg border border-border max-h-72 overflow-y-auto bg-card">
+            {results.slice(0, MAX_RESULTS).map((e) => (
+              <li key={e.rung.rungId}>
+                <button onClick={() => onPick(e.rung, e.chain)} className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors">
+                  <p className="text-sm font-medium text-foreground">{e.autoName}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">{e.chain.projectName ? `${e.chain.projectName} > ` : ""}{e.chain.scopePath}</p>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function AutoNameFinder({ chains, onPick }: Props) {
+  const [query, setQuery] = useState("");
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden mb-4">
       <div className="flex items-center gap-2 px-5 py-3 border-b border-border bg-muted/30">
@@ -63,30 +95,7 @@ export function AutoNameFinder({ chains, onPick }: Props) {
             </button>
           )}
         </div>
-        {q.length >= 2 && (
-          <div className="mt-3">
-            {results.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No activity matches "{q}".</p>
-            ) : (
-              <>
-                <p className="text-[0.6875rem] text-muted-foreground mb-1.5">
-                  {results.length} match{results.length === 1 ? "" : "es"}
-                  {results.length > MAX_RESULTS ? ` — showing the first ${MAX_RESULTS}, type more to narrow it down` : ""}
-                </p>
-                <ul className="divide-y divide-border/60 rounded-lg border border-border max-h-72 overflow-y-auto">
-                  {results.slice(0, MAX_RESULTS).map((e) => (
-                    <li key={e.rung.rungId}>
-                      <button onClick={() => onPick(e.rung, e.chain)} className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors">
-                        <p className="text-sm font-medium text-foreground">{e.autoName}</p>
-                        <p className="text-[0.6875rem] text-muted-foreground">{e.chain.projectName ? `${e.chain.projectName} > ` : ""}{e.chain.scopePath}</p>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </div>
-        )}
+        <AutoNameResults chains={chains} query={query} onPick={onPick} />
       </div>
     </div>
   );
