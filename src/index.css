@@ -2549,3 +2549,10 @@ select[aria-hidden="true"] {
 .shell-head > :not(:first-child) { flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: auto; }
 .shell-head > :not(:first-child):is(.flex, [class*="flex "], [class^="flex"]) { flex-wrap: wrap; justify-content: flex-end; }
 .shell-head > :not(:first-child) > .flex:only-child { flex-wrap: wrap; justify-content: flex-end; }
+
+/* One arrow only, for custom dropdowns too (SearchableNativeSelect / SearchableSelect draw their own chevron):
+   when a page also overlays an absolutely-positioned chevron next to one, hide the page's extra copy. */
+:has(> :not(select):is(button, div) .lucide-chevron-down) > svg.lucide-chevron-down.absolute,
+:has(> :not(select):is(button, div) .lucide-chevrons-up-down) > svg.lucide-chevron-down.absolute {
+    display: none !important;
+}
