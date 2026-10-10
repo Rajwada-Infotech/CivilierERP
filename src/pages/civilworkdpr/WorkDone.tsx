@@ -12,6 +12,7 @@ import { floorLabel, floorDisplay, roomDisplay, VILLA_FLOOR } from "@/lib/floorL
 import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
+import { AutoNameFinder } from "@/components/civilworkdpr/AutoNameFinder";
 import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
@@ -446,6 +447,10 @@ export default function WorkDone() {
           </div>
         ) : (
           <>
+          <AutoNameFinder
+            chains={allChains as DependencyMasterListRow[]}
+            onPick={(rung, chain) => setActiveAssignment({ rung, chain })}
+          />
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
               <MapPin size={14} className="text-cyan-600 dark:text-cyan-400" />

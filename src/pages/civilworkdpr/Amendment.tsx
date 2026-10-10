@@ -8,6 +8,7 @@ import {
   getAmendments,
   type AmendmentRecord,
 } from "@/api/dependencyActivityAssignmentApi";
+import { dependencyAutoName, matchesAutoNameSearch } from "@/lib/dependencyAutoName";
 import { FileClock, Search, UserRound, CalendarDays, ShieldCheck, RotateCcw } from "lucide-react";
 
 const fmtDate = (d: string | null) =>
@@ -22,6 +23,9 @@ const SOURCE_META: Record<string, { label: string; className: string }> = {
 // rejection — read-only. A row here is a past attempt (migration 488's
 // fork-on-rework design); "Now at" shows what the current attempt has
 // moved on to since.
+const autoNameOf = (r: AmendmentRecord) =>
+  dependencyAutoName({ flatName: r.flatName, alias: r.alias, roomName: r.roomName, storey: r.storey, activityName: r.activityName });
+
 export default function Amendment() {
   const rights = usePageRights("civilworkdpr-amendment");
   const [search, setSearch] = useState("");
@@ -33,12 +37,12 @@ export default function Amendment() {
   });
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
     if (!q) return rows;
+    // Every word typed must appear somewhere in the Auto Name (flat, room, activity), location,
+    // engineer or reason — so a whole Auto Name, or any pieces of it, finds the row.
     return rows.filter((r) =>
-      [r.activityName, r.alias, r.scopePath, r.projectName, r.engineerNames, r.reworkReason].some((v) =>
-        (v || "").toLowerCase().includes(q),
-      ),
+      matchesAutoNameSearch(q, [autoNameOf(r), r.activityName, r.alias, r.scopePath, r.projectName, r.engineerNames, r.reworkReason]),
     );
   }, [rows, search]);
 
@@ -69,7 +73,7 @@ export default function Amendment() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search activity, location, engineer, reason…"
+                  placeholder="Search Auto Name, activity, location, engineer, reason…"
                   className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
                 />
               </div>
@@ -108,7 +112,7 @@ export default function Amendment() {
                         <tr key={r.assignmentId} className="hover:bg-muted/20">
                           <td className="px-4 py-3">
                             <p className="font-medium text-foreground">{r.sequenceNo}. {r.activityName}</p>
-                            <p className="text-[0.6875rem] text-muted-foreground">{r.alias}</p>
+                            <p className="text-[0.6875rem] text-muted-foreground">{autoNameOf(r)}</p>
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground max-w-[220px]">
                             {r.projectName ? `${r.projectName} > ` : ""}{r.scopePath}

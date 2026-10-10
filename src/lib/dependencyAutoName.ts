@@ -30,3 +30,24 @@ export function dependencyAutoName(parts: {
   if (room && !(roomRaw && norm(flat).includes(norm(roomRaw)))) where.push(room);
   return [where.join(", "), activity].filter(Boolean).join(" and ");
 }
+
+/**
+ * Words of a search box, for "Auto Name wise" searching: split on spaces, commas and ">", drop the
+ * joining word "and" (so pasting a whole Auto Name like "NS/n1/101, Hall Room and 2.1 Column and
+ * Beam" works), lower-cased. Matching is then "every word appears somewhere in the record".
+ */
+export function searchTokens(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[\s,>]+/)
+    .filter((t) => t && t !== "and")
+    .slice(0, 8);
+}
+
+/** True when every word of `query` appears in at least one of the given text parts. Empty query matches. */
+export function matchesAutoNameSearch(query: string, parts: (string | null | undefined)[]): boolean {
+  const tokens = searchTokens(query);
+  if (tokens.length === 0) return true;
+  const haystack = parts.filter(Boolean).join(" \n ").toLowerCase();
+  return tokens.every((t) => haystack.includes(t));
+}

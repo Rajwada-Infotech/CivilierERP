@@ -1,5 +1,33 @@
 const express = require("express");
 const router = express.Router();
+
+// ── "Auto Name" search ───────────────────────────────────────────────────────
+// An activity's Auto Name is "<flat>, <room> and <activity>" (e.g. "NS/n1/101, Hall Room and
+// 2.1 Column and Beam Fiver net Fix"). Searching splits what was typed into words (dropping the
+// joining "and") and requires EVERY word to match somewhere in the activity, flat, room, tower,
+// project, chain alias (or, where asked, an engineer's name) — so a whole Auto Name or any pieces of
+// it, in any order, finds the activity. A single word behaves exactly as the old search did.
+function searchTokens(search) {
+  return String(search || "").toLowerCase().split(/[\s,>]+/).filter((t) => t && t !== "and").slice(0, 8);
+}
+function bindSearchTokens(request, tokens) {
+  tokens.forEach((t, i) => request.input(`st${i}`, sql.NVarChar(200), `%${t.replace(/[[\]%_]/g, (c) => `[${c}]`)}%`));
+}
+// SQL (no leading AND) matching every token; `withEngineer` also lets a token match an engineer's name.
+function tokenSearchCond(tokens, withEngineer) {
+  return tokens
+    .map((_, i) => `(
+        am.activity_name LIKE @st${i} OR dm.Alias LIKE @st${i} OR ep.name LIKE @st${i} OR
+        bm.BlockName LIKE @st${i} OR um.UnitName LIKE @st${i} OR rm.RoomName LIKE @st${i}${
+          withEngineer
+            ? ` OR EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer sdae JOIN dbo.users su ON su.id = sdae.EngineerId
+                WHERE sdae.AssignmentId = daa.Id AND su.name LIKE @st${i})`
+            : ""
+        }
+      )`)
+    .join(" AND ");
+}
+
 const multer = require("multer");
 const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -263,14 +291,10 @@ router.get(
       request.input("rungIdFilter", sql.Int, rungIdFilter);
       conds.push("daa.DependencyMasterActivityId = @rungIdFilter");
     }
-    if (search) {
-      request.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push(`(
-        am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
-        bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search OR
-        EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer sdae JOIN dbo.users su ON su.id = sdae.EngineerId
-                WHERE sdae.AssignmentId = daa.Id AND su.name LIKE @search)
-      )`);
+    const tokens = search ? searchTokens(search) : [];
+    if (tokens.length) {
+      bindSearchTokens(request, tokens);
+      conds.push(`(${tokenSearchCond(tokens, true)})`);
     }
     if (qcPending) {
       conds.push("ISNULL((SELECT TOP 1 qcp.Decision FROM dbo.DependencyActivityQc qcp WHERE qcp.AssignmentId = daa.Id ORDER BY qcp.QcAt DESC, qcp.Id DESC), '') <> 'APPROVED'");
@@ -419,14 +443,11 @@ router.get(
       const pool = await getPool();
 
       const projectCond = Number.isFinite(projectFilterId) ? " AND dm.ProjectId = @projectFilterId" : "";
-      const searchCond = search ? `
-          AND (
-            am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
-            bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search
-          )` : "";
+      const tokens = search ? searchTokens(search) : [];
+      const searchCond = tokens.length ? ` AND ${tokenSearchCond(tokens, false)}` : "";
 
       const countsReq = pool.request();
-      if (search) countsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (tokens.length) bindSearchTokens(countsReq, tokens);
       if (projectCond) countsReq.input("projectFilterId", sql.Int, projectFilterId);
       // Started now, awaited below: the status counts and the room list are
       // independent aggregates over the same tables, so they run in parallel
@@ -445,7 +466,7 @@ router.get(
         GROUP BY daa.Status
       `);
       const roomsReq = pool.request();
-      if (search) roomsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (tokens.length) bindSearchTokens(roomsReq, tokens);
       if (projectCond) roomsReq.input("projectFilterId", sql.Int, projectFilterId);
       if (statusFilter && STATUS_VALUES.has(statusFilter)) roomsReq.input("statusFilter", sql.NVarChar(20), statusFilter);
       const roomsPromise = roomsReq.query(`
@@ -608,9 +629,10 @@ const transferFilters = (req, request) => {
     request.input("rungFilter", sql.Int, rungId);
     cond += " AND dma.Id = @rungFilter";
   }
-  if (search) {
-    request.input("search", sql.NVarChar(200), `%${search}%`);
-    cond += " AND (am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search)";
+  const tokens = search ? searchTokens(search) : [];
+  if (tokens.length) {
+    bindSearchTokens(request, tokens);
+    cond += ` AND ${tokenSearchCond(tokens, false)}`;
   }
   return cond;
 };

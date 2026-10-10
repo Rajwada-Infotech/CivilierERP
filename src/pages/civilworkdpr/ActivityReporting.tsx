@@ -557,7 +557,7 @@ export default function ActivityReporting() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search flat or activity…"
+                  placeholder="Search Auto Name — flat, room or activity…"
                   className="pl-7 pr-7 py-1.5 w-full sm:w-56 text-xs rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-cyan-500/30"
                 />
                 {search && (
