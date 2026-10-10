@@ -95,6 +95,8 @@ const PHOTO_PHASES = new Set(["before", "after"]);
 
 const STATUS_VALUES = new Set(["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
+// Activity Priority set on the Work Allocation form (dbo.DependencyActivityAssignment.Priority; NULL = none).
+const PRIORITY_VALUES = new Set(["Low", "High", "Urgent", "Very Urgent"]);
 
 // Rework forks a brand-new assignment attempt instead of mutating the
 // rejected one in place (see migration 488's own comment) — the redo goes
@@ -107,7 +109,7 @@ const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
 async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, source, actor) {
   const old = (await new sql.Request(tx).input("id", sql.Int, oldAssignmentId).query(`
     SELECT AttemptNo, LabourSource, MaterialSource, LabourContractorId, MaterialContractorId,
-           Description, ApprovalLevelsJson
+           Description, ApprovalLevelsJson, Priority
     FROM dbo.DependencyActivityAssignment WHERE Id = @id
   `)).recordset[0];
 
@@ -138,16 +140,17 @@ async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, sour
     .input("materialContractorId", sql.Int, old?.MaterialContractorId ?? null)
     .input("description", sql.NVarChar(500), old?.Description || null)
     .input("approvalLevelsJson", sql.NVarChar(sql.MAX), old?.ApprovalLevelsJson || "[]")
+    .input("priority", sql.NVarChar(20), old?.Priority || null)
     .input("by", sql.NVarChar(200), actor)
     .query(`
       INSERT INTO dbo.DependencyActivityAssignment
         (DependencyMasterActivityId, Status, AttemptNo, ReworkFromAssignmentId,
          LabourSource, MaterialSource, LabourContractorId, MaterialContractorId,
-         Description, ApprovalLevelsJson, CreatedBy)
+         Description, ApprovalLevelsJson, Priority, CreatedBy)
       OUTPUT INSERTED.Id AS id
       VALUES (@rungId, 'PENDING', @attemptNo, @reworkFrom,
               @labourSource, @materialSource, @labourContractorId, @materialContractorId,
-              @description, @approvalLevelsJson, @by)
+              @description, @approvalLevelsJson, @priority, @by)
     `);
   const newAssignmentId = ins.recordset[0].id;
 
@@ -333,6 +336,7 @@ router.get(
         CASE daa.MaterialSource WHEN 'CONTRACTOR' THEN mc.LHeadName WHEN 'DEVELOPER' THEN dev.name END AS materialSourceName,
         daa.Description AS description,
         daa.Remarks AS remarks,
+        daa.Priority AS priority,
         daa.Status AS status,
         daa.PreCancelStatus AS preCancelStatus,
         daa.ProgressPercent AS progressPercent,
@@ -1957,7 +1961,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         Id AS assignmentId, StartDate AS startDate, Days AS days, EndDate AS endDate,
         LabourSource AS labourSource, MaterialSource AS materialSource,
         LabourContractorId AS labourContractorId, MaterialContractorId AS materialContractorId,
-        Description AS description, Remarks AS remarks, ApprovalLevelsJson AS approvalLevelsJson,
+        Description AS description, Remarks AS remarks, Priority AS priority, ApprovalLevelsJson AS approvalLevelsJson,
         ReworkFromAssignmentId AS reworkFromAssignmentId
       FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1
     `);
@@ -2123,6 +2127,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
             qcStatus,
             description: assignment.description,
             remarks: assignment.remarks,
+            priority: assignment.priority ?? null,
             materials,
             checkpoints,
           }
@@ -2145,7 +2150,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
 
   const {
     engineerIds, qcUserIds, approvalLevels, startDate, days, endDate, labourSource, materialSource,
-    labourContractorId, materialContractorId, description, remarks, materials, checkpoints,
+    labourContractorId, materialContractorId, description, remarks, materials, checkpoints, priority,
   } = req.body;
 
   if (engineerIds != null && !Array.isArray(engineerIds)) {
@@ -2207,6 +2212,9 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
   if (materialSource && !SOURCE_VALUES.has(materialSource)) {
     return res.status(400).json({ error: `materialSource must be one of: ${[...SOURCE_VALUES].join(", ")}` });
   }
+  if (priority && !PRIORITY_VALUES.has(priority)) {
+    return res.status(400).json({ error: `priority must be one of: ${[...PRIORITY_VALUES].join(", ")}` });
+  }
 
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -2231,6 +2239,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .input("materialContractorId", sql.Int, Number.isFinite(materialContractorId) ? materialContractorId : null)
         .input("description", sql.NVarChar(500), description || null)
         .input("remarks", sql.NVarChar(1000), remarks || null)
+        .input("priority", sql.NVarChar(20), priority || null)
         .input("approvalLevelsJson", sql.NVarChar(sql.MAX), approvalLevelsJson);
 
     let assignmentId;
@@ -2244,7 +2253,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
           SET StartDate = @startDate, Days = @days, EndDate = @endDate,
               LabourSource = @labourSource, MaterialSource = @materialSource,
               LabourContractorId = @labourContractorId, MaterialContractorId = @materialContractorId,
-              Description = @description, Remarks = @remarks, ApprovalLevelsJson = @approvalLevelsJson,
+              Description = @description, Remarks = @remarks, Priority = @priority, ApprovalLevelsJson = @approvalLevelsJson,
               UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
@@ -2255,10 +2264,10 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .query(`
           INSERT INTO dbo.DependencyActivityAssignment
             (DependencyMasterActivityId, StartDate, Days, EndDate, LabourSource, MaterialSource,
-             LabourContractorId, MaterialContractorId, Description, Remarks, ApprovalLevelsJson, CreatedBy)
+             LabourContractorId, MaterialContractorId, Description, Remarks, Priority, ApprovalLevelsJson, CreatedBy)
           OUTPUT INSERTED.Id AS id
           VALUES (@rungId, @startDate, @days, @endDate, @labourSource, @materialSource,
-                  @labourContractorId, @materialContractorId, @description, @remarks, @approvalLevelsJson, @createdBy)
+                  @labourContractorId, @materialContractorId, @description, @remarks, @priority, @approvalLevelsJson, @createdBy)
         `);
       assignmentId = inserted.recordset[0].id;
     }

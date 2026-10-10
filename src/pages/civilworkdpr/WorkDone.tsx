@@ -13,6 +13,7 @@ import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
 import { AutoNameFinder } from "@/components/civilworkdpr/AutoNameFinder";
+import { PriorityBadge } from "@/components/civilworkdpr/PriorityBadge";
 import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
@@ -203,6 +204,7 @@ function DependencyChainCards({
                       >
                         {meta.label}
                       </span>
+                      <PriorityBadge priority={assignment?.priority} />
                       <QcBadge qcStatus={assignment?.qcStatus} />
                       <AttemptBadge attemptNo={assignment?.attemptNo} />
                     </button>

@@ -128,6 +128,10 @@ export interface ApprovalLevel {
   mode: "all" | "any";
 }
 
+/** Activity Priority picked on the Work Allocation form, mildest first. */
+export const ASSIGNMENT_PRIORITIES = ["Low", "High", "Urgent", "Very Urgent"] as const;
+export type AssignmentPriority = (typeof ASSIGNMENT_PRIORITIES)[number];
+
 export interface RungAssignmentDetail {
   rungId: number;
   activityId: number;
@@ -159,6 +163,7 @@ export interface RungAssignmentDetail {
     } | null;
     description: string | null;
     remarks: string | null;
+    priority?: AssignmentPriority | null;
     materials: AssignmentMaterial[];
     checkpoints: AssignmentCheckpoint[];
   } | null;
@@ -177,6 +182,7 @@ export interface RungAssignmentPayload {
   materialContractorId: number | null;
   description: string | null;
   remarks: string | null;
+  priority?: AssignmentPriority | null;
   checkpoints: AssignmentCheckpoint[];
   materials: AssignmentMaterial[];
 }
@@ -292,6 +298,7 @@ export interface ReportedAssignment {
   materialSourceName?: string | null;
   description: string | null;
   remarks: string | null;
+  priority?: AssignmentPriority | null;
   status: AssignmentStatus;
   // What Status was right before this activity got Cancelled — only ever
   // non-null while status === "CANCELLED". Determines what restoring it

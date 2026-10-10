@@ -45,6 +45,7 @@ import {
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
 import ActivityDetailModal from "./ActivityDetailModal";
 import { dependencyAutoName } from "@/lib/dependencyAutoName";
+import { PriorityBadge } from "@/components/civilworkdpr/PriorityBadge";
 
 // Purely presentational — icon + accent color per status, same colors as
 // ASSIGNMENT_STATUS_META's Tailwind classes just as hex for GlassCard's
@@ -223,6 +224,7 @@ function ChainGroupList({
                             {row.sequenceNo}. {row.activityName}
                           </span>
                           <div onClick={(e) => e.stopPropagation()} className="shrink-0 flex flex-col items-end gap-0.5">
+                            <PriorityBadge priority={row.priority} />
                             <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
                             <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} />
                           </div>
@@ -312,6 +314,7 @@ function ChainGroupList({
                           <td className="px-5 py-3">
                             <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
                               {row.sequenceNo}. {row.activityName}
+                              <PriorityBadge priority={row.priority} />
                               <QcBadge qcStatus={row.qcStatus} />
                               <AttemptBadge attemptNo={row.attemptNo} />
                             </span>
