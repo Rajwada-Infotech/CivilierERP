@@ -1,4 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
@@ -235,11 +238,34 @@ export default function WorkDone() {
   // GET /:id per chain via useQueries, which at production scale (1000+
   // chains) blew through the route's rate limit and left this page unable
   // to load at all.
-  const { data: allChains = [] } = useQuery({
+  const { data: allChains = [], isSuccess: chainsLoaded } = useQuery({
     queryKey: ["civilworkdpr-work-done-all-chains"],
     queryFn: getDependencyMasters,
     enabled: rights.canView,
   });
+
+  // Opened from a report row (?rung=&chain=): go straight to that activity's allocation form, once.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { rungId: linkedRung, chainId: linkedChain } = readChainLink(searchParams);
+  useEffect(() => {
+    if ((!linkedRung && !linkedChain) || !chainsLoaded) return;
+    const chain = (allChains as DependencyMasterListRow[]).find((c) =>
+      linkedChain ? c.id === linkedChain : c.activities?.some((a) => a.rungId === linkedRung),
+    );
+    const rung = chain?.activities?.find((a) => a.rungId === linkedRung);
+    if (chain && rung) setActiveAssignment({ rung, chain });
+    else toast.error("That activity is not in Work Allocation (its chain may have been retired, or is outside your projects).");
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("rung");
+        next.delete("chain");
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedRung, linkedChain, chainsLoaded]);
   const { data: projects = [], isLoading: loadingProjects } = useQuery({
     queryKey: ["civilworkdpr-work-done-projects"],
     queryFn: fetchProjects,

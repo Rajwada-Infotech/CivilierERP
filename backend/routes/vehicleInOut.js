@@ -30,7 +30,7 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const multer = require("multer");
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");

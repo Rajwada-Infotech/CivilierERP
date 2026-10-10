@@ -1,3 +1,5 @@
+import { useLiveData } from "@/hooks/useLiveData";
+import { autoPostKey, autoPostUrl, nextEntryToAutoPost } from "./paymentAutoPost";
 import React from "react";
 import { printPayment, downloadPaymentPdf } from "@/utils/paymentDocument";
 import { useState, useCallback, useEffect, useMemo } from "react";
@@ -208,6 +210,10 @@ const Payment: React.FC = () => {
   const [pmtPostingLoading, setPmtPostingLoading] = useState(false);
   const [pmtPosting, setPmtPosting] = useState(false);
   const [pmtPostingError, setPmtPostingError] = useState<string | null>(null);
+  // Entries whose auto-post failed. They are NOT tried again by themselves - doing so looped at network speed
+  // (every failure re-ran the effect, which posted the same entry again), and under a rate limit that storm
+  // locked everyone out. "Retry" below clears this and posts once more, on request.
+  const [pmtPostFailed, setPmtPostFailed] = useState<Set<string>>(new Set());
   const [formChainData, setFormChainData] = useState<PaymentChainResponse | null>(null);
   const [loadingFormChain, setLoadingFormChain] = useState(false);
   // Known totalPaid injected by "Pay Remaining" — overrides stale opt.totalPaid from DB
@@ -309,6 +315,8 @@ const Payment: React.FC = () => {
     if ((detailTab !== "posting" && detailTab !== "chain") || !viewingRec?.id) return;
     setPmtPostingLoading(true);
     setPmtPostingData(null);
+    setPmtPostFailed(new Set());
+    setPmtPostingError(null);
     const url = viewingRec.expenseRef
       ? `/api/new-payment/chain-posting/${encodeURIComponent(viewingRec.expenseRef)}`
       : `/api/new-payment/${viewingRec.id}/posting`;
@@ -325,16 +333,17 @@ const Payment: React.FC = () => {
   // rather than all at once, since each hits the same doc-number lock.
   useEffect(() => {
     if (detailTab !== "posting" || pmtPostingLoading || pmtPosting) return;
+    // Posting is a write: the server refuses it (403) for anyone without the Create right on Payments. Someone who
+    // can only look at a payment must not fire it at all - it used to be refused, tried again, refused again...
+    if (!rights.canCreate) return;
     const entries: any[] = pmtPostingData?.entries ?? [];
     // Debit Notes (routes/debitNote.js) post themselves immediately on save
     // — there's no /:id/post-to-gl for a debit note id, so this loop must
     // never try to "auto-post" one the way it does payments/bounce charges.
-    const next = entries.find((e) => !e.isPosted && !e.isBounced && e.type !== "debit_note");
+    const next = nextEntryToAutoPost(entries, pmtPostFailed);
     if (!next) return;
-    const url =
-      next.type === "bounce_charge"
-        ? `/api/new-payment/${next.pmtId}/post-bounce-charge-to-gl`
-        : `/api/new-payment/${next.pmtId}/post-to-gl`;
+    const failKey = autoPostKey(next);
+    const url = autoPostUrl(next);
     setPmtPosting(true);
     setPmtPostingError(null);
     fetchWithAuth(url, { method: "POST" })
@@ -350,10 +359,13 @@ const Payment: React.FC = () => {
           ),
         }));
       })
-      .catch((err: any) => setPmtPostingError(err.message ?? "Posting failed"))
+      .catch((err: any) => {
+        setPmtPostingError(err.message ?? "Posting failed");
+        setPmtPostFailed((prev) => new Set(prev).add(failKey));
+      })
       .finally(() => setPmtPosting(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detailTab, pmtPostingLoading, pmtPostingData, pmtPosting]);
+  }, [detailTab, pmtPostingLoading, pmtPostingData, pmtPosting, pmtPostFailed, rights.canCreate]);
 
   // Deep-link support — Trial Balance drill-down (Level 3) navigates here as
   // /payments?view=<PPaymentID>, so this payment's receipt should open
@@ -507,6 +519,7 @@ const Payment: React.FC = () => {
     data: dbData,
     isLoading,
     isError,
+    error: loadError,
     refetch: refetchPayments,
   } = useQuery({
     queryKey: [
@@ -721,6 +734,10 @@ const Payment: React.FC = () => {
   >({
     queryKey: ["supplier-options-payment-filter"],
     queryFn: fetchSupplierOptions,
+  });
+  // A ledger, vendor, contractor, broker, customer or partner added anywhere appears in the Payee / filter pickers at once.
+  useLiveData("ledgers", () => {
+    void queryClient.invalidateQueries({ queryKey: ["supplier-options-payment-filter"] });
   });
 
   const { data: finYearOptions = [] } = useQuery<
@@ -4555,8 +4572,21 @@ const Payment: React.FC = () => {
             )}
 
             {isError && (
-              <div className="text-center py-16 text-destructive text-sm">
-                Failed to load payments. Please log in and try again.
+              <div className="text-center py-16 text-sm space-y-3">
+                <p className="text-destructive">
+                  {/too many requests|429/i.test(loadError?.message ?? "")
+                    ? "Too many requests just now - the server asks for a short pause. Try again in a few seconds."
+                    : /log ?in|session|token|unauthori[sz]ed|401/i.test(loadError?.message ?? "")
+                      ? "Your session has ended. Please log in again."
+                      : `Could not load payments${loadError?.message ? `: ${loadError.message}` : "."}`}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void refetchPayments()}
+                  className="px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors"
+                >
+                  Try again
+                </button>
               </div>
             )}
 
@@ -5760,12 +5790,33 @@ const Payment: React.FC = () => {
                       </div>
                     );
                   })()}
+                  {!rights.canCreate &&
+                    (pmtPostingData?.entries ?? []).some((e: any) => !e.isPosted && !e.isBounced && e.type !== "debit_note") && (
+                      <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 mt-2">
+                        <AlertCircle size={13} className="text-amber-600 flex-shrink-0" />
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          Not posted to the ledger yet. Posting needs the Create right on Payments, which you don't have, so it will be
+                          posted by someone who does.
+                        </p>
+                      </div>
+                    )}
                   {pmtPostingError && (
                     <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 mt-2">
                       <AlertCircle size={13} className="text-destructive flex-shrink-0" />
-                      <p className="text-xs text-destructive">
+                      <p className="text-xs text-destructive flex-1">
                         Auto-posting failed: {pmtPostingError}
                       </p>
+                      <button
+                        type="button"
+                        disabled={pmtPosting}
+                        onClick={() => {
+                          setPmtPostingError(null);
+                          setPmtPostFailed(new Set());
+                        }}
+                        className="shrink-0 rounded-lg border border-destructive/30 px-2.5 py-1 text-[0.6875rem] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                      >
+                        Retry
+                      </button>
                     </div>
                   )}
                 </div>

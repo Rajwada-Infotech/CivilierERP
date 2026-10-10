@@ -13,6 +13,7 @@ const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
 const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const authMiddleware = require("./middleware/auth");
+const { attachRateLimitUser, rateLimitKey, loginRateLimitKey } = require("./middleware/rateLimitIdentity");
 const { attachProjectScope } = require("./services/projectScope");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
@@ -178,6 +179,7 @@ const ALL_ROUTES = [
   { path: "/api/salary-structure", file: "./routes/salaryStructure" },
   { path: "/api/payroll-run", file: "./routes/payrollRun" },
   { path: "/api/attendance-record", file: "./routes/attendanceRecord" },
+  { path: "/api/employee-attendance", file: "./routes/employeeAttendance" },
   { path: "/api/leave-record", file: "./routes/leaveRecord" },
   { path: "/api/overtime-record", file: "./routes/overtimeRecord" },
   { path: "/api/incentive-record", file: "./routes/incentiveRecord" },
@@ -461,12 +463,27 @@ async function createApp() {
   // including the Vercel serverless entry point (api/index.js) which calls
   // createApp() directly and never goes through startServer().
   if (!isTest) {
+    // Per account: 20 attempts / 15 min at one email address (see loginRateLimitKey for why not per IP).
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 20,
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
+      keyGenerator: loginRateLimitKey,
       skip: (req) => isDev && isLocalRequest(req),
+      validate: false,
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+    // Per IP, much higher: one machine trying many accounts. Everyone behind one address (an office, or this
+    // server's Docker gateway) shares it, so it must allow a whole company signing in together.
+    const loginIpLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 600,
+      message: { error: "Too many login attempts. Try again later." },
+      store: makeStore("rl:login-ip:"),
+      skip: (req) => isDev && isLocalRequest(req),
+      validate: false,
       standardHeaders: true,
       legacyHeaders: false,
     });
@@ -498,12 +515,14 @@ async function createApp() {
       return _cachedLimit;
     }
 
+    // The limiter runs before authentication, so req.user does not exist yet: the person is identified from a
+    // verified token by attachRateLimitUser (see middleware/rateLimitIdentity.js) and gets a bucket of their own.
     const apiLimiter = rateLimit({
       windowMs: 60 * 1000,
       max: async (req) => {
-        if (!req.user?.userId) return 1000;
+        if (req.rateLimitUserId == null) return 1000;
         try {
-          return await getDynamicLimitCached(req.user.userId);
+          return await getDynamicLimitCached(req.rateLimitUserId);
         } catch (err) {
           logger.warn(
             { event: "RATE_LIMIT_FALLBACK", err },
@@ -513,15 +532,17 @@ async function createApp() {
         }
       },
       store: makeStore("rl:api:"),
-      skip: (req) => req.path.startsWith("/api/user-activity"),
-      keyGenerator: (req) =>
-        req.user?.userId ? `user:${req.user.userId}` : req.ip,
+      // Inside app.use("/api", ...) req.path has the "/api" stripped ("/user-activity"), so this must read the full URL -
+      // comparing req.path with "/api/user-activity" never matched, and every logged action cost a second request.
+      skip: (req) => req.originalUrl.startsWith("/api/user-activity"),
+      keyGenerator: rateLimitKey,
       validate: false,
       standardHeaders: true,
       legacyHeaders: false,
     });
 
-    app.use("/api/users/login", loginLimiter);
+    app.use("/api/users/login", loginIpLimiter, loginLimiter);
+    app.use("/api", attachRateLimitUser);
     app.use("/api", apiLimiter);
   }
 

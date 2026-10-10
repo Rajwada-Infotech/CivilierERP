@@ -1,7 +1,7 @@
 "use strict";
 
 const express = require("express");
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 const authMiddleware = require("../middleware/auth");
 const { getMaintenanceState, setMaintenance } = require("../services/maintenanceMode");
 const { isSuperAdmin } = require("../middleware/maintenanceGate");

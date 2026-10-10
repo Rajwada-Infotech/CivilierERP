@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed } = require("../services/projectScope");
@@ -601,6 +601,12 @@ const transferFilters = (req, request) => {
   if (Number.isFinite(projectId)) {
     request.input("projectId", sql.Int, projectId);
     cond += " AND dm.ProjectId = @projectId";
+  }
+  // One exact activity (a report row opened in Work Transfer).
+  const rungId = req.query.rungId ? parseInt(req.query.rungId, 10) : null;
+  if (Number.isFinite(rungId)) {
+    request.input("rungFilter", sql.Int, rungId);
+    cond += " AND dma.Id = @rungFilter";
   }
   if (search) {
     request.input("search", sql.NVarChar(200), `%${search}%`);

@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
@@ -434,6 +437,39 @@ export default function ActivityReporting() {
     setDetailRow(row);
     setDetailTab(tab);
   };
+
+  // Opened from a report row (?rung=): open that activity's detail straight away, once.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedRung = readChainLink(searchParams).rungId;
+  useEffect(() => {
+    if (!linkedRung || !rights.canView) return;
+    let cancelled = false;
+    getReportedAssignments({ rungId: linkedRung })
+      .then((rows) => {
+        if (cancelled) return;
+        if (rows[0]) openDetail(rows[0]);
+        else toast.error("That activity is not in Activity Reporting (it may be outside your projects or its chain retired).");
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : "Could not open that activity.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("rung");
+            next.delete("chain");
+            return next;
+          },
+          { replace: true },
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedRung, rights.canView]);
 
   // Debounced so the search box doesn't fire a fresh GROUP BY over the
   // whole (342,000+ row, in production) table on every keystroke.
