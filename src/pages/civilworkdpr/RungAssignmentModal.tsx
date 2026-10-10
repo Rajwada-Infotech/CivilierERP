@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, ShieldCheck, Plus, Trash2, Users, Search } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, Link2, ShieldCheck, Plus, Trash2, Users, Search } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
@@ -19,6 +19,7 @@ import {
 } from "@/api/dependencyActivityAssignmentApi";
 import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { chainFloorDisplay, roomDisplay } from "@/lib/floorLabel";
+import { dependencyAutoName } from "@/lib/dependencyAutoName";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
@@ -335,6 +336,12 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     queryFn: () => getRungAssignment(rungId),
   });
 
+  // Derived from the dependency itself (alias + room + activity) — read-only, never typed.
+  const autoName = useMemo(
+    () => dependencyAutoName({ alias: chain.alias, roomName: chain.roomName, storey: chain.storey, activityName: rung.activityName }),
+    [chain, rung],
+  );
+
   const defaultDescription = useMemo(
     () =>
       `Work for ${chain.projectName || "—"}, ${chain.towerName || "—"}, ${chainFloorDisplay(chain.floor)}, ${chain.flatName || "—"}, ${roomDisplay(chain.roomName, chain.storey)} and ${rung.activityName}`,
@@ -585,6 +592,14 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Auto Name — fetched from the dependency (alias, room) and its activity; read-only */}
+            <div>
+              <label className={labelCls}>
+                <Link2 size={11} /> Auto Name
+              </label>
+              <input value={autoName} readOnly tabIndex={-1} title="Fetched automatically from the dependency — not editable" className={`${inputCls} cursor-default opacity-90`} />
             </div>
 
             {/* Description — auto-filled from location + activity, editable */}
