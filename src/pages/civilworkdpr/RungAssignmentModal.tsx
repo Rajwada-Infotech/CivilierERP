@@ -336,9 +336,9 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     queryFn: () => getRungAssignment(rungId),
   });
 
-  // Derived from the dependency itself (alias + room + activity) — read-only, never typed.
+  // Derived from the dependency itself (flat + room + activity) — read-only, never typed.
   const autoName = useMemo(
-    () => dependencyAutoName({ alias: chain.alias, roomName: chain.roomName, storey: chain.storey, activityName: rung.activityName }),
+    () => dependencyAutoName({ flatName: chain.flatName, alias: chain.alias, roomName: chain.roomName, storey: chain.storey, activityName: rung.activityName }),
     [chain, rung],
   );
 
@@ -594,7 +594,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
               </div>
             </div>
 
-            {/* Auto Name — fetched from the dependency (alias, room) and its activity; read-only */}
+            {/* Auto Name — fetched from the dependency (flat, room) and its activity; read-only */}
             <div>
               <label className={labelCls}>
                 <Link2 size={11} /> Auto Name
