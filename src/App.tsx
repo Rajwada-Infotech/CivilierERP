@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
 import { Toaster } from "sonner";
 import { SystemUpdateBanner } from "./components/SystemUpdateBanner";
+import { NewBuildWatcher } from "./components/NewBuildWatcher";
 import { MaintenanceWatcher } from "./components/MaintenanceWatcher";
 import {
   BrowserRouter as Router,
@@ -2668,6 +2669,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" closeButton />
       <SystemUpdateBanner />
+      <NewBuildWatcher />
       {/* ActivityBrowserProvider is always mounted so AuthSessionBridge is always inside it.
           The initialLoading gate moved inside the tree to avoid provider context being missing
           during hot-module-reload or React strict-mode double-renders. */}
