@@ -46,6 +46,7 @@ import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
 import ActivityDetailModal from "./ActivityDetailModal";
 import { dependencyAutoName } from "@/lib/dependencyAutoName";
 import { PriorityBadge } from "@/components/civilworkdpr/PriorityBadge";
+import { AssignmentPrioritySelect } from "@/components/civilworkdpr/AssignmentPrioritySelect";
 
 // Purely presentational — icon + accent color per status, same colors as
 // ASSIGNMENT_STATUS_META's Tailwind classes just as hex for GlassCard's
@@ -300,6 +301,7 @@ function ChainGroupList({
                         <th className="px-5 py-2">Activity</th>
                         <th className="px-3 py-2">Engineer</th>
                         <th className="px-3 py-2">Tag</th>
+                        <th className="px-3 py-2">Priority</th>
                         <th className="px-3 py-2">Start Date</th>
                         <th className="px-3 py-2">Material</th>
                         <th className="px-3 py-2">Photos</th>
@@ -316,7 +318,6 @@ function ChainGroupList({
                           <td className="px-5 py-3">
                             <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
                               {row.sequenceNo}. {row.activityName}
-                              <PriorityBadge priority={row.priority} />
                               <QcBadge qcStatus={row.qcStatus} />
                               <AttemptBadge attemptNo={row.attemptNo} />
                             </span>
@@ -333,6 +334,9 @@ function ChainGroupList({
                             ) : (
                               <span className="text-xs text-muted-foreground">—</span>
                             )}
+                          </td>
+                          <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                            <AssignmentPrioritySelect rungId={row.rungId} priority={row.priority} />
                           </td>
                           <td className="px-3 py-3">
                             <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
