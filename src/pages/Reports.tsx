@@ -1607,8 +1607,8 @@ const ALL_REPORTS: ReportDef[] = [
     },
     columns: [
       { header: "Supplier Name", accessor: "name" },
-      { header: "GST No", accessor: "gst_no" },
-      { header: "PAN", accessor: "pan_no" },
+      { header: "GSTIN (GST Identification Number)", accessor: "gst_no" },
+      { header: "PAN (Permanent Account Number)", accessor: "pan_no" },
       { header: "Contact", accessor: "contact_person" },
       { header: "Phone", accessor: "phone" },
       { header: "City", accessor: "city" },

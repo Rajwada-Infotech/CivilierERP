@@ -292,7 +292,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <SectionCard icon={IdCard} iconClass="bg-sky-500/10 text-sky-600" title="Identity">
-            {field("PanNo", "PAN Number")}
+            {field("PanNo", "PAN (Permanent Account Number)")}
             {field("AadhaarNo", "Aadhaar Number")}
           </SectionCard>
           <SectionCard icon={Briefcase} iconClass="bg-emerald-500/10 text-emerald-600" title="Occupation & Income">

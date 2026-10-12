@@ -181,9 +181,9 @@ function EnterpriseViewModal({
               label: "GST Issue Date",
               value: enterprise.gst_issue_date?.slice(0, 10),
             },
-            { label: "TAN", value: enterprise.tan },
-            { label: "PAN", value: enterprise.pan },
-            { label: "CIN", value: enterprise.cin },
+            { label: "TAN (Tax Deduction and Collection Account Number)", value: enterprise.tan },
+            { label: "PAN (Permanent Account Number)", value: enterprise.pan },
+            { label: "CIN (Corporate Identity Number)", value: enterprise.cin },
             { label: "CR Code", value: enterprise.cr_code },
             { label: "RERA No.", value: enterprise.rera_no },
             { label: "RERA Date", value: enterprise.rera_date?.slice(0, 10) },
@@ -302,9 +302,9 @@ function EnterpriseViewModal({
               label="GST Issue Date"
               value={enterprise.gst_issue_date?.slice(0, 10)}
             />
-            <Row label="TAN" value={enterprise.tan} />
-            <Row label="PAN" value={enterprise.pan} />
-            <Row label="CIN" value={enterprise.cin} />
+            <Row label="TAN (Tax Deduction and Collection Account Number)" value={enterprise.tan} />
+            <Row label="PAN (Permanent Account Number)" value={enterprise.pan} />
+            <Row label="CIN (Corporate Identity Number)" value={enterprise.cin} />
             <Row label="CR Code" value={enterprise.cr_code} />
             <Row label="RERA No." value={enterprise.rera_no} />
             <Row label="RERA Date" value={enterprise.rera_date?.slice(0, 10)} />
@@ -383,7 +383,7 @@ function buildEnterpriseColumns(
     },
     {
       accessorKey: "pan",
-      header: "PAN",
+      header: "PAN (Permanent Account Number)",
       cell: ({ getValue }) => (
         <span className="font-mono text-xs text-muted-foreground">
           {(getValue() as string) || "—"}
@@ -551,7 +551,7 @@ export default function EnterpriseMaster() {
       { header: "Name", accessor: "name" },
       { header: "Short Name", accessor: "short_name" },
       { header: "Type", accessor: "entity_type" },
-      { header: "PAN", accessor: "pan" },
+      { header: "PAN (Permanent Account Number)", accessor: "pan" },
       { header: "GST Type", accessor: "gst_type" },
       { header: "Phone", accessor: "phone_number" },
       { header: "Status", accessor: "status" },
@@ -959,9 +959,9 @@ export default function EnterpriseMaster() {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {sel("GST Type", "gst_type", GST_TYPES)}
                   {field("GST Issue Date", "gst_issue_date", "date")}
-                  {field("TAN", "tan", "text", "Tax Deduction Account Number")}
-                  {field("PAN", "pan", "text", "AAAAA0000A")}
-                  {field("CIN", "cin", "text", "Company Identification Number")}
+                  {field("TAN (Tax Deduction and Collection Account Number)", "tan", "text", "AAAA00000A")}
+                  {field("PAN (Permanent Account Number)", "pan", "text", "AAAAA0000A")}
+                  {field("CIN (Corporate Identity Number)", "cin", "text", "L00000AA0000AAA000000")}
                   {field("CR Code", "cr_code")}
                   {field("RERA No.", "rera_no")}
                   {field("RERA Date", "rera_date", "date")}

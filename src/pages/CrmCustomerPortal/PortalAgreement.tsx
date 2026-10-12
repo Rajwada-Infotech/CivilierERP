@@ -454,7 +454,7 @@ const PortalAgreement: React.FC = () => {
             <InfoField label="Project" value={agreement.ProjectName} />
             <InfoField label="Unit" value={agreement.UnitNo} />
             <InfoField label="Total Value" value={fmtMoney(agreement.TotalValue)} />
-            <InfoField label="PAN" value={agreement.PanNo} mono />
+            <InfoField label="PAN (Permanent Account Number)" value={agreement.PanNo} mono />
             <InfoField label="Aadhaar" value={maskAadhaar(agreement.AadhaarNo)} mono />
             <InfoField label="Agreement Date" value={fmtDate(agreement.AgreementDate) || "Not yet finalized"} />
             {agreement.LegalAddress && <InfoField label="Registered Address" value={agreement.LegalAddress} />}

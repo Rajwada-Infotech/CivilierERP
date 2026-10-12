@@ -459,7 +459,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // ── PAN is mandatory for suppliers ──
     if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
       return res.status(400).json({
-        error: "PAN Number is mandatory for suppliers.",
+        error: "PAN is mandatory for suppliers.",
         code: "MISSING_PAN",
       });
     }
@@ -994,7 +994,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     // ── PAN is mandatory for suppliers ──
     if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
       return res.status(400).json({
-        error: "PAN Number is mandatory for suppliers.",
+        error: "PAN is mandatory for suppliers.",
         code: "MISSING_PAN",
       });
     }

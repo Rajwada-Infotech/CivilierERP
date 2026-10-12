@@ -2602,7 +2602,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         { key: "AccountNo", label: "Account Number", type: "text" },
                         { key: "IfscCode", label: "IFSC Code", type: "text" },
                         { key: "AccountHolderName", label: "Account Holder Name", type: "text" },
-                        { key: "PanNo", label: "PAN Number", type: "text" },
+                        { key: "PanNo", label: "PAN (Permanent Account Number)", type: "text" },
                         { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                         { key: "Occupation", label: "Occupation", type: "text" },
                         { key: "AnnualIncome", label: "Annual Income", type: "number" },
