@@ -2927,7 +2927,9 @@ const ReportTable: React.FC<{
   companies: CompanyOption[];
   projects: { id: number; name: string }[];
   onClose: () => void;
-}> = ({ report, filters, companies, projects, onClose }) => {
+  /** When set, clicking a row calls this instead of opening the row-detail dialog (the Civil Work DPR Query page). */
+  onRowOpen?: (row: Record<string, unknown>) => void;
+}> = ({ report, filters, companies, projects, onClose, onRowOpen }) => {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -3666,7 +3668,7 @@ const ReportTable: React.FC<{
                 {pageRows.map((row, i) => (
                   <tr
                     key={i}
-                    onClick={() => setSelectedRow(row)}
+                    onClick={() => (onRowOpen ? onRowOpen(row) : setSelectedRow(row))}
                     className="hover:bg-muted/20 transition-colors cursor-pointer"
                   >
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">
@@ -3828,6 +3830,32 @@ const ReportTile: React.FC<{
 // isMarketingHeadPage) — showing Finance/Material/Admin tiles they can't
 // actually open would just be a dead end (backend 403s on click).
 const MARKETING_HEAD_SECTION_IDS = new Set(["sales-automation", "crm"]);
+
+/** One report shown on its own page (Civil Work DPR > Query) — the same definition and table as in Reports. */
+export const QueryReportTable: React.FC<{
+  reportId: string;
+  onClose: () => void;
+  onRowOpen: (row: Record<string, unknown>) => void;
+}> = ({ reportId, onClose, onRowOpen }) => {
+  const report = REPORT_MAP.get(reportId);
+  const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    fetchProjectOptions()
+      .then((l) => setProjects(Array.isArray(l) ? l : []))
+      .catch(() => setProjects([]));
+  }, []);
+  if (!report) return null;
+  return (
+    <ReportTable
+      report={report}
+      filters={{ companyId: "", projectId: "", finYearId: "", dateMode: "single", singleDate: "", rangeFrom: "", rangeTo: "" }}
+      companies={[]}
+      projects={projects}
+      onClose={onClose}
+      onRowOpen={onRowOpen}
+    />
+  );
+};
 
 const Reports: React.FC = () => {
   usePageRights("reports");

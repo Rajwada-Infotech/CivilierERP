@@ -34,6 +34,7 @@ const guard = requireAnyPageRight(
     "civilworkdpr-work-done",
     "civilworkdpr-quality-check",
     "civilworkdpr-work-transfer",
+    "civilworkdpr-query",
   ],
   "view",
 );

@@ -1,4 +1,4 @@
-import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText, ShieldTick, Edit2, Repeat } from "iconsax-react";
+import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText, ShieldTick, Edit2, Repeat, SearchNormal1 } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Room Composition, Room Categories and Room Master are reachable from the
@@ -61,5 +61,11 @@ export const buildCivilWorkDprNavItems = (_pendingApprovalCount: number): NavIte
     icon: Edit2,
     path: "/civilworkdpr/amendment",
     pageKey: "civilworkdpr-amendment",
+  },
+  {
+    label: "Query",
+    icon: SearchNormal1,
+    path: "/civilworkdpr/query",
+    pageKey: "civilworkdpr-query",
   },
 ];
