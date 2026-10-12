@@ -52,6 +52,7 @@ import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { useAuth } from "@/contexts/AuthContext";
 import { DateInput } from "@/components/ui/date-input";
+import { chequeLotRange } from "./payment/chequeLotRange";
 
 const PAYMENT_MODES: FundTransferMode[] = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
 const CHEQUE_MODES: FundTransferMode[] = ["Cheque", "Post-Dated Cheque"];
@@ -1407,12 +1408,18 @@ export default function FundTransfer() {
                           {chequeLots.map((lot) => (
                             <option key={lot.CId} value={String(lot.CId)}>
                               {lot.ChequeLotNumber}
+                              {chequeLotRange(lot) ? `  · Cheques ${chequeLotRange(lot)}` : ""}
                               {lot.RemainingCheques != null ? `  (${lot.RemainingCheques} remaining)` : ""}
                             </option>
                           ))}
                         </select>
                         <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                       </div>
+                      {chequeLotRange(chequeLots.find((l) => String(l.CId) === String(chequeLotId))) && (
+                        <p className="text-[0.6875rem] text-muted-foreground">
+                          Cheques {chequeLotRange(chequeLots.find((l) => String(l.CId) === String(chequeLotId)))}
+                        </p>
+                      )}
                     </div>
                   )}
 
