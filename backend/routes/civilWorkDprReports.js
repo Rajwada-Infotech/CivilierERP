@@ -9,6 +9,8 @@
  *   GET /api/civilworkdpr-reports/quality-checks      every QC inspection (approved / rework) with its check results
  *   GET /api/civilworkdpr-reports/daily-updates       daily checkpoint photo updates (date, time logged in IST, who)
  *   GET /api/civilworkdpr-reports/daily-reports       the daily logbook: which work was done where on which day, and how much progress that day
+ *   GET /api/civilworkdpr-reports/user-daily-work     the same logbook, one row per allocated user: who had which work reported on a chosen date
+ *   GET /api/civilworkdpr-reports/tag-wise            the user-wise logbook limited to tagged activities, filterable by tag (DprTagMaster)
  *
  * Every route answers { data, total, page, totalPages } so the Reports page can page through it (it asks for
  * 500 rows at a time) and export everything. Filters: projectId (one id or a comma-separated list), dateFrom,
@@ -18,7 +20,7 @@
 
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -88,7 +90,11 @@ const ENGINEER_NAMES = `(
     FROM dbo.DependencyActivityEngineer dae JOIN dbo.users u ON u.id = dae.EngineerId
     WHERE dae.AssignmentId = daa.Id)`;
 
+// rungId / chainId let the Reports screen open exactly this activity / chain in Work Allocation, Activity
+// Reporting or Work Transfer.
 const ACTIVITY_COLUMNS = `
+    dma.Id AS rungId,
+    dm.Id AS chainId,
     ep.name AS projectName,
     ${SCOPE_PATH} AS location,
     dm.Alias AS chain,
@@ -332,6 +338,80 @@ router.get("/daily-reports", authMiddleware, guard, async (req, res) => {
     fail(res, "daily-reports", err);
   }
 });
+
+// ── User-Wise Daily Work ──────────────────────────────────────────────────────
+// For each user (engineer) an activity is allocated to, the work REPORTED on a date: one row per
+// (daily-log entry, allocated user). Filters: projectId, userId (one id or a comma-separated list) and
+// a date — `date` for one day, or dateFrom/dateTo for a range. With NO date given it shows today only
+// (never the whole history). "Progress" is the day's reported progress and, next to it, what was made
+// that day; status / dates / attempt are the activity's current allocation, QC its latest decision.
+// `byTag` turns it into the Tag-Wise report: every row carries its activity's tag, untagged activities are
+// left out, and a `tagId` filter (one id or a comma-separated list) narrows it to those tags. The tag is read
+// live from the activity, so re-tagging an activity moves its records straight away.
+const dailyWorkHandler = (byTag) => async (req, res) => {
+  const p = parseCommon(req);
+  const single = validDate(req.query.date);
+  const userIds = [
+    ...new Set(String(req.query.userId ?? "").split(",").map((x) => parseInt(x.trim(), 10)).filter(Number.isInteger)),
+  ].slice(0, 200);
+  try {
+    const conds = [...projectConds(req, p)];
+    if (single) conds.push("dl.LogDate = @date");
+    else if (p.dateFrom || p.dateTo) {
+      if (p.dateFrom) conds.push("dl.LogDate >= @dateFrom");
+      if (p.dateTo) conds.push("dl.LogDate <= @dateTo");
+    } else conds.push(`dl.LogDate = ${TODAY}`);
+    // Validated integers only, so inlining the list is injection-safe.
+    if (userIds.length) conds.push(`u.id IN (${userIds.join(",")})`);
+    if (byTag) {
+      const tagIds = [
+        ...new Set(String(req.query.tagId ?? "").split(",").map((x) => parseInt(x.trim(), 10)).filter(Number.isInteger)),
+      ].slice(0, 200);
+      conds.push("am.TagId IS NOT NULL");
+      if (tagIds.length) conds.push(`am.TagId IN (${tagIds.join(",")})`);
+    }
+    const where = `WHERE ${conds.join(" AND ")}`;
+    const from = `
+      FROM (
+        SELECT l.Id, l.DependencyMasterActivityId, l.LogDate, l.ProgressPercent,
+          CASE WHEN l.ProgressPercent IS NULL THEN NULL
+               ELSE l.ProgressPercent - ISNULL(LAG(l.ProgressPercent) OVER (PARTITION BY l.DependencyMasterActivityId ORDER BY l.LogDate), 0)
+          END AS ProgressMade
+        FROM dbo.DependencyActivityDailyLog l
+      ) dl
+      JOIN dbo.DependencyMasterActivity dma ON dma.Id = dl.DependencyMasterActivityId
+      JOIN dbo.DependencyActivityAssignment daa ON daa.DependencyMasterActivityId = dma.Id AND daa.IsCurrent = 1
+      JOIN dbo.DependencyActivityEngineer dae ON dae.AssignmentId = daa.Id
+      JOIN dbo.users u ON u.id = dae.EngineerId
+      JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+      JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+      LEFT JOIN dbo.DprTagMaster tg ON tg.Id = am.TagId
+      LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+      LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+      LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+      LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId`;
+    await sendPage(res, await getPool(), p, {
+      core: `SELECT dl.Id AS logId, tg.TagName AS tagName, u.id AS userId, u.name AS userName, dl.LogDate AS logDate,
+        dma.Id AS rungId, dm.Id AS chainId, dm.Alias AS chain, ep.name AS projectName, ${SCOPE_PATH} AS location,
+        um.UnitName AS flatName, rm.RoomName AS roomName, rm.Storey AS storey, am.activity_name AS activityName,
+        daa.Status AS status, dl.ProgressPercent AS progressPercent, dl.ProgressMade AS progressMade,
+        daa.StartDate AS startDate, daa.EndDate AS endDate, daa.AttemptNo AS attemptNo,
+        (SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC) AS qcStatus
+        ${from} ${where}`,
+      countSql: `SELECT COUNT(*) AS total ${from} ${where}`,
+      orderBy: byTag
+        ? "tg.TagName, u.name, dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC"
+        : "u.name, dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC",
+      bind: bindFilters(p, (r) => {
+        if (single) r.input("date", sql.Date, single);
+      }),
+    });
+  } catch (err) {
+    fail(res, byTag ? "tag-wise" : "user-daily-work", err);
+  }
+};
+router.get("/user-daily-work", authMiddleware, guard, dailyWorkHandler(false));
+router.get("/tag-wise", authMiddleware, guard, dailyWorkHandler(true));
 
 module.exports = router;
 module.exports._test = { parseCommon, validDate };

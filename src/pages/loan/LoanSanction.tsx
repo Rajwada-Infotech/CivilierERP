@@ -88,6 +88,7 @@ import {
   type LoanPayment,
 } from "@/api/loanSanctionApi";
 import { DateInput } from "@/components/ui/date-input";
+import { chequeLotRange } from "@/pages/finance/payment/chequeLotRange";
 
 const ACCENT = "#22c55e";
 const LOAN_TYPES: LoanType[] = ["Inter-Company", "Bank Loan", "Customer Loan"];
@@ -363,10 +364,14 @@ function LoanChequePicker({
             {lots.map((lot) => (
               <option key={lot.CId} value={String(lot.CId)}>
                 {lot.ChequeLotNumber}
+                {chequeLotRange(lot) ? ` · Cheques ${chequeLotRange(lot)}` : ""}
                 {lot.RemainingCheques != null ? ` (${lot.RemainingCheques} left)` : ""}
               </option>
             ))}
           </select>
+        )}
+        {chequeLotRange(activeLot) && (
+          <p className="text-[0.6875rem] text-muted-foreground normal-case tracking-normal">Cheques {chequeLotRange(activeLot)}</p>
         )}
       </div>
       <div className="space-y-2">

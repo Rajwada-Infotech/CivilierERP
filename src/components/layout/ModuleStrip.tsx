@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight, ChevronDown } from "lucide-react";
 import { MODULES, ADMIN_MODULE } from "./moduleDefs";
 import { useModule } from "@/contexts/ModuleContext";
-import { MODULE_DASHBOARD_ROUTES, Module, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
+import { MODULE_DASHBOARD_ROUTES, Module, firstAccessibleAdminPath, hasAnyAdminPageRight, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
@@ -59,10 +59,10 @@ export const ModuleStrip: React.FC = () => {
   const userHasModuleAccess = (moduleId: string): boolean =>
     sharedUserHasModuleAccess(moduleId, isAdminTier, (pk) => canAccessPage(pk as any));
 
-  // Filter regular modules; admin for admin-tier OR users with approval-inbox access
-  const canAccessApprovalInbox = canAccessPage("approval-inbox" as any);
+  // Filter regular modules; admin for admin-tier OR anyone with an Admin page ticked in Menu Rights
+  const canAccessAnyAdminPage = hasAnyAdminPageRight((pk) => canAccessPage(pk as any));
   const regularItems = MODULES.filter((m) => userHasModuleAccess(m.id));
-  const adminItems = (isAdminTier || canAccessApprovalInbox) ? [ADMIN_MODULE] : [];
+  const adminItems = (isAdminTier || canAccessAnyAdminPage) ? [ADMIN_MODULE] : [];
 
   useLayoutEffect(() => {
     updateScrollHint();
@@ -84,10 +84,10 @@ export const ModuleStrip: React.FC = () => {
     setModuleSwitching(true);
     await new Promise((r) => setTimeout(r, 260));
     setActiveModule(mod);
-    // Non-admin-tier users with only approval-inbox access land directly on the inbox
+    // Non-admin-tier users land on the first Admin page ticked for them (the Control Center needs its own tick)
     const dest =
       mod === "admin" && !isAdminTier
-        ? "/admin/approval/inbox"
+        ? firstAccessibleAdminPath((pk) => canAccessPage(pk as any)) ?? "/admin/approval/inbox"
         : MODULE_DASHBOARD_ROUTES[mod];
     navigate(dest);
     setTimeout(() => setModuleSwitching(false), 60);

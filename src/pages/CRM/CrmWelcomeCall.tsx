@@ -1981,7 +1981,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 mt-2 text-xs">
                     <div><span className="text-muted-foreground block">Mobile</span>{c.Mobile || "—"}</div>
                     <div><span className="text-muted-foreground block">Email</span>{c.Email || "—"}</div>
-                    <div><span className="text-muted-foreground block">PAN</span>{c.PanNo || "—"}</div>
+                    <div><span className="text-muted-foreground block">PAN (Permanent Account Number)</span>{c.PanNo || "—"}</div>
                     <div><span className="text-muted-foreground block">Aadhaar</span>{c.AadhaarNo || "—"}</div>
                   </div>
                 </div>
@@ -2010,7 +2010,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                       className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
                     <input placeholder="Email" value={coForm.Email} onChange={(e) => setCoForm((f) => ({ ...f, Email: e.target.value }))}
                       className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                    <input placeholder="PAN No." value={coForm.PanNo} onChange={(e) => setCoForm((f) => ({ ...f, PanNo: e.target.value }))}
+                    <input placeholder="PAN (Permanent Account Number)" value={coForm.PanNo} onChange={(e) => setCoForm((f) => ({ ...f, PanNo: e.target.value }))}
                       className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
                     <input placeholder="Aadhaar No." value={coForm.AadhaarNo} onChange={(e) => setCoForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
                       className="text-sm border border-border rounded px-2 py-1.5 bg-background" />

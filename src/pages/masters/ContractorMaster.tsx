@@ -199,8 +199,8 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Contact Person", accessor: "LHeadContactPerson" },
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },
-  { header: "GST Number", accessor: "LGST" },
-  { header: "PAN Number", accessor: "LHeadPan" },
+  { header: "GSTIN (GST Identification Number)", accessor: "LGST" },
+  { header: "PAN (Permanent Account Number)", accessor: "LHeadPan" },
   { header: "Contractor Type", accessor: "contractorType" },
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
   {
@@ -226,8 +226,8 @@ const CSV_HEADERS = {
   contactPerson: "Contact Person",
   phone: "Phone",
   email: "Email",
-  gst: "GST Number",
-  pan: "PAN Number",
+  gst: "GSTIN (GST Identification Number)",
+  pan: "PAN (Permanent Account Number)",
   contractorType: "Contractor Type",
   paymentTerms: "Payment Terms",
   group: "Group Name",
@@ -299,7 +299,7 @@ function buildContractorColumns(
     },
     {
       accessorKey: "LGST",
-      header: "GST No.",
+      header: "GSTIN (GST Identification Number)",
       cell: ({ getValue }) => (
         <span className="font-mono text-xs font-semibold text-primary">
           {(getValue() as string) || "—"}
@@ -824,9 +824,9 @@ const ContractorMaster: React.FC = () => {
         <tr><td>Phone</td><td>${c.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${c.LHeadEmail || "—"}</td></tr>
         <tr><td>GST Type</td><td>${c.LGSTType || "—"}</td></tr>
-        <tr><td>GST Number</td><td>${c.LGST || "—"}</td></tr>
+        <tr><td>GSTIN (GST Identification Number)</td><td>${c.LGST || "—"}</td></tr>
         <tr><td>GST State</td><td>${c.LGSTState || "—"}</td></tr>
-        <tr><td>PAN Number</td><td>${c.LHeadPan || "—"}</td></tr>
+        <tr><td>PAN (Permanent Account Number)</td><td>${c.LHeadPan || "—"}</td></tr>
         <tr><td>Contractor Type</td><td>${c.contractorType || "—"}</td></tr>
         <tr><td>Payment Terms</td><td>${c.LHeadPaymentTerms || "—"}</td></tr>
         <tr><td>Group</td><td>${c.LBelongsTo != null ? (accountGroups.find((g) => g._id === String(c.LBelongsTo))?.name ?? "—") : "—"}</td></tr>
@@ -1218,11 +1218,11 @@ const ContractorMaster: React.FC = () => {
                   )}
                 </div>
 
-                {/* GST Number — only when Registered */}
+                {/* GSTIN (GST Identification Number) — only when Registered */}
                 {form.LGSTType === "Registered" && (
                   <div className="space-y-1.5">
                     <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                      GST Number <span className="text-destructive">*</span>
+                      GSTIN (GST Identification Number) <span className="text-destructive">*</span>
                     </label>
                     <input
                       value={form.LGST}
@@ -1262,7 +1262,7 @@ const ContractorMaster: React.FC = () => {
                 {/* PAN */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    PAN Number
+                    PAN (Permanent Account Number)
                   </label>
                   <input
                     value={form.LHeadPan}
@@ -1697,13 +1697,13 @@ const ContractorMaster: React.FC = () => {
                 { label: "Email", value: viewRecord.LHeadEmail || "—" },
                 { label: "GST Type", value: viewRecord.LGSTType || "—" },
                 {
-                  label: "GST Number",
+                  label: "GSTIN (GST Identification Number)",
                   value: viewRecord.LGST || "—",
                   mono: true,
                 },
                 { label: "GST State", value: viewRecord.LGSTState || "—" },
                 {
-                  label: "PAN Number",
+                  label: "PAN (Permanent Account Number)",
                   value: viewRecord.LHeadPan || "—",
                   mono: true,
                 },

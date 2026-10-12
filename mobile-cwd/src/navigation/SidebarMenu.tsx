@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Home, ArrowRightLeft, GitBranch, Hammer, FileBarChart, ShieldCheck, Grip, X, User, LogOut, Pickaxe, Users, FileClock } from "lucide-react-native";
+import { Home, ArrowRightLeft, GitBranch, Hammer, FileBarChart, ShieldCheck, Grip, X, User, LogOut, Pickaxe, Users, FileClock, Tags, ClipboardList } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
@@ -13,7 +13,7 @@ import type { MainStackParamList } from "./MainStack";
 
 const ACCENT = "#0891b2";
 
-type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "WorkTransfer" | "DependencyManagement" | "WorkAllocation" | "Reporting" | "QualityCheck" | "Attendance" | "Amendment">;
+type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "WorkTransfer" | "DependencyManagement" | "WorkAllocation" | "Reporting" | "QualityCheck" | "Attendance" | "Amendment" | "Reports" | "TagMaster">;
 type NavItemDef = { route: NavRoute; label: string; icon: React.ComponentType<{ size?: number; color?: string }>; params?: object; key: string };
 
 const NAV_ITEMS: NavItemDef[] = [
@@ -25,6 +25,8 @@ const NAV_ITEMS: NavItemDef[] = [
   { key: "Dependency", route: "DependencyManagement", label: "Dependency Management", icon: GitBranch },
   { key: "Attendance", route: "Attendance", label: "Attendance", icon: Users },
   { key: "Amendment",  route: "Amendment",  label: "Amendment",     icon: FileClock },
+  { key: "Reports",    route: "Reports",    label: "Reports",       icon: ClipboardList },
+  { key: "TagMaster",  route: "TagMaster",  label: "DPR Tag Master", icon: Tags },
 ];
 
 export function SidebarMenu() {

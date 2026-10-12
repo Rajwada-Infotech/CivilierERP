@@ -8,6 +8,7 @@
 // belongs-to, or tagged through Project Master's multi-company tagging).
 import { projectBelongsToCompany, projectCompanyIds, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { parseSheetDate } from "@/lib/xlsxBook";
+import { didYouMean, normText } from "@/lib/importMatch";
 import type { FaImportFileRow, FaImportMode } from "./faInventoryExcel";
 
 export interface FaImportResultRow {
@@ -52,7 +53,7 @@ export interface FaImportContext {
   deriveFinYear: (isoDate: string) => string;
 }
 
-export const normText = (v: unknown) => String(v ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+export { normText };
 
 /**
  * Whether a godown can be used for this company + project. A project's own
@@ -63,29 +64,6 @@ export const normText = (v: unknown) => String(v ?? "").toLowerCase().replace(/\
 export function godownMatches(g: FaGodownLike, companyId: number, projectId: number | null): boolean {
   if (!projectId) return g.EnterpriseID === companyId;
   return g.ProjectID === projectId || (g.ProjectID == null && g.EnterpriseID === companyId);
-}
-
-const lev = (a: string, b: string): number => {
-  const dp: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
-  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    }
-  }
-  return dp[a.length][b.length];
-};
-
-/** Up to 3 master names that look like what was typed, as a " — did you mean …?" hint. */
-function didYouMean(input: string, names: string[]): string {
-  const q = normText(input);
-  if (!q) return "";
-  const hits = [...new Set(names.map((n) => n.trim()).filter(Boolean))]
-    .map((n) => ({ n, k: normText(n) }))
-    .filter(({ k }) => k.includes(q) || q.includes(k) || lev(q, k) <= Math.max(2, Math.floor(q.length * 0.3)))
-    .slice(0, 3)
-    .map(({ n }) => `"${n}"`);
-  return hits.length ? ` — did you mean ${hits.join(" / ")}?` : "";
 }
 
 export function validateFaImportRows(rawRows: FaImportFileRow[], ctx: FaImportContext): FaImportResultRow[] {

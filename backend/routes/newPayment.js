@@ -1,8 +1,8 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectParamGuard, paymentProjectSql, ebResolvedProjectSql, assertProjectRawAllowed } = require("../services/projectScope");
 
@@ -249,6 +249,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const dateParam = req.query.date ? String(req.query.date).trim() : "";
     const dueDate = req.query.dueDate ? String(req.query.dueDate).trim() : "";
     const remarks = req.query.remarks ? String(req.query.remarks).trim() : "";
+    // Cheque number (np.PChequeNo) - "contains", so typing the last digits of a cheque finds it.
+    const chequeNo = req.query.chequeNo ? String(req.query.chequeNo).trim().slice(0, 50) : "";
     const idFilter = req.query.id ? parseInt(req.query.id, 10) : null;
     // Payment Date (np.PDate) range — list view's Date filter.
     const dateFrom = req.query.from ? String(req.query.from).trim() : "";
@@ -318,6 +320,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (docDate) conditions.push(`CAST(np.PCreatedAt AS DATE) = @docDate`);
     if (dateParam) conditions.push(`np.PDate = @dateParam`);
     if (dueDate) conditions.push(`np.PChequeDate = @dueDate`);
+    if (chequeNo) conditions.push(`np.PChequeNo LIKE @chequeNo`);
     if (dateFrom) conditions.push(`np.PDate >= @dateFrom`);
     if (dateTo) conditions.push(`np.PDate <= @dateTo`);
     if (remarks)
@@ -343,6 +346,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (dateFrom) request.input("dateFrom", sql.Date, dateFrom);
     if (dateTo) request.input("dateTo", sql.Date, dateTo);
     if (remarks) request.input("remarks", sql.NVarChar(200), `%${remarks}%`);
+    if (chequeNo) request.input("chequeNo", sql.NVarChar(60), `%${chequeNo}%`);
 
     const countResult = await request.query(
       `SELECT COUNT(*) AS total FROM dbo.NewPayment np ${SUPPLIER_JOINS_SQL} ${whereClause}`,
@@ -368,6 +372,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (dateTo) dataRequest.input("dateTo", sql.Date, dateTo);
     if (remarks)
       dataRequest.input("remarks", sql.NVarChar(200), `%${remarks}%`);
+    if (chequeNo) dataRequest.input("chequeNo", sql.NVarChar(60), `%${chequeNo}%`);
 
     const result = await dataRequest.query(`
       SELECT

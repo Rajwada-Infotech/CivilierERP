@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createGatewayFetch, installGatewayFetch, isGatewayFailure } from "./gatewayFetch";
+import { createGatewayFetch, installGatewayFetch, isGatewayFailure, rateLimitWaitMs } from "./gatewayFetch";
 import { getSystemStatus, resetSystemStatus, setHealthCheck } from "./systemStatus";
 
 const html = (status: number) =>
@@ -132,5 +132,43 @@ describe("installGatewayFetch", () => {
     } finally {
       window.fetch = original;
     }
+  });
+});
+
+describe("429 Too many requests", () => {
+  const tooMany = (retryAfter?: string) =>
+    new Response("Too many requests", { status: 429, headers: retryAfter ? { "retry-after": retryAfter } : {} });
+
+  it("waits as long as the server asked (kept between 1.5 and 10 seconds)", () => {
+    expect(rateLimitWaitMs(tooMany("4"))).toBe(4000);
+    expect(rateLimitWaitMs(tooMany("0"))).toBe(1500);
+    expect(rateLimitWaitMs(tooMany())).toBe(1500);
+    expect(rateLimitWaitMs(tooMany("60"))).toBe(10_000);
+  });
+
+  it("a read is retried after the wait, with no 'updating' banner, and succeeds", async () => {
+    native.mockResolvedValueOnce(tooMany("2")).mockResolvedValueOnce(json(200, { ok: true }));
+    const promise = gatewayFetch("/api/things");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(native).toHaveBeenCalledTimes(1);
+    expect(getSystemStatus()).toBe("ok");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect((await promise).status).toBe(200);
+    expect(native).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after two retries and hands back the 429, so the page can say why", async () => {
+    native.mockResolvedValue(tooMany("1"));
+    const promise = gatewayFetch("/api/things");
+    await vi.advanceTimersByTimeAsync(1500 + 1500 + 10);
+    expect((await promise).status).toBe(429);
+    expect(native).toHaveBeenCalledTimes(3);
+  });
+
+  it("a write is never retried", async () => {
+    native.mockResolvedValue(tooMany("1"));
+    const res = await gatewayFetch("/api/things", { method: "POST", body: "{}" });
+    expect(res.status).toBe(429);
+    expect(native).toHaveBeenCalledTimes(1);
   });
 });

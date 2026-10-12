@@ -151,7 +151,17 @@ describe("filters", () => {
     await get("daily-updates");
     const q = rowsQuery();
     expect(q.text).toMatch(/c\.FieldName AS \[checkpoint\]/);
-    expect(q.text).not.toMatch(/AS checkpoint/i);
+    expect(q.text).not.toMatch(/AS checkpoint([ ,]|$)/i);
+  });
+
+  test("every activity report row carries the activity and chain ids the Reports screen opens", async () => {
+    for (const name of ["activity-status", "overdue", "quality-checks", "daily-updates", "daily-reports"]) {
+      mockQueries = [];
+      await get(name);
+      const q = rowsQuery().text;
+      expect(q).toMatch(/dma\.Id AS rungId/);
+      expect(q).toMatch(/dm\.Id AS chainId/);
+    }
   });
 
   test("daily reports: progress made is worked out over the whole logbook, then the date range is applied", async () => {

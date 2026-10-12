@@ -1,3 +1,4 @@
+import { useLiveData } from "@/hooks/useLiveData";
 import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -195,6 +196,12 @@ export default function JournalVoucher() {
       setLoading(false);
     }
   };
+
+  // A ledger or vendor added anywhere shows up in the line pickers straight away. On a failed live reload the list on
+  // screen is kept (the first load below still clears it on failure, as before).
+  useLiveData("ledgers", () => {
+    getJournalVoucherLedgerOptions().then(setLedgerOptions).catch(() => {});
+  });
 
   useEffect(() => {
     load();

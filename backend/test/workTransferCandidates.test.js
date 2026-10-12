@@ -50,10 +50,52 @@ describe("GET /transfer/candidates (paged)", () => {
     expect(res.body.total).toBe(42);
     expect(res.body.projects).toEqual([{ id: 3, name: "Alpha", count: 42 }]);
     expect(res.body.rows.map((r) => r.assignmentId)).toEqual([11, 12]); // page order, not detail order
-    expect(mockInputs).toMatchObject({ engineerId: 9, offset: 20, limit: 20, projectId: 3, search: "%plaster%" });
+    expect(mockInputs).toMatchObject({ engineerId: 9, offset: 20, limit: 20, projectId: 3, st0: "%plaster%" });
     const pageSql = mockQueries.find((q) => /OFFSET @offset/.test(q));
     expect(pageSql).toMatch(/FROM dbo\.DependencyActivityEngineer dae/);
     expect(pageSql).toMatch(/dae\.EngineerId = @engineerId/);
+  });
+
+  it("a report row opened in Work Transfer: ?rungId narrows the list (and the count) to that one activity", async () => {
+    const res = await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1&rungId=777");
+    expect(res.status).toBe(200);
+    expect(mockInputs.rungFilter).toBe(777);
+    const pageSql = mockQueries.find((q) => /OFFSET @offset/.test(q));
+    const countSql = mockQueries.find((q) => /COUNT\(\*\) AS total/.test(q));
+    expect(pageSql).toMatch(/AND dma\.Id = @rungFilter/);
+    expect(countSql).toMatch(/AND dma\.Id = @rungFilter/);
+  });
+
+  it("a junk ?rungId is ignored, never put in the SQL", async () => {
+    await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1&rungId=1;DROP");
+    // parseInt("1;DROP") is 1 - a number, bound as a parameter, never concatenated
+    expect(mockQueries.join(" ")).not.toMatch(/DROP/);
+    await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1&rungId=abc");
+    expect(mockInputs.rungFilter).toBe(1); // from the first request only; "abc" added nothing new
+  });
+
+  it("several words must ALL match, in any order (Auto Name search), each bound as its own parameter", async () => {
+    await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1&search=Plaster%20%20Block-A");
+    expect(mockInputs.st0).toBe("%plaster%");
+    expect(mockInputs.st1).toBe("%block-a%");
+    expect(mockInputs.st2).toBeUndefined();
+    const pageSql = mockQueries.find((q) => /OFFSET @offset/.test(q));
+    expect(pageSql).toMatch(/@st0/);
+    expect(pageSql).toMatch(/@st1/);
+    expect(pageSql).toMatch(/\) AND \(/); // one group per word, joined with AND
+  });
+
+  it("wildcard characters typed into the search are matched literally, not as patterns", async () => {
+    await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1&search=50%25_");
+    expect(mockInputs.st0).toBe("%50[%][_]%");
+  });
+
+  it("the exact-activity filter and the word search work together", async () => {
+    await request(app()).get("/api/dependency-activity-assignment/transfer/candidates?engineerId=9&page=1&rungId=777&search=plaster");
+    const pageSql = mockQueries.find((q) => /OFFSET @offset/.test(q));
+    expect(pageSql).toMatch(/AND dma\.Id = @rungFilter/);
+    expect(pageSql).toMatch(/@st0/);
+    expect(mockInputs.rungFilter).toBe(777);
   });
 
   it("restricts a scoped user to their projects", async () => {

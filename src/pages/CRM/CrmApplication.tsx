@@ -522,7 +522,7 @@ const CoApplicantStep: React.FC<{
               <input value={draft.Email} onChange={(e) => setDraft((d: any) => ({ ...d, Email: e.target.value }))} className={inputCls} />
             </div>
             <div>
-              <label className={labelCls}>PAN</label>
+              <label className={labelCls}>PAN (Permanent Account Number)</label>
               <input value={draft.PanNo} onChange={(e) => setDraft((d: any) => ({ ...d, PanNo: e.target.value.toUpperCase() }))} className={inputCls} />
             </div>
             <div>
@@ -2538,7 +2538,7 @@ const CrmApplication: React.FC = () => {
                             )}
                             {selectedBroker.LHeadPan && (
                               <div>
-                                <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">PAN</dt>
+                                <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">PAN (Permanent Account Number)</dt>
                                 <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
                               </div>
                             )}
@@ -2954,7 +2954,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                     <Row label="Name" value={a.ApplicantName} />
-                    <Row label="PAN" value={a.PanNo} />
+                    <Row label="PAN (Permanent Account Number)" value={a.PanNo} />
                     <Row label="Mobile" value={<>{a.Mobile}{a.AltMobile ? <span className="text-muted-foreground"> / {a.AltMobile}</span> : null}</>} />
                     <Row label="Email" value={a.Email} />
                     <Row label="Address" full value={[a.CustomerAddress, a.CustomerCity, a.CustomerState, a.CustomerPincode].filter(Boolean).join(", ") || null} />
@@ -3445,7 +3445,7 @@ const BankDetailsStep: React.FC<{
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {[
             ["BankName", "Bank Name"], ["BranchName", "Branch"], ["AccountNo", "Account No"], ["IfscCode", "IFSC Code"],
-            ["AccountHolderName", "Account Holder Name"], ["PanNo", "PAN No"], ["AadhaarNo", "Aadhaar No"],
+            ["AccountHolderName", "Account Holder Name"], ["PanNo", "PAN (Permanent Account Number)"], ["AadhaarNo", "Aadhaar No"],
             ["Occupation", "Occupation"], ["AnnualIncome", "Annual Income"],
           ].map(([key, label]) => (
             <div key={key}>

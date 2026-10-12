@@ -4,7 +4,7 @@ const router = express.Router();
 // Project access: a refund's own project, else its booking's.
 const { projectParamGuard, projectPredicate } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT COALESCE(r.ProjectId, b.ProjectId) AS ProjectId FROM dbo.CrmRefund r LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId WHERE r.Id = @id"));
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -20,7 +20,7 @@ const {
 } = require("../services/crmLedger");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 const FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
 

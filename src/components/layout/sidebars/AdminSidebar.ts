@@ -1,5 +1,6 @@
 import { Chart2, Profile2User, Shield, TickCircle, ShieldTick, Message2, Building, TrendUp, DocumentText, Ticket, Cpu, Layer, Mobile, Setting2 } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
+import { ADMIN_PATH_PAGE_KEYS } from "@/contexts/module.utils";
 
 export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   // ── 1. Dashboard ───────────────────────────────────────────────────────────
@@ -87,3 +88,24 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   { label: "APK Manager", icon: Mobile, path: "/admin/apk-manager" },
   { label: "System Maintenance", icon: Setting2, path: "/admin/system-maintenance" },
 ];
+
+/**
+ * The Admin menu for someone who is not admin-tier: only the pages ticked for them in Menu Rights. An item with no
+ * page key (APK Manager, System Maintenance, ticket panels) is admin-tier only, so it is dropped, and a group with
+ * nothing left disappears.
+ */
+export function filterAdminNavItems(items: NavItem[], canAccessPage: (pageKey: string) => boolean): NavItem[] {
+  const allowed = (path?: string) => {
+    const key = path ? ADMIN_PATH_PAGE_KEYS[path] : undefined;
+    return !!key && canAccessPage(key);
+  };
+  return items.reduce<NavItem[]>((acc, item) => {
+    if (item.children) {
+      const children = item.children.filter((c) => allowed(c.path));
+      if (children.length > 0) acc.push({ ...item, children });
+    } else if (allowed(item.path)) {
+      acc.push(item);
+    }
+    return acc;
+  }, []);
+}

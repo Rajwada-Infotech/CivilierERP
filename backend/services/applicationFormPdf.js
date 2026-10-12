@@ -540,7 +540,7 @@ function renderApplicationFormPdfBuffer(d) {
       ], L, W / 3);
       fieldRow(doc, [
         ["Email Address", d.Email || "—"],
-        ["PAN No.", d.CustomerPanNo || "—"],
+        ["PAN (Permanent Account Number)", d.CustomerPanNo || "—"],
         ["Aadhaar No.", d.CustomerAadhaar || "—"],
       ], L, W / 3);
       fieldRow(doc, [
@@ -650,7 +650,7 @@ function renderApplicationFormPdfBuffer(d) {
             ["Date of Birth", c.DateOfBirth ? fmtDate(c.DateOfBirth) : "—"],
           ], L, W / 3);
           fieldRow(doc, [
-            ["PAN No.", c.PanNo || "—"],
+            ["PAN (Permanent Account Number)", c.PanNo || "—"],
             ["Aadhaar No.", c.AadhaarNo || "—"],
             ["Occupation", c.Occupation || "—"],
           ], L, W / 3);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BookOpen, CalendarClock, CalendarDays, Hash, Info, Loader2, Wallet, X } from "lucide-react";
+import { chequeLotRange } from "../payment/chequeLotRange";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { BankRecord } from "@/api/bankMasterApi";
@@ -217,10 +218,16 @@ export function SettlementModeSection({
                     {lots.map((l) => (
                       <option key={l.CId} value={String(l.CId)}>
                         {l.ChequeLotNumber}
+                        {chequeLotRange(l) ? `  · Cheques ${chequeLotRange(l)}` : ""}
                         {l.RemainingCheques != null ? `  (${l.RemainingCheques} remaining)` : ""}
                       </option>
                     ))}
                   </select>
+                  {chequeLotRange(lots.find((l) => l.CId === value.chequeLotId)) && (
+                    <p className="text-[0.6875rem] text-muted-foreground">
+                      Cheques {chequeLotRange(lots.find((l) => l.CId === value.chequeLotId))}
+                    </p>
+                  )}
                 </div>
               )}
 

@@ -128,6 +128,10 @@ export interface ApprovalLevel {
   mode: "all" | "any";
 }
 
+/** Activity Priority picked on the Work Allocation form, mildest first. */
+export const ASSIGNMENT_PRIORITIES = ["Low", "High", "Urgent", "Very Urgent"] as const;
+export type AssignmentPriority = (typeof ASSIGNMENT_PRIORITIES)[number];
+
 export interface RungAssignmentDetail {
   rungId: number;
   activityId: number;
@@ -159,6 +163,7 @@ export interface RungAssignmentDetail {
     } | null;
     description: string | null;
     remarks: string | null;
+    priority?: AssignmentPriority | null;
     materials: AssignmentMaterial[];
     checkpoints: AssignmentCheckpoint[];
   } | null;
@@ -177,6 +182,7 @@ export interface RungAssignmentPayload {
   materialContractorId: number | null;
   description: string | null;
   remarks: string | null;
+  priority?: AssignmentPriority | null;
   checkpoints: AssignmentCheckpoint[];
   materials: AssignmentMaterial[];
 }
@@ -292,6 +298,7 @@ export interface ReportedAssignment {
   materialSourceName?: string | null;
   description: string | null;
   remarks: string | null;
+  priority?: AssignmentPriority | null;
   status: AssignmentStatus;
   // What Status was right before this activity got Cancelled — only ever
   // non-null while status === "CANCELLED". Determines what restoring it
@@ -345,8 +352,17 @@ export const getReportedAssignments = async (params?: {
   // with no room at all, instead of falling through to "every activity".
   roomId?: number | null;
   status?: AssignmentStatus;
+  /** Exactly one activity (its current attempt). */
+  rungId?: number;
+  /** Words matched against activity, flat, room, project, chain alias or engineer (every word must match). */
+  search?: string;
+  /** Page size (server default applies when omitted). */
+  limit?: number;
 }): Promise<ReportedAssignment[]> => {
   const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.rungId) qs.set("rungId", String(params.rungId));
   if (params?.dependencyMasterId) qs.set("dependencyMasterId", String(params.dependencyMasterId));
   if (params && "roomId" in params && params.roomId !== undefined) {
     qs.set("roomId", params.roomId === null ? "null" : String(params.roomId));
@@ -859,10 +875,13 @@ export const getTransferCandidatesPage = async (params: {
   limit?: number;
   projectId?: number;
   search?: string;
+  /** Only this activity (a report row opened in Work Transfer). */
+  rungId?: number;
 }): Promise<TransferCandidatePage> => {
   const qs = new URLSearchParams({ engineerId: String(params.engineerId), page: String(params.page), limit: String(params.limit ?? 50) });
   if (params.projectId) qs.set("projectId", String(params.projectId));
   if (params.search) qs.set("search", params.search);
+  if (params.rungId) qs.set("rungId", String(params.rungId));
   const res = await fetchWithAuth(`${BASE}/transfer/candidates?${qs.toString()}`);
   return handleResponse<TransferCandidatePage>(res);
 };

@@ -425,10 +425,10 @@ function ProjectViewModal({
         {
           title: "Compliance",
           fields: [
-            { label: "GST Number", value: project.gst },
+            { label: "GSTIN (GST Identification Number)", value: project.gst },
             { label: "GST Registration Date", value: project.gstDate },
-            { label: "PAN Number", value: project.pan },
-            { label: "TAN Number", value: project.tan },
+            { label: "PAN (Permanent Account Number)", value: project.pan },
+            { label: "TAN (Tax Deduction and Collection Account Number)", value: project.tan },
             { label: "Trade License Number", value: project.tradeLicenseNo },
           ],
         },
@@ -539,10 +539,10 @@ function ProjectViewModal({
             <Row label="Priority" value={project.priority} />
 
             <Section title="Compliance" icon={<Shield size={11} />} />
-            <Row label="GST Number" value={project.gst} />
+            <Row label="GSTIN (GST Identification Number)" value={project.gst} />
             <Row label="GST Registration Date" value={project.gstDate} />
-            <Row label="PAN Number" value={project.pan} />
-            <Row label="TAN Number" value={project.tan} />
+            <Row label="PAN (Permanent Account Number)" value={project.pan} />
+            <Row label="TAN (Tax Deduction and Collection Account Number)" value={project.tan} />
             <Row label="Trade License Number" value={project.tradeLicenseNo} />
 
             {project.jvEnabled && (
@@ -1698,10 +1698,10 @@ export default function ProjectMaster() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {fi("GST Number", "gst", "text", "", true)}
+                      {fi("GSTIN (GST Identification Number)", "gst", "text", "", true)}
                       {fi("GST Registration Date", "gstDate", "date", "", true)}
-                      {fi("PAN Number", "pan", "text", "", true)}
-                      {fi("TAN Number", "tan", "text", "", true)}
+                      {fi("PAN (Permanent Account Number)", "pan", "text", "", true)}
+                      {fi("TAN (Tax Deduction and Collection Account Number)", "tan", "text", "", true)}
                       {fi(
                         "Trade License Number",
                         "tradeLicenseNo",

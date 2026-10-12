@@ -1,4 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
@@ -9,6 +12,8 @@ import { floorLabel, floorDisplay, roomDisplay, VILLA_FLOOR } from "@/lib/floorL
 import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
+import { AutoNameFinder } from "@/components/civilworkdpr/AutoNameFinder";
+import { PriorityBadge } from "@/components/civilworkdpr/PriorityBadge";
 import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
@@ -199,6 +204,7 @@ function DependencyChainCards({
                       >
                         {meta.label}
                       </span>
+                      <PriorityBadge priority={assignment?.priority} />
                       <QcBadge qcStatus={assignment?.qcStatus} />
                       <AttemptBadge attemptNo={assignment?.attemptNo} />
                     </button>
@@ -235,11 +241,34 @@ export default function WorkDone() {
   // GET /:id per chain via useQueries, which at production scale (1000+
   // chains) blew through the route's rate limit and left this page unable
   // to load at all.
-  const { data: allChains = [] } = useQuery({
+  const { data: allChains = [], isSuccess: chainsLoaded } = useQuery({
     queryKey: ["civilworkdpr-work-done-all-chains"],
     queryFn: getDependencyMasters,
     enabled: rights.canView,
   });
+
+  // Opened from a report row (?rung=&chain=): go straight to that activity's allocation form, once.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { rungId: linkedRung, chainId: linkedChain } = readChainLink(searchParams);
+  useEffect(() => {
+    if ((!linkedRung && !linkedChain) || !chainsLoaded) return;
+    const chain = (allChains as DependencyMasterListRow[]).find((c) =>
+      linkedChain ? c.id === linkedChain : c.activities?.some((a) => a.rungId === linkedRung),
+    );
+    const rung = chain?.activities?.find((a) => a.rungId === linkedRung);
+    if (chain && rung) setActiveAssignment({ rung, chain });
+    else toast.error("That activity is not in Work Allocation (its chain may have been retired, or is outside your projects).");
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("rung");
+        next.delete("chain");
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedRung, linkedChain, chainsLoaded]);
   const { data: projects = [], isLoading: loadingProjects } = useQuery({
     queryKey: ["civilworkdpr-work-done-projects"],
     queryFn: fetchProjects,
@@ -420,6 +449,10 @@ export default function WorkDone() {
           </div>
         ) : (
           <>
+          <AutoNameFinder
+            chains={allChains as DependencyMasterListRow[]}
+            onPick={(rung, chain) => setActiveAssignment({ rung, chain })}
+          />
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
               <MapPin size={14} className="text-cyan-600 dark:text-cyan-400" />

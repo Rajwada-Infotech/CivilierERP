@@ -1,3 +1,5 @@
+import { bankReportChequeNo } from "@/lib/bankReportCheque";
+import { chainLinksForRow } from "@/lib/civilWorkDprLinks";
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { fmtIstIso } from "@/lib/istTime";
 import { useNavigate } from "react-router-dom";
@@ -19,6 +21,10 @@ import type { AttendanceReportRow } from "@/api/workerAttendanceApi";
 import { VendorLedgerReportBody } from "@/pages/finance/VendorLedgerReport";
 import { getProjects as fetchProjectOptions } from "@/api/grnApi";
 import { MultiSelectDropdown, type MultiSelectOption } from "@/components/ui/MultiSelectDropdown";
+import { dependencyAutoName } from "@/lib/dependencyAutoName";
+import { todayIstDate } from "@/lib/attendanceFormat";
+import { getEngineers } from "@/api/dependencyActivityAssignmentApi";
+import { getDprTags } from "@/api/dprTagMasterApi";
 import {
   Building2,
   Calendar,
@@ -70,6 +76,7 @@ import {
   ShieldCheck,
   Camera,
   UserCog,
+  Tag,
   CalendarDays,
 } from "lucide-react";
 import { DateInput } from "@/components/ui/date-input";
@@ -178,6 +185,8 @@ const CWD_INLINE_PROJECT_REPORTS = new Set([
   "cwd-quality-checks",
   "cwd-daily-updates",
   "cwd-daily-reports",
+  "cwd-user-daily-work",
+  "cwd-tag-wise",
 ]);
 
 // Civil Work DPR report cells.
@@ -475,6 +484,8 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Party", accessor: "PaymentName" },
       { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
       { header: "Mode", accessor: "Mode" },
+      // Cheque number, for the rows paid by cheque (a dash for every other mode).
+      { header: "Cheque No", accessor: (r) => bankReportChequeNo(r) },
       { header: "Doc No", accessor: "DocNo" },
       {
         header: "Cleared",
@@ -1386,6 +1397,103 @@ const ALL_REPORTS: ReportDef[] = [
     ],
   },
   {
+    id: "cwd-user-daily-work",
+    label: "User-Wise Daily Work Report",
+    description: "Which work was reported for each allocated user on a chosen date — Auto Name, status, progress, QC and attempt (shows only the selected day; today when no date is picked)",
+    icon: UserCog,
+    color: "#14b8a6",
+    apiPath: "/api/civilworkdpr-reports/user-daily-work",
+    serverPaged: true,
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: "date",
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "User", accessor: (r) => (r.userName ?? "—") as string },
+      { header: "Date", accessor: (r) => cwdDate(r.logDate) },
+      {
+        header: "Auto Name",
+        accessor: (r) =>
+          dependencyAutoName({
+            flatName: r.flatName as string | null,
+            alias: r.chain as string | null,
+            roomName: r.roomName as string | null,
+            storey: r.storey as string | null,
+            activityName: r.activityName as string | null,
+          }) || "—",
+      },
+      { header: "Activity", accessor: (r) => (r.activityName ?? "—") as string },
+      { header: "Status", accessor: (r) => cwdStatusLabel(r.status) },
+      { header: "Chain", accessor: (r) => (r.chain ?? "—") as string },
+      { header: "Location", accessor: (r) => (r.location ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.projectName ?? "—") as string },
+      {
+        header: "Progress",
+        accessor: (r) =>
+          r.progressPercent == null || r.progressPercent === ""
+            ? "—"
+            : `${cwdPercent(r.progressPercent)}${r.progressMade == null ? "" : ` (${Number(r.progressMade) > 0 ? "+" : ""}${Math.round(Number(r.progressMade) * 10) / 10}% that day)`}`,
+      },
+      { header: "Start Date", accessor: (r) => cwdDate(r.startDate) },
+      { header: "End Date", accessor: (r) => cwdDate(r.endDate) },
+      { header: "QC", accessor: (r) => cwdStatusLabel(r.qcStatus) },
+      { header: "Attempt", accessor: (r) => (r.attemptNo ?? "—") as string },
+    ],
+  },
+  {
+    id: "cwd-tag-wise",
+    label: "Tag-Wise Civil Work DPR Report",
+    description: "Civil Work DPR records grouped by the activity's tag — filter by project, tag, user and date (shows only the selected day); Auto Name, progress, QC and attempt included",
+    icon: Tag,
+    color: "#0ea5e9",
+    apiPath: "/api/civilworkdpr-reports/tag-wise",
+    serverPaged: true,
+    filterConfig: {
+      companyParam: null,
+      finYearParam: null,
+      projectParam: "projectId",
+      singleDateParam: "date",
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
+    },
+    columns: [
+      { header: "Tag", accessor: (r) => (r.tagName ?? "—") as string },
+      { header: "User", accessor: (r) => (r.userName ?? "—") as string },
+      { header: "Date", accessor: (r) => cwdDate(r.logDate) },
+      {
+        header: "Auto Name",
+        accessor: (r) =>
+          dependencyAutoName({
+            flatName: r.flatName as string | null,
+            alias: r.chain as string | null,
+            roomName: r.roomName as string | null,
+            storey: r.storey as string | null,
+            activityName: r.activityName as string | null,
+          }) || "—",
+      },
+      { header: "Activity", accessor: (r) => (r.activityName ?? "—") as string },
+      { header: "Status", accessor: (r) => cwdStatusLabel(r.status) },
+      { header: "Chain", accessor: (r) => (r.chain ?? "—") as string },
+      { header: "Location", accessor: (r) => (r.location ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.projectName ?? "—") as string },
+      {
+        header: "Progress",
+        accessor: (r) =>
+          r.progressPercent == null || r.progressPercent === ""
+            ? "—"
+            : `${cwdPercent(r.progressPercent)}${r.progressMade == null ? "" : ` (${Number(r.progressMade) > 0 ? "+" : ""}${Math.round(Number(r.progressMade) * 10) / 10}% that day)`}`,
+      },
+      { header: "Start Date", accessor: (r) => cwdDate(r.startDate) },
+      { header: "End Date", accessor: (r) => cwdDate(r.endDate) },
+      { header: "QC", accessor: (r) => cwdStatusLabel(r.qcStatus) },
+      { header: "Attempt", accessor: (r) => (r.attemptNo ?? "—") as string },
+    ],
+  },
+  {
     id: "cwd-daily-updates",
     label: "Daily Checkpoint Updates",
     description: "Daily photo updates per checkpoint, with the time logged in IST (date range = update date)",
@@ -1499,8 +1607,8 @@ const ALL_REPORTS: ReportDef[] = [
     },
     columns: [
       { header: "Supplier Name", accessor: "name" },
-      { header: "GST No", accessor: "gst_no" },
-      { header: "PAN", accessor: "pan_no" },
+      { header: "GSTIN (GST Identification Number)", accessor: "gst_no" },
+      { header: "PAN (Permanent Account Number)", accessor: "pan_no" },
       { header: "Contact", accessor: "contact_person" },
       { header: "Phone", accessor: "phone" },
       { header: "City", accessor: "city" },
@@ -2381,6 +2489,8 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "cwd-engineer-workload",
       "cwd-quality-checks",
       "cwd-daily-reports",
+      "cwd-user-daily-work",
+      "cwd-tag-wise",
       "cwd-daily-updates",
       "worker-attendance",
       "cwd-daily-labour",
@@ -2823,6 +2933,10 @@ const ReportTable: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
+  // Civil Work DPR rows carry the activity / chain they are about: offer to open it in the pages that work on it.
+  const reportNavigate = useNavigate();
+  const { canAccessPage: canOpenPage } = useAuth();
+  const chainLinks = selectedRow ? chainLinksForRow(selectedRow, (pk) => canOpenPage(pk as never)) : [];
   const PAGE_SIZE = 20;
 
   // ── Godown switcher (stock-summary only) ─────────────────────────────────
@@ -2878,6 +2992,28 @@ const ReportTable: React.FC<{
   const isExpenseRegister = report.id === "expense-register";
   // Civil Work DPR reports carry their own multi-select Project picker (supersedes the section bar's single one).
   const hasInlineProject = CWD_INLINE_PROJECT_REPORTS.has(report.id);
+  // User-Wise Daily Work: a User multi-select next to the Project one.
+  // The Tag-Wise report is the same logbook plus a Tag multi-select, so it shares the User + inline Date fields.
+  const isTagWise = report.id === "cwd-tag-wise";
+  const isUserWise = report.id === "cwd-user-daily-work" || isTagWise;
+  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [tagOptions, setTagOptions] = useState<MultiSelectOption[]>([]);
+  useEffect(() => {
+    if (!isTagWise) return;
+    getDprTags()
+      .then((list) => setTagOptions(list.map((t) => ({ id: String(t.id), label: t.tagName }))))
+      .catch(() => {});
+  }, [isTagWise]);
+  const [userIds, setUserIds] = useState<string[]>([]);
+  // Its own Date field, right in the report's toolbar (starts on today): one day's records only.
+  const [userDate, setUserDate] = useState<string>(() => todayIstDate());
+  const [userOptions, setUserOptions] = useState<MultiSelectOption[]>([]);
+  useEffect(() => {
+    if (!isUserWise) return;
+    getEngineers()
+      .then((list) => setUserOptions(list.map((u) => ({ id: u.id, label: u.name }))))
+      .catch(() => {});
+  }, [isUserWise]);
   const isGrnRegister = report.id === "grn-register";
   const [expenseHeadIds, setExpenseHeadIds] = useState<string[]>([]);
   const [expenseHeadOptions, setExpenseHeadOptions] = useState<MultiSelectOption[]>([]);
@@ -3000,6 +3136,14 @@ const ReportTable: React.FC<{
 
     // Civil Work DPR reports: every picked project, comma-separated.
     if (hasInlineProject && projectIds.length) f[fc.projectParam ?? "projectId"] = projectIds.join(",");
+    if (isUserWise && userIds.length) f["userId"] = userIds.join(",");
+    if (isTagWise && tagIds.length) f["tagId"] = tagIds.join(",");
+    // The inline Date supersedes the section bar's Day / Range, the way the Expense Register's does.
+    if (isUserWise && userDate) {
+      delete f["dateFrom"];
+      delete f["dateTo"];
+      f["date"] = userDate;
+    }
 
     // Expense Register: inline Date Range — supersedes the shared section
     // bar's Day/Range date filter the same way Company/Project above do.
@@ -3067,7 +3211,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, dateFrom, dateTo, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, tagIds, userDate, dateFrom, dateTo, projects]);
 
   // ── Server-paged reports: fetch just the page on screen ──────────────────
   // Fetching every page up front (fetchAllRows) meant hundreds of sequential
@@ -3316,6 +3460,55 @@ const ReportTable: React.FC<{
             </div>
           )}
 
+          {isUserWise && (
+            <div className="flex items-center gap-1.5">
+              <DateInput
+                value={userDate}
+                onChange={(e) => setUserDate(e.target.value)}
+                title="Date — only this day's work is shown"
+                className="h-[30px] px-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              />
+              {userDate && (
+                <button
+                  type="button"
+                  onClick={() => setUserDate("")}
+                  title="Clear the date (then the section bar's Day / Range applies, or today if none)"
+                  className="h-[30px] flex items-center px-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-all"
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {isTagWise && tagOptions.length > 0 && (
+            <div className="w-52">
+              <MultiSelectDropdown
+                options={tagOptions}
+                value={tagIds}
+                onChange={setTagIds}
+                placeholder="All Tags"
+                searchPlaceholder="Search tags…"
+                itemNoun="tag"
+                className="h-[30px] py-1"
+              />
+            </div>
+          )}
+
+          {isUserWise && userOptions.length > 0 && (
+            <div className="w-52">
+              <MultiSelectDropdown
+                options={userOptions}
+                value={userIds}
+                onChange={setUserIds}
+                placeholder="All Users"
+                searchPlaceholder="Search users…"
+                itemNoun="user"
+                className="h-[30px] py-1"
+              />
+            </div>
+          )}
+
           {isExpenseRegister && expenseHeadOptions.length > 0 && (
             <div className="w-56">
               <MultiSelectDropdown
@@ -3538,6 +3731,26 @@ const ReportTable: React.FC<{
             {report.label}
           </DialogTitle>
         </DialogHeader>
+        {chainLinks.length > 0 && (
+          <div className="rounded-lg border border-border bg-muted/30 p-3">
+            <p className="mb-2 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">Open this activity in</p>
+            <div className="flex flex-wrap gap-2">
+              {chainLinks.map((l) => (
+                <button
+                  key={l.label}
+                  type="button"
+                  onClick={() => {
+                    setSelectedRow(null);
+                    reportNavigate(l.to);
+                  }}
+                  className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {selectedRow && (
           <div className="divide-y divide-border">
             {effectiveColumns.map((col) => {

@@ -3,8 +3,8 @@ const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { cleanNames } = require("../middleware/cleanNames");
 // Account Head Master: names are saved without stray spaces (see middleware/cleanNames.js).
 router.use(cleanNames(["LHeadName", "LHeadCode", "DisplayName"]));
@@ -459,7 +459,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // ── PAN is mandatory for suppliers ──
     if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
       return res.status(400).json({
-        error: "PAN Number is mandatory for suppliers.",
+        error: "PAN is mandatory for suppliers.",
         code: "MISSING_PAN",
       });
     }
@@ -994,7 +994,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     // ── PAN is mandatory for suppliers ──
     if (LHeadType === "S" && !(LHeadPan && LHeadPan.trim())) {
       return res.status(400).json({
-        error: "PAN Number is mandatory for suppliers.",
+        error: "PAN is mandatory for suppliers.",
         code: "MISSING_PAN",
       });
     }

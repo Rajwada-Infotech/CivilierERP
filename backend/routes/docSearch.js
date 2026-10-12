@@ -7,7 +7,7 @@
  */
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 60 * 1000, max: 240, validate: false, message: { error: "Too many searches, slow down." } }));
 const { getPool } = require("../db");
 const { findDocuments } = require("../services/docFinder");

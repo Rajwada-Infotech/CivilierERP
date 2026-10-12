@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import {
-  Plus, ArrowLeftRight, Building2, Landmark, Loader2, RefreshCw,
+  Plus, ArrowLeftRight, Landmark, Loader2, RefreshCw,
   CheckCircle2, Clock, FileText, AlertCircle, Search, X, ExternalLink,
   Calendar, ShieldCheck, Wallet, BookOpen, Hash, CalendarDays, ChevronDown,
   AlertTriangle, Info, CalendarClock, Pencil,
@@ -52,6 +52,7 @@ import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { useAuth } from "@/contexts/AuthContext";
 import { DateInput } from "@/components/ui/date-input";
+import { chequeLotRange } from "./payment/chequeLotRange";
 
 const PAYMENT_MODES: FundTransferMode[] = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
 const CHEQUE_MODES: FundTransferMode[] = ["Cheque", "Post-Dated Cheque"];
@@ -1247,16 +1248,10 @@ export default function FundTransfer() {
                 transferType stays "Intra" unconditionally (see useState
                 above) — kept as a field rather than deleted outright since
                 historical Inter transfers still need TransferType to
-                display correctly in the list/detail views below. */}
-            <div className="flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border-2 border-primary bg-primary/5">
-              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center shrink-0 bg-primary/15 text-primary">
-                <Building2 size={16} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs sm:text-sm font-semibold text-primary">Intra-Company</p>
-                <p className="hidden sm:block text-[0.6875rem] text-muted-foreground">Between two banks of the same company</p>
-              </div>
-            </div>
+                display correctly in the list/detail views below. The
+                "Intra-Company" card that used to sit here was the only
+                choice, so it is gone; the dialog description already says
+                the transfer is between two banks of the same company. */}
 
             {/* Source / Destination panels */}
             <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 sm:gap-4 items-stretch">
@@ -1413,12 +1408,18 @@ export default function FundTransfer() {
                           {chequeLots.map((lot) => (
                             <option key={lot.CId} value={String(lot.CId)}>
                               {lot.ChequeLotNumber}
+                              {chequeLotRange(lot) ? `  · Cheques ${chequeLotRange(lot)}` : ""}
                               {lot.RemainingCheques != null ? `  (${lot.RemainingCheques} remaining)` : ""}
                             </option>
                           ))}
                         </select>
                         <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                       </div>
+                      {chequeLotRange(chequeLots.find((l) => String(l.CId) === String(chequeLotId))) && (
+                        <p className="text-[0.6875rem] text-muted-foreground">
+                          Cheques {chequeLotRange(chequeLots.find((l) => String(l.CId) === String(chequeLotId)))}
+                        </p>
+                      )}
                     </div>
                   )}
 

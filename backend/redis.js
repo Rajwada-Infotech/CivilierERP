@@ -222,6 +222,13 @@ const getCacheVersion = (ns) =>
 const bumpCacheVersion = async (ns) => {
   await safeExec((r) => r.incr(`cache:version:${ns}`));
   invalidateLocalCacheVersion(ns);
+  // Live updates: tell open pages the data behind this cache changed (see services/realtime.js). Never allowed to
+  // break the write that called us.
+  try {
+    require("./services/realtime").afterCacheBump(ns);
+  } catch {
+    /* realtime unavailable */
+  }
 };
 
 // Companion to bumpCacheVersion: call this to also evict the in-process

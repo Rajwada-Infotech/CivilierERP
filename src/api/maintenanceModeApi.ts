@@ -13,9 +13,22 @@ export interface MaintenanceState {
   updatedBy: string | null;
 }
 
-/** Public: no sign-in needed, and it keeps answering while maintenance is on. */
+/**
+ * Public: no sign-in needed, and it keeps answering while maintenance is on. When there IS a signed-in person the token
+ * is sent anyway, only so the server counts the request against that person's rate limit instead of the shared
+ * anonymous one (behind Docker every anonymous request comes from the same address).
+ */
 export async function getMaintenanceStatus(): Promise<MaintenanceState> {
-  const res = await fetch("/api/system-maintenance/status", { cache: "no-store" });
+  let token: string | null = null;
+  try {
+    token = sessionStorage.getItem("token");
+  } catch {
+    /* storage can be blocked */
+  }
+  const res = await fetch("/api/system-maintenance/status", {
+    cache: "no-store",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
   if (!res.ok) throw new Error("Could not check the system status");
   return res.json();
 }

@@ -5,7 +5,7 @@ const router = express.Router();
 // Project access: a cancellation belongs to its booking's project.
 const { projectParamGuard, projectPredicate } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmCancellation c JOIN dbo.CrmBooking b ON b.Id = c.BookingId WHERE c.Id = @id"));
-const rateLimit = require("express-rate-limit");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -27,7 +27,7 @@ const { findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // The set of company banks THIS booking's real payments actually landed in
 // (milestone receipts + on-account deposits, wherever DepositBankId is set).

@@ -1,3 +1,4 @@
+import { chequeLotRange } from "../chequeLotRange";
 import React, { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -139,6 +140,14 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
               <span className="font-mono text-sm font-semibold text-foreground">
                 {activeLot?.ChequeLotNumber ?? "—"}
               </span>
+              {chequeLotRange(activeLot) && (
+                <span
+                  className="font-mono text-xs text-muted-foreground"
+                  title="Cheque numbers in this lot"
+                >
+                  · Cheques {chequeLotRange(activeLot)}
+                </span>
+              )}
               {activeLot?.RemainingCheques != null && (
                 <span className="ml-auto text-[0.6875rem] text-muted-foreground bg-primary/10 text-primary px-2 py-0.5 rounded-full font-heading">
                   {activeLot.RemainingCheques} remaining
@@ -198,6 +207,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 {lots.map((lot) => (
                   <option key={lot.CId} value={String(lot.CId)}>
                     {lot.ChequeLotNumber}
+                    {chequeLotRange(lot) ? `  · Cheques ${chequeLotRange(lot)}` : ""}
                     {lot.RemainingCheques != null
                       ? `  (${lot.RemainingCheques} remaining)`
                       : ""}
