@@ -19,14 +19,14 @@ export const MODE_STYLE: Record<
     dot: "bg-blue-500",
   },
   "Post-Dated Cheque": {
-    ring: "ring-indigo-500/30 bg-indigo-500/10",
-    text: "text-indigo-600 dark:text-indigo-400",
-    dot: "bg-indigo-500",
+    ring: "ring-border bg-muted/60",
+    text: "text-foreground",
+    dot: "bg-foreground",
   },
   UPI: {
-    ring: "ring-violet-500/30 bg-violet-500/10",
-    text: "text-violet-600 dark:text-violet-400",
-    dot: "bg-violet-500",
+    ring: "ring-border bg-muted/60",
+    text: "text-foreground",
+    dot: "bg-foreground",
   },
   Card: {
     ring: "ring-amber-500/30 bg-[#ffe2021a]",

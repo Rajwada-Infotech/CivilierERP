@@ -335,7 +335,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
 
             if (!form.chequeDate) {
               return (
-                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-violet-600 dark:text-violet-400">
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-muted/60 border border-border text-xs text-foreground">
                   <Info size={13} className="shrink-0 mt-0.5" />
                   <span>Post-dated cheques are generally valid for <strong>3 months</strong> from the cheque date. Select a date to see the validity window.</span>
                 </div>
@@ -362,7 +362,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
             }
 
             return (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-indigo-600 dark:text-indigo-400">
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-muted/60 border border-border text-xs text-foreground">
                 <CalendarClock size={13} className="shrink-0 mt-0.5" />
                 <div className="space-y-0.5">
                   <p className="font-semibold">PDC scheduled for {fmtDate(chequeD)}</p>

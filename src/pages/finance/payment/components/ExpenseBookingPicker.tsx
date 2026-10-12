@@ -253,14 +253,14 @@ export function ExpenseBookingPicker({
             </span>
           ) : selectedContract ? (
             <span className="flex items-center gap-2 min-w-0">
-              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
-              <span className="font-mono text-xs text-violet-600 dark:text-violet-400 font-semibold truncate">
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-muted/60 text-foreground border border-border">CON</span>
+              <span className="font-mono text-xs text-foreground font-semibold truncate">
                 {selectedContract.DocNo} · {selectedContract.ContactPerson}
               </span>
             </span>
           ) : selected ? (
             <span className="flex items-center gap-2 min-w-0">
-              <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${selected.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
+              <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${selected.type === "emi" ? "bg-muted/60 text-foreground border border-border" : "bg-primary/10 text-primary border border-primary/20"}`}>
                 {selected.type === "emi" ? "EMI" : "EXB"}
               </span>
               <span className="font-mono text-xs text-primary font-semibold truncate">{selected.label}</span>
@@ -339,7 +339,7 @@ export function ExpenseBookingPicker({
                     const cls = t === "partial"
                       ? isActive ? "bg-amber-500/15 text-amber-600 border-amber-500/40" : "bg-muted text-muted-foreground border-border hover:border-amber-500/30"
                       : t === "emi"
-                        ? isActive ? "bg-violet-500/15 text-violet-600 border-violet-500/30" : "bg-muted text-muted-foreground border-border hover:border-primary/20"
+                        ? isActive ? "bg-muted/60 text-foreground border-border" : "bg-muted text-muted-foreground border-border hover:border-primary/20"
                         : isActive ? "bg-primary/10 text-primary border-primary/30" : "bg-muted text-muted-foreground border-border hover:border-primary/20";
                     return (
                       <button key={t} type="button" onClick={() => setTypeFilter(t)}
@@ -412,7 +412,7 @@ export function ExpenseBookingPicker({
                         {mergeChecked && <span className="w-2 h-2 rounded-sm bg-white" />}
                       </span>
                     ) : (
-                      <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
+                      <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${o.type === "emi" ? "bg-muted/60 text-foreground border border-border" : "bg-primary/10 text-primary border border-primary/20"}`}>
                         {o.type === "emi" ? "EMI" : "EXB"}
                       </span>
                     )}
@@ -420,7 +420,7 @@ export function ExpenseBookingPicker({
                       <p className="font-mono text-xs font-semibold text-foreground truncate">{o.label}</p>
                       {o.projectName && <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{o.projectName}</p>}
                       {o.supplierName && o.supplierName !== o.projectName && <p className="text-[0.625rem] text-primary/60 mt-0.5 truncate">{o.supplierName}</p>}
-                      {o.type === "emi" && o.installmentNo && <p className="text-[0.625rem] text-violet-500 mt-0.5">Installment #{o.installmentNo}</p>}
+                      {o.type === "emi" && o.installmentNo && <p className="text-[0.625rem] text-foreground mt-0.5">Installment #{o.installmentNo}</p>}
                       {mergeMode && o.type === "emi" && <p className="text-[0.625rem] text-muted-foreground mt-0.5 italic">Not mergeable — paid via its own installments</p>}
                       {mergeMode && o.type !== "emi" && mergeAnchor && !mergeChecked && !isMergeCompatible(o) && (
                         <p className="text-[0.625rem] text-amber-600 dark:text-amber-400 mt-0.5 italic">{mergeIncompatibleReason(o)}</p>
@@ -481,9 +481,9 @@ export function ExpenseBookingPicker({
                     setOpen(false);
                     setSearch("");
                   }}
-                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedContract?.ContractId === c.ContractId ? "bg-violet-500/5" : ""}`}
+                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedContract?.ContractId === c.ContractId ? "bg-muted/60" : ""}`}
                 >
-                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
+                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-muted/60 text-foreground border border-border">CON</span>
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-xs font-semibold text-foreground truncate">{c.DocNo || `CON-${c.ContractId}`}</p>
                     {c.ContactPerson && <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{c.ContactPerson}</p>}
@@ -495,7 +495,7 @@ export function ExpenseBookingPicker({
                       </p>
                     )}
                   </div>
-                  {c.ContractAmount != null && <span className="shrink-0 text-[0.6875rem] font-mono font-semibold text-violet-600/80 mt-0.5">₹{Number(c.ContractAmount).toLocaleString("en-IN")}</span>}
+                  {c.ContractAmount != null && <span className="shrink-0 text-[0.6875rem] font-mono font-semibold text-foreground mt-0.5">₹{Number(c.ContractAmount).toLocaleString("en-IN")}</span>}
                 </button>
               ))
               ) : (

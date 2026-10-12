@@ -12,16 +12,16 @@ export function ModeInfoBanner({ mode }: { mode: string }) {
       icon: "text-blue-500",
     },
     indigo: {
-      container: "bg-indigo-500/5 border border-indigo-500/20",
-      icon: "text-indigo-500",
+      container: "bg-muted/60 border border-border",
+      icon: "text-foreground",
     },
     cyan: {
       container: "bg-cyan-500/5 border border-cyan-500/20",
       icon: "text-cyan-500",
     },
     violet: {
-      container: "bg-violet-500/5 border border-violet-500/20",
-      icon: "text-violet-500",
+      container: "bg-muted/60 border border-border",
+      icon: "text-foreground",
     },
     orange: {
       container: "bg-orange-500/5 border border-orange-500/20",

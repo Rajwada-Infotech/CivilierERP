@@ -2226,8 +2226,7 @@ const Payment: React.FC = () => {
               <h2 className="font-heading text-sm font-bold text-foreground">{editingId ? "Edit payment" : "New payment"}</h2>
             </div>
 
-            <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px]">
-            <div className="px-5 sm:px-6 py-6 space-y-7 min-w-0">
+            <div className="px-5 sm:px-6 py-6 space-y-7">
               {/* ── 1. Link Expense Booking ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Link2} label="Expense Booking" />
@@ -3354,12 +3353,12 @@ const Payment: React.FC = () => {
                                     {
                                       label: "CGST",
                                       value: grnGstBreakdown.totals.totalCGST,
-                                      cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                      cls: "border-border bg-muted/60 text-foreground",
                                     },
                                     {
                                       label: "SGST",
                                       value: grnGstBreakdown.totals.totalSGST,
-                                      cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                      cls: "border-border bg-muted/60 text-foreground",
                                     },
                                     {
                                       label: "Total GST",
@@ -3392,7 +3391,7 @@ const Payment: React.FC = () => {
                                   <span className="text-muted-foreground">
                                     +
                                   </span>
-                                  <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                                  <span className="text-foreground font-semibold">
                                     {formatINR(
                                       grnGstBreakdown.totals.totalCGST,
                                     )}
@@ -3403,7 +3402,7 @@ const Payment: React.FC = () => {
                                   <span className="text-muted-foreground">
                                     +
                                   </span>
-                                  <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                                  <span className="text-foreground font-semibold">
                                     {formatINR(
                                       grnGstBreakdown.totals.totalSGST,
                                     )}
@@ -3714,7 +3713,7 @@ const Payment: React.FC = () => {
                             : ds === "Cheque Bounced" || ds === "Cheque Cancelled"
                             ? "border-red-500"
                             : ds === "Reissued"
-                            ? "border-violet-500"
+                            ? "border-foreground"
                             : ds === "Cheque Issued"
                             ? "border-blue-500"
                             : ds === "Pending"
@@ -3726,7 +3725,7 @@ const Payment: React.FC = () => {
                             : ds === "Cheque Bounced" || ds === "Cheque Cancelled"
                             ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20"
                             : ds === "Reissued"
-                            ? "bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20"
+                            ? "bg-muted/60 text-foreground border-border"
                             : ds === "Cheque Issued"
                             ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
                             : ds === "Pending"
@@ -3775,7 +3774,7 @@ const Payment: React.FC = () => {
                                 </p>
                               )}
                               {p.ReplacementDocNo && (
-                                <p className="text-[0.625rem] text-violet-600 dark:text-violet-400">
+                                <p className="text-[0.625rem] text-foreground">
                                   Reissued as {p.ReplacementDocNo}
                                 </p>
                               )}
@@ -3952,7 +3951,7 @@ const Payment: React.FC = () => {
                     }
                     badge={
                       form.mode === "Post-Dated Cheque" ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 ring-1 ring-indigo-500/20">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-muted/60 text-foreground ring-1 ring-border">
                           <CalendarClock size={9} /> Scheduled
                         </span>
                       ) : null
@@ -4016,54 +4015,6 @@ const Payment: React.FC = () => {
                   </button>
                 </div>
               </div>
-            </div>
-
-            {/* ── The voucher, as it stands: fills in while the form is completed ── */}
-            <aside className="hidden lg:block" style={{ borderLeft: "1px solid hsl(var(--foreground))" }}>
-              <div className="sticky top-20 p-5">
-                <p className="label">Voucher</p>
-                <p className="figure" style={{ fontSize: 30, marginTop: 10, overflowWrap: "anywhere" }}>
-                  {Number(form.amount) > 0 ? formatINR(Number(form.amount)) : "₹—"}
-                </p>
-                {Number(form.tdsAmount) > 0 && (
-                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>
-                    less TDS {formatINR(Number(form.tdsAmount))} · net {formatINR(Math.max(0, Number(form.amount || 0) - Number(form.tdsAmount)))}
-                  </p>
-                )}
-
-                <div style={{ marginTop: 16 }}>
-                  {[
-                    { l: "Pay to", v: form.paidTo },
-                    { l: "For", v: form.paymentName },
-                    { l: "Company", v: form.company },
-                    { l: "Project", v: form.project },
-                    { l: "Date", v: form.date ? new Date(`${form.date}T12:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "" },
-                    { l: "Mode", v: [form.mode, form.bankName].filter(Boolean).join(" · ") },
-                    { l: "Against", v: form.expenseRef || form.jvNo || "" },
-                  ].map((r) => (
-                    <div key={r.l} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid var(--rule-soft)" }}>
-                      <span className="label" style={{ flexShrink: 0 }}>{r.l}</span>
-                      <span style={{ fontSize: 12.5, fontWeight: r.v ? 600 : 400, color: r.v ? "var(--ink)" : "var(--faint)", textAlign: "right", overflowWrap: "anywhere" }}>
-                        {r.v || "not set"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                <p className="label" style={{ marginTop: 18, marginBottom: 6 }}>Needed to save</p>
-                {[
-                  { l: "Payment purpose", ok: !!form.paymentName.trim() },
-                  { l: "Payment mode", ok: !!form.mode },
-                  { l: "Date", ok: !!form.date },
-                  { l: "Amount or an invoice", ok: Number(form.amount) > 0 || !!form.expenseRef },
-                ].map((c) => (
-                  <div key={c.l} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12, color: c.ok ? "var(--ink)" : "var(--graphite)" }}>
-                    <i className={c.ok ? undefined : "hatch"} style={{ width: 9, height: 9, flexShrink: 0, border: "1px solid var(--ink)", background: c.ok ? "var(--blue)" : undefined }} />
-                    {c.l}
-                  </div>
-                ))}
-              </div>
-            </aside>
             </div>
           </div>
         )}
@@ -4443,7 +4394,7 @@ const Payment: React.FC = () => {
                           );
                         })()}
                       {projectFilter && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading bg-violet-500/10 text-violet-600 border border-violet-500/20">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading bg-muted/60 text-foreground border border-border">
                           <FolderKanban size={9} />
                           {projectFilter}
                           <button
@@ -5075,21 +5026,21 @@ const Payment: React.FC = () => {
                             ds === "Pending" ? "border-l-amber-500" :
                             ds === "Cheque Issued" ? "border-l-blue-500" :
                             ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "border-l-red-500" :
-                            ds === "Reissued" ? "border-l-violet-500" :
+                            ds === "Reissued" ? "border-l-foreground" :
                             "border-l-gray-400";
                           const dotColor =
                             ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500" :
                             ds === "Pending" ? "bg-amber-500" :
                             ds === "Cheque Issued" ? "bg-blue-500" :
                             ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "bg-red-500" :
-                            ds === "Reissued" ? "bg-violet-500" :
+                            ds === "Reissued" ? "bg-foreground" :
                             "bg-gray-400";
                           const badgeClass =
                             ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400" :
                             ds === "Pending" ? "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400" :
                             ds === "Cheque Issued" ? "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400" :
                             ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400" :
-                            ds === "Reissued" ? "bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-400" :
+                            ds === "Reissued" ? "bg-muted/60 border-border text-foreground" :
                             "bg-gray-500/10 border-gray-500/20 text-gray-700 dark:text-gray-400";
                           return (
                             <div key={p.PPaymentID} className="relative">
@@ -5122,7 +5073,7 @@ const Payment: React.FC = () => {
                                   </div>
                                 )}
                                 {p.ReplacementDocNo && (
-                                  <div className="text-[0.625rem] text-violet-600 dark:text-violet-400 flex items-center gap-1">
+                                  <div className="text-[0.625rem] text-foreground flex items-center gap-1">
                                     <RefreshCw size={9} /> Reissued as {p.ReplacementDocNo}
                                   </div>
                                 )}
@@ -5297,7 +5248,7 @@ const Payment: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-1.5 text-[0.625rem]">
                     {viewingChain.chain.mrDocNo && (
                       <>
-                        <span className="bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-400 px-2 py-1 rounded-md font-mono font-semibold">
+                        <span className="bg-muted/60 border border-border text-foreground px-2 py-1 rounded-md font-mono font-semibold">
                           MR: {viewingChain.chain.mrDocNo}
                         </span>
                         <ArrowRight
@@ -5308,7 +5259,7 @@ const Payment: React.FC = () => {
                     )}
                     {viewingChain.chain.workDoneRef && (
                       <>
-                        <span className="bg-violet-500/10 border border-violet-500/20 text-violet-700 dark:text-violet-400 px-2 py-1 rounded-md font-mono font-semibold">
+                        <span className="bg-muted/60 border border-border text-foreground px-2 py-1 rounded-md font-mono font-semibold">
                           WD: {viewingChain.chain.workDoneRef}
                         </span>
                         <ArrowRight
@@ -5428,7 +5379,7 @@ const Payment: React.FC = () => {
                             <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">
                               On A/C
                             </p>
-                            <p className="font-mono text-xs font-bold text-violet-500 dark:text-violet-400">
+                            <p className="font-mono text-xs font-bold text-foreground">
                               {formatINR(viewingOaBalance)}
                             </p>
                           </div>
