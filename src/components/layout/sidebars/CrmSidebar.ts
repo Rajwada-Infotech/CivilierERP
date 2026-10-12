@@ -1,4 +1,4 @@
-import { ClipboardList, FileText, IndianRupee, Wrench, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2 } from "lucide-react";
+import { ClipboardList, FileText, IndianRupee, Wrench, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2, ArrowRightLeft } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Sidebar groups follow the real legal workflow sequence per Transfer of
@@ -96,6 +96,19 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
+  // ── Resale & Buy-back ────────────────────────────────────────────────────────
+  // A sold property passing to a new buyer (seller clearance → NOC → buyer →
+  // approval → fee → registered deed of assignment → transfer) or bought back
+  // (→ cancellation deed → payout). Each case links out to the existing pages
+  // that do their part (Applications, Received Payments, Approval Inbox).
+  {
+    label: "Resale & Buy-back",
+    icon: ArrowRightLeft,
+    children: [
+      { label: "Cases", path: "/crm/resales", pageKey: "crm-resales" },
+    ],
+  },
+
   // ── Finance ──────────────────────────────────────────────────────────────────
   {
     label: "Finance",
@@ -121,7 +134,6 @@ export const crmNavItems: NavItem[] = [
     children: [
       { label: "Service Tickets",    path: "/crm/service-tickets",    pageKey: "crm-service-tickets"    },
       { label: "Cancellations",      path: "/crm/cancellations",      pageKey: "crm-cancellations"      },
-      { label: "Resale & Buy-back", path: "/crm/resales",            pageKey: "crm-resales"            },
       { label: "Customer 360",       path: "/crm/customer-360",       pageKey: "crm-customer-360"       },
       { label: "Construction Updates", path: "/crm/construction-updates", pageKey: "crm-construction-updates" },
     ],

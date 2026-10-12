@@ -574,6 +574,12 @@ router.put("/:id/transfer", requirePageRight("crm-resales", "edit"), async (req,
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const pool = getPool();
+  // Every stage of the case first: seller clear, NOC, buyer, approval, fee
+  // paid, deed of assignment registered (services/crmResaleCase.js).
+  try {
+    const cur = (await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmUnitResale WHERE Id = @id")).recordset[0];
+    if (cur && cur.Status === "Approved") await caseSvc.assertReadyToFinish(pool, id);
+  } catch (e) { return caseErr(res, e, "PUT /:id/transfer (case check)"); }
   const tx = new sql.Transaction(pool);
   try {
     await tx.begin();
@@ -585,6 +591,19 @@ router.put("/:id/transfer", requirePageRight("crm-resales", "edit"), async (req,
     const { endorseToBuyer } = require("../services/crmResaleTransfer");
     const done = await endorseToBuyer(tx, resale, actorId(req));
     await tx.commit();
+    // The new buyer: portal access to their property, and the booking's staff
+    // are asked to welcome them (their bank details / loan follow from there).
+    // Never fatal — the transfer itself is done.
+    try {
+      if (done.applicationIds?.[0]) await require("../services/crmPortalProvision").ensurePortalUser(pool, done.applicationIds[0]);
+    } catch (pe) { console.warn("[crm-resales] buyer portal provisioning failed:", pe.message); }
+    try {
+      const { emitNotification } = require("../services/notify");
+      const bk = (await pool.request().input("b", sql.Int, resale.FromBookingId).input("c", sql.Int, resale.ToCustomerId).query(
+        "SELECT b.BookingNo, b.AssignedTo, (SELECT CustomerName FROM dbo.CrmCustomer WHERE Id = @c) AS Buyer FROM dbo.CrmBooking b WHERE b.Id = @b")).recordset[0];
+      if (bk?.AssignedTo) await emitNotification(pool, bk.AssignedTo, "crm_resale_transferred", "New owner — welcome call due",
+        `${bk.BookingNo} now belongs to ${bk.Buyer} (resale case #${id}). Make the welcome call and collect their bank / loan details.`, id, "crm_resale");
+    } catch (ne) { console.warn("[crm-resales] new-owner notification failed:", ne.message); }
     const actor = req.user?.email || req.user?.name || String(actorId(req));
     const warnings = [];
     const { postCrmResaleTransferToGL, postCrmResaleFeeToGL } = require("../services/crmLedger");
@@ -613,6 +632,12 @@ router.put("/:id/transfer", requirePageRight("crm-resales", "edit"), async (req,
 router.put("/:id/send-to-finance", requirePageRight("crm-resales", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
+  // The buy-back's case first: seller clear (dues, loan NOC), approved, and
+  // its cancellation deed registered / signed letter verified.
+  try {
+    const cur = (await getPool().request().input("id", sql.Int, id).query("SELECT Status, Kind FROM dbo.CrmUnitResale WHERE Id = @id")).recordset[0];
+    if (cur && cur.Kind === "BuyBack" && cur.Status === "Approved") await caseSvc.assertReadyToFinish(getPool(), id);
+  } catch (e) { return caseErr(res, e, "PUT /:id/send-to-finance (case check)"); }
   const bankId = req.body?.BankLHeadId != null && req.body.BankLHeadId !== "" ? parseInt(req.body.BankLHeadId, 10) : null;
   const pool = getPool();
   const tx = new sql.Transaction(pool);
@@ -638,6 +663,57 @@ router.put("/:id/send-to-finance", requirePageRight("crm-resales", "edit"), asyn
     console.error("[crm-resales] PUT /:id/send-to-finance:", e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to send it to Finance" });
   }
+});
+
+// ── The case: stages, seller clearance, NOC, documents (services/crmResaleCase.js) ──
+const caseSvc = require("../services/crmResaleCase");
+const caseUpload = require("multer")({
+  storage: require("multer").memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => cb(null, ["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(file.mimetype)),
+});
+const caseErr = (res, e, where) => {
+  if (e.status) return res.status(e.status).json({ error: e.message });
+  console.error(`[crm-resales] ${where}:`, e.message);
+  res.status(500).json({ error: "Something went wrong — please try again" });
+};
+const withCase = (fn) => async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try { res.json(await fn(getPool(), id, req)); } catch (e) { caseErr(res, e, `${req.method} ${req.path}`); }
+};
+router.get("/:id/case", requirePageRight("crm-resales", "view"), withCase((db, id) => caseSvc.caseState(db, id)));
+router.put("/:id/case/clearance", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.confirmClearance(db, id, actorId(req))));
+router.put("/:id/case/seller-loan", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.setSellerLoan(db, id, req.body?.hasLoan === true, actorId(req))));
+router.put("/:id/case/noc", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.issueNoc(db, id, actorId(req))));
+router.put("/:id/case/buyer-application", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.openBuyerApplication(db, id, actorId(req))));
+router.put("/:id/case/fee-invoice", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.issueFeeInvoice(db, id, actorId(req), req.user?.email || req.user?.name)));
+router.put("/:id/case/fee-payment", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.recordFeePayment(db, id, req.body || {}, actorId(req), req.user?.email || req.user?.name)));
+router.put("/:id/case/deed/:step", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.deedStep(db, id, String(req.params.step), req.body || {}, actorId(req))));
+router.post("/:id/documents", requirePageRight("crm-resales", "edit"), (req, res) => {
+  caseUpload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    if (!req.file) return res.status(400).json({ error: "Attach a PDF or image" });
+    try {
+      await caseSvc.addDocument(getPool(), id, String(req.body?.DocumentType || ""), req.file, req.body?.Remarks, actorId(req));
+      res.status(201).json(await caseSvc.caseState(getPool(), id));
+    } catch (e) { caseErr(res, e, "POST /:id/documents"); }
+  });
+});
+router.put("/:id/documents/:docId/review", requirePageRight("crm-resales", "edit"), withCase((db, id, req) =>
+  caseSvc.reviewDocument(db, id, parseInt(req.params.docId, 10), req.body?.decision, req.body?.remarks, actorId(req))));
+router.get("/:id/documents/:docId/file", requirePageRight("crm-resales", "view"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const f = await caseSvc.documentFile(getPool(), id, parseInt(req.params.docId, 10));
+    if (!f?.FileBase64) return res.status(404).json({ error: "File not found" });
+    res.setHeader("Content-Type", f.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(f.FileName || "document")}"`);
+    res.send(Buffer.from(f.FileBase64, "base64"));
+  } catch (e) { caseErr(res, e, "GET /:id/documents/:docId/file"); }
 });
 
 // GET /:id — one resale / buy-back, with the bookings moving (for the review panel).

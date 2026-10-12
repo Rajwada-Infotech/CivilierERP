@@ -54,6 +54,7 @@ const INVOICE_TYPE_LABEL = {
   Other: "Other Charges",
   OnAccount: "On-Account Payment",
   Final: "Final Invoice (Grand Total)",
+  TransferFee: "Transfer Fee (Resale)",
 };
 
 // Data-URL ("data:image/png;base64,....") -> Buffer pdfkit can embed, or
@@ -74,7 +75,7 @@ function decodeLogo(dataUrl) {
 async function fetchInvoiceData(pool, invoiceId) {
   const result = await pool.request().input("id", sql.Int, invoiceId).query(`
     SELECT
-      inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.CreatedAt, inv.Status, inv.MilestoneId, inv.OnAccountPaymentId,
+      inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.CreatedAt, inv.Status, inv.MilestoneId, inv.OnAccountPaymentId, inv.ResaleId,
       b.Id AS BookingId, b.BookingNo, b.UnitNo, b.BlockName, b.ProjectName, b.AreaSqFt, b.RatePerSqFt, b.GrandTotal, b.HsnCode,
       b.TotalGstAmount, b.UnitParkingGstRate,
       a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email,
@@ -106,6 +107,24 @@ async function fetchInvoiceData(pool, invoiceId) {
   // (dividing the raw GST amount by 1) for any booking with GrandTotal
   // left 0/NULL instead of falling back to "no split" like getGstSplit()
   // correctly does.
+  // A resale's transfer fee: billed to the NEW buyer (the booking is still
+  // the seller's when it is issued), with the fee's own GST / HSN — a
+  // service, not the property's rate.
+  if (row.ResaleId) {
+    const f = (await pool.request().input("rid", sql.Int, row.ResaleId).query(`
+      SELECT r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, r.DeveloperFeeHsnCode, r.DeveloperFeeGstRate,
+             c.CustomerName, c.Mobile, c.Email, c.Address, c.City, c.State, c.Pincode
+      FROM dbo.CrmUnitResale r LEFT JOIN dbo.CrmCustomer c ON c.Id = r.ToCustomerId WHERE r.Id = @rid`)).recordset[0];
+    if (f) {
+      Object.assign(row, {
+        ApplicantName: f.CustomerName, Mobile: f.Mobile, Email: f.Email,
+        CustomerAddress: f.Address, CustomerCity: f.City, CustomerState: f.State, CustomerPincode: f.Pincode,
+        HsnCode: f.DeveloperFeeHsnCode, UnitParkingGstRate: f.DeveloperFeeGstRate,
+        InvBase: Number(f.DeveloperFeeAmount) || 0, InvGst: Number(f.DeveloperFeeGstAmount) || 0,
+      });
+      return row;
+    }
+  }
   const { gstAmount, baseAmount } = await getGstSplit(pool, row.BookingId, Number(row.Amount) || 0);
   row.InvGst = gstAmount;
   row.InvBase = baseAmount;

@@ -95,6 +95,17 @@ async function endorseToBuyer(tx, resale, actorUserId) {
   let paid = 0;
   for (const b of bookings) {
     paid += Number(b.Paid || 0);
+    // The case opened the buyer's application already (their KYC and
+    // co-applicants are on it): the first booking takes that one.
+    let appId = null;
+    if (resale.BuyerApplicationId && !applicationIds.includes(resale.BuyerApplicationId)) {
+      appId = resale.BuyerApplicationId;
+      await tx.request().input("a", sql.Int, appId).input("uid", sql.Int, b.UnitId).input("pid", sql.Int, b.ProjectId).input("co", sql.Int, b.CompanyId)
+        .input("pp", sql.Int, b.PaymentPlanId || null).input("ref", sql.Int, b.ApplicationId)
+        .query(`UPDATE dbo.CrmApplication SET Status = N'Converted', PreferredUnitId = @uid, ProjectId = ISNULL(ProjectId, @pid), CompanyId = ISNULL(CompanyId, @co),
+                  PaymentPlanId = @pp, ReferredByApplicationId = @ref, UpdatedAt = SYSDATETIME() WHERE Id = @a`);
+    }
+    if (appId == null) {
     const appNo = await getNextDocNumber(require("../db").getPool(), "APP", "APP");
     const app = await tx.request()
       .input("no", sql.NVarChar(50), appNo).input("cid", sql.Int, buyer.Id)
@@ -108,7 +119,8 @@ async function endorseToBuyer(tx, resale, actorUserId) {
                 InterestedProject, InterestedUnit, PaymentPlanId, Source, Status, Notes, ReferredByApplicationId, DateOfApply, IsActive, CreatedBy, CreatedAt, AssignedTo, AssignedBy)
               OUTPUT INSERTED.Id
               VALUES (@no, @cid, @name, @mob, @em, @pid, @co, @uid, @proj, @unit, @pp, N'Other', N'Converted', @note, @ref, CAST(SYSDATETIME() AS DATE), 1, @by, SYSDATETIME(), @by, @by)`);
-    const appId = app.recordset[0].Id;
+    appId = app.recordset[0].Id;
+    }
     applicationIds.push(appId);
     // One Active application line per unit / plot: the seller's goes first.
     for (const t of [["CrmApplicationUnit", "UnitId"], ["CrmApplicationPlot", "PlotId"]]) {

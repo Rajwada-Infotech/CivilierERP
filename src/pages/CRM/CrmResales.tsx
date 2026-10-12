@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -64,6 +65,7 @@ const EMPTY = { Kind: "Resale" as "Resale" | "BuyBack", FromBookingId: "", ToCus
 
 const CrmResales: React.FC = () => {
   const rights = usePageRights("crm-resales");
+  const nav = useNavigate();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -117,6 +119,7 @@ const CrmResales: React.FC = () => {
       setOpen(false);
       setForm({ ...EMPTY });
       refresh();
+      if (out.id) nav(`/crm/resales/${out.id}`); // straight into its case
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setSaving(false); }
   };
@@ -147,22 +150,16 @@ const CrmResales: React.FC = () => {
       header: "", id: "actions",
       cell: ({ row }) => {
         const d = row.original;
-        if (!rights.canEdit || !d.BookingIds || ["Completed", "Cancelled", "Rejected"].includes(d.Status)) return null;
+        const open = !!d.BookingIds && !["Completed", "Cancelled", "Rejected"].includes(d.Status);
         return (
           <div className="flex gap-1.5 justify-end">
-            {d.Status === "Approved" && d.Kind === "Resale" && (
-              <button onClick={() => { if (window.confirm(`Pass ${d.UnitName || d.PlotName} to ${d.ToCustomerName}? The booking, its schedule and the ${fmt(d.OriginalValue)} paid move to the new buyer.`)) act(d, "transfer"); }}
+            {d.BookingIds && (
+              <button onClick={() => nav(`/crm/resales/${d.Id}`)}
                 className="px-2 h-7 text-[0.6875rem] rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">
-                Transfer to buyer
+                {open ? "Open case" : "View case"}
               </button>
             )}
-            {d.Status === "Approved" && d.Kind === "BuyBack" && !d.PayoutNewPaymentId && (
-              <button onClick={() => { setPay({ BankLHeadId: "", PaymentMode: "" }); setPaying(d); }}
-                className="px-2 h-7 text-[0.6875rem] rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">
-                Send to Finance
-              </button>
-            )}
-            {!(d.Kind === "BuyBack" && d.PayoutNewPaymentId) && <button onClick={() => act(d, "cancel", undefined, "Cancelled")}
+            {open && rights.canEdit && !(d.Kind === "BuyBack" && d.PayoutNewPaymentId) && <button onClick={() => act(d, "cancel", undefined, "Cancelled")}
               className="px-2 h-7 text-[0.6875rem] rounded-lg border border-border text-muted-foreground hover:bg-muted">
               Cancel
             </button>}
@@ -179,8 +176,8 @@ const CrmResales: React.FC = () => {
       <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2 mb-3">
         <Info size={13} className="text-muted-foreground mt-0.5 shrink-0" />
         <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-          <span className="font-medium text-foreground">Resale:</span> the booking passes to the new buyer with everything paid so far; they continue the schedule. The price the buyers agree is theirs, not company revenue — only <span className="font-medium text-foreground">our fee</span> (paid by the new buyer) is.{" "}
-          <span className="font-medium text-foreground">Buy-back:</span> we pay the agreed price through Finance and the property returns to stock. Both are approved in the Approval Inbox — CRM head, then Finance.
+          <span className="font-medium text-foreground">Resale:</span> seller clearance (dues, loan NOC) → our NOC → the buyer's application & KYC → approval → transfer fee → registered deed of assignment → the booking passes to the buyer with everything paid. The price the buyers agree is theirs, not company revenue — only <span className="font-medium text-foreground">our fee</span> is.{" "}
+          <span className="font-medium text-foreground">Buy-back:</span> seller clearance → approval → cancellation deed (or letter) → Finance pays the agreed price and the property returns to stock. Open a case to see where it stands.
         </p>
       </div>
 
