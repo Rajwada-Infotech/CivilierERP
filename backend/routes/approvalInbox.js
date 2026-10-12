@@ -1043,6 +1043,41 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
+    // A resale / buy-back's transfer deed: the Legal Head's sign-off and its
+    // signing date (services/crmTransferDeed.js).
+    if (!module || module === "crm-transfer-deeds" || module === "crm-transfer-deed-date") {
+      for (const [mod, label, col] of [["crm-transfer-deeds", "Transfer Deed (Legal Head)", "SeniorApprovalStatus"], ["crm-transfer-deed-date", "Transfer Deed (Date Approval)", "DateApprovalStatus"]]) {
+        if (module && module !== mod) continue;
+        queries.push(`
+          SELECT
+            '${mod}'                              AS Module,
+            '${label}'                            AS ModuleLabel,
+            CAST(d.Id AS NVARCHAR)                AS RecordId,
+            CONCAT(d.DeedNo, ' · ', COALESCE(b.UnitNo, b.BookingNo)) AS Reference,
+            d.CreatedAt                           AS RecordDate,
+            d.${col}                              AS Status,
+            CAST(NULL AS NVARCHAR)                AS ContractorName,
+            CONCAT(fc.CustomerName, CASE WHEN d.DeedType = N'Assignment' THEN CONCAT(' → ', tc.CustomerName) ELSE ' → us' END) AS SupplierName,
+            r.AgreedValue                         AS Amount,
+            ${withProjectName(NULL_EXTRA, "pr_td.name")}
+            ISNULL(CAST(cu.name AS NVARCHAR(255)), '') AS CreatedBy,
+            ''                                    AS ApprovedBy,
+            ''                                    AS ApprovedAt,
+            ''                                    AS RejectedBy,
+            ${col === "DateApprovalStatus" ? "CONCAT('Signing date: ', CONVERT(NVARCHAR(10), d.ProposedDate, 23))" : "CAST(ISNULL(d.SeniorRemarks, '') AS NVARCHAR(MAX))"} AS RejectionNote,
+            ISNULL(d.UpdatedAt, d.CreatedAt)      AS LastModified
+          FROM dbo.CrmTransferDeed d
+          JOIN dbo.CrmUnitResale r ON r.Id = d.ResaleId
+          JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+          LEFT JOIN dbo.CrmCustomer fc ON fc.Id = r.FromCustomerId
+          LEFT JOIN dbo.CrmCustomer tc ON tc.Id = r.ToCustomerId
+          LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy
+          LEFT JOIN dbo.enterprise pr_td ON pr_td.id = b.ProjectId
+          WHERE d.IsActive = 1 AND d.${col} = 'Pending'
+        `);
+      }
+    }
+
     if (!module || module === "crm-sales-deed-director") {
       queries.push(`
         SELECT

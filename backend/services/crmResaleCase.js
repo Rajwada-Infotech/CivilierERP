@@ -35,20 +35,6 @@ const DOC_TYPES = {
 };
 const DEED_STEPS = ["Draft", "LegalApproved", "Consented", "Executed", "DutyPaid", "Registered"];
 
-const DEED_LABEL = { Draft: "Drafted", LegalApproved: "Legal approved", Consented: "Both parties consented", Executed: "Executed", DutyPaid: "Stamp duty paid", Registered: "Registered" };
-const nextDeedStep = (cur) => (cur == null ? "Draft" : DEED_STEPS[DEED_STEPS.indexOf(cur) + 1] || null);
-function deedNextHint(next, docs) {
-  const has = (t) => docs.some((d) => d.DocumentType === t && d.Status !== "Rejected");
-  switch (next) {
-    case "Draft": return has("DeedDraft") ? "Start the deed from the uploaded draft" : "Upload the deed draft";
-    case "LegalApproved": return "Legal approval of the draft (someone other than who uploaded it verifies the draft)";
-    case "Consented": return "Record the seller's and the buyer's consent to the draft";
-    case "Executed": return "Record the date the deed was signed (executed)";
-    case "DutyPaid": return "Enter the stamp duty and registration fee assessed, with the paid receipt";
-    case "Registered": return "Enter the registration number, date and Sub-Registrar office, with the registered copy";
-    default: return "";
-  }
-}
 const idsOf = (r) => String(r.BookingIds || r.FromBookingId || "").split(",").map(Number).filter(Number.isInteger);
 
 async function loadCase(db, id) {
@@ -139,11 +125,21 @@ async function caseState(db, id) {
   const deedType = isResale ? "Assignment" : (f.agreement?.Status === "Registered" ? "CancellationDeed" : "CancellationLetter");
   const deedStatus = r.DeedStatus || null;
   const deedIdx = deedStatus ? DEED_STEPS.indexOf(deedStatus) : -1;
-  const deedComplete = deedType === "CancellationLetter" ? verified(docs, "CancellationLetter") : deedStatus === "Registered";
-  const deedNext = deedType === "CancellationLetter" ? null : nextDeedStep(deedStatus);
+  // The deed's own legal chain (Transfer Deeds — migration 560). A case
+  // finished before it existed recorded its deed on the case (DeedStatus).
+  let td = null;
+  if (deedType !== "CancellationLetter") {
+    const row = (await db.request().input("id", sql.Int, id).query(
+      "SELECT TOP 1 Id FROM dbo.CrmTransferDeed WHERE ResaleId = @id AND IsActive = 1 AND Status <> N'Cancelled' ORDER BY Id DESC")).recordset[0];
+    if (row) td = await require("./crmTransferDeed").deedState(db, row.Id);
+  }
+  const deedComplete = deedType === "CancellationLetter" ? verified(docs, "CancellationLetter")
+    : td ? td.deed.Status === "Registered" : deedStatus === "Registered";
+  const deedNext = null;
   const deedBlockers = deedComplete ? [] : deedType === "CancellationLetter"
     ? ["Upload the signed cancellation letter and have it verified"]
-    : [deedNextHint(deedNext, docs)];
+    : td ? [`${td.steps.find((x) => x.state === "current")?.label || "Transfer deed"} — on the Transfer Deeds page`]
+      : ["Open the transfer deed"];
 
   // 6 fee
   const fee = Math.round((Number(r.DeveloperFeeAmount || 0) + Number(r.DeveloperFeeGstAmount || 0)) * 100) / 100;
@@ -165,7 +161,8 @@ async function caseState(db, id) {
     ...(isResale ? [stage("fee", "Transfer fee", feeOk, feeBlockers,
       fee > 0 ? [fmt(fee), r.FeeInvoiceNo, r.FeeReceiptNo && `${r.FeeReceiptNo} ${r.FeeReceiptStatus}`].filter(Boolean).join(" · ") : "No fee", !(fee > 0))] : []),
     stage("deed", deedType === "Assignment" ? "Deed of assignment" : deedType === "CancellationDeed" ? "Cancellation deed" : "Cancellation letter",
-      deedComplete, deedBlockers, deedType === "CancellationLetter" ? (verified(docs, "CancellationLetter") ? "Signed letter verified" : null) : (DEED_LABEL[deedStatus] || "Not started")),
+      deedComplete, deedBlockers, deedType === "CancellationLetter" ? (verified(docs, "CancellationLetter") ? "Signed letter verified" : null)
+        : td ? `${td.deed.DeedNo} · ${td.deed.StatusLabel}` : deedStatus === "Registered" ? "Registered" : "Not started"),
     stage(isResale ? "transfer" : "payout", isResale ? "Transfer" : "Payout & back to stock", done, [], done ? "Completed" : null),
   ];
   // The checklist each step shows: every requirement, done or not, with the
@@ -203,16 +200,12 @@ async function caseState(db, id) {
     ],
     deed: deedType === "CancellationLetter"
       ? [{ label: "Signed cancellation letter verified", ok: verified(docs, "CancellationLetter"), doc: "CancellationLetter" }]
-      : [
-          { label: "Draft uploaded and the deed started", ok: deedIdx >= 0, doc: "DeedDraft", step: "Draft" },
-          { label: "Legal approval (draft verified by someone else)", ok: deedIdx >= 1, step: "LegalApproved" },
-          { label: isResale ? "Seller and buyer consent to the draft" : "Seller consents to the draft", ok: deedIdx >= 2, step: "Consented" },
-          { label: "Deed signed (executed)", ok: deedIdx >= 3, step: "Executed", hint: r.DeedExecutionDate ? new Date(r.DeedExecutionDate).toISOString().slice(0, 10) : null },
-          { label: "Stamp duty & registration fee paid (receipt verified)", ok: deedIdx >= 4, doc: "StampDutyReceipt", step: "DutyPaid",
-            hint: r.DeedDutyPaidAt ? `${fmt(r.DeedStampDuty)} + ${fmt(r.DeedRegistrationFee)} · ${r.DeedDutyPaidRef}` : null },
-          { label: "Registered at the Sub-Registrar (copy verified)", ok: deedIdx >= 5, doc: "RegisteredDeed", step: "Registered",
-            hint: r.DeedRegNo ? `${r.DeedRegNo} · ${r.DeedRegOffice}` : null },
-        ],
+      : td
+        // The deed's legal steps, read from the deed itself.
+        ? td.steps.map((x) => ({ label: x.label, ok: x.ok, hint: x.state === "current" ? (x.checks.find((c) => !c.ok)?.label || null) : null, link: x.state === "current" ? "deed" : null }))
+        : deedStatus === "Registered"
+          ? [{ label: "Registered (recorded on the case)", ok: true, hint: r.DeedRegNo ? `${r.DeedRegNo} · ${r.DeedRegOffice}` : null }]
+          : [{ label: `Open the ${isResale ? "deed of assignment" : "cancellation deed"} — its legal steps run on the Transfer Deeds page`, ok: false, action: "open-deed" }],
     transfer: [{ label: "Booking passed to the buyer", ok: done, action: "transfer" }],
     payout: [{ label: "Payout sent to Finance and paid", ok: done, action: "send-to-finance", hint: r.PayoutNewPaymentId ? "With Finance" : null }],
   };
@@ -234,7 +227,7 @@ async function caseState(db, id) {
       AgreedValue: r.AgreedValue, OriginalValue: r.OriginalValue, DeveloperFeeAmount: r.DeveloperFeeAmount, DeveloperFeeGstAmount: r.DeveloperFeeGstAmount,
       SellerHasLoan: hasLoan, SellerHasLoanSetByStaff: r.SellerHasLoan != null, SellerClearedAt: r.SellerClearedAt,
       NocNo: r.NocNo, NocIssuedAt: r.NocIssuedAt, BuyerApplicationId: r.BuyerApplicationId, FeeInvoiceId: r.FeeInvoiceId,
-      DeedType: deedType, DeedStatus: deedStatus, DeedStep: deedIdx, DeedNext: deedNext,
+      DeedType: deedType, DeedStatus: deedStatus, DeedStep: deedIdx, DeedNext: deedNext, TransferDeedId: td?.deed.Id || null, TransferDeedNo: td?.deed.DeedNo || null,
       FeeTotal: fee, FeeInvoiceNo: r.FeeInvoiceNo, FeeInvoiceStatus: r.FeeInvoiceStatus, FeeReceivedPaymentId: r.FeeReceivedPaymentId,
       FeeReceiptNo: r.FeeReceiptNo, FeeReceiptStatus: r.FeeReceiptStatus,
       DeedExecutionDate: r.DeedExecutionDate, DeedStampDuty: r.DeedStampDuty, DeedRegistrationFee: r.DeedRegistrationFee,
@@ -377,78 +370,6 @@ async function recordFeePayment(db, id, b, actorUserId, actorEmail) {
   return caseState(db, id);
 }
 
-/**
- * Stage 7: the deed, one step at a time (Draft -> LegalApproved -> Consented
- * -> Executed -> DutyPaid -> Registered). Each step checks its own evidence.
- */
-async function deedStep(db, id, step, b, actorUserId) {
-  const st = await caseState(db, id);
-  const c = st.case;
-  if (["Rejected", "Cancelled", "Completed"].includes(c.Status)) throw new CaseError(`This case is ${c.Status}`, 409);
-  if (c.DeedType === "CancellationLetter") throw new CaseError("This buy-back needs a signed cancellation letter, not a deed — upload it under documents");
-  if (step !== c.DeedNext) throw new CaseError(c.DeedNext ? `The next deed step is: ${DEED_LABEL[c.DeedNext] || c.DeedNext}` : "The deed is already registered", 409);
-  const before = st.stages.slice(0, st.stages.findIndex((s) => s.key === "deed")).filter((s) => !s.ok && !s.na);
-  // The deed is drafted and approved once the earlier stages are through.
-  if (before.length) throw new CaseError(`Finish first: ${before.map((s) => s.label).join(", ")}`, 409);
-  const docs = st.documents;
-  const ok = (t) => docs.some((d) => d.DocumentType === t && d.Status === "Verified");
-  const has = (t) => docs.some((d) => d.DocumentType === t && d.Status !== "Rejected");
-  const req = db.request().input("id", sql.Int, id).input("by", sql.Int, actorUserId).input("s", sql.NVarChar(30), step);
-  let set = "";
-  switch (step) {
-    case "Draft":
-      if (!has("DeedDraft")) throw new CaseError("Upload the deed draft first");
-      set = "DeedType = @t";
-      req.input("t", sql.NVarChar(30), c.DeedType);
-      break;
-    case "LegalApproved":
-      if (!ok("DeedDraft")) throw new CaseError("The deed draft must be verified (by someone other than who uploaded it)");
-      set = "DeedLegalApprovedAt = SYSDATETIME(), DeedLegalApprovedBy = @by";
-      break;
-    case "Consented": {
-      const method = String(b?.method || "").trim();
-      if (!method) throw new CaseError("Say how both parties consented (signed copy, in person, email …)");
-      if (c.Kind !== "BuyBack" && !(b?.seller && b?.buyer)) throw new CaseError("Both the seller and the buyer must consent");
-      if (c.Kind === "BuyBack" && !b?.seller) throw new CaseError("The seller must consent");
-      set = "DeedSellerConsentAt = SYSDATETIME(), DeedBuyerConsentAt = CASE WHEN @buyer = 1 THEN SYSDATETIME() ELSE NULL END, DeedConsentMethod = @m";
-      req.input("m", sql.NVarChar(200), method).input("buyer", sql.Bit, b?.buyer ? 1 : 0);
-      break;
-    }
-    case "Executed": {
-      const d = String(b?.executionDate || "").slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new CaseError("Enter the execution date");
-      if (d > new Date().toISOString().slice(0, 10)) throw new CaseError("The execution date can't be in the future");
-      set = "DeedExecutionDate = @d";
-      req.input("d", sql.Date, d);
-      break;
-    }
-    case "DutyPaid": {
-      const duty = Number(b?.stampDuty), fee = Number(b?.registrationFee);
-      if (!(duty >= 0) || !(fee >= 0) || !(duty + fee > 0)) throw new CaseError("Enter the stamp duty and registration fee assessed by the Sub-Registrar");
-      if (!String(b?.paidRef || "").trim()) throw new CaseError("Enter the payment reference (GRN / challan no.)");
-      if (!ok("StampDutyReceipt")) throw new CaseError("Upload the paid stamp-duty receipt and have it verified");
-      const by = ["Buyer", "Seller", "Developer", "Shared"].includes(b?.paidBy) ? b.paidBy : "Buyer";
-      set = "DeedStampDuty = @duty, DeedRegistrationFee = @fee, DeedDutyPaidAt = SYSDATETIME(), DeedDutyPaidRef = @ref, DeedDutyPaidBy = @pb";
-      req.input("duty", sql.Decimal(18, 2), duty).input("fee", sql.Decimal(18, 2), fee).input("ref", sql.NVarChar(100), String(b.paidRef).trim()).input("pb", sql.NVarChar(30), by);
-      break;
-    }
-    case "Registered": {
-      const no = String(b?.regNo || "").trim(), d = String(b?.regDate || "").slice(0, 10), off = String(b?.regOffice || "").trim();
-      if (!no || !/^\d{4}-\d{2}-\d{2}$/.test(d) || !off) throw new CaseError("Enter the registration number, date and Sub-Registrar office");
-      const exec = c.DeedExecutionDate ? new Date(c.DeedExecutionDate).toISOString().slice(0, 10) : null; // a DATE comes back as a Date
-      if (exec && d < exec) throw new CaseError("Registration can't be before the execution date");
-      if (d > new Date().toISOString().slice(0, 10)) throw new CaseError("The registration date can't be in the future");
-      if (!ok("RegisteredDeed")) throw new CaseError("Upload the registered deed copy and have it verified");
-      set = "DeedRegNo = @no, DeedRegDate = @d, DeedRegOffice = @off, DeedRegisteredBy = @by";
-      req.input("no", sql.NVarChar(100), no).input("d", sql.Date, d).input("off", sql.NVarChar(200), off);
-      break;
-    }
-    default: throw new CaseError("Unknown deed step");
-  }
-  await req.query(`UPDATE dbo.CrmUnitResale SET DeedStatus = @s, ${set}, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
-  return caseState(db, id);
-}
-
 /** Throws unless every stage before the last (transfer / payout) is done. */
 async function assertReadyToFinish(db, id) {
   const st = await caseState(db, id);
@@ -490,4 +411,4 @@ async function documentFile(db, id, docId) {
     .query("SELECT FileName, FileBase64, MimeType FROM dbo.CrmResaleDocument WHERE Id = @d AND ResaleId = @id AND IsActive = 1")).recordset[0] || null;
 }
 
-module.exports = { caseState, confirmClearance, setSellerLoan, issueNoc, openBuyerApplication, issueFeeInvoice, recordFeePayment, deedStep, assertReadyToFinish, addDocument, reviewDocument, documentFile, CaseError, DOC_TYPES, DEED_STEPS };
+module.exports = { caseState, confirmClearance, setSellerLoan, issueNoc, openBuyerApplication, issueFeeInvoice, recordFeePayment, assertReadyToFinish, addDocument, reviewDocument, documentFile, CaseError, DOC_TYPES, DEED_STEPS };

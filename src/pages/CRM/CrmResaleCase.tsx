@@ -209,6 +209,19 @@ const CrmResaleCase: React.FC = () => {
             {ch.link === "kyc" && c.ToCustomerId && !ch.ok && <Link className={ghost} to={`/crm/customers?customerId=${c.ToCustomerId}`}>Edit buyer <ExternalLink size={11} /></Link>}
             {ch.link === "application" && <Link className={ghost} to={`/crm/applications?id=${c.BuyerApplicationId}`}>Open application <ExternalLink size={11} /></Link>}
             {ch.link === "inbox" && !ch.ok && <Link className={ghost} to="/admin/approval/inbox">Approval Inbox <ExternalLink size={11} /></Link>}
+            {ch.link === "deed" && c.TransferDeedId && <Link className={primary} to={`/crm/transfer-deeds?id=${c.TransferDeedId}`}>Work on {c.TransferDeedNo} <ExternalLink size={11} /></Link>}
+            {ch.action === "open-deed" && canEdit && active && (
+              <button className={primary} disabled={!!busy} onClick={async () => {
+                setBusy("deed");
+                try {
+                  const r = await fetchWithAuth(`/api/crm/transfer-deeds/for-case/${c.Id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+                  const out = await r.json().catch(() => ({}));
+                  if (!r.ok) throw new Error(out.error || "Could not open the deed");
+                  nav(`/crm/transfer-deeds?id=${out.deed.Id}`);
+                } catch (e: any) { toast.error(translateError(e.message)); }
+                finally { setBusy(null); }
+              }}>Open the deed</button>
+            )}
             {ch.doc && <DocSlot type={ch.doc} active={active} />}
             {canEdit && active && canAct && !ch.ok && ch.action && ACTION_LABEL[ch.action] && (
               <button className={primary} disabled={!!busy || (ch.action === "clearance" && s.checks.slice(0, i).some((x) => !x.ok))}

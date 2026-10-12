@@ -254,6 +254,18 @@ const MODULE_OPTIONS = [
     desc: "Booking cancellation",
   },
   {
+    id: "crm-transfer-deeds",
+    label: "Transfer Deed — Legal Head",
+    icon: "⚖️",
+    desc: "A resale's deed of assignment or a buy-back's cancellation deed, before it goes to the parties",
+  },
+  {
+    id: "crm-transfer-deed-date",
+    label: "Transfer Deed — Date Approval",
+    icon: "📅",
+    desc: "The signing date every party accepted, before it is fixed",
+  },
+  {
     id: "crm-resales",
     label: "Property Resale & Buy-back",
     icon: "🔁",
@@ -324,6 +336,8 @@ const MODULE_GROUPS = [
       "crm-brokerage",
       "crm-refunds",
       "crm-resales",
+      "crm-transfer-deeds",
+      "crm-transfer-deed-date",
       "crm-cancellations",
     ],
   },

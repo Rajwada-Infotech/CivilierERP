@@ -405,11 +405,25 @@ router.put("/:id/cancel", requirePageRight("crm-resales", "edit"), async (req, r
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    // Its transfer deed goes with it — unless the deed is already signed or
+    // registered: that is a legal instrument now, and is undone by a deed of
+    // its own, not by cancelling the case.
+    const deed = (await pool.request().input("id", sql.Int, id).query(
+      "SELECT TOP 1 Id, DeedNo, Status FROM dbo.CrmTransferDeed WHERE ResaleId = @id AND IsActive = 1 AND Status <> N'Cancelled'")).recordset[0];
+    if (deed && ["Executed", "Registered"].includes(deed.Status)) {
+      return res.status(409).json({ error: `${deed.DeedNo} is already ${deed.Status === "Registered" ? "registered" : "signed"} — the case can't be cancelled.` });
+    }
     const r = await pool.request().input("id", sql.Int, id).input("by", sql.Int, actorId(req))
       .query(`UPDATE dbo.CrmUnitResale SET Status = N'${ResaleStatus.CANCELLED}', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
               WHERE Id = @id AND IsActive = 1 AND Status <> N'${ResaleStatus.COMPLETED}'`);
     if (!r.rowsAffected[0])
       return res.status(400).json({ error: "Not found, or already completed — a completed resale has already moved the plot and cannot be cancelled here." });
+    if (deed) {
+      await pool.request().input("d", sql.Int, deed.Id).input("by", sql.Int, actorId(req))
+        .query("UPDATE dbo.CrmTransferDeed SET Status = N'Cancelled', UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @d");
+      await pool.request().input("d", sql.Int, deed.Id).input("u", sql.Int, actorId(req))
+        .query("INSERT INTO dbo.CrmTransferDeedLog (DeedId, Action, ActorType, ActorUserId, Remarks) VALUES (@d, N'Cancelled with its case', N'Staff', @u, NULL)");
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-resales] PUT /:id/cancel:", e.message);
@@ -702,7 +716,6 @@ router.put("/:id/case/noc", requirePageRight("crm-resales", "edit"), withCase((d
 router.put("/:id/case/buyer-application", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.openBuyerApplication(db, id, actorId(req))));
 router.put("/:id/case/fee-invoice", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.issueFeeInvoice(db, id, actorId(req), req.user?.email || req.user?.name)));
 router.put("/:id/case/fee-payment", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.recordFeePayment(db, id, req.body || {}, actorId(req), req.user?.email || req.user?.name)));
-router.put("/:id/case/deed/:step", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.deedStep(db, id, String(req.params.step), req.body || {}, actorId(req))));
 router.post("/:id/documents", requirePageRight("crm-resales", "edit"), (req, res) => {
   caseUpload.single("file")(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });

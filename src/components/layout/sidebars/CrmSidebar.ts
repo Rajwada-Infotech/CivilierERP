@@ -105,7 +105,8 @@ export const crmNavItems: NavItem[] = [
     label: "Resale & Buy-back",
     icon: ArrowRightLeft,
     children: [
-      { label: "Cases", path: "/crm/resales", pageKey: "crm-resales" },
+      { label: "Cases",            path: "/crm/resales",                      pageKey: "crm-resales"        },
+      { label: "Transfer Deeds",   path: "/crm/transfer-deeds",               pageKey: "crm-transfer-deeds" },
     ],
   },
 

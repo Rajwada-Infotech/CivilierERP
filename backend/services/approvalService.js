@@ -37,6 +37,9 @@ const MAKER_COLUMNS = {
   "crm-refunds": "RequestedBy",
   "crm-resales": "CreatedBy",
   "crm-brokerage": "CreatedBy",
+  // Not money, but the same separation: whoever prepared a transfer deed
+  // can't give it the Legal Head's sign-off too.
+  "crm-transfer-deeds": "CreatedBy",
 };
 
 // Map module slug → { table, pkCol, statusCol }
@@ -142,6 +145,13 @@ const MODULE_MAP = {
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
   "crm-refunds": { table: "dbo.CrmRefund", pk: "Id", status: "Status" },
   "crm-resales": { table: "dbo.CrmUnitResale", pk: "Id", status: "Status" },
+  // A resale / buy-back's transfer deed (migration 560): the Legal Head's
+  // sign-off on its papers, and — a second gate on the same row, same
+  // single-level ApprovalAuditLog caveat as crm-agreement-date — the
+  // signing date every party accepted. Each submission writes its own
+  // Level=0 marker, so a deed sent back for a recheck is reviewed afresh.
+  "crm-transfer-deeds": { table: "dbo.CrmTransferDeed", pk: "Id", status: "SeniorApprovalStatus" },
+  "crm-transfer-deed-date": { table: "dbo.CrmTransferDeed", pk: "Id", status: "DateApprovalStatus" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
   contracts: { table: "dbo.Contract", pk: "ContractId", status: "Status" },
   // Same ApprovalAuditLog caveat as crm-agreement-date above: no Module
