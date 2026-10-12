@@ -3,7 +3,7 @@ const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, "SELECT ProjectId FROM dbo.CrmOccupancyCertificate WHERE Id = @id"); }
-const rateLimit = require("../middleware/rateLimiter");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -11,7 +11,7 @@ const { actorId } = require("../services/saAccess");
 const { rollupBookingTotals } = require("./crmParking");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // Builds the SELECT with enrichment subqueries so the list page can show
 // booking counts and possession-gate status without extra round-trips.

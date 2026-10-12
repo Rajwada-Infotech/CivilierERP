@@ -8,8 +8,8 @@ const authMiddleware = require("../middleware/auth");
 const { isSaAdmin } = require("../services/saAccess");
 const { runCrmSlaCheck } = require("../services/crmSlaEngine");
 
-const rateLimit = require("../middleware/rateLimiter");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 router.use(authMiddleware);
 
 let lastRun = null; // { timestamp, durationMs, summary }

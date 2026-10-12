@@ -9,8 +9,8 @@
 // there is no separate literal "Pending" status in the schema.
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("../middleware/rateLimiter");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { computeProgressMap } = require("../utils/taskProgress");

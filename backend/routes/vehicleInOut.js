@@ -30,7 +30,7 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const multer = require("multer");
-const rateLimit = require("../middleware/rateLimiter");
+const apiRateLimit = require("../middleware/apiRateLimit");
 
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
@@ -69,7 +69,7 @@ function parseIstDateTime(value) {
 const router = express.Router();
 
 // ── Rate-limit ────────────────────────────────────────────────────────────────
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // ── Permission guard ─────────────────────────────────────────────────────────
 // Approve/Reject are exempt — transition() (approvalService.js) is the real
