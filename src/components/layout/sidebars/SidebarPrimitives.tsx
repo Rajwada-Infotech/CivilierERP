@@ -99,7 +99,7 @@ export interface NavItem {
 /** Icon, sat inside a soft rounded chip — matches the icon-tile look of the
  *  reference design rather than a bare glyph. */
 const IconChip = ({
-  icon: Icon,
+  icon: _icon,
   size,
   active,
   compact,
@@ -118,7 +118,7 @@ const IconChip = ({
         height: size + pad,
       }}
     >
-      <Icon size={size} variant={active ? "Bold" : "Linear"} />
+      <span className={`rounded-full ${active ? "w-2 h-2 bg-sidebar-primary" : "w-1.5 h-1.5 bg-current"}`} />
     </span>
   );
 };
@@ -341,7 +341,7 @@ export const NavGroup = ({
                 onClick={() => toggleSection(section.label)}
                 className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[0.6875rem] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
               >
-                <section.icon size={12} />
+                <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />
                 <OverflowTooltip text={section.label}>
                   <span className="flex-1 text-left truncate font-medium">
                     {section.label}
