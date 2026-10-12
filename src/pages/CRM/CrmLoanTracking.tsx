@@ -25,7 +25,8 @@ const BKG_API = "/api/crm/bookings";
 const WC_API  = "/api/crm/welcome-calls";
 
 // ── Status meta ───────────────────────────────────────────────────────────────
-type LoanStatus = "NotApplied" | "Applied" | "Sanctioned" | "Disbursed" | "Rejected";
+// "Closed" is set by the system only — a previous owner's loan after a resale.
+type LoanStatus = "NotApplied" | "Applied" | "Sanctioned" | "Disbursed" | "Rejected" | "Closed";
 
 const STATUS_ORDER: LoanStatus[] = ["NotApplied", "Applied", "Sanctioned", "Disbursed"];
 
@@ -35,6 +36,7 @@ const STATUS_META: Record<string, { label: string; pill: string; icon: React.Ele
   Sanctioned: { label: "Sanctioned",  pill: "text-emerald-700 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700", icon: BadgeCheck },
   Disbursed:  { label: "Disbursed",   pill: "text-purple-700 bg-purple-50 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-700", icon: CheckCircle2 },
   Rejected:   { label: "Rejected",    pill: "text-red-600 bg-red-50 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800", icon: XCircle },
+  Closed:     { label: "Closed (previous owner)", pill: "text-muted-foreground bg-muted border-border", icon: XCircle },
 };
 
 const SANCTION_STATUSES: LoanStatus[] = ["NotApplied", "Applied", "Sanctioned", "Disbursed", "Rejected"];

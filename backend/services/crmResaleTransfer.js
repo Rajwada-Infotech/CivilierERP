@@ -137,6 +137,20 @@ async function endorseToBuyer(tx, resale, actorUserId) {
       .query("UPDATE dbo.CrmBooking SET ApplicationId = @a, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @b");
     await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, b.ApplicationId)
       .query("UPDATE dbo.CrmCoApplicant SET IsActive = 0 WHERE (BookingId = @b OR ApplicationId = @a) AND IsActive = 1");
+    // What was the seller's stays as their history, off the buyer's booking:
+    //  - their home loan is closed (its bank NOC was verified at clearance),
+    //    so it no longer asks the buyer for a bank NOC or a sanction;
+    //  - their bank details move to their own (old) application, so a refund
+    //    or cancellation for the buyer is never pre-filled with them;
+    //  - how the property is financed is the buyer's to declare.
+    await tx.request().input("b", sql.Int, b.Id).input("rid", sql.Int, resale.Id)
+      .query(`UPDATE dbo.CrmLoanDetail SET SanctionStatus = N'Closed', UpdatedAt = SYSDATETIME(),
+                Notes = LTRIM(ISNULL(Notes, N'') + CHAR(10) + N'Seller''s loan — closed when the property was resold (case #' + CAST(@rid AS NVARCHAR(20)) + N')')
+              WHERE BookingId = @b AND ISNULL(SanctionStatus, N'') <> N'Closed'`);
+    await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, b.ApplicationId)
+      .query("UPDATE dbo.CrmCustomerBankDetail SET ApplicationId = ISNULL(ApplicationId, @a), BookingId = NULL, UpdatedAt = SYSDATETIME() WHERE BookingId = @b");
+    await tx.request().input("b", sql.Int, b.Id)
+      .query("UPDATE dbo.CrmBooking SET FinancingType = NULL WHERE Id = @b");
   }
   paid = Math.round(paid * 100) / 100;
   await tx.request().input("id", sql.Int, resale.Id).input("paid", sql.Decimal(18, 2), paid).input("by", sql.Int, actorUserId)

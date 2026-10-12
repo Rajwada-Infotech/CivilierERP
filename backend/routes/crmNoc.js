@@ -196,11 +196,11 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
              a.ApplicantName,
              CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
                SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
              ) THEN 'Bank' ELSE 'Organisation' END AS NocType,
              CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
                SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
              ) THEN 1 ELSE 0 END AS HasLoan
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId

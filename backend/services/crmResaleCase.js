@@ -79,11 +79,18 @@ async function sellerFacts(db, r) {
     FROM dbo.CrmPaymentMilestone m
     WHERE m.BookingId IN (${list}) AND m.Status NOT IN (N'Paid', N'Waived')
       AND m.DemandStatus NOT IN (N'Pending', N'Paid') AND m.AmountDue - ISNULL(m.AmountPaid, 0) > 0.009`);
+  // Under the full-booking hold, money paid stays On Account (milestones only
+  // settle once the whole price is in) — so a demand is covered when what
+  // sits on account pays it, even though the milestone isn't marked Paid yet.
+  const onAccount = Number((await q(`SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) AS v FROM dbo.CrmOnAccountPayment
+    WHERE BookingId IN (${list}) AND ISNULL(Status, N'') NOT IN (N'Bounced', N'Held')`))[0].v) || 0;
+  const demandedTotal = overdue.reduce((t, m) => t + Number(m.Balance || 0), 0);
+  const uncovered = Math.max(0, Math.round((demandedTotal - onAccount) * 100) / 100);
   const openCancellation = (await q(`SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WHERE BookingId IN (${list}) AND Status NOT IN (N'Rejected', N'Withdrawn', N'Cancelled')`))[0] || null;
   const openRefund = (await q(`SELECT TOP 1 RefundNo FROM dbo.CrmRefund WHERE BookingId IN (${list}) AND Status NOT IN (N'Paid', N'Rejected', N'Cancelled')`))[0] || null;
-  const loans = await q(`SELECT BankName, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId IN (${list}) AND ISNULL(SanctionStatus, N'') NOT IN (N'Rejected', N'Withdrawn')`);
+  const loans = await q(`SELECT BankName, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId IN (${list}) AND ISNULL(SanctionStatus, N'') NOT IN (N'Rejected', N'Withdrawn', N'Closed', N'NotApplied')`);
   const agreement = (await q(`SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement WHERE BookingId IN (${list}) ORDER BY CASE WHEN BookingId = ${Number(r.FromBookingId) || 0} THEN 0 ELSE 1 END`))[0] || null;
-  return { overdue, openCancellation, openRefund, loans, agreement };
+  return { overdue, onAccount, demandedTotal, uncovered, openCancellation, openRefund, loans, agreement };
 }
 
 async function docsOf(db, id) {
@@ -109,7 +116,9 @@ async function caseState(db, id) {
 
   // 2 clearance
   const clearanceBlockers = [];
-  for (const m of f.overdue) clearanceBlockers.push(`${m.MilestoneName}${m.DemandNo ? ` (${m.DemandNo})` : ""} — ${fmt(m.Balance)} demanded and unpaid`);
+  if (f.uncovered > 0.009) {
+    clearanceBlockers.push(`${fmt(f.uncovered)} demanded and not yet paid (${f.overdue.map((m) => `${m.MilestoneName}${m.DemandNo ? ` ${m.DemandNo}` : ""}`).join(", ")}${f.onAccount > 0 ? `; ${fmt(f.onAccount)} on account already counted` : ""})`);
+  }
   if (f.openCancellation) clearanceBlockers.push(`Cancellation ${f.openCancellation.CancellationNo} is open on this property`);
   if (f.openRefund) clearanceBlockers.push(`Refund ${f.openRefund.RefundNo} is open on this property`);
   if (hasLoan && !verified(docs, "SellerLoanNoc")) clearanceBlockers.push("The seller has a home loan — upload and verify their bank's NOC / closure letter");
@@ -165,8 +174,11 @@ async function caseState(db, id) {
   const checks = {
     request: [{ label: "Case recorded", ok: true }],
     clearance: [
-      { label: "Every demanded milestone is paid", ok: !f.overdue.length,
-        hint: f.overdue.map((m) => `${m.MilestoneName} ${fmt(m.Balance)}`).join(" · ") || null },
+      { label: "Every demanded amount is paid", ok: !(f.uncovered > 0.009),
+        hint: !f.overdue.length ? null
+          : f.uncovered > 0.009
+            ? `${fmt(f.uncovered)} still due — ${f.overdue.map((m) => `${m.MilestoneName} ${fmt(m.Balance)}`).join(" · ")}${f.onAccount > 0 ? ` (${fmt(f.onAccount)} on account counted)` : ""}`
+            : `Covered by ${fmt(f.onAccount)} paid on account (settles when the full price is in)` },
       { label: "No open cancellation or refund", ok: !f.openCancellation && !f.openRefund,
         hint: [f.openCancellation?.CancellationNo, f.openRefund?.RefundNo].filter(Boolean).join(", ") || null },
       hasLoan

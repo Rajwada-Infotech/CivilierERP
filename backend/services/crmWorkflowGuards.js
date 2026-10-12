@@ -1264,9 +1264,12 @@ async function maybeUnlockBrokerageOnAgreementExecuted(pool, bookingId) {
  */
 async function checkLoanProcessingCleared(pool, bookingId) {
   const result = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT b.FinancingType, l.SanctionStatus
+    SELECT b.FinancingType,
+           -- the booking's live loan, newest first (a closed one — e.g. a
+           -- previous owner's, after a resale — never counts)
+           (SELECT TOP 1 l.SanctionStatus FROM dbo.CrmLoanDetail l
+             WHERE l.BookingId = b.Id AND ISNULL(l.SanctionStatus, N'') <> N'Closed' ORDER BY l.Id DESC) AS SanctionStatus
     FROM dbo.CrmBooking b
-    LEFT JOIN dbo.CrmLoanDetail l ON l.BookingId = b.Id
     WHERE b.Id = @bid
   `);
   const row = result.recordset[0];
@@ -1316,7 +1319,7 @@ async function resolveNocType(pool, bookingId) {
     SELECT
       CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
         SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
       ) THEN 1 ELSE 0 END AS IsLoanFinanced
     FROM dbo.CrmBooking b WHERE b.Id = @bid
   `);
