@@ -476,7 +476,7 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
   const toCustomerId = b.ToCustomerId != null && b.ToCustomerId !== "" ? parseInt(b.ToCustomerId, 10) : null;
   if (kind === "Resale" && !Number.isInteger(toCustomerId)) return res.status(400).json({ error: "Choose the new buyer" });
   const agreed = num(b.AgreedValue);
-  if (kind === "BuyBack" && !(agreed > 0)) return res.status(400).json({ error: "Enter the agreed buy-back price" });
+  if (!(agreed > 0)) return res.status(400).json({ error: kind === "BuyBack" ? "Enter the agreed buy-back price" : "Enter the price the buyers agreed (it goes on the transfer and the GL)" });
   try {
     const pool = getPool();
     const { movingBookings, openResaleOn } = require("../services/crmResaleTransfer");
@@ -581,7 +581,7 @@ router.put("/:id/transfer", requirePageRight("crm-resales", "edit"), async (req,
       "SELECT * FROM dbo.CrmUnitResale WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id AND IsActive = 1")).recordset[0];
     if (!resale) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
     if (resale.Kind !== "Resale") { await tx.rollback(); return res.status(400).json({ error: "A buy-back completes when Finance pays it" }); }
-    if (resale.Status !== "Approved") { await tx.rollback(); return res.status(400).json({ error: `Approve it first (it is ${resale.Status})` }); }
+    if (resale.Status !== "Approved") { await tx.rollback(); return res.status(resale.Status === "Completed" ? 409 : 400).json({ error: resale.Status === "Completed" ? "Already done — this property has changed hands" : `Approve it first (it is ${resale.Status})` }); }
     const { endorseToBuyer } = require("../services/crmResaleTransfer");
     const done = await endorseToBuyer(tx, resale, actorId(req));
     await tx.commit();
@@ -622,7 +622,7 @@ router.put("/:id/send-to-finance", requirePageRight("crm-resales", "edit"), asyn
       "SELECT * FROM dbo.CrmUnitResale WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id AND IsActive = 1")).recordset[0];
     if (!resale) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
     if (resale.Kind !== "BuyBack") { await tx.rollback(); return res.status(400).json({ error: "Only a buy-back is paid by Finance" }); }
-    if (resale.Status !== "Approved") { await tx.rollback(); return res.status(400).json({ error: `Approve it first (it is ${resale.Status})` }); }
+    if (resale.Status !== "Approved") { await tx.rollback(); return res.status(resale.Status === "Completed" ? 409 : 400).json({ error: resale.Status === "Completed" ? "Already done — this property has changed hands" : `Approve it first (it is ${resale.Status})` }); }
     if (resale.PayoutNewPaymentId) { await tx.rollback(); return res.status(409).json({ error: "Its payout voucher is already with Finance" }); }
     const { raiseBuyBackVoucher } = require("../services/crmResaleTransfer");
     const v = await raiseBuyBackVoucher(tx, resale, {

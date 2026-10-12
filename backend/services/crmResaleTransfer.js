@@ -155,19 +155,26 @@ async function raiseBuyBackVoucher(tx, resale, { bankId, paymentMode = "", actor
   const conveyed = await conveyedReason(tx, ids);
   if (conveyed) throw new ResaleError(conveyed, 409);
   if (bookings.some((b) => b.CustomerId !== resale.FromCustomerId)) throw new ResaleError("The property no longer belongs to the seller on this buy-back", 409);
-  const unapplied = bookings.reduce((s, b) => s + Number(b.Unapplied || 0), 0);
-  if (unapplied > 0.009) throw new ResaleError(`₹${unapplied.toLocaleString("en-IN")} is still on account (not yet adjusted to a milestone). Adjust it first, so the buy-back counts every rupee paid.`, 409);
+  // Money still on account counts as paid (until the full price is in it
+  // stays there — the full-booking hold), and completeBuyBack uses it up. It
+  // must not be promised elsewhere meanwhile: an open refund or re-booking
+  // transfer on the same credit would pay it out twice.
+  const claimed = (await tx.request().query(`
+    SELECT TOP 1 r.RefundNo FROM dbo.CrmRefund r
+    WHERE r.BookingId IN (${ids.join(",") || "0"}) AND r.Status NOT IN ('Paid', 'Rejected', 'Cancelled')`)).recordset[0];
+  if (claimed) throw new ResaleError(`Refund ${claimed.RefundNo} is open on this property's money — finish or reject it first`, 409);
   const price = Math.round(Number(resale.AgreedValue || 0) * 100) / 100;
   const tds = Math.round(Number(resale.TdsAmount || 0) * 100) / 100;
   if (!(price > 0)) throw new ResaleError("The buy-back has no agreed price");
   if (tds < 0 || tds >= price) throw new ResaleError("TDS must be less than the buy-back price");
-  if (bankId == null) throw new ResaleError("Choose the company bank that pays this buy-back");
+  // No bank chosen here = Finance picks it on the voucher (as for refunds and
+  // brokerage); Finance can't approve the voucher without one.
 
   const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
   const { ensureCrmCustomerLedgerHead } = require("./crmLedger");
-  const bankName = (await tx.request().input("bid", sql.Int, bankId)
+  const bankName = bankId == null ? "" : (await tx.request().input("bid", sql.Int, bankId)
     .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid")).recordset[0]?.LHeadName;
-  if (!bankName) throw new ResaleError("That bank account was not found");
+  if (bankId != null && !bankName) throw new ResaleError("That bank account was not found");
   const sellerHeadId = await ensureCrmCustomerLedgerHead(tx, resale.FromCustomerId, actorEmail);
   const docTypeId = await resolveDocTypeId(tx, sql, "PAY");
   const docNo = await lockNextDocNumber(tx, sql, { docTypeId, tableName: "NewPayment", docNoColumn: "DocNo", issuedBy: actorEmail });
@@ -226,6 +233,12 @@ async function completeBuyBack(pool, resaleId, newPaymentId, actorUserId, actorE
       await tx.request().input("b", sql.Int, id).input("by", sql.Int, actorUserId)
         .query(`UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @b AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')`);
       await releaseBookingInventoryLines(tx, id);
+      // What sat on account was counted in the price paid back — use it up,
+      // so it can't be refunded or transferred a second time.
+      await tx.request().input("b", sql.Int, id).input("rid", sql.Int, resaleId).query(`
+        UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = Amount, Status = 'Applied',
+          Notes = ISNULL(Notes, '') + CHAR(10) + 'Paid back in buy-back #' + CAST(@rid AS NVARCHAR(20))
+        WHERE BookingId = @b AND Amount - ISNULL(AppliedAmount, 0) > 0.009`);
       await syncApplicationOnBookingTerminal(tx, id, "Cancelled", "BookingBoughtBack", `Bought back by the developer (buy-back #${resaleId})`, actorUserId);
       await tx.request().input("b", sql.Int, id).query("UPDATE dbo.CrmMoneyReceipt SET Status = 'Rejected', UpdatedAt = SYSDATETIME() WHERE BookingId = @b AND Status = 'Pending'");
       await tx.request().input("b", sql.Int, id).input("by", sql.Int, actorUserId).query(`

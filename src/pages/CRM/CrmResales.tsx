@@ -323,9 +323,9 @@ const CrmResales: React.FC = () => {
                 <span className="text-muted-foreground">Seller receives</span><span className="tabular-nums font-medium">{fmt(Number(paying.AgreedValue || 0) - Number(paying.TdsAmount || 0))}</span>
               </div>
               <div>
-                <label className={label}>Pay from</label>
+                <label className={label}>Pay from (optional — Finance can choose it)</label>
                 <select value={pay.BankLHeadId} onChange={(e) => setPay((p) => ({ ...p, BankLHeadId: e.target.value }))} className={input}>
-                  <option value="">Choose the company bank</option>
+                  <option value="">Let Finance choose</option>
                   {banks.map((b: any) => (
                     <option key={b.BId} value={b.BId}>{[b.BName, b.BBranch, b.BAccountLast4 ? `····${b.BAccountLast4}` : null].filter(Boolean).join(" · ")}</option>
                   ))}
@@ -341,7 +341,7 @@ const CrmResales: React.FC = () => {
               <p className="text-[0.6875rem] text-muted-foreground">When Finance approves the voucher in Payments, the booking closes and the property returns to stock.</p>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setPaying(null)} className="px-3 h-9 text-sm rounded-lg border border-border hover:bg-muted">Close</button>
-                <button disabled={!pay.BankLHeadId} onClick={async () => { await act(paying, "send-to-finance", pay, "Sent to Finance"); setPaying(null); }}
+                <button onClick={async () => { await act(paying, "send-to-finance", pay, "Sent to Finance"); setPaying(null); }}
                   className="px-4 h-9 text-sm rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-60">
                   Send to Finance
                 </button>

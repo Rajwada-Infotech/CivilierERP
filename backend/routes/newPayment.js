@@ -1813,6 +1813,11 @@ router.put("/:id/approve", async (req, res) => {
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
+      // The money has moved only when the LAST level approves. Before that
+      // (a 2-level Payments workflow) nothing downstream may act on it — a
+      // buy-back must not close the booking, a refund or brokerage must not
+      // read Paid, on-account must not be credited.
+      const isFinalApproval = result?.newStatus === "Approved";
       const effectiveRef = approvedRef && /-EMI-\d+$/.test(approvedRef)
         ? approvedRef.replace(/-EMI-\d+$/, "")
         : approvedRef;
@@ -1821,7 +1826,7 @@ router.put("/:id/approve", async (req, res) => {
         await _syncBillStatus(pool, effectiveRef);
       }
 
-      if (approvedRow?.SourceCrmBrokerageId) {
+      if (isFinalApproval && approvedRow?.SourceCrmBrokerageId) {
         try {
           const existingBrokerPay = await pool.request()
             .input("pid", sql.Int, id)
@@ -1868,7 +1873,7 @@ router.put("/:id/approve", async (req, res) => {
       // CRM Refund payout: this NewPayment IS the customer refund disbursement.
       // Approving it means the cash has moved — mark the CrmRefund Paid, consume
       // its held/on-account source, and post the forfeiture GL leg. Non-fatal.
-      if (approvedRow?.SourceCrmRefundId) {
+      if (isFinalApproval && approvedRow?.SourceCrmRefundId) {
         try {
           const { markCrmRefundPaid } = require("./crmRefunds");
           await markCrmRefundPaid(
@@ -1885,7 +1890,7 @@ router.put("/:id/approve", async (req, res) => {
 
       // Buy-back payout: this NewPayment pays the seller — approving it brings
       // the property back to stock (services/crmResaleTransfer.js). Non-fatal.
-      if (approvedRow?.SourceCrmResaleId) {
+      if (isFinalApproval && approvedRow?.SourceCrmResaleId) {
         try {
           const { completeBuyBack } = require("../services/crmResaleTransfer");
           await completeBuyBack(pool, approvedRow.SourceCrmResaleId, id, req.user?.userId ?? null, req.user?.email || req.user?.name || null);
@@ -1896,7 +1901,7 @@ router.put("/:id/approve", async (req, res) => {
       }
 
       // ── On Account hooks: fire on APPROVE (funds have actually moved) ──────
-      if (approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
+      if (isFinalApproval && approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
         try {
           const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
           const partyTypeLabel = { S: "Supplier", V: "Vendor", C: "Contractor", A: "Customer" };
