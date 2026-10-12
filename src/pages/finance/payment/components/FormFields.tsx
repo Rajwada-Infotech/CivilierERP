@@ -1,6 +1,5 @@
 import React from "react";
 import { AutoInput } from "@/components/ui/date-input";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Link2, X } from "lucide-react";
 import { MODE_STYLE } from "../constants";
 
@@ -17,7 +16,7 @@ export function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+      <label className="font-heading text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-[0.12em] flex items-center gap-1">
         {label}
         {required && <span className="text-destructive">*</span>}
       </label>
@@ -36,33 +35,14 @@ export function SectionHeader({
   label: string;
   badge?: React.ReactNode;
 }) {
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  // A ruled heading, as on the dashboards: icon, label in capitals, then a rule out to the edge.
   return (
-    <div
-      className="flex items-center gap-2.5 px-3 py-2 rounded-lg"
-      style={{
-        background: isDark ? "rgba(99,102,241,0.08)" : "rgba(99,102,241,0.06)",
-        border: isDark
-          ? "1px solid rgba(99,102,241,0.18)"
-          : "1px solid rgba(99,102,241,0.15)",
-      }}
-    >
-      <div
-        className="flex items-center justify-center w-5 h-5 rounded-md shrink-0"
-        style={{
-          background: "rgba(99,102,241,0.18)",
-          border: "1px solid rgba(99,102,241,0.28)",
-        }}
-      >
-        <Icon size={11} style={{ color: "#818cf8" }} />
-      </div>
-      <p
-        className="text-[0.625rem] font-heading uppercase tracking-widest flex-1"
-        style={{ color: isDark ? "#94a3b8" : "#6366f1" }}
-      >
-        {label}
-      </p>
+    <div className="flex items-center gap-2.5 pb-1">
+      <span className="flex items-center justify-center w-[22px] h-[22px] shrink-0 rounded-full text-foreground" style={{ border: "1.5px solid hsl(var(--foreground))" }}>
+        <Icon size={11} />
+      </span>
+      <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">{label}</p>
+      <span className="flex-1 h-px" style={{ background: "hsl(var(--border))" }} />
       {badge}
     </div>
   );

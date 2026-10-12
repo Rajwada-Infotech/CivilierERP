@@ -8,7 +8,7 @@ import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
@@ -2143,17 +2143,17 @@ const Payment: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Payments"]} />
-      <FinanceShell
-        title="Payment Management"
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Payments"
         subtitle="Record and track payments linked to expense bookings"
-        icon={Wallet}
         action={
           view === "list" ? (
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               {rights.canCreate && (
                 <Button
                   onClick={openNew}
-                  className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
+                  className="shrink-0 bg-foreground text-card hover:bg-foreground/85 font-heading font-semibold uppercase tracking-[0.1em] px-3 sm:px-4 py-2 text-[0.625rem] h-auto"
                 >
                   <Plus size={13} className="sm:mr-1" />
                   <span className="hidden sm:inline">New Payment</span>
@@ -2182,8 +2182,7 @@ const Payment: React.FC = () => {
               />
               <button
                 onClick={() => refetchPayments()}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors"
-                style={{ color: "#818cf8" }}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground hover:bg-primary/10 transition-colors"
               >
                 <RefreshCw size={13} />
                 <span className="hidden sm:inline">Refresh</span>
@@ -2194,70 +2193,18 @@ const Payment: React.FC = () => {
       >
         {/* ── Summary stats ── */}
         {view === "list" && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="statrow">
             {[
-              {
-                label: "Total Paid",
-                value: formatINR(totalAmount),
-                icon: Banknote,
-                ring: "ring-primary/20",
-                bg: "bg-primary/10",
-                blob: "bg-primary",
-                borderL: "border-l-primary",
-                color: "text-primary",
-              },
-              {
-                label: "By Cheque",
-                value: String(chequeCount),
-                icon: Clock,
-                ring: "ring-amber-500/20",
-                bg: "bg-[#ffe2021a]",
-                blob: "bg-amber-500",
-                borderL: "border-l-amber-500",
-                color: "text-amber-500",
-              },
-              {
-                label: "By Cash",
-                value: String(cashCount),
-                icon: CheckCircle2,
-                ring: "ring-emerald-500/20",
-                bg: "bg-emerald-500/10",
-                blob: "bg-emerald-500",
-                borderL: "border-l-emerald-500",
-                color: "text-emerald-500",
-              },
-            ].map(
-              ({
-                label,
-                value,
-                icon: Icon,
-                ring,
-                bg,
-                blob,
-                borderL,
-                color,
-              }) => (
-                <div
-                  key={label}
-                  className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}
-                >
-                  <div
-                    className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${blob}`}
-                  />
-                  <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
-                    <Icon size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-lg font-bold font-heading text-foreground leading-none">
-                      {value}
-                    </p>
-                    <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
-                      {label}
-                    </p>
-                  </div>
-                </div>
-              ),
-            )}
+              { label: "Total paid", value: formatINR(totalAmount), note: "in this list" },
+              { label: "By cheque", value: String(chequeCount), note: "payments" },
+              { label: "By cash", value: String(cashCount), note: "payments" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(22px, 2.4vw, 32px)", marginTop: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
           </div>
         )}
 
@@ -2265,79 +2212,18 @@ const Payment: React.FC = () => {
         {/* FORM VIEW                                                          */}
         {/* ══════════════════════════════════════════════════════════════════ */}
         {view === "form" && (
-          <div
-            className="rounded-2xl overflow-hidden"
-            onKeyDown={preventEnterSubmit}
-            style={{
-              background: isDark
-                ? "rgba(12,14,22,0.55)"
-                : "rgba(255,255,255,0.80)",
-              border: isDark
-                ? "1px solid rgba(99,102,241,0.20)"
-                : "1px solid rgba(99,102,241,0.18)",
-              backdropFilter: "blur(20px) saturate(160%)",
-              WebkitBackdropFilter: "blur(20px) saturate(160%)",
-              boxShadow: isDark
-                ? "0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)"
-                : "0 8px 40px rgba(99,102,241,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
-            }}
-          >
+          <div onKeyDown={preventEnterSubmit} style={{ border: "1px solid hsl(var(--foreground))", background: "hsl(var(--card))" }}>
             {/* Form header */}
-            <div
-              className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
-              style={{
-                background: isDark
-                  ? "rgba(99,102,241,0.10)"
-                  : "rgba(99,102,241,0.06)",
-                borderBottom: isDark
-                  ? "1px solid rgba(99,102,241,0.18)"
-                  : "1px solid rgba(99,102,241,0.14)",
-              }}
-            >
-              {/* Left accent stripe */}
-              <div
-                className="absolute left-0 top-0 bottom-0 w-0.5"
-                style={{
-                  background:
-                    "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)",
-                }}
-              />
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={cancelForm}
-                  className="flex items-center gap-1.5 text-sm transition-colors hover:opacity-70"
-                  style={{ color: isDark ? "#94a3b8" : "#6366f1" }}
-                >
-                  <ArrowLeft size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-                <span
-                  style={{
-                    color: isDark
-                      ? "rgba(99,102,241,0.4)"
-                      : "rgba(99,102,241,0.3)",
-                  }}
-                >
-                  |
-                </span>
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-6 h-6 rounded-lg flex items-center justify-center"
-                    style={{
-                      background: "rgba(99,102,241,0.18)",
-                      border: "1px solid rgba(99,102,241,0.30)",
-                    }}
-                  >
-                    <Receipt size={12} style={{ color: "#818cf8" }} />
-                  </div>
-                  <h2
-                    className="text-sm font-heading font-bold"
-                    style={{ color: isDark ? "#e0e7ff" : "#3730a3" }}
-                  >
-                    {editingId ? "Edit Payment" : "New Payment"}
-                  </h2>
-                </div>
-              </div>
+            <div className="flex items-center gap-3 px-5 sm:px-6 py-3.5" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <button
+                onClick={cancelForm}
+                className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ArrowLeft size={14} />
+                <span className="hidden sm:inline">Back</span>
+              </button>
+              <span className="h-4 w-px" style={{ background: "hsl(var(--border))" }} />
+              <h2 className="font-heading text-sm font-bold text-foreground">{editingId ? "Edit payment" : "New payment"}</h2>
             </div>
 
             <div className="px-5 sm:px-6 py-6 space-y-7">
@@ -4988,7 +4874,7 @@ const Payment: React.FC = () => {
             )}
           </>
         )}
-      </FinanceShell>
+      </SheetShell>
 
       {/* Payment detail view modal */}
       {viewingRec && (
