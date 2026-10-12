@@ -27,6 +27,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
@@ -241,7 +242,7 @@ export default function CrmBookingAmendments() {
       header: "Customer",
       accessorKey: "ApplicantName",
       cell: ({ row }) => (
-        <span className="text-xs font-medium">{row.original.ApplicantName}</span>
+        <span className="text-xs font-medium"><ApplicantNames name={row.original.ApplicantName} bookingId={row.original.BookingId} /></span>
       ),
     },
     {
@@ -506,7 +507,7 @@ export default function CrmBookingAmendments() {
                 <div className="flex-1 min-w-0">
                   <p className="text-muted-foreground">Customer</p>
                   <p className="font-semibold mt-0.5 truncate">
-                    {reviewDialog.row.ApplicantName}
+                    <ApplicantNames name={reviewDialog.row.ApplicantName} bookingId={reviewDialog.row.BookingId} />
                   </p>
                 </div>
                 <div className="flex-1 min-w-0">

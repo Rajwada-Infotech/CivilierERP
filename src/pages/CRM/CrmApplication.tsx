@@ -29,6 +29,7 @@ import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/applications";
 const CUSTOMER_API = "/api/crm/customers";
@@ -1707,7 +1708,7 @@ const CrmApplication: React.FC = () => {
       accessorKey: "ApplicantName", header: "Applicant", size: 210,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
+          <div className="font-medium text-foreground"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
             {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
@@ -1786,7 +1787,7 @@ const CrmApplication: React.FC = () => {
       accessorKey: "ApplicantName", header: "Applicant", size: 220,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
+          <div className="font-medium text-foreground"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
             {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
@@ -2904,7 +2905,7 @@ const CrmApplication: React.FC = () => {
               {viewingAppDetail ? (
                 <>
                   <span className="font-mono text-primary">{viewingAppDetail.application.ApplicationNo}</span>
-                  <span>— {viewingAppDetail.application.ApplicantName}</span>
+                  <span>— <ApplicantNames name={viewingAppDetail.application.ApplicantName} bookingId={viewingAppDetail.application.BookingId} applicationId={viewingAppDetail.application.ApplicationId} /></span>
                   <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[viewingAppDetail.application.Status] || ""}`}>
                     {viewingAppDetail.bookings && viewingAppDetail.bookings.length > 0 ? "Submitted" : viewingAppDetail.application.Status}
                   </span>
@@ -3278,7 +3279,7 @@ const CrmApplication: React.FC = () => {
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 <span className="font-mono text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
-                <span className="font-medium text-foreground">{cancellingApp?.ApplicantName}</span> will be moved to Cancelled.
+                <span className="font-medium text-foreground"><ApplicantNames name={cancellingApp?.ApplicantName} bookingId={cancellingApp?.BookingId} applicationId={cancellingApp?.ApplicationId} /></span> will be moved to Cancelled.
                 {(cancellingApp?.PreferredUnitName || cancellingApp?.InterestedUnit) && (
                   " Any hold on the picked unit — and any parking slot tied to it — is released immediately, so it's available for another application right away."
                 )}

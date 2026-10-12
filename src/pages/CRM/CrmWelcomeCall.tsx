@@ -20,6 +20,7 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput, DateTimeInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
@@ -1322,7 +1323,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <PhoneCall size={18} className="text-sky-600 dark:text-sky-400" />
-            Welcome Call — {booking.ApplicantName} <span className="text-muted-foreground font-normal text-sm">({booking.BookingNo})</span>
+            Welcome Call — <ApplicantNames name={booking.ApplicantName} bookingId={booking.BookingId} applicationId={booking.ApplicationId} /> <span className="text-muted-foreground font-normal text-sm">({booking.BookingNo})</span>
           </DialogTitle>
         </DialogHeader>
 
@@ -2263,7 +2264,7 @@ const CrmWelcomeCall: React.FC = () => {
     { accessorKey: "ApplicantName", header: "Customer", size: 140,
       cell: (i) => (
         <div onClick={() => openBooking(i.row.original)} className="cursor-pointer">
-          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
@@ -2288,7 +2289,7 @@ const CrmWelcomeCall: React.FC = () => {
     { accessorKey: "ApplicantName", header: "Customer", size: 140,
       cell: (i) => (
         <div onClick={() => openBooking(i.row.original)} className="cursor-pointer">
-          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
@@ -2414,7 +2415,7 @@ const CrmWelcomeCall: React.FC = () => {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-foreground">{c.ApplicantName}</span>
+                      <span className="font-medium text-foreground"><ApplicantNames name={c.ApplicantName} bookingId={c.BookingId} applicationId={c.ApplicationId} /></span>
                       <span className="text-xs text-muted-foreground font-mono">{c.BookingNo}</span>
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">{c.Mobile} · {c.ProjectName || c.UnitNo}</div>

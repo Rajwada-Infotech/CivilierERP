@@ -19,6 +19,7 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/mutation";
 
@@ -459,7 +460,7 @@ const CrmMutation: React.FC = () => {
                       <div className="w-1 shrink-0" style={{ background: railColor }} />
                       <div className="flex-1 p-3 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-sm truncate">{r.ApplicantName}</span>
+                          <span className="font-semibold text-sm truncate"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} applicationId={r.ApplicationId} /></span>
                           <span className={cn("text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium shrink-0", STATUS_COLOR[r.Status] || "")}>{r.Status}</span>
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5 truncate">{r.MutationNo} · {r.BookingNo} · {r.UnitNo}</div>
@@ -481,7 +482,7 @@ const CrmMutation: React.FC = () => {
                 <div className="flex items-start justify-between gap-3 mb-4">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-semibold">{detail.ApplicantName}</h3>
+                      <h3 className="text-lg font-semibold"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></h3>
                       <span className={cn("text-xs px-2 py-0.5 rounded-full border font-medium", STATUS_COLOR[detail.Status] || "")}>{detail.Status}</span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{detail.MutationNo} · {detail.BookingNo} · {detail.UnitNo} {detail.DeedNo && `· Deed ${detail.DeedNo}`}</p>
@@ -549,7 +550,7 @@ const CrmMutation: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                       <div><p className="text-xs text-muted-foreground">Booking</p><p className="font-medium">{detail.BookingNo}</p></div>
                       <div><p className="text-xs text-muted-foreground">Unit</p><p className="font-medium">{detail.UnitNo}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Applicant</p><p className="font-medium">{detail.ApplicantName}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Applicant</p><p className="font-medium"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></p></div>
                       <div><p className="text-xs text-muted-foreground">Sale Deed</p><p className="font-medium">{detail.DeedNo || "—"} {detail.RegistrationNo && `(Reg. ${detail.RegistrationNo})`}</p></div>
                       <div><p className="text-xs text-muted-foreground">Application No.</p><p className="font-mono font-medium">{detail.ApplicationNo || "—"}</p></div>
                       <div><p className="text-xs text-muted-foreground">Applied On</p><p className="font-medium">{fmtDate(detail.ApplicationDate)}</p></div>

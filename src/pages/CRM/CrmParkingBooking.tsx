@@ -23,6 +23,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
@@ -738,7 +739,7 @@ const CrmParkingBooking: React.FC = () => {
               <AlertTriangle size={16} /> Release Parking Allotment
             </DialogTitle>
             <DialogDescription className="text-sm leading-relaxed">
-              You are about to release slot <strong>{releaseTarget?.SlotNo || releaseTarget?.ParkingSlotNo || "—"}</strong> ({releaseTarget?.CurrentParkingType}) allotted to <strong>{releaseTarget?.ApplicantName}</strong>.
+              You are about to release slot <strong>{releaseTarget?.SlotNo || releaseTarget?.ParkingSlotNo || "—"}</strong> ({releaseTarget?.CurrentParkingType}) allotted to <strong><ApplicantNames name={releaseTarget?.ApplicantName} bookingId={releaseTarget?.BookingId} applicationId={releaseTarget?.ApplicationId} /></strong>.
               {releaseTarget?.BookingId != null && " The linked booking's grand total and milestones will be recalculated."}
               {" "}This action cannot be undone without re-allotting.
             </DialogDescription>
@@ -803,7 +804,7 @@ const CrmParkingBooking: React.FC = () => {
                 <option value="">Select application</option>
                 {(applications as any[]).map((a: any) => (
                   <option key={a.Id} value={String(a.Id)}>
-                    {a.ApplicantName} — {a.Mobile} ({a.ApplicationNo})
+                    <ApplicantNames name={a.ApplicantName} bookingId={a.BookingId} applicationId={a.ApplicationId} /> — {a.Mobile} ({a.ApplicationNo})
                   </option>
                 ))}
               </SearchableNativeSelect>

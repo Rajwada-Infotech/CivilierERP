@@ -17,6 +17,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 // Same approver set the backend's INVOICE_VOID_ROLES enforces
 // (crmBookings.js PUT /:id/invoices/:invoiceId/void) — this only controls
@@ -582,7 +583,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                             : "text-sky-700 bg-sky-50 border-sky-200"
                         }`}>{b.Status}</span>
                       </div>
-                      <div className="text-sm font-medium truncate">{b.ApplicantName}</div>
+                      <div className="text-sm font-medium truncate"><ApplicantNames name={b.ApplicantName} bookingId={b.BookingId} applicationId={b.ApplicationId} /></div>
                       <div className="text-xs text-muted-foreground truncate">
                         {b.ProjectName || "—"} · Unit {b.UnitNo || "—"}{b.Mobile ? ` · ${b.Mobile}` : ""}
                       </div>
@@ -615,7 +616,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                 )}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                <div><span className="text-muted-foreground">Customer</span><div className="font-medium truncate">{booking.ApplicantName}</div></div>
+                <div><span className="text-muted-foreground">Customer</span><div className="font-medium truncate"><ApplicantNames name={booking.ApplicantName} bookingId={booking.BookingId} applicationId={booking.ApplicationId} /></div></div>
                 <div><span className="text-muted-foreground">Company</span><div className="font-medium truncate">{booking.CompanyName || "—"}</div></div>
                 <div><span className="text-muted-foreground">Project</span><div className="font-medium truncate">{booking.ProjectName || "—"}</div></div>
                 <div><span className="text-muted-foreground">Block / Unit</span><div className="font-medium truncate">{[booking.BlockName, booking.UnitNo].filter(Boolean).join(" / ") || booking.UnitNo || "—"}</div></div>
@@ -1160,7 +1161,7 @@ const CrmInvoices: React.FC = () => {
                       {isCollapsed ? <ChevronRight size={14} className="text-muted-foreground shrink-0" /> : <ChevronDown size={14} className="text-muted-foreground shrink-0" />}
                       <Building2 size={14} className="text-primary shrink-0" />
                       <span className="font-mono text-sm font-semibold">{g.BookingNo}</span>
-                      <span className="text-sm text-muted-foreground truncate">{g.ApplicantName}</span>
+                      <span className="text-sm text-muted-foreground truncate"><ApplicantNames name={g.ApplicantName} bookingId={g.BookingId} /></span>
                       {g.ProjectName && <span className="text-xs text-muted-foreground truncate hidden sm:inline">· {g.ProjectName} {g.UnitNo}</span>}
                     </div>
                     <div className="flex items-center gap-3 shrink-0 text-xs">
@@ -1281,7 +1282,7 @@ const CrmInvoices: React.FC = () => {
                           {isVoid && <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800 no-underline inline-block">Void</span>}
                         </td>
                         <td className="px-3 py-1.5 font-mono text-xs">{inv.BookingNo}</td>
-                        <td className="px-3 py-1.5 text-xs truncate max-w-[160px]">{inv.ApplicantName}</td>
+                        <td className="px-3 py-1.5 text-xs truncate max-w-[160px]"><ApplicantNames name={inv.ApplicantName} bookingId={inv.BookingId} /></td>
                         <td className="px-3 py-1.5 text-xs text-muted-foreground truncate max-w-[160px]">{inv.ProjectName || "—"} {inv.UnitNo}</td>
                         <td className="px-3 py-1.5"><span className="text-xs px-2 py-0.5 rounded-md bg-muted font-medium">{inv.InvoiceType}</span></td>
                         <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}</td>

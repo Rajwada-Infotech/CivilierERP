@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/customer-bank-details";
 const CHECKLIST_API = "/api/crm/welcome-calls";
@@ -233,7 +234,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
                 {initials(row.ApplicantName)}
               </div>
               <div>
-                <span className="font-semibold text-foreground">{row.ApplicantName}</span>
+                <span className="font-semibold text-foreground"><ApplicantNames name={row.ApplicantName} bookingId={row.BookingId} applicationId={row.ApplicationId} /></span>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
                   <span className="font-mono">{row.BookingNo}</span>
                   <span>·</span>
@@ -435,7 +436,7 @@ const CrmCustomerBankDetails: React.FC = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium truncate">{r.ApplicantName}</span>
+                  <span className="text-sm font-medium truncate"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} applicationId={r.ApplicationId} /></span>
                   <span className="text-xs font-mono text-muted-foreground shrink-0">{r.BookingNo}</span>
                 </div>
                 <div className="text-xs text-muted-foreground truncate">

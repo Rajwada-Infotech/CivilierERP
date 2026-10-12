@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const BKG_API = "/api/crm/bookings";
 const WC_API  = "/api/crm/welcome-calls";
@@ -249,7 +250,7 @@ const CrmLoanTracking: React.FC = () => {
       accessorKey: "ApplicantName", header: "Customer", size: 180,
       cell: (i) => (
         <div>
-          <div className="font-medium text-sm">{i.row.original.ApplicantName}</div>
+          <div className="font-medium text-sm"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.UnitNo} · {i.row.original.Mobile}</div>
         </div>
       ),
@@ -383,7 +384,7 @@ const CrmLoanTracking: React.FC = () => {
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-semibold text-sm flex items-center gap-1.5">
                     <User size={13} className="text-muted-foreground" />
-                    {editingRow.ApplicantName}
+                    <ApplicantNames name={editingRow.ApplicantName} bookingId={editingRow.BookingId} applicationId={editingRow.ApplicationId} />
                   </div>
                   <StatusPill status={editingRow.SanctionStatus} />
                 </div>

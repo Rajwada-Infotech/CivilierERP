@@ -15,6 +15,34 @@ const { createAmendmentRequest } = require("../services/crmAmendments");
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
+// GET /names — the co-applicants (Applicant 2, 3 …) of every booking and
+// application, in applicant order, so every CRM screen can show a booking as
+// "Mr. Roy & Mrs. Roy" (src/components/crm/ApplicantNames.tsx). A booking's
+// list includes its application's co-applicants. Project-scoped.
+router.get("/names", async (req, res) => {
+  try {
+    const { projectPredicate } = require("../services/projectScope");
+    const r = await getPool().request().query(`
+      SELECT a.Id AS ApplicationId, b.Id AS BookingId, c.Name, c.CreatedAt, c.Id
+      FROM dbo.CrmCoApplicant c
+      JOIN dbo.CrmApplication a ON a.Id = c.ApplicationId OR a.Id = (SELECT bx.ApplicationId FROM dbo.CrmBooking bx WHERE bx.Id = c.BookingId)
+      LEFT JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id AND b.IsActive = 1
+      WHERE c.IsActive = 1 AND LTRIM(RTRIM(ISNULL(c.Name, ''))) <> ''${projectPredicate(req.projectScope, "a.ProjectId")}
+      ORDER BY c.CreatedAt, c.Id`);
+    const byApplication = {}, byBooking = {};
+    const add = (map, key, name) => { if (key == null) return; const l = (map[key] ||= []); if (!l.includes(name)) l.push(name); };
+    for (const row of r.recordset) {
+      const name = String(row.Name).trim();
+      add(byApplication, row.ApplicationId, name);
+      add(byBooking, row.BookingId, name);
+    }
+    res.json({ byApplication, byBooking });
+  } catch (e) {
+    console.error("[crm-co-applicant] GET /names error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /booking/:bookingId — co-applicants for a booking
 router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {

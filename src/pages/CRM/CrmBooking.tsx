@@ -34,6 +34,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { DateInput } from "@/components/ui/date-input";
 
 const API     = "/api/crm/bookings";
@@ -638,7 +639,7 @@ const CrmBooking: React.FC = () => {
     { accessorKey: "ApplicantName", header: "Customer", size: 160,
       cell: (i) => (
         <div onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.Id} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
@@ -927,7 +928,7 @@ const CrmBooking: React.FC = () => {
                 <SelectContent>
                   {(apps as any[]).map((a: any) => (
                     <SelectItem key={a.Id} value={String(a.Id)}>
-                      {a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})
+                      {a.ApplicationNo} — <ApplicantNames name={a.ApplicantName} applicationId={a.Id} /> ({a.Mobile})
                     </SelectItem>
                   ))}
                 </SelectContent>

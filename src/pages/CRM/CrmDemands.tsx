@@ -17,6 +17,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/payments";
 
@@ -149,7 +150,7 @@ function MilestoneRow({
       {showBooking && (
         <div className="shrink-0 w-36">
           <div className="font-mono text-xs font-bold text-blue-400">{m.BookingNo}</div>
-          <div className="text-xs text-card-foreground/70 truncate">{m.ApplicantName}</div>
+          <div className="text-xs text-card-foreground/70 truncate"><ApplicantNames name={m.ApplicantName} bookingId={m.BookingId} /></div>
         </div>
       )}
       <div className="shrink-0 w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-card-foreground/60">
@@ -617,7 +618,7 @@ const CrmDemands: React.FC = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Undo Demand?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will revert demand <strong>{undoRow?.DemandNo}</strong> for <strong>{undoRow?.ApplicantName}</strong> ({undoRow?.MilestoneName}) back to "Not Raised" and clear the demand number.
+              This will revert demand <strong>{undoRow?.DemandNo}</strong> for <strong><ApplicantNames name={undoRow?.ApplicantName} bookingId={undoRow?.BookingId} /></strong> ({undoRow?.MilestoneName}) back to "Not Raised" and clear the demand number.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

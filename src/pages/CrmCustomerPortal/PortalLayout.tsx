@@ -11,6 +11,7 @@ import {
   applyPortalAccent, getStoredPortalAccent, applyPortalMode, getStoredPortalMode, StatusPill,
 } from "./portalTheme";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const NAV_GROUPS: { label: string; items: { to: string; label: string; icon: any }[] }[] = [
   { label: "Overview", items: [
@@ -103,7 +104,7 @@ function ApplicationSelector({
                       {app.ProjectName || "Project"}{app.UnitNo ? ` · Unit ${app.UnitNo}` : ""}
                     </p>
                     <p className="text-xs mt-0.5" style={{ color: TEXT_MUTED }}>
-                      {app.ApplicantName}
+                      <ApplicantNames name={app.ApplicantName} bookingId={app.BookingId} applicationId={app.ApplicationId} />
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">

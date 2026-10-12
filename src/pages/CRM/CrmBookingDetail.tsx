@@ -24,6 +24,7 @@ import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { BodyPortal } from "@/components/ui/body-portal";
 
 const API = "/api/crm/bookings";
@@ -1287,7 +1288,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <Building2 size={13} className="text-sky-500" />
                 </span>
                 <span className="bg-gradient-to-r from-sky-400 to-sky-500 bg-clip-text text-transparent">
-                  {booking ? `${booking.BookingNo} — ${booking.ApplicantName}` : "Booking Detail"}
+                  {booking ? <>{booking.BookingNo} — <ApplicantNames name={booking.ApplicantName} bookingId={booking.Id} applicationId={booking.ApplicationId} /></> : "Booking Detail"}
                 </span>
               </DialogTitle>
               {booking && booking.Status !== 'Cancelled' && booking.DeedStatus === 'Registered' && (
