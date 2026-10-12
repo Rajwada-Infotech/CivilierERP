@@ -216,6 +216,46 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
   }
 });
 
+// ── Bulk import (CRM → Customers → Import) ───────────────────────────────────
+// Keep these explicit /import/* routes before /:id. Express route order matters:
+// otherwise "import" is treated as an id and the import UI cannot fetch its
+// field contract.
+router.get("/import/fields", requirePageRight("crm-customers", "create"), (req, res) => {
+  const { FIELDS, MAX_ROWS } = require("../services/crmCustomerImport");
+  res.json({ fields: FIELDS, maxRows: MAX_ROWS });
+});
+
+router.post("/import/preview", requirePageRight("crm-customers", "create"), async (req, res) => {
+  try {
+    const { analyze } = require("../services/crmCustomerImport");
+    res.json(await analyze(getPool(), req.body?.rows));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error("[crm-customers] POST /import/preview:", e.message);
+    res.status(500).json({ error: "Could not check the file" });
+  }
+});
+
+router.post("/import/apply", requirePageRight("crm-customers", "create"), async (req, res) => {
+  try {
+    const { apply } = require("../services/crmCustomerImport");
+    const existing = ["fill", "update"].includes(req.body?.existing) ? req.body.existing : "skip";
+    const out = await apply(getPool(), req.body?.rows, {
+      existing,
+      fileName: req.body?.fileName,
+      sourceTag: req.body?.sourceTag,
+      excludedRowNos: req.body?.excludedRowNos,
+      actorUserId: actorId(req),
+      actorName: req.user?.name || req.user?.email || "import",
+    });
+    res.json(out);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error("[crm-customers] POST /import/apply:", e.message);
+    res.status(500).json({ error: e.message || "The import failed" });
+  }
+});
+
 // GET /:id — single customer plus every application filed under them, so
 // staff can see their full history in one place (not just the latest one).
 // Also aggregates outstanding payment across EVERY booking this customer
@@ -369,42 +409,6 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     }
     console.error("[crm-customers] POST error:", e.message);
     res.status(500).json({ error: e.message });
-  }
-});
-
-// ── Bulk import (CRM → Customers → Import) ─────────────────────────────────
-// The browser reads the .xlsx / .csv and maps its columns; rows arrive as
-// { rowNo, cells: { CustomerName, Mobile, ... } }. /preview only reads; /apply
-// re-checks everything itself (never trusts a preview) and saves row by row.
-// See services/crmCustomerImport.js for the cleaning, rules and matching.
-router.get("/import/fields", requirePageRight("crm-customers", "create"), (req, res) => {
-  const { FIELDS, MAX_ROWS } = require("../services/crmCustomerImport");
-  res.json({ fields: FIELDS, maxRows: MAX_ROWS });
-});
-
-router.post("/import/preview", requirePageRight("crm-customers", "create"), async (req, res) => {
-  try {
-    const { analyze } = require("../services/crmCustomerImport");
-    res.json(await analyze(getPool(), req.body?.rows));
-  } catch (e) {
-    if (e.status) return res.status(e.status).json({ error: e.message });
-    console.error("[crm-customers] POST /import/preview:", e.message);
-    res.status(500).json({ error: "Could not check the file" });
-  }
-});
-
-router.post("/import/apply", requirePageRight("crm-customers", "create"), async (req, res) => {
-  try {
-    const { apply } = require("../services/crmCustomerImport");
-    const existing = req.body?.existing === "fill" ? "fill" : "skip";
-    const out = await apply(getPool(), req.body?.rows, {
-      existing, fileName: req.body?.fileName, actorUserId: actorId(req), actorName: req.user?.name || req.user?.email || "import",
-    });
-    res.json(out);
-  } catch (e) {
-    if (e.status) return res.status(e.status).json({ error: e.message });
-    console.error("[crm-customers] POST /import/apply:", e.message);
-    res.status(500).json({ error: "The import failed" });
   }
 });
 
