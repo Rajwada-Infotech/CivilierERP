@@ -622,6 +622,13 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         const effectiveTotal = total || oldRow.TotalValue;
         const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
         await generateMilestonesForBooking(tx, id, effectiveTotal, newPlanId, b.BookingDate || null, actor, effectiveBookingAmount);
+      } else if (totalChanged && !(await tx.request().input("bid", sql.Int, id)
+          .query("SELECT TOP 1 1 AS x FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid")).recordset.length) {
+        // No schedule at all (e.g. it was booked before it had a price) — the
+        // new price gets the schedule booking creation would have made.
+        const cur = (await tx.request().input("bid", sql.Int, id)
+          .query("SELECT PaymentPlanId, BookingAmount, BookingDate FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+        await generateMilestonesForBooking(tx, id, Number(total), cur.PaymentPlanId, cur.BookingDate, actor, Number(cur.BookingAmount || 0));
       } else if (total != null && total !== oldRow.TotalValue) {
         // TotalValue moved (rate correction) without a plan switch — the
         // existing schedule's ₹/% no longer add up to what's actually owed.
@@ -1015,6 +1022,12 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     if (readiness.missing.length) {
       return res.status(400).json({ error: `Cannot submit for approval — confirm ${readiness.missing.join(" and ")} first` });
     }
+    // A booking goes for approval only with a price and a payment schedule.
+    const sched = (await pool.request().input("id", sql.Int, id).query(`
+      SELECT b.TotalValue, (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id) AS Milestones
+      FROM dbo.CrmBooking b WHERE b.Id = @id`)).recordset[0];
+    if (!(Number(sched?.TotalValue) > 0)) return res.status(400).json({ error: "Cannot submit for approval — this booking has no price. Set the rate first." });
+    if (!sched.Milestones) return res.status(400).json({ error: "Cannot submit for approval — this booking has no payment schedule. Re-save its rate / payment plan to create one." });
 
     const actor = actorId(req);
     const userEmail = requireUserEmail(req, res);
