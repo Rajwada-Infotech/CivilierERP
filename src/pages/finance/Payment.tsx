@@ -4696,7 +4696,7 @@ const Payment: React.FC = () => {
                               <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-1.5 truncate">
                                 {rec.mode || "—"}{rec.bankName ? ` · ${rec.bankName}` : ""}
                               </p>
-                              {ref && <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate tabular-nums">{ref}</p>}
+                              {ref && <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground mt-1.5 truncate">{ref}</p>}
                             </td>
                             {/* The invoice or journal voucher it settles */}
                             <td className="px-3 py-3">
