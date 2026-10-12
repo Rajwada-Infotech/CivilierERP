@@ -29,6 +29,8 @@ jest.mock("../db", () => {
     if (/SELECT Id, Status FROM dbo\.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1/.test(text)) {
       return { recordset: [{ Id: 9, Status: "COMPLETED" }] };
     }
+    // The step has an engineer (status / progress need one).
+    if (/COUNT\(\*\) AS n FROM dbo\.DependencyActivityEngineer/.test(text)) return { recordset: [{ n: 1 }] };
     if (/SELECT QcUserId FROM dbo\.DependencyActivityQcAssignee/.test(text)) return { recordset: [] };
     if (/SELECT Id, FieldName FROM dbo\.DependencyActivityCheckpoint WHERE AssignmentId = @aid/.test(text)) {
       return { recordset: [{ Id: 1, FieldName: "ALIGNMENT" }, { Id: 2, FieldName: "LABEL" }] };
