@@ -47,9 +47,9 @@ describe("GET /api/dependency-activity-assignment — paging, filters and scope"
 
   it("search, overdue and due-soon become SQL conditions", async () => {
     await request(app()).get("/api/dependency-activity-assignment?search=plaster&overdue=1");
-    expect(mockQuery).toMatch(/am\.activity_name LIKE @search/);
+    expect(mockQuery).toMatch(/am\.activity_name LIKE @st0/);
     expect(mockQuery).toMatch(/daa\.EndDate BETWEEN '2000-01-01'/);
-    expect(mockInputs.search).toBe("%plaster%");
+    expect(mockInputs.st0).toBe("%plaster%"); // one word: one pattern, as the old search did
     await request(app()).get("/api/dependency-activity-assignment?dueSoon=1");
     expect(mockQuery).toMatch(/DATEADD\(DAY, 2,/);
   });
