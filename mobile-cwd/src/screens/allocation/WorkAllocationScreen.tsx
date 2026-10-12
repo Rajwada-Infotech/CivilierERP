@@ -89,6 +89,7 @@ function ChainCard({ c, canInspect }: { c: ChainGroup; canInspect: boolean }) {
             </View>
             <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
               <PriorityBadge priority={a.priority} />
+              {!!a.tagName && <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: ACCENT }}>#{a.tagName}</Text>}
               <QcBadge qc={a.qcStatus} />
               {(a.attemptNo ?? 1) > 1 && <Text style={{ fontSize: 9.5, color: "#d946ef", fontFamily: fonts.heading.semibold }}>Attempt {a.attemptNo}</Text>}
               <Text numberOfLines={1} style={{ flex: 1, fontSize: 10.5, color: colors.mutedForeground, fontFamily: fonts.body.regular }}>{a.engineerNames || "Not assigned yet"}</Text>

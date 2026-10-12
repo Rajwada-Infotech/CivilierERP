@@ -104,6 +104,9 @@ export interface ActivityAssignment {
   /** A villa room's own floor (part of its Auto Name). */
   storey?: string | null;
   priority?: AssignmentPriority | null;
+  /** The activity's tag: the one set in Activity Reporting, else its Activity Master default. */
+  tagId?: number | null;
+  tagName?: string | null;
   /** Latest Quality Check decision, if any. */
   qcStatus?: "APPROVED" | "REWORK" | null;
   qcNames?: string | null;
@@ -673,6 +676,10 @@ export interface DprTag { id: number; tagName: string; isActive: boolean; activi
 export const getDprTags = (): Promise<DprTag[]> => getJson("/api/dpr-tag-master", "Failed to load tags");
 export const createDprTag = (tagName: string) => send<{ id: number }>("POST", "/api/dpr-tag-master", { tagName }, "Failed to add the tag");
 export const updateDprTag = (id: number, data: { tagName: string; isActive: boolean }) => send("PUT", `/api/dpr-tag-master/${id}`, data, "Failed to update the tag");
+/** Tag one reported activity. A new name is added to the DPR Tag Master; blank clears the activity's own tag. */
+export const setActivityTag = (rungId: number, tagName: string) =>
+  send<{ tagId: number | null }>("PUT", `/api/dependency-activity-assignment/${rungId}/tag`, { tagName }, "Failed to save the tag");
+
 export const deleteDprTag = async (id: number) => {
   const res = await fetchWithAuth(`/api/dpr-tag-master/${id}`, { method: "DELETE" });
   if (!res.ok) {
