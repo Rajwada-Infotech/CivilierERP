@@ -1498,6 +1498,36 @@ router.get(
 // further ProgressPercent change is accepted at all, forward or back. A
 // mistaken 100% now has to go through QC sending it back for rework (a
 // fresh attempt, not editing this one), not a drag on the same bar.
+// PUT /:rungId/priority — change the Priority of the activity's current allocation (the same column the Work Allocation
+// form saves), so Reporting and Work Allocation always agree. null / blank clears it.
+router.put(
+  "/:rungId/priority",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isInteger(rungId)) return res.status(400).json({ error: "Invalid activity" });
+    const priority = req.body?.priority || null;
+    if (priority && !PRIORITY_VALUES.has(priority)) {
+      return res.status(400).json({ error: `priority must be one of: ${[...PRIORITY_VALUES].join(", ")}` });
+    }
+    try {
+      const pool = await getPool();
+      const r = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("priority", sql.NVarChar(20), priority)
+        .input("by", sql.NVarChar(200), req.user?.email || req.user?.name || "system")
+        .query(`UPDATE dbo.DependencyActivityAssignment SET Priority = @priority, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+                WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1`);
+      if (!r.rowsAffected[0]) return res.status(404).json({ error: "This activity has no allocation yet" });
+      res.json({ priority });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] PUT /:rungId/priority error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // PUT /:rungId/tag — tag this reported activity (a new name is saved to the DPR Tag Master; blank clears it, and the
 // activity falls back to its Activity Master tag).
 router.put(

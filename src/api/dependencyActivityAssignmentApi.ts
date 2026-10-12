@@ -466,6 +466,16 @@ export const updateAssignmentStatus = async (
 // independent — the Activity Detail modal's status dropdown, its Remarks
 // textarea (saved on blur), and its draggable progress bar (saved on
 // drag-release) each call this with only the field that actually changed.
+/** Change an activity's Priority (the same field the Work Allocation form sets); null clears it. */
+export const updateAssignmentPriority = async (rungId: number, priority: AssignmentPriority | null): Promise<{ priority: AssignmentPriority | null }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/priority`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ priority }),
+  });
+  return handleResponse<{ priority: AssignmentPriority | null }>(res);
+};
+
 /** Tag one reported activity. A new name is added to the DPR Tag Master; blank clears the activity's own tag. */
 export const setActivityTag = async (rungId: number, tagName: string): Promise<{ message: string; tagId: number | null }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/tag`, {
