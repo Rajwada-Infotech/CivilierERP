@@ -364,6 +364,12 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
     } else conds.push(`dl.LogDate = ${TODAY}`);
     // Validated integers only, so inlining the list is injection-safe.
     if (userIds.length) conds.push(`u.id IN (${userIds.join(",")})`);
+    // Auto Name search: every word typed (the joining "and" dropped) must match the flat, room, activity, chain,
+    // tower or project, in any order — so a whole Auto Name or pieces of it find the record.
+    const tokens = String(req.query.search ?? "").toLowerCase().split(/[\s,>]+/).filter((t) => t && t !== "and").slice(0, 8);
+    tokens.forEach((_, i) => {
+      conds.push(`(am.activity_name LIKE @st${i} OR dm.Alias LIKE @st${i} OR ep.name LIKE @st${i} OR bm.BlockName LIKE @st${i} OR um.UnitName LIKE @st${i} OR rm.RoomName LIKE @st${i})`);
+    });
     if (byTag) {
       const tagIds = [
         ...new Set(String(req.query.tagId ?? "").split(",").map((x) => parseInt(x.trim(), 10)).filter(Number.isInteger)),
@@ -405,6 +411,7 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
         : "u.name, dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC",
       bind: bindFilters(p, (r) => {
         if (single) r.input("date", sql.Date, single);
+        tokens.forEach((t, i) => r.input(`st${i}`, sql.NVarChar(200), `%${t.replace(/[[\]%_]/g, (c) => `[${c}]`)}%`));
       }),
     });
   } catch (err) {

@@ -76,6 +76,7 @@ import {
   ShieldCheck,
   Camera,
   UserCog,
+  Search,
   Tag,
   CalendarDays,
 } from "lucide-react";
@@ -3021,6 +3022,13 @@ const ReportTable: React.FC<{
       .catch(() => {});
   }, [isTagWise]);
   const [userIds, setUserIds] = useState<string[]>(savedCtx?.userIds ?? []);
+  // Auto Name search (User-Wise / Tag-Wise): words of "flat, room and activity" in any order, sent after a pause.
+  const [autoSearch, setAutoSearch] = useState("");
+  const [autoSearchTerm, setAutoSearchTerm] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setAutoSearchTerm(autoSearch.trim().length >= 2 ? autoSearch.trim() : ""), 400);
+    return () => clearTimeout(t);
+  }, [autoSearch]);
   // Its own Date field, right in the report's toolbar (starts on today): one day's records only.
   const [userDate, setUserDate] = useState<string>(() => savedCtx?.userDate ?? (startWithoutDate ? "" : todayIstDate()));
   const [userOptions, setUserOptions] = useState<MultiSelectOption[]>([]);
@@ -3160,6 +3168,7 @@ const ReportTable: React.FC<{
     if (hasInlineProject && projectIds.length) f[fc.projectParam ?? "projectId"] = projectIds.join(",");
     if (isUserWise && userIds.length) f["userId"] = userIds.join(",");
     if (isTagWise && tagIds.length) f["tagId"] = tagIds.join(",");
+    if (isUserWise && autoSearchTerm) f["search"] = autoSearchTerm;
     // The inline Date supersedes the section bar's Day / Range, the way the Expense Register's does.
     if (isUserWise && userDate) {
       delete f["dateFrom"];
@@ -3233,7 +3242,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, tagIds, userDate, dateFrom, dateTo, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, tagIds, autoSearchTerm, userDate, dateFrom, dateTo, projects]);
 
   // ── Server-paged reports: fetch just the page on screen ──────────────────
   // Fetching every page up front (fetchAllRows) meant hundreds of sequential
@@ -3497,6 +3506,23 @@ const ReportTable: React.FC<{
                   title="Clear the date (then the section bar's Day / Range applies, or today if none)"
                   className="h-[30px] flex items-center px-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-all"
                 >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {isUserWise && (
+            <div className="relative w-64">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={autoSearch}
+                onChange={(e) => setAutoSearch(e.target.value)}
+                placeholder="Search Auto Name — flat, room or activity…"
+                className="w-full h-[30px] pl-7 pr-7 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              />
+              {autoSearch && (
+                <button type="button" onClick={() => setAutoSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear search">
                   <X size={11} />
                 </button>
               )}
