@@ -4528,7 +4528,7 @@ const Payment: React.FC = () => {
             )}
 
             {!isLoading && !isError && (
-              <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+              <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
                 {/* Mobile cards — the desktop table switches over at lg
                     (1024px), not sm (640px): six columns (Payment Purpose,
                     Doc No, Expense Ref, Amount, Status, Actions) genuinely
@@ -4645,190 +4645,164 @@ const Payment: React.FC = () => {
                 {/* Desktop table — compact, no horizontal scroll. Matches
                     the lg breakpoint on the mobile-cards wrapper above. */}
                 <div className="hidden lg:block">
-                  <table className="w-full text-sm table-fixed">
+                  <table className="w-full text-sm table-fixed" style={{ borderCollapse: "collapse" }}>
                     <thead>
-                      <tr className="bg-muted/30 border-b border-border">
-                        <th className="px-4 py-3.5 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
-                          Payment Purpose
-                        </th>
-                        <th className="px-4 py-3.5 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
-                          Doc No
-                        </th>
-                        <th className="px-4 py-3.5 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
-                          Expense Ref
-                        </th>
-                        <th className="px-4 py-3.5 text-right text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
-                          Amount
-                        </th>
-                        <th className="px-4 py-3.5 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
-                          Status
-                        </th>
-                        <th className="px-4 py-3.5 text-right text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
-                          Actions
-                        </th>
+                      <tr style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                        {[
+                          { h: "No.", w: "5%", right: false },
+                          { h: "Payment", w: "24%", right: false },
+                          { h: "Date", w: "10%", right: false },
+                          { h: "Document", w: "15%", right: false },
+                          { h: "Against", w: "16%", right: false },
+                          { h: "Amount", w: "11%", right: true },
+                          { h: "Status", w: "10%", right: false },
+                          { h: "", w: "9%", right: true },
+                        ].map((c, i) => (
+                          <th
+                            key={i}
+                            className={`px-3 py-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground ${c.right ? "text-right" : "text-left"}`}
+                            style={{ width: c.w }}
+                          >
+                            {c.h}
+                          </th>
+                        ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border">
+                    <tbody>
                       {records.length === 0 && (
                         <tr>
-                          <td
-                            colSpan={6}
-                            className="text-center py-14 text-muted-foreground text-sm"
-                          >
-                            <AlertCircle
-                              size={18}
-                              className="mx-auto mb-2 opacity-30"
-                            />
+                          <td colSpan={8} className="text-center py-14 text-muted-foreground text-sm">
+                            <AlertCircle size={18} className="mx-auto mb-2 opacity-30" />
                             No payments yet. Click "New Payment" to get started.
                           </td>
                         </tr>
                       )}
-                      {records.map((rec) => (
-                        <tr
-                          key={rec.id}
-                          className="hover:bg-muted/20 transition-colors"
-                        >
-                          {/* Payment purpose + paid-to + date + bank stacked */}
-                          <td className="px-4 py-4">
-                            <p className="font-heading font-medium text-foreground text-xs truncate">
-                              {rec.paymentName || "—"}
-                            </p>
-                            {rec.paidTo && (
-                              <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">
-                                Paid to{" "}
-                                <span className="text-foreground/80">
-                                  {rec.paidTo}
-                                </span>
+                      {records.map((rec, rowIndex) => {
+                        const ref = rec.chequeNo ? `Chq #${rec.chequeNo}` : rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference;
+                        const shown = rec.displayStatus || rec.status || "";
+                        const stopped = /bounce|cancel|reject|fail/i.test(shown);
+                        const waiting = /pending|issued|draft|submitted|reissued/i.test(shown);
+                        const when = rec.date ? new Date(`${String(rec.date).slice(0, 10)}T12:00:00`) : null;
+                        return (
+                          <tr
+                            key={rec.id}
+                            className="hover:bg-primary/[0.06] transition-colors align-top"
+                            style={{ borderBottom: "1px solid hsl(var(--border) / 0.6)" }}
+                          >
+                            {/* Running number on this page of the list */}
+                            <td className="px-3 py-3 font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground">
+                              {String((page - 1) * PAGE_SIZE + rowIndex + 1).padStart(2, "0")}
+                            </td>
+                            {/* What it was for, and who was paid */}
+                            <td className="px-3 py-3">
+                              <p className="font-semibold text-foreground text-[0.8125rem] truncate">{rec.paymentName || "—"}</p>
+                              {rec.paidTo && <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate">to {rec.paidTo}</p>}
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <p className="text-[0.75rem] text-foreground tabular-nums">
+                                {when && !Number.isNaN(when.getTime()) ? when.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : rec.date || "—"}
                               </p>
-                            )}
-                            <p className="text-[0.625rem] text-muted-foreground mt-0.5">
-                              {rec.date || "—"}
-                            </p>
-                            {rec.bankName && (
-                              <p className="text-[0.625rem] text-muted-foreground/70 mt-0.5 truncate">{rec.bankName}</p>
-                            )}
-                          </td>
-                          {/* Doc No + Mode + Cheque/Ref stacked */}
-                          <td className="px-4 py-4">
-                            <span className="font-mono text-[0.6875rem] font-semibold text-emerald-600 dark:text-emerald-400">
-                              {rec.docNo || "—"}
-                            </span>
-                            <div className="mt-1">
-                              <ModeBadge mode={rec.mode} />
-                            </div>
-                            {(rec.chequeNo || rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference) && (
-                              <p className="font-mono text-[0.625rem] text-blue-500 mt-0.5 truncate">
-                                {rec.chequeNo ? `#${rec.chequeNo}` : rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference}
+                              {when && !Number.isNaN(when.getTime()) && <p className="text-[0.625rem] text-muted-foreground mt-1 tabular-nums">{when.getFullYear()}</p>}
+                            </td>
+                            {/* Document number, then how it was paid */}
+                            <td className="px-3 py-3">
+                              <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground truncate">{rec.docNo || "—"}</p>
+                              <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-1.5 truncate">
+                                {rec.mode || "—"}{rec.bankName ? ` · ${rec.bankName}` : ""}
                               </p>
-                            )}
-                          </td>
-                          {/* Expense Ref + JV + GRN stacked */}
-                          <td className="px-4 py-4">
-                            {rec.expenseRef ? (
-                              <span className="font-mono text-[0.6875rem] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
-                                {rec.expenseRef}
-                              </span>
-                            ) : rec.jvNo ? (
-                              <span className="font-mono text-[0.6875rem] bg-teal-500/10 text-teal-600 border border-teal-500/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
-                                {rec.jvNo}
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground text-xs">
-                                —
-                              </span>
-                            )}
-                            <div className="mt-1">
-                              <PaymentGRNBadges
-                                expenseId={rec.expenseId || ""}
-                              />
-                            </div>
-                          </td>
-                          {/* Amount */}
-                          <td className="px-4 py-4 font-mono text-xs font-semibold text-right whitespace-nowrap">
-                            {formatINR(rec.amount ?? 0)}
-                          </td>
-                          {/* Status */}
-                          <td className="px-4 py-4">
-                            <div className="flex flex-col gap-1">
-                              {rec.displayStatus && rec.displayStatus !== rec.status ? (
-                                <span className={`inline-flex items-center justify-center w-28 py-px rounded text-[0.5625rem] font-semibold border whitespace-nowrap ${
-                                  rec.displayStatus === "Success" || rec.displayStatus === "Cheque Cleared"
-                                    ? "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
-                                  : rec.displayStatus === "Pending"
-                                    ? "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
-                                  : rec.displayStatus === "Cheque Issued"
-                                    ? "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800"
-                                  : rec.displayStatus === "Cheque Bounced" || rec.displayStatus === "Cheque Cancelled"
-                                    ? "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800"
-                                  : rec.displayStatus === "Reissued"
-                                    ? "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-400 dark:border-violet-800"
-                                  : "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-950/40 dark:text-gray-400 dark:border-gray-800"
-                                }`}>
-                                  {rec.displayStatus}
-                                </span>
+                              {ref && <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate tabular-nums">{ref}</p>}
+                            </td>
+                            {/* The invoice or journal voucher it settles */}
+                            <td className="px-3 py-3">
+                              {rec.expenseRef || rec.jvNo ? (
+                                <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-primary truncate">{rec.expenseRef || rec.jvNo}</p>
                               ) : (
-                                <StatusBadge status={rec.status} />
+                                <span className="text-muted-foreground text-xs">—</span>
                               )}
-                              {rec.status === "Pending" && (
-                                <ApprovalStatusChain
-                                  table="NewPayment"
-                                  recordId={rec.id}
-                                  preloaded={approvalTrails.get(String(rec.id)) ?? null}
-                                  preloadedLoading={approvalTrailsLoading}
-                                />
-                              )}
-                            </div>
-                          </td>
-                          {/* Actions */}
-                          <td className="px-3 py-4">
-                            <div className="flex items-center gap-1.5 justify-end flex-wrap">
-                              <ApprovalActions
-                                status={rec.status}
-                                recordId={Number(rec.id)}
-                                endpoint="/api/new-payment"
-                                submitOnly
-                                onSuccess={() => {
-                                  queryClient.invalidateQueries({
-                                    queryKey: ["payments"],
-                                    exact: false,
-                                  });
-                                  queryClient.invalidateQueries({
-                                    queryKey: ["expense-options-payment"],
-                                  });
-                                  refetchPayments();
-                                  window.dispatchEvent(
-                                    new CustomEvent("approval-action"),
-                                  );
-                                }}
-                              />
-                              <button data-row-view
-                                onClick={() => openViewRec(rec)}
-                                title="View details"
-                                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                              <div className="mt-1">
+                                <PaymentGRNBadges expenseId={rec.expenseId || ""} />
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">
+                              {formatINR(rec.amount ?? 0)}
+                            </td>
+                            {/* Status: a solid mark is settled, a hatched one is in progress, red has stopped */}
+                            <td className="px-3 py-3">
+                              <span
+                                className="inline-flex items-center gap-1.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]"
+                                style={{ color: stopped ? "hsl(var(--destructive))" : "hsl(var(--foreground))" }}
                               >
-                                <Eye size={12} />
-                              </button>
-                              {rights.canEdit && (
-                                <button
-                                  onClick={() => openEdit(rec)}
-                                  title="Edit"
-                                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                                >
-                                  <Edit size={12} />
-                                </button>
+                                <i
+                                  className="shrink-0"
+                                  style={{
+                                    width: 8,
+                                    height: 8,
+                                    border: `1px solid ${stopped ? "hsl(var(--destructive))" : "hsl(var(--foreground))"}`,
+                                    background: stopped
+                                      ? "hsl(var(--destructive))"
+                                      : waiting
+                                        ? "repeating-linear-gradient(135deg, hsl(var(--foreground)) 0, hsl(var(--foreground)) 1px, transparent 1px, transparent 3px)"
+                                        : "hsl(var(--primary))",
+                                  }}
+                                />
+                                {shown || "—"}
+                              </span>
+                              {rec.status === "Pending" && (
+                                <div className="mt-1.5">
+                                  <ApprovalStatusChain
+                                    table="NewPayment"
+                                    recordId={rec.id}
+                                    preloaded={approvalTrails.get(String(rec.id)) ?? null}
+                                    preloadedLoading={approvalTrailsLoading}
+                                  />
+                                </div>
                               )}
-                              {rights.canDelete && (
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex items-center gap-1 justify-end flex-wrap">
+                                <ApprovalActions
+                                  status={rec.status}
+                                  recordId={Number(rec.id)}
+                                  endpoint="/api/new-payment"
+                                  submitOnly
+                                  onSuccess={() => {
+                                    queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
+                                    queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+                                    refetchPayments();
+                                    window.dispatchEvent(new CustomEvent("approval-action"));
+                                  }}
+                                />
                                 <button
-                                  onClick={() => setDeleteId(rec.id)}
-                                  className="p-1.5 rounded-md border border-destructive/30 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                  data-row-view
+                                  onClick={() => openViewRec(rec)}
+                                  title="View details"
+                                  className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                                 >
-                                  <Trash2 size={12} />
+                                  <Eye size={12} />
                                 </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                                {rights.canEdit && (
+                                  <button
+                                    onClick={() => openEdit(rec)}
+                                    title="Edit"
+                                    className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+                                  >
+                                    <Edit size={12} />
+                                  </button>
+                                )}
+                                {rights.canDelete && (
+                                  <button
+                                    onClick={() => setDeleteId(rec.id)}
+                                    title="Delete"
+                                    className="p-1.5 border border-destructive/30 text-destructive/70 hover:text-destructive hover:border-destructive transition-colors"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -4837,37 +4811,25 @@ const Payment: React.FC = () => {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between mt-2 px-1">
-                <p className="text-xs text-muted-foreground">
-                  Page {page} of {totalPages} · {totalRecords} total
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <p className="label">
+                  Page {page} of {totalPages} · {totalRecords} in all
                 </p>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                    className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-                  >
-                    <ChevronLeft size={14} />
+                <div className="seg">
+                  <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="disabled:opacity-40" aria-label="Previous page">
+                    <ChevronLeft size={13} />
                   </button>
                   {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                     const pg = page <= 3 ? i + 1 : page - 2 + i;
                     if (pg < 1 || pg > totalPages) return null;
                     return (
-                      <button
-                        key={pg}
-                        onClick={() => setPage(pg)}
-                        className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-primary btn-module text-white" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
-                      >
+                      <button key={pg} onClick={() => setPage(pg)} className={pg === page ? "on" : undefined}>
                         {pg}
                       </button>
                     );
                   })}
-                  <button
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={page === totalPages}
-                    className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-                  >
-                    <ChevronRight size={14} />
+                  <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="disabled:opacity-40" aria-label="Next page">
+                    <ChevronRight size={13} />
                   </button>
                 </div>
               </div>
