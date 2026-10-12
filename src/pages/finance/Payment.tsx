@@ -4698,11 +4698,8 @@ const Payment: React.FC = () => {
                               <p className="font-semibold text-foreground text-[0.8125rem] truncate">{rec.paymentName || "—"}</p>
                               {rec.paidTo && <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate">to {rec.paidTo}</p>}
                             </td>
-                            <td className="px-3 py-3 whitespace-nowrap">
-                              <p className="text-[0.75rem] text-foreground tabular-nums">
-                                {when && !Number.isNaN(when.getTime()) ? when.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : rec.date || "—"}
-                              </p>
-                              {when && !Number.isNaN(when.getTime()) && <p className="text-[0.625rem] text-muted-foreground mt-1 tabular-nums">{when.getFullYear()}</p>}
+                            <td className="px-3 py-3 whitespace-nowrap text-[0.75rem] text-foreground tabular-nums">
+                              {when && !Number.isNaN(when.getTime()) ? when.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : rec.date || "—"}
                             </td>
                             {/* Document number, then how it was paid */}
                             <td className="px-3 py-3">
