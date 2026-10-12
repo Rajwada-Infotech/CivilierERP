@@ -558,6 +558,43 @@ async function postCrmOnAccountApplied(pool, onAccountId, appliedAmount, userEma
 }
 
 /**
+ * A brokerage approved: what is owed to the broker.
+ *   Dr Brokerage on Sales (gross)  /  Cr broker's ledger (gross)
+ * The payout voucher (Finance -> Payments, PAmount = gross, TDSAmount = TDS)
+ * then posts Dr broker / Cr Bank (net) + Cr TDS Payable, clearing it.
+ * Idempotent per brokerage record (one per tranche).
+ */
+async function postCrmBrokerageAccrualToGL(pool, brokerageId, userEmail) {
+  if (await hasPosting(pool, "CrmBrokerage", brokerageId))
+    return { posted: true, reason: "already posted (idempotent)" };
+  const row = (await pool.request().input("id", sql.Int, brokerageId).query(`
+    SELECT br.Id, br.ComputedAmount, br.BrokerId, br.TrancheLabel, b.BookingNo, b.CompanyId, b.ProjectId
+    FROM dbo.CrmBrokerageMaster br JOIN dbo.CrmBooking b ON b.Id = br.BookingId
+    WHERE br.Id = @id`)).recordset[0];
+  if (!row) return { posted: false, reason: `Brokerage ${brokerageId} not found` };
+  if (!row.BrokerId) return { posted: false, reason: `Brokerage ${brokerageId} has no broker ledger head` };
+  const gross = Math.round(Number(row.ComputedAmount || 0) * 100) / 100;
+  if (gross <= 0) return { none: true, reason: "No brokerage amount — nothing to post" };
+  const expenseHeadId = await getGLHeadIdByCode(pool, "CRM-BROKERAGE-EXP", "Brokerage on Sales");
+  const voucherNo = `BRK-${brokerageId}`;
+  const what = `${row.BookingNo}${row.TrancheLabel ? ` (${row.TrancheLabel} tranche)` : ""}`;
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate: new Date(),
+    sourceType: "CrmBrokerage",
+    sourceId: brokerageId,
+    companyId: row.CompanyId ?? null,
+    projectId: row.ProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: expenseHeadId, debit: gross, narration: `${voucherNo} — brokerage on ${what}` },
+      { lHeadId: row.BrokerId, credit: gross, narration: `${voucherNo} — brokerage owed on ${what}` },
+    ],
+  });
+  return { posted: true };
+}
+
+/**
  * A broker payout actually being cash paid out.
  *   Dr Broker ................. reduces what we owe them
  *   Cr CRM Collections A/c .... cash leaves
@@ -1229,6 +1266,7 @@ module.exports = {
   postCrmBuyBackDifferenceToGL,
   postCrmResaleTransferToGL,
   postCrmResaleFeeToGL,
+  postCrmBrokerageAccrualToGL,
   CRM_COLLECTIONS_ACCOUNT,
   CRM_GST_OUTPUT_ACCOUNT,
   CRM_SALE_INCOME_ACCOUNT,

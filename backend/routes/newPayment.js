@@ -1639,13 +1639,13 @@ router.put("/:id/approve", async (req, res) => {
 
     const pool = getPool();
     const brokerageGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
-      SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmBrokerageId,
+      SELECT np.PPaymentID, np.PAmount, ISNULL(np.TDSAmount, 0) AS TDSAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmBrokerageId,
              br.ComputedAmount,
              ISNULL(br.NetPayable, br.ComputedAmount) AS NetPayable,
              (SELECT ISNULL(SUM(Amount),0)
               FROM dbo.CrmBrokerPayment
               WHERE BrokerageId = np.SourceCrmBrokerageId) AS TotalPaid,
-             (SELECT ISNULL(SUM(PAmount),0)
+             (SELECT ISNULL(SUM(PAmount - ISNULL(TDSAmount, 0)),0)
               FROM dbo.NewPayment np2
               WHERE np2.SourceCrmBrokerageId = np.SourceCrmBrokerageId
                 AND np2.PPaymentID <> np.PPaymentID
@@ -1666,7 +1666,8 @@ router.put("/:id/approve", async (req, res) => {
       // prevent the record from ever flipping to Paid when TDS is deducted.
       const netPayable = Number(gateRow.NetPayable || gateRow.ComputedAmount || 0);
       const remaining = netPayable - Number(gateRow.TotalPaid || 0) - Number(gateRow.OtherSubmitted || 0);
-      if (Number(gateRow.PAmount || 0) > remaining + 0.01) {
+      // The voucher is gross with its TDS; what reaches the broker is the net.
+      if (Number(gateRow.PAmount || 0) - Number(gateRow.TDSAmount || 0) > remaining + 0.01) {
         return res.status(400).json({
           error: `Brokerage payment exceeds the remaining net payable balance of ₹${remaining.toLocaleString("en-IN")}`,
         });
@@ -1809,7 +1810,7 @@ router.put("/:id/approve", async (req, res) => {
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, TDSAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
@@ -1834,7 +1835,8 @@ router.put("/:id/approve", async (req, res) => {
           if (!existingBrokerPay.recordset.length) {
             await pool.request()
               .input("bid", sql.Int, approvedRow.SourceCrmBrokerageId)
-              .input("amt", sql.Decimal(18,2), Number(approvedRow.PAmount || 0))
+              // Net paid to the broker (the voucher is gross with its TDS).
+              .input("amt", sql.Decimal(18,2), Number(approvedRow.PAmount || 0) - Number(approvedRow.TDSAmount || 0))
               .input("dt", sql.Date, approvedRow.PDate ? new Date(approvedRow.PDate) : new Date())
               .input("mode", sql.NVarChar(50), approvedRow.PMode || null)
               .input("ref", sql.NVarChar(200), paymentReferenceForBrokerage(approvedRow))
