@@ -8,6 +8,7 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, Download, CheckCircle2, AlertCircle, Info, CalendarDays, BarChart3 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -1243,7 +1244,7 @@ const CrmAgreement: React.FC = () => {
                   <div className="w-[3px] shrink-0 self-stretch" style={{ background: railColor }} />
                   <div className="flex-1 min-w-0 p-3 space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-semibold leading-tight truncate">{a.ApplicantName}</span>
+                      <span className="text-sm font-semibold leading-tight truncate"><ApplicantNames name={a.ApplicantName} bookingId={a.BookingId} applicationId={a.ApplicationId} /></span>
                       <span className={`shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${agrStatusColor[a.Status] || ""}`}>{a.Status}</span>
                     </div>
                     {isBookingCancelled(a) && (
@@ -1398,7 +1399,7 @@ const CrmAgreement: React.FC = () => {
                         : "text-primary"} />
                     </div>
                     <div className="min-w-0">
-                      <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate">{detail.agreement?.ApplicantName}</h2>
+                      <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate"><ApplicantNames name={detail.agreement?.ApplicantName} bookingId={detail.agreement?.BookingId} applicationId={detail.agreement?.ApplicationId} /></h2>
                       <p className="text-[0.6875rem] font-mono text-muted-foreground mt-0.5">
                         {detail.agreement?.AgreementNo}
                         {detail.agreement?.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{detail.agreement.VersionNo}</span>}

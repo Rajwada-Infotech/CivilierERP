@@ -7,6 +7,7 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, CheckCircle2, Circle, ExternalLink, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -29,12 +30,6 @@ const AGREEMENT_STEPS = [
   { key: "FinalExecution",   label: "Final Execution",          hint: "Mark the agreement Executed" },
 ] as const;
 const MANUAL_STEPS = new Set(["DirectorMeeting"]);
-
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load legal workflows (HTTP ${r.status})`);
-  return r.json();
-}
 
 const PAGE_SIZE = 20;
 interface LegalMilestoneListFilters {
@@ -452,6 +447,7 @@ const statusColor: Record<string, string> = {
   Applied:    "text-sky-700 bg-sky-50 border-sky-200",
   Draft:      "text-orange-700 bg-orange-50 border-orange-200",
 };
+const STATUS_COLOR_FALLBACK = "text-muted-foreground bg-muted/50 border-border";
 
 // ─── Stage row component ──────────────────────────────────────────────────────
 // The one row type for EVERY stage in the journey — Agreement's own 8
@@ -470,101 +466,94 @@ const StageRow: React.FC<{
   const hasRecord = !!stage.status;
   const isAuto = action.kind === "auto";
   const isManual = action.kind === "manual";
-  const actionLabel = isManual ? "Mark Done" : isAuto ? "Auto-synced" : isDone ? "Open" : hasRecord ? "Continue" : isLocked ? "View" : "Start →";
+  const actionLabel = isManual ? "Mark Done" : isAuto ? null : isDone ? "Open" : hasRecord ? "Continue" : isLocked ? null : "Start →";
 
   const handleClick = () => {
+    if (isLocked) return;                              // locked steps are read-only — no navigation
     if (action.kind === "manual") { action.onAction(); return; }
     if (action.kind === "navigate") {
       navigate(`${action.path}${action.path.includes("?") ? "&" : "?"}bookingId=${bookingId}`);
     }
   };
 
-  // Not applicable to this specific booking (e.g. Bank NOC for a self-funded
-  // purchase) — render as a plainly dimmed, non-actionable row instead of a
-  // normal Start/Continue action, so staff never gets an inviting "Start →"
-  // button for a step that will never happen for this booking.
+  // ── Not applicable — single dimmed strikethrough line ─────────────────
   if (stage.isApplicable === false) {
     return (
-      <div className="relative flex gap-4 pb-5 last:pb-0">
-        {!isLast && <div className="absolute left-[15px] top-8 bottom-0 w-0.5 bg-border" />}
-        <div className="shrink-0 z-10 mt-1">
-          <div className="w-8 h-8 rounded-full bg-muted/40 border-2 border-dashed border-border flex items-center justify-center">
-            <span className="text-muted-foreground/50 text-xs">—</span>
-          </div>
+      <div className="relative flex gap-3 pb-2.5 last:pb-0">
+        {!isLast && <div className="absolute left-[11px] top-5 bottom-0 w-px bg-border/40" />}
+        <div className="shrink-0 z-10 w-[22px] h-[22px] rounded-full bg-muted/30 border border-dashed border-border flex items-center justify-center mt-0.5">
+          <span className="text-muted-foreground/30 text-[0.5rem] leading-none">—</span>
         </div>
-        <div className="flex-1 rounded-xl border border-dashed border-border bg-muted/10 px-4 py-3 opacity-70">
-          <span className="text-sm font-semibold text-muted-foreground line-through decoration-muted-foreground/40">{stage.label}</span>
-          <div className="text-[0.75rem] text-muted-foreground mt-0.5">Not applicable — {stage.notApplicableReason}</div>
+        <div className="flex-1 py-0.5 opacity-40">
+          <span className="text-xs font-medium text-muted-foreground line-through">{stage.label}</span>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="relative flex gap-4 pb-5 last:pb-0">
-      {!isLast && (
-        <div className={`absolute left-[15px] top-8 bottom-0 w-0.5 ${isDone ? "bg-green-300" : "bg-border"}`} />
-      )}
-
-      <div className="shrink-0 z-10 mt-1">
-        {isDone ? (
-          <div className="w-8 h-8 rounded-full bg-green-100 border-2 border-green-400 dark:bg-green-900/40 dark:border-green-600 flex items-center justify-center">
-            <CheckCircle2 size={16} className="text-green-600 dark:text-green-400" />
+  // ── Done — compact single green row ───────────────────────────────────
+  if (isDone) {
+    return (
+      <div className="relative flex gap-3 pb-2.5 last:pb-0">
+        {!isLast && <div className="absolute left-[11px] top-5 bottom-0 w-px bg-green-200 dark:bg-green-900/60" />}
+        <div className="shrink-0 z-10 w-[22px] h-[22px] rounded-full bg-green-100 border-2 border-green-400 dark:bg-green-900/40 dark:border-green-600 flex items-center justify-center mt-0.5">
+          <CheckCircle2 size={11} className="text-green-600 dark:text-green-400" />
+        </div>
+        <div className="flex-1 flex items-center justify-between gap-2 min-w-0 py-0.5">
+          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+            <span className="text-xs font-semibold text-green-700 dark:text-green-300">{stage.label}</span>
+            {stage.no && <span className="text-[0.625rem] font-mono text-muted-foreground/60 bg-muted/50 px-1 rounded">{stage.no}</span>}
+            {stage.status && <span className={`text-[0.625rem] px-1.5 py-0.5 rounded border font-semibold ${statusColor[stage.status] ?? STATUS_COLOR_FALLBACK}`}>{stage.status}</span>}
           </div>
-        ) : isLocked ? (
-          <div className="w-8 h-8 rounded-full bg-muted/60 border-2 border-border flex items-center justify-center">
-            <Lock size={13} className="text-muted-foreground/50" />
-          </div>
-        ) : (
-          <div className="w-8 h-8 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center">
-            <Circle size={12} className="text-primary fill-primary/30" />
-          </div>
-        )}
-      </div>
-
-      <div className={`flex-1 rounded-xl border transition-colors ${
-        isDone
-          ? "border-green-200 bg-green-500/[0.04] dark:border-green-900/60 dark:bg-green-950/20"
-          : isLocked
-          ? "border-border bg-muted/20 opacity-70"
-          : "border-primary/30 bg-primary/[0.03]"
-      }`}>
-        <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-sm font-semibold leading-tight ${isLocked ? "text-muted-foreground" : isDone ? "text-green-700 dark:text-green-300" : "text-foreground"}`}>
-                {stage.label}
-              </span>
-              {stage.no && <span className="text-[0.6875rem] font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">{stage.no}</span>}
-              {stage.status && (
-                <span className={`text-[0.6875rem] px-2 py-0.5 rounded-lg border font-semibold ${statusColor[stage.status] || ""}`}>
-                  {stage.status}
-                </span>
-              )}
-            </div>
-            <div className={`text-[0.75rem] mt-0.5 leading-snug ${isLocked ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
-              {isLocked
-                ? <span className="flex items-center gap-1"><Lock size={9} className="shrink-0" /> Waiting: {stage.unlockedHint}</span>
-                : stage.sublabel}
-            </div>
-          </div>
-          {isAuto ? (
-            <span className="shrink-0 text-[0.625rem] text-muted-foreground bg-muted/60 border border-border rounded-lg px-2.5 py-1.5 whitespace-nowrap">Auto-synced</span>
-          ) : (isManual && !canEdit) ? null : (
-            <button
-              onClick={handleClick}
-              className={`shrink-0 flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap ${
-                isDone
-                  ? "border-green-300 text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:border-green-800 dark:text-green-300"
-                  : isLocked
-                  ? "border-border text-muted-foreground hover:bg-muted"
-                  : "border-primary btn-module text-white "
-              }`}
-            >
-              {actionLabel} {!isManual && <ExternalLink size={11} />}
+          {action.kind === "navigate" && (
+            <button onClick={handleClick} className="shrink-0 text-[0.625rem] text-muted-foreground/50 hover:text-primary flex items-center gap-0.5 whitespace-nowrap transition-colors">
+              <ExternalLink size={9} /> Open
             </button>
           )}
         </div>
+      </div>
+    );
+  }
+
+  // ── Locked — ghost row, hint visible only on hover ────────────────────
+  if (isLocked) {
+    return (
+      <div className="relative flex gap-3 pb-2.5 last:pb-0">
+        {!isLast && <div className="absolute left-[11px] top-5 bottom-0 w-px bg-border/30" />}
+        <div className="shrink-0 z-10 w-[22px] h-[22px] rounded-full bg-muted/20 border border-border/40 flex items-center justify-center mt-0.5">
+          <Lock size={8} className="text-muted-foreground/25" />
+        </div>
+        <div className="flex-1 py-0.5 min-w-0" title={stage.unlockedHint}>
+          <span className="text-xs font-medium text-muted-foreground/35 select-none">{stage.label}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Active / pending — highlighted card with sublabel + action ─────────
+  return (
+    <div className="relative flex gap-3 pb-4 last:pb-0">
+      {!isLast && <div className="absolute left-[11px] top-5 bottom-0 w-px bg-border" />}
+      <div className="shrink-0 z-10 w-[22px] h-[22px] rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center mt-1">
+        <Circle size={7} className="text-primary fill-primary/30" />
+      </div>
+      <div className="flex-1 rounded-lg border border-primary/20 bg-primary/[0.03] px-3 py-2.5 flex items-center justify-between gap-3 min-w-0">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-semibold text-foreground">{stage.label}</span>
+            {stage.no && <span className="text-[0.625rem] font-mono text-muted-foreground bg-muted/60 px-1 rounded">{stage.no}</span>}
+            {stage.status && <span className={`text-[0.625rem] px-1.5 py-0.5 rounded border font-semibold ${statusColor[stage.status] ?? STATUS_COLOR_FALLBACK}`}>{stage.status}</span>}
+          </div>
+          <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{stage.sublabel}</p>
+        </div>
+        {isAuto ? (
+          <span className="shrink-0 text-[0.625rem] text-muted-foreground bg-muted/50 border border-border rounded px-2 py-1 whitespace-nowrap">Auto</span>
+        ) : (isManual && !canEdit) || actionLabel === null ? null : (
+          <button onClick={handleClick}
+            className="shrink-0 flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg border-primary btn-module text-white whitespace-nowrap">
+            {actionLabel} {!isManual && <ExternalLink size={10} />}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -632,6 +621,15 @@ const CrmLegalMilestones: React.FC = () => {
     ? selectedTracker
     : (trackers as any[]).find((t: any) => t.Id === selectedId);
   const selectRow = (t: any) => { setSelectedId(t.Id); setSelectedTracker(t); setSp({ bookingId: String(t.BookingId) }, { replace: true }); };
+
+  // Pre-build WorkflowModel for every list row once per trackers change instead
+  // of calling buildWorkflowModel() inside the render map on every re-render
+  // (any state change — selected row, dialog open, filter input — was rebuilding
+  // the full model for all 20 rows unnecessarily).
+  const trackerModels = useMemo(
+    () => (trackers as any[]).map((t: any) => ({ id: t.Id, m: buildWorkflowModel(t) })),
+    [trackers],
+  );
 
   // /eligible-bookings already applies the real POST gate (Approved, active,
   // not frozen, has an Agreement, no tracker yet) — no client-side filtering needed.
@@ -714,8 +712,8 @@ const CrmLegalMilestones: React.FC = () => {
               <div className="p-4 text-center text-sm text-destructive">{(error as any)?.message || "Failed to load"}</div>
             ) : trackers.length === 0 ? (
               <div className="p-4 text-center text-muted-foreground text-sm">No legal workflows started</div>
-            ) : (trackers as any[]).map((t: any) => {
-              const m = buildWorkflowModel(t);
+            ) : trackerModels.map(({ id, m }) => {
+              const t = (trackers as any[]).find((r: any) => r.Id === id)!;
               const { text, done } = m.journeyLabel;
               return (
                 <button
@@ -729,14 +727,10 @@ const CrmLegalMilestones: React.FC = () => {
                     <div className={`w-[3px] shrink-0 self-stretch ${done ? "bg-green-500" : m.agreementDone ? "bg-blue-500" : "bg-sky-400"}`} />
                     <div className="flex-1 min-w-0 p-3 space-y-1">
                       <div className="flex items-center gap-1.5">
-                        <div className="text-sm font-semibold truncate">{t.ApplicantName}</div>
+                        <div className="text-sm font-semibold truncate"><ApplicantNames name={t.ApplicantName} bookingId={t.BookingId} applicationId={t.ApplicationId} /></div>
                         {m.isPhysicallyComplete && (
-                          // Bare "Completed" here read as if THIS BOOKING'S journey
-                          // were done — sitting right next to a "Document Collection
-                          // pending" line one row below made that reading actively
-                          // contradictory. This flag is about the PROJECT (Ready-to-
-                          // Move / physically finished construction), not this
-                          // booking's own progress — labelled accordingly.
+                          // Flag is about the PROJECT (Ready-to-Move / physically finished
+                          // construction), not this booking's own legal journey progress.
                           <span className="shrink-0 text-[0.5625rem] px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="This booking's PROJECT is already physically complete (Ready-to-Move) — Handover doesn't have to wait on the Sale Deed. Does not mean this booking's own legal journey is finished.">Project Ready</span>
                         )}
                       </div>
@@ -767,10 +761,10 @@ const CrmLegalMilestones: React.FC = () => {
                   <div className="px-5 py-4 flex items-center justify-between gap-3 border-b border-border bg-muted/20">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="font-heading font-bold text-[0.9375rem] truncate">{selected.ApplicantName}</h2>
+                        <h2 className="font-heading font-bold text-[0.9375rem] truncate"><ApplicantNames name={selected.ApplicantName} bookingId={selected.BookingId} applicationId={selected.ApplicationId} /></h2>
                         {model.isPhysicallyComplete && (
-                          <span className="shrink-0 text-[0.625rem] px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete — Handover doesn't have to wait on the Sale Deed. Agreement/AFS Registration is still required as normal.">
-                            Project Completed
+                          <span className="shrink-0 text-[0.625rem] px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete (Ready-to-Move) — Handover doesn't have to wait on the Sale Deed. Agreement/AFS Registration is still required as normal.">
+                            Project Ready
                           </span>
                         )}
                       </div>
@@ -794,7 +788,7 @@ const CrmLegalMilestones: React.FC = () => {
                       really was. */}
                   <div className="px-5 py-3 space-y-2">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-[0.6875rem] text-muted-foreground font-medium">Overall journey progress</span>
+                      <span className="text-[0.6875rem] text-muted-foreground font-medium">Overall progress</span>
                       <span className="text-[0.6875rem] font-semibold text-foreground">{model.doneCount}/{model.totalCount} steps</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
@@ -803,40 +797,39 @@ const CrmLegalMilestones: React.FC = () => {
                         style={{ width: `${model.totalCount ? Math.round((model.doneCount / model.totalCount) * 100) : 0}%` }}
                       />
                     </div>
-                    <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                      {model.progressChecks.map((p) => (
+                    {/* Numbered dots per section — hover for full section name */}
+                    <div className="flex items-center gap-1 pt-0.5">
+                      {model.progressChecks.map((p, i) => (
                         <span key={p.label} title={p.label}
-                          className={`flex items-center gap-1 text-[0.625rem] px-2 py-0.5 rounded-full border font-medium ${
-                            p.done ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-300" : "bg-muted/40 border-border text-muted-foreground/60"
+                          className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[0.5625rem] font-bold border transition-colors ${
+                            p.done
+                              ? "bg-green-500 border-green-500 text-white"
+                              : "bg-muted/30 border-border text-muted-foreground/50"
                           }`}>
-                          {p.done ? <CheckCircle2 size={9} /> : <Circle size={9} />}
-                          {p.label}
+                          {p.done ? "✓" : i + 1}
                         </span>
                       ))}
                     </div>
                   </div>
                 </div>
 
-                {/* The ENTIRE journey — Agreement's 8 sub-steps included — as
-                    one continuous list of sections, every section using the
-                    exact same StageRow component. No separate "Phase 1 card"
-                    with different visuals, and nothing hidden behind a locked
-                    placeholder: a section not yet reachable simply shows its
-                    stages as locked rows (with the real reason why), so
-                    staff can always see the full remaining journey at a
-                    glance instead of it appearing to vanish. */}
                 {model.sections.map((section) => (
                   <div key={section.key} className="rounded-xl border border-border bg-card overflow-hidden">
-                    <div className="px-5 py-3.5 border-b border-border bg-muted/20 flex items-start gap-3">
-                      <div>
-                        <h3 className="text-sm font-bold">{section.title}</h3>
-                        <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-relaxed">
-                          {section.isApplicable ? section.description : section.notApplicableReason}
-                        </p>
-                      </div>
+                    {/* Compact section header — description available on the ⓘ hover */}
+                    <div className="px-4 py-2.5 border-b border-border bg-muted/10 flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-foreground">{section.title}</span>
+                      {section.isApplicable && (
+                        <span
+                          title={section.description}
+                          className="text-[0.625rem] text-muted-foreground/50 hover:text-muted-foreground cursor-default transition-colors select-none"
+                        >ⓘ</span>
+                      )}
+                      {!section.isApplicable && (
+                        <span className="text-[0.625rem] text-muted-foreground/50">{section.notApplicableReason}</span>
+                      )}
                     </div>
                     {section.isApplicable && (
-                      <div className="p-5 space-y-0">
+                      <div className="px-4 py-3 space-y-0">
                         {section.stages.map((stage, idx) => (
                           <StageRow
                             key={stage.key}
