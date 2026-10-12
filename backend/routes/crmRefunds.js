@@ -507,7 +507,9 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
     if (!pre) return res.status(404).json({ error: "Refund not found" });
     const bankId = pre.RefundBankLHeadId ?? (pre.ProjectBanks === 1 ? pre.OnlyProjectBank : null);
     if (pre.Status === "Pending") {
-      if (bankId == null) return res.status(400).json({ error: pre.ProjectBanks > 1 ? "Choose which company bank pays this refund (edit the refund) — the project has several." : "No company bank to pay from — add the project's bank in Project Banks, or set one on the refund." });
+      // The company bank is Finance's call, as for every payout (brokerage
+      // etc.): when neither the refund nor the project names one, Finance
+      // picks it on the voucher in Payments before approving it there.
       if (!pre.CustomerBankName && !pre.CustomerAccountNo) return res.status(400).json({ error: "Add the customer's bank details to the refund before approving it." });
       if (!(Number(pre.NetAmount) > 0)) return res.status(400).json({ error: "The refund's net amount must be more than zero." });
     }
@@ -533,7 +535,7 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
         .query(`
           UPDATE dbo.CrmRefund SET
             Status = 'FinanceApproved', ApprovedBy = @ab, ApprovedAt = SYSDATETIME(),
-            FinanceNewPaymentId = @np, RefundBankLHeadId = @bank, UpdatedAt = SYSDATETIME()
+            FinanceNewPaymentId = @np, RefundBankLHeadId = COALESCE(@bank, RefundBankLHeadId), UpdatedAt = SYSDATETIME()
           WHERE Id = @id`);
       await tx.commit();
       await Promise.all([bumpCacheVersion("crm-refunds"), bumpCacheVersion("new-payment")]);
@@ -589,7 +591,6 @@ async function raisePayoutVoucher(tx, rf, opts) {
       }
     }
     const bankId = opts.bankId != null ? opts.bankId : rf.RefundBankLHeadId;
-    if (bankId == null) { throw new RefundPayoutError("A company bank account (RefundBankLHeadId) is required to disburse this refund", 400); }
     if (!rf.CustomerBankName && !rf.CustomerAccountNo) { throw new RefundPayoutError("Customer bank details are missing — add them to the refund before disbursing", 400); }
     const net = Number(rf.NetAmount) || 0;
     if (net <= 0) { throw new RefundPayoutError("Net refund amount must be greater than 0", 400); }
@@ -605,9 +606,8 @@ async function raisePayoutVoucher(tx, rf, opts) {
     // Bank name is known the moment bankId is — resolving and storing it
     // now (instead of leaving PBankName blank for Finance to fill in later)
     // is what the whole Payment.tsx NOT-NULL crash chain traced back to.
-    const bankRow = await tx.request().input("bid", sql.Int, bankId)
-      .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid");
-    const bankName = bankRow.recordset[0]?.LHeadName || "";
+    const bankName = bankId == null ? "" : ((await tx.request().input("bid", sql.Int, bankId)
+      .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid")).recordset[0]?.LHeadName || "");
 
     const actorEmail = opts.actorEmail;
     const customerHeadId = await ensureCrmCustomerLedgerHead(tx, rf.CustomerId, actorEmail);
@@ -623,7 +623,7 @@ async function raisePayoutVoucher(tx, rf, opts) {
 
     const npIns = await tx.request()
       .input("name", sql.VarChar, "CRM Refund")
-      .input("remarks", sql.NVarChar(1000), `${rf.RefundNo} — customer refund ₹${net.toLocaleString("en-IN")} to ${rf.CustomerBankName || "customer bank"} ${rf.CustomerAccountNo || ""}${paymentMode ? "" : " — finance to complete payment details"}`)
+      .input("remarks", sql.NVarChar(1000), `${rf.RefundNo} — customer refund ₹${net.toLocaleString("en-IN")} to ${rf.CustomerBankName || "customer bank"} ${rf.CustomerAccountNo || ""}${paymentMode && bankId != null ? "" : " — finance to complete payment details"}`)
       .input("mode", sql.VarChar(50), paymentMode)
       .input("bankName", sql.VarChar(200), bankName)
       .input("amt", sql.Decimal(18, 2), net)
@@ -810,18 +810,20 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
         UPDATE dbo.CrmRefund SET
           Status = 'Paid', PaidAt = SYSDATETIME(),
           FinanceNewPaymentId = ISNULL(FinanceNewPaymentId, @np),
+          -- the bank Finance actually paid from, when it was picked on the voucher
+          RefundBankLHeadId = COALESCE((SELECT TRY_CAST(np.PBankID AS INT) FROM dbo.NewPayment np WHERE np.PPaymentID = ISNULL(@np, FinanceNewPaymentId)), RefundBankLHeadId),
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
     // Consume the source held / on-account credit by the gross amount.
     if (rf.SourceOnAccountId) {
-      await tx.request().input("oid", sql.Int, rf.SourceOnAccountId).input("g", sql.Decimal(18, 2), Number(rf.GrossAmount) || 0)
+      await tx.request().input("oid", sql.Int, rf.SourceOnAccountId).input("rid", sql.Int, refundId).input("g", sql.Decimal(18, 2), Number(rf.GrossAmount) || 0)
         .query(`
           UPDATE dbo.CrmOnAccountPayment SET
             AppliedAmount = AppliedAmount + @g,
             Status = CASE WHEN AppliedAmount + @g >= Amount - 0.01 THEN 'Applied'
                           WHEN ISNULL(Status,'') = 'Held' THEN 'Held' ELSE 'PartiallyApplied' END,
-            Notes = ISNULL(Notes,'') + char(10) + 'Refunded via CrmRefund #' + CAST(@oid AS NVARCHAR(20))
+            Notes = ISNULL(Notes,'') + char(10) + 'Refunded via CrmRefund #' + CAST(@rid AS NVARCHAR(20))
           WHERE Id = @oid
         `);
     }

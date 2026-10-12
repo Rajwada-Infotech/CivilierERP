@@ -1274,8 +1274,8 @@ function buildInboxQueries(module, projectScope = null) {
           r.Status,
           CAST(NULL AS NVARCHAR)                 AS ContractorName,
           cu.CustomerName                        AS SupplierName,
-          r.GrossAmount                          AS Amount,
-          ${NULL_EXTRA}
+          r.NetAmount                            AS Amount,
+          ${withProjectName(NULL_EXTRA, "pr_rf.name")}
           ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
           ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
           ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
@@ -1286,6 +1286,7 @@ function buildInboxQueries(module, projectScope = null) {
         JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
         LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
         LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
+        LEFT JOIN dbo.enterprise pr_rf ON pr_rf.id = r.ProjectId
         WHERE r.Status = 'Pending'
       `);
     }
