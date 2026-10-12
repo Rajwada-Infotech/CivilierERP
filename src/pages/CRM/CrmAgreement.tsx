@@ -716,44 +716,8 @@ const CrmAgreement: React.FC = () => {
 
   const filtered = agreements;
 
-  // ── Auto-select first agreement ─────────────────────────────────────────
-  // On first load (or after a filter change that leaves the current
-  // selection out of the visible list), open the first agreement in the
-  // list so the detail panel is never a dead "Select an agreement"
-  // placeholder when the user clearly has agreements to look at. Skips
-  // entirely when a specific ?id= or ?bookingId= deep-link is active.
-  // Uses a ref so a background React Query refetch never stomps on whatever
-  // the user had navigated to. All array access is guarded so a fresh
-  // fetch that returns an empty or malformed row can't crash the render.
-  const autoSelectedRef = useRef(false);
-  useEffect(() => {
-    if (isLoading) return;
-    if (idFilter || bkgFilter) return;
-    if (selectedId != null) return;
-    if (!Array.isArray(agreements) || agreements.length === 0) return;
-    if (autoSelectedRef.current) return;
-    const first = agreements[0];
-    if (!first || first.Id == null) return;
-    autoSelectedRef.current = true;
-    selectAgreement(first.Id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, agreements, idFilter, bkgFilter, selectedId]);
-
-  // If the currently-selected agreement is no longer in the (filtered)
-  // list, fall back to the first row. Does not fire while ?id= is set
-  // explicitly, and does not fire when the user clicked a different row
-  // (that already updates selectedId to something in the list).
-  useEffect(() => {
-    if (isLoading || idFilter || bkgFilter) return;
-    if (selectedId == null) return;
-    if (!Array.isArray(agreements) || agreements.length === 0) return;
-    const stillVisible = agreements.some((a: any) => a && a.Id === selectedId);
-    if (stillVisible) return;
-    const first = agreements[0];
-    if (!first || first.Id == null) return;
-    selectAgreement(first.Id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, agreements, idFilter, bkgFilter, selectedId]);
+  // Nothing opens by itself: the user picks an agreement, or arrives via an
+  // ?id= / ?bookingId= link. (It used to open the first row on load.)
 
   // ?bookingId= deep-link resolver — same as before.
   const handledBkgFilterRef = useRef<string | null>(null);
