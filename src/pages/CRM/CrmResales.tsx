@@ -47,6 +47,7 @@ interface Deal {
   DeveloperFeeAmount: number | null; DeveloperFeeGstAmount: number | null;
   TdsAmount: number | null; BuyBackGstAmount: number | null; StampDutyAmount: number | null;
   Status: string; RejectionNote: string | null; Notes: string | null; ProjectId: number | null; PayoutNewPaymentId: number | null;
+  StageLabel?: string | null; StageNo?: number | null; StageCount?: number | null; StageTodo?: number;
 }
 interface Holding {
   BookingId: number; BookingIds: number[]; BookingNos: string; UnitNo: string; Kind: string;
@@ -133,9 +134,33 @@ const CrmResales: React.FC = () => {
     },
     { header: "Property", id: "prop", cell: ({ row }) => <span className="font-medium text-foreground">{row.original.UnitName || row.original.PlotName || row.original.PlotNo || "—"}<span className="block text-[0.6875rem] font-normal text-muted-foreground">{row.original.FromBookingNo}</span></span> },
     { header: "From → To", id: "parties", cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.original.FromCustomerName || "—"}<ArrowRightLeft size={10} className="inline mx-1" />{row.original.Kind === "BuyBack" ? "Us (buy-back)" : row.original.ToCustomerName || "—"}</span> },
-    { header: "Paid by seller", id: "paid", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.PaidAtTransfer ?? row.original.OriginalValue)}</span> },
-    { header: "Agreed price", accessorKey: "AgreedValue", cell: ({ row }) => <span className="tabular-nums">{fmt(row.original.AgreedValue)}</span> },
-    { header: "Our fee", accessorKey: "DeveloperFeeAmount", cell: ({ row }) => <span className="tabular-nums">{row.original.Kind === "BuyBack" ? "—" : fmt(row.original.DeveloperFeeAmount)}</span> },
+    {
+      header: "Money", id: "money",
+      cell: ({ row }) => {
+        const d = row.original;
+        return (
+          <div className="text-xs tabular-nums leading-relaxed">
+            <div><span className="text-muted-foreground">Paid so far </span>{fmt(d.PaidAtTransfer ?? d.OriginalValue)}</div>
+            <div><span className="text-muted-foreground">{d.Kind === "BuyBack" ? "Buy-back " : "Agreed "}</span>{fmt(d.AgreedValue)}</div>
+            {d.Kind !== "BuyBack" && Number(d.DeveloperFeeAmount) > 0 && <div><span className="text-muted-foreground">Our fee </span>{fmt(d.DeveloperFeeAmount)}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      header: "Where it stands", id: "stage",
+      cell: ({ row }) => {
+        const d = row.original;
+        if (!d.StageLabel || !d.StageCount) return <span className="text-xs text-muted-foreground">—</span>;
+        return (
+          <div className="min-w-[150px]">
+            <div className="text-xs font-medium">Step {d.StageNo} of {d.StageCount}: {d.StageLabel}</div>
+            <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${Math.round(((d.StageNo! - 1) / d.StageCount) * 100)}%` }} /></div>
+            {!!d.StageTodo && <div className="text-[0.625rem] text-muted-foreground mt-0.5">{d.StageTodo} thing{d.StageTodo === 1 ? "" : "s"} left</div>}
+          </div>
+        );
+      },
+    },
     {
       header: "Status", accessorKey: "Status",
       cell: ({ row }) => (
@@ -152,7 +177,7 @@ const CrmResales: React.FC = () => {
         const d = row.original;
         const open = !!d.BookingIds && !["Completed", "Cancelled", "Rejected"].includes(d.Status);
         return (
-          <div className="flex gap-1.5 justify-end">
+          <div className="flex gap-1.5 justify-end" onClick={(e) => e.stopPropagation()}>
             {d.BookingIds && (
               <button onClick={() => nav(`/crm/resales/${d.Id}`)}
                 className="px-2 h-7 text-[0.6875rem] rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">
@@ -176,8 +201,8 @@ const CrmResales: React.FC = () => {
       <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2 mb-3">
         <Info size={13} className="text-muted-foreground mt-0.5 shrink-0" />
         <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-          <span className="font-medium text-foreground">Resale:</span> seller clearance (dues, loan NOC) → our NOC → the buyer's application & KYC → approval → transfer fee → registered deed of assignment → the booking passes to the buyer with everything paid. The price the buyers agree is theirs, not company revenue — only <span className="font-medium text-foreground">our fee</span> is.{" "}
-          <span className="font-medium text-foreground">Buy-back:</span> seller clearance → approval → cancellation deed (or letter) → Finance pays the agreed price and the property returns to stock. Open a case to see where it stands.
+          <span className="font-medium text-foreground">Resale</span> — the booking passes to a new buyer, with everything paid, once the seller is clear, the buyer is set up, the fee is paid and the deed of assignment is registered.{" "}
+          <span className="font-medium text-foreground">Buy-back</span> — we pay the agreed price and the property returns to stock. Open a case to see its steps.
         </p>
       </div>
 
@@ -191,7 +216,9 @@ const CrmResales: React.FC = () => {
         )}
       </div>
 
-      <DataTable columns={columns} data={deals} loading={isLoading} />
+      <DataTable columns={columns} data={deals} loading={isLoading}
+        onRowClick={(r) => { if (r.original.BookingIds) nav(`/crm/resales/${r.original.Id}`); }}
+        rowClassName={(r) => (r.original.BookingIds ? "cursor-pointer" : "")} />
 
       <Dialog open={open} onOpenChange={(o) => { if (!o) setOpen(false); }}>
         <DialogContent accent="crm" className="max-w-xl">

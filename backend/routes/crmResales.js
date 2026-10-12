@@ -86,7 +86,20 @@ router.get("/", requirePageRight("crm-resales", "view"), async (req, res) => {
       "COALESCE((SELECT ProjectId FROM dbo.PlotMaster WHERE Id = r.PlotId), (SELECT ProjectId FROM dbo.UnitMaster WHERE Id = r.UnitId), (SELECT ProjectId FROM dbo.CrmBooking WHERE Id = r.FromBookingId))", "").trim());
     if (req.query.status) { r0.input("st", sql.NVarChar(30), req.query.status); conds.push("r.Status = @st"); }
     const result = await r0.query(`${SELECT} WHERE ${conds.join(" AND ")} ORDER BY r.CreatedAt DESC`);
-    res.json(result.recordset);
+    // Where each open case stands (the same stage engine as the case page).
+    const rows = result.recordset;
+    for (const row of rows) {
+      if (!row.BookingIds || !["Pending", "Approved"].includes(row.Status)) continue;
+      try {
+        const st = await require("../services/crmResaleCase").caseState(pool, row.Id);
+        const cur = st.stages.find((s) => s.key === st.currentStage);
+        row.StageLabel = cur?.label || null;
+        row.StageNo = cur ? st.stages.indexOf(cur) + 1 : null;
+        row.StageCount = st.stages.length;
+        row.StageTodo = cur ? cur.checks.filter((c) => !c.ok).length : 0;
+      } catch { /* the list still loads */ }
+    }
+    res.json(rows);
   } catch (e) {
     console.error("[crm-resales] GET:", e.message);
     res.status(500).json({ error: "Failed to load resales" });

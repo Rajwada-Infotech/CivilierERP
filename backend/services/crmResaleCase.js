@@ -159,6 +159,53 @@ async function caseState(db, id) {
       deedComplete, deedBlockers, deedType === "CancellationLetter" ? (verified(docs, "CancellationLetter") ? "Signed letter verified" : null) : (DEED_LABEL[deedStatus] || "Not started")),
     stage(isResale ? "transfer" : "payout", isResale ? "Transfer" : "Payout & back to stock", done, [], done ? "Completed" : null),
   ];
+  // The checklist each step shows: every requirement, done or not, with the
+  // document it needs (uploaded and verified right there in the step).
+  const feeApproved = r.FeeReceiptStatus === "Approved";
+  const checks = {
+    request: [{ label: "Case recorded", ok: true }],
+    clearance: [
+      { label: "Every demanded milestone is paid", ok: !f.overdue.length,
+        hint: f.overdue.map((m) => `${m.MilestoneName} ${fmt(m.Balance)}`).join(" · ") || null },
+      { label: "No open cancellation or refund", ok: !f.openCancellation && !f.openRefund,
+        hint: [f.openCancellation?.CancellationNo, f.openRefund?.RefundNo].filter(Boolean).join(", ") || null },
+      hasLoan
+        ? { label: "Seller's bank NOC / loan-closure letter verified", ok: verified(docs, "SellerLoanNoc"), doc: "SellerLoanNoc",
+            hint: f.loans.length ? `Loan with ${f.loans.map((l) => l.BankName).join(", ")}` : "Marked as having a loan" }
+        : { label: "No home loan on the property", ok: true, hint: "From Loan Tracking — change it if that's wrong" },
+      { label: "Clearance confirmed by staff", ok: !!r.SellerClearedAt, action: "clearance" },
+    ],
+    noc: [{ label: "Developer NOC issued", ok: !!r.NocIssuedAt, action: "noc", hint: r.NocNo || null }],
+    buyer: [
+      { label: "New buyer chosen", ok: !!r.ToCustomerId, hint: r.ToName || null },
+      { label: "Buyer's PAN on file", ok: !!r.ToPan, link: "kyc" },
+      { label: "Buyer's Aadhaar on file", ok: !!r.ToAadhaar, link: "kyc" },
+      { label: "Buyer's address on file", ok: !!r.ToAddress, link: "kyc" },
+      { label: "Buyer's application opened (add co-applicants there)", ok: !!r.BuyerApplicationId, action: "buyer-application", link: r.BuyerApplicationId ? "application" : null },
+    ],
+    approval: [{ label: "Approved by Marketing Head, then Director", ok: ["Approved", "Completed"].includes(r.Status), link: "inbox", hint: r.Status === "Pending" ? "Waiting in the Approval Inbox" : null }],
+    fee: [
+      { label: `Fee invoice issued to the buyer (${fmt(fee)} incl. GST)`, ok: !!r.FeeInvoiceId && r.FeeInvoiceStatus !== "Void", action: "fee-invoice", hint: r.FeeInvoiceNo || null },
+      { label: "Buyer's payment recorded", ok: !!r.FeeReceivedPaymentId && r.FeeReceiptStatus !== "Rejected", action: "fee-payment", hint: r.FeeReceiptNo || null },
+      { label: "Payment approved by Finance", ok: feeApproved, hint: r.FeeReceivedPaymentId && !feeApproved ? "Finance → Received Payments" : null },
+    ],
+    deed: deedType === "CancellationLetter"
+      ? [{ label: "Signed cancellation letter verified", ok: verified(docs, "CancellationLetter"), doc: "CancellationLetter" }]
+      : [
+          { label: "Draft uploaded and the deed started", ok: deedIdx >= 0, doc: "DeedDraft", step: "Draft" },
+          { label: "Legal approval (draft verified by someone else)", ok: deedIdx >= 1, step: "LegalApproved" },
+          { label: isResale ? "Seller and buyer consent to the draft" : "Seller consents to the draft", ok: deedIdx >= 2, step: "Consented" },
+          { label: "Deed signed (executed)", ok: deedIdx >= 3, step: "Executed", hint: r.DeedExecutionDate ? new Date(r.DeedExecutionDate).toISOString().slice(0, 10) : null },
+          { label: "Stamp duty & registration fee paid (receipt verified)", ok: deedIdx >= 4, doc: "StampDutyReceipt", step: "DutyPaid",
+            hint: r.DeedDutyPaidAt ? `${fmt(r.DeedStampDuty)} + ${fmt(r.DeedRegistrationFee)} · ${r.DeedDutyPaidRef}` : null },
+          { label: "Registered at the Sub-Registrar (copy verified)", ok: deedIdx >= 5, doc: "RegisteredDeed", step: "Registered",
+            hint: r.DeedRegNo ? `${r.DeedRegNo} · ${r.DeedRegOffice}` : null },
+        ],
+    transfer: [{ label: "Booking passed to the buyer", ok: done, action: "transfer" }],
+    payout: [{ label: "Payout sent to Finance and paid", ok: done, action: "send-to-finance", hint: r.PayoutNewPaymentId ? "With Finance" : null }],
+  };
+  stages.forEach((st) => { st.checks = checks[st.key] || []; });
+
   // Each stage needs every stage before it.
   let blockedFrom = -1;
   stages.forEach((s, i) => {
