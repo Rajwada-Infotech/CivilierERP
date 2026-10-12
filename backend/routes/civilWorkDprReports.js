@@ -9,7 +9,7 @@
  *   GET /api/civilworkdpr-reports/quality-checks      every QC inspection (approved / rework) with its check results
  *   GET /api/civilworkdpr-reports/daily-updates       daily checkpoint photo updates (date, time logged in IST, who)
  *   GET /api/civilworkdpr-reports/daily-reports       the daily logbook: which work was done where on which day, and how much progress that day
- *   GET /api/civilworkdpr-reports/user-daily-work     the same logbook, one row per allocated user: who had which work reported on a chosen date
+ *   GET /api/civilworkdpr-reports/user-daily-work     the same logbook, one row per reported entry: who reported which work on a chosen date
  *   GET /api/civilworkdpr-reports/tag-wise            the user-wise logbook limited to tagged activities, filterable by tag (DprTagMaster)
  *
  * Every route answers { data, total, page, totalPages } so the Reports page can page through it (it asks for
@@ -381,7 +381,7 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
     const where = `WHERE ${conds.join(" AND ")}`;
     const from = `
       FROM (
-        SELECT l.Id, l.DependencyMasterActivityId, l.LogDate, l.ProgressPercent,
+        SELECT l.Id, l.DependencyMasterActivityId, l.LogDate, l.ProgressPercent, l.CreatedBy,
           CASE WHEN l.ProgressPercent IS NULL THEN NULL
                ELSE l.ProgressPercent - ISNULL(LAG(l.ProgressPercent) OVER (PARTITION BY l.DependencyMasterActivityId ORDER BY l.LogDate), 0)
           END AS ProgressMade
@@ -389,8 +389,9 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
       ) dl
       JOIN dbo.DependencyMasterActivity dma ON dma.Id = dl.DependencyMasterActivityId
       JOIN dbo.DependencyActivityAssignment daa ON daa.DependencyMasterActivityId = dma.Id AND daa.IsCurrent = 1
-      JOIN dbo.DependencyActivityEngineer dae ON dae.AssignmentId = daa.Id
-      JOIN dbo.users u ON u.id = dae.EngineerId
+      -- The user is whoever REPORTED the entry (the log's CreatedBy is their email) — one row per entry, not one per
+      -- engineer the activity is allocated to.
+      OUTER APPLY (SELECT TOP 1 uu.id, uu.name FROM dbo.users uu WHERE uu.email = dl.CreatedBy ORDER BY uu.id) u
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       LEFT JOIN dbo.DprTagMaster tg ON tg.Id = COALESCE(dma.TagId, am.TagId)
@@ -399,7 +400,7 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId`;
     await sendPage(res, await getPool(), p, {
-      core: `SELECT dl.Id AS logId, tg.TagName AS tagName, u.id AS userId, u.name AS userName, dl.LogDate AS logDate,
+      core: `SELECT dl.Id AS logId, tg.TagName AS tagName, u.id AS userId, ISNULL(u.name, dl.CreatedBy) AS userName, dl.LogDate AS logDate,
         dma.Id AS rungId, dm.Id AS chainId, dm.Alias AS chain, ep.name AS projectName, ${SCOPE_PATH} AS location,
         um.UnitName AS flatName, rm.RoomName AS roomName, rm.Storey AS storey, am.activity_name AS activityName,
         daa.Status AS status, dl.ProgressPercent AS progressPercent, dl.ProgressMade AS progressMade,
@@ -408,8 +409,8 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
         ${from} ${where}`,
       countSql: `SELECT COUNT(*) AS total ${from} ${where}`,
       orderBy: byTag
-        ? "tg.TagName, u.name, dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC"
-        : "u.name, dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC",
+        ? "tg.TagName, ISNULL(u.name, dl.CreatedBy), dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC"
+        : "ISNULL(u.name, dl.CreatedBy), dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC",
       bind: bindFilters(p, (r) => {
         if (single) r.input("date", sql.Date, single);
         tokens.forEach((t, i) => r.input(`st${i}`, sql.NVarChar(200), `%${t.replace(/[[\]%_]/g, (c) => `[${c}]`)}%`));
