@@ -6,6 +6,7 @@ import {
   getDependencyMasters,
   deleteDependencyMaster,
   type DependencyMasterListRow,
+  type LadderActivity,
   type WorkType,
 } from "@/api/dependencyMasterApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -24,6 +25,9 @@ import {
 import { Plus, Search, RefreshCw, GitBranch, Boxes, Home, Waypoints } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { DependencyMasterList } from "./components/DependencyMasterList";
+import { AutoNameResults } from "@/components/civilworkdpr/AutoNameFinder";
+import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
+import { dependencyAutoName, matchesAutoNameSearch } from "@/lib/dependencyAutoName";
 
 type TypeFilter = "ALL" | WorkType;
 
@@ -66,6 +70,8 @@ export default function DependencyMasterPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("ALL");
   const [deleteTarget, setDeleteTarget] = useState<DependencyMasterListRow | null>(null);
+  // An activity picked from the Auto Name matches — opens its allocation form (where Auto Name is shown).
+  const [activeAssignment, setActiveAssignment] = useState<{ rung: LadderActivity; chain: DependencyMasterListRow } | null>(null);
 
   const { data: rows = [], isLoading, refetch } = useQuery({
     queryKey: ["dependency-masters"],
@@ -76,11 +82,22 @@ export default function DependencyMasterPage() {
   const externalCount = rows.filter((r) => r.workType === "EXTERNAL").length;
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
+    const q = search.trim();
     return rows.filter((r) => {
       if (typeFilter !== "ALL" && r.workType !== typeFilter) return false;
       if (!q) return true;
-      return r.alias.toLowerCase().includes(q) || r.scopePath.toLowerCase().includes(q);
+      // A chain matches on its own alias / location, or when one of its activities' Auto Names
+      // (flat, room and activity) contains every word typed.
+      const chainText = [r.alias, r.scopePath, r.projectName];
+      return (
+        matchesAutoNameSearch(q, chainText) ||
+        (r.activities ?? []).some((a) =>
+          matchesAutoNameSearch(q, [
+            dependencyAutoName({ flatName: r.flatName, alias: r.alias, roomName: r.roomName, storey: r.storey, activityName: a.activityName }),
+            ...chainText,
+          ]),
+        )
+      );
     });
   }, [rows, search, typeFilter]);
 
@@ -146,10 +163,10 @@ export default function DependencyMasterPage() {
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search alias or path…"
+                placeholder="Search Auto Name, alias or path…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 h-9 w-64"
+                className="pl-8 h-9 w-72"
               />
             </div>
             <button
@@ -161,6 +178,9 @@ export default function DependencyMasterPage() {
             </button>
           </div>
         </div>
+
+        {/* Auto Name matches — pick one to open that activity */}
+        <AutoNameResults chains={rows} query={search} onPick={(rung, chain) => setActiveAssignment({ rung, chain })} />
 
         {/* List */}
         {isLoading ? (
@@ -195,6 +215,10 @@ export default function DependencyMasterPage() {
         )}
       </CivilWorkDprShell>
 
+
+      {activeAssignment && (
+        <RungAssignmentModal rung={activeAssignment.rung} chain={activeAssignment.chain} onClose={() => setActiveAssignment(null)} />
+      )}
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>

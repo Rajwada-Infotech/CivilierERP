@@ -10,6 +10,7 @@ import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { StatusPill, displayStatus } from "@/components/StatusPill";
 import { usePageRights } from "@/hooks/usePageRights";
+import { AutoNameLookup } from "@/components/AutoNameLookup";
 import { getChainActivities, getDependencyChains, getScopeProjects, type DependencyChain } from "@/api/cwdApi";
 
 const ACCENT = "#0891b2";
@@ -88,6 +89,7 @@ function ProjectChains({ projectId, term }: { projectId: number; term: string })
 export default function DependencyManagementScreen() {
   const rights = usePageRights("civilworkdpr-dependency");
   const qc = useQueryClient();
+  const navigation = useNavigation<{ navigate: (name: string, params?: object) => void }>();
   const [open, setOpen] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");
@@ -117,8 +119,12 @@ export default function DependencyManagementScreen() {
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 12, paddingHorizontal: 12 }}>
           <Search size={14} color={colors.mutedForeground} />
-          <TextInput value={search} onChangeText={setSearch} placeholder="Search chain, block, unit or room…" placeholderTextColor={`${colors.mutedForeground}99`} style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }} />
+          <TextInput value={search} onChangeText={setSearch} placeholder="Search chain, block, unit, room or Auto Name…" placeholderTextColor={`${colors.mutedForeground}99`} style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }} />
           {!!search && <TouchableOpacity onPress={() => setSearch("")}><X size={14} color={colors.mutedForeground} /></TouchableOpacity>}
+        </View>
+
+        <View style={{ marginTop: 12 }}>
+          <AutoNameLookup onOpen={(rungId) => navigation.navigate("AllocationForm", { rungId })} />
         </View>
 
         <View style={{ marginTop: 14, gap: 10 }}>

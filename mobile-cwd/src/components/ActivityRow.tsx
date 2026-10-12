@@ -5,6 +5,8 @@ import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { StatusPill, displayStatus, STATUS_COLOR } from "@/components/StatusPill";
 import { timelineMessage, type ActivityAssignment } from "@/api/cwdApi";
+import { PriorityBadge } from "@/components/PriorityBadge";
+import { dependencyAutoName } from "@/utils/dependencyAutoName";
 
 const ACCENT = "#0891b2";
 
@@ -15,14 +17,21 @@ function ActivityRowView({ a, onPress }: { a: ActivityAssignment; onPress: () =>
   const shown = displayStatus(a.status, a.resumedAt);
   const pct = Math.max(0, Math.min(100, a.progressPercent ?? 0));
   const hint = timelineMessage(a);
+  const autoName = dependencyAutoName({ flatName: a.flatName, alias: a.alias, roomName: a.roomName, storey: a.storey, activityName: a.activityName });
   return (
     <Pressable onPress={onPress} style={{ backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.heading.semibold, color: colors.foreground }} numberOfLines={2}>
           {a.sequenceNo != null ? `${a.sequenceNo}. ` : ""}{a.activityName ?? "Activity"}
         </Text>
-        <StatusPill status={shown} />
+        <View style={{ alignItems: "flex-end", gap: 4 }}>
+          <StatusPill status={shown} />
+          <PriorityBadge priority={a.priority} />
+        </View>
       </View>
+      {!!autoName && (
+        <Text style={{ fontSize: 10.5, fontFamily: fonts.body.medium, color: ACCENT, marginTop: 3 }} numberOfLines={2}>{autoName}</Text>
+      )}
       {!!a.scopePath && (
         <Text style={{ fontSize: 10.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 3 }} numberOfLines={2}>
           {[a.projectName, a.scopePath].filter(Boolean).join(" · ")}

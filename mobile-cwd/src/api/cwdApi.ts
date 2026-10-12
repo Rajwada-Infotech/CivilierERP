@@ -69,6 +69,10 @@ export interface CwdDashboard {
 export const getCwdDashboard = (): Promise<CwdDashboard> =>
   getJson("/api/civilworkdpr-dashboard", "Failed to load the dashboard");
 
+/** Activity Priority picked on the Work Allocation form, mildest first. */
+export const ASSIGNMENT_PRIORITIES = ["Low", "High", "Urgent", "Very Urgent"] as const;
+export type AssignmentPriority = (typeof ASSIGNMENT_PRIORITIES)[number];
+
 export interface ActivityAssignment {
   assignmentId: number;
   rungId: number;
@@ -97,6 +101,9 @@ export interface ActivityAssignment {
   flatName?: string | null;
   roomId?: number | null;
   roomName?: string | null;
+  /** A villa room's own floor (part of its Auto Name). */
+  storey?: string | null;
+  priority?: AssignmentPriority | null;
   /** Latest Quality Check decision, if any. */
   qcStatus?: "APPROVED" | "REWORK" | null;
   qcNames?: string | null;
@@ -163,6 +170,7 @@ export interface RungDetail {
     approvalLevels?: unknown[];
     description: string | null;
     remarks: string | null;
+    priority?: AssignmentPriority | null;
     materials: { itemId: string; quantity: number }[];
     checkpoints: RungCheckpoint[];
     qcStatus?: { decision: "APPROVED" | "REWORK"; qcBy: string | null } | null;
@@ -508,6 +516,9 @@ export interface AmendmentRecord {
   workType: "INTERNAL" | "EXTERNAL";
   projectName: string | null;
   scopePath: string;
+  flatName?: string | null;
+  roomName?: string | null;
+  storey?: string | null;
   engineerNames: string | null;
   currentStatus: AssignmentStatus | null;
   currentAttemptNo: number | null;
@@ -569,6 +580,7 @@ export interface AllocationPayload {
   materialContractorId: number | null;
   description: string | null;
   remarks: string | null;
+  priority: AssignmentPriority | null;
   materials: { itemId: string; quantity: number }[];
   checkpoints: RungCheckpoint[];
 }
@@ -647,3 +659,67 @@ export const getMyProfile = (userId: string | number): Promise<MyProfile> =>
   getJson(`/api/user-profile/${userId}/profile`, "Failed to load your profile");
 export const changeMyPassword = (userId: string | number, current_password: string, new_password: string) =>
   send("POST", `/api/user-profile/${userId}/change-password`, { current_password, new_password }, "Failed to change the password");
+
+// ── Auto Name lookup: server-side word search over every activity ─────────────────────────────────
+
+/** Activities matching every word of `search` (flat, room, activity, chain, project, engineer) — the same
+ *  Auto Name search the web's Work Allocation / Reporting pages use. */
+export const searchActivitiesByAutoName = (search: string, limit = 25): Promise<ActivityAssignment[]> =>
+  getActivityAssignments({ search, limit });
+
+// ── DPR Tag Master ───────────────────────────────────────────────────────────────────────────────
+
+export interface DprTag { id: number; tagName: string; isActive: boolean; activityCount: number; createdBy?: string | null }
+export const getDprTags = (): Promise<DprTag[]> => getJson("/api/dpr-tag-master", "Failed to load tags");
+export const createDprTag = (tagName: string) => send<{ id: number }>("POST", "/api/dpr-tag-master", { tagName }, "Failed to add the tag");
+export const updateDprTag = (id: number, data: { tagName: string; isActive: boolean }) => send("PUT", `/api/dpr-tag-master/${id}`, data, "Failed to update the tag");
+export const deleteDprTag = async (id: number) => {
+  const res = await fetchWithAuth(`/api/dpr-tag-master/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: string }).error || "Failed to delete the tag");
+  }
+};
+
+// ── Reports: User-Wise Daily Work and Tag-Wise (same endpoints as the web Reports page) ─────────────
+
+export interface DailyWorkRow {
+  logId: number;
+  tagName?: string | null;
+  userId: number;
+  userName: string | null;
+  logDate: string;
+  rungId: number;
+  chain: string | null;
+  projectName: string | null;
+  location: string | null;
+  flatName: string | null;
+  roomName: string | null;
+  storey: string | null;
+  activityName: string | null;
+  status: AssignmentStatus;
+  progressPercent: number | null;
+  progressMade: number | null;
+  startDate: string | null;
+  endDate: string | null;
+  attemptNo: number | null;
+  qcStatus: "APPROVED" | "REWORK" | null;
+}
+
+export interface DailyWorkFilters { projectId?: number[]; userId?: number[]; tagId?: number[]; date?: string; page?: number; limit?: number }
+
+/** One page of the user-wise (`kind` "user") or tag-wise ("tag") daily work report. */
+export const getDailyWorkReport = async (kind: "user" | "tag", f: DailyWorkFilters): Promise<{ rows: DailyWorkRow[]; total: number }> => {
+  const qs = new URLSearchParams({ page: String(f.page ?? 1), limit: String(f.limit ?? 25) });
+  if (f.projectId?.length) qs.set("projectId", f.projectId.join(","));
+  if (f.userId?.length) qs.set("userId", f.userId.join(","));
+  if (f.tagId?.length) qs.set("tagId", f.tagId.join(","));
+  if (f.date) qs.set("date", f.date);
+  const body = await getJson<{ data?: DailyWorkRow[]; rows?: DailyWorkRow[]; total?: number } | DailyWorkRow[]>(
+    `/api/civilworkdpr-reports/${kind === "tag" ? "tag-wise" : "user-daily-work"}?${qs}`,
+    "Failed to load the report",
+  );
+  if (Array.isArray(body)) return { rows: body, total: body.length };
+  const rows = body.data ?? body.rows ?? [];
+  return { rows, total: body.total ?? rows.length };
+};

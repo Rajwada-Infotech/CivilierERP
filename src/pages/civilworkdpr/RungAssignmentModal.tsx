@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, ShieldCheck, Plus, Trash2, Users, Search } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, Link2, Flag, ShieldCheck, Plus, Trash2, Users, Search } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
@@ -19,6 +19,9 @@ import {
 } from "@/api/dependencyActivityAssignmentApi";
 import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { chainFloorDisplay, roomDisplay } from "@/lib/floorLabel";
+import { dependencyAutoName } from "@/lib/dependencyAutoName";
+import { PRIORITY_META } from "@/components/civilworkdpr/PriorityBadge";
+import { ASSIGNMENT_PRIORITIES, type AssignmentPriority } from "@/api/dependencyActivityAssignmentApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
@@ -313,6 +316,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const [materialContractorId, setMaterialContractorId] = useState<number | null>(null);
   const [description, setDescription] = useState<string>("");
   const [descriptionTouched, setDescriptionTouched] = useState(false);
+  const [priority, setPriority] = useState<AssignmentPriority | "">("");
   const [remarks, setRemarks] = useState<string>("");
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   // Read-only here — see the render block below. Tagged in Activity Master,
@@ -334,6 +338,12 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     queryKey: ["dependency-activity-assignment", rungId],
     queryFn: () => getRungAssignment(rungId),
   });
+
+  // Derived from the dependency itself (flat + room + activity) — read-only, never typed.
+  const autoName = useMemo(
+    () => dependencyAutoName({ flatName: chain.flatName, alias: chain.alias, roomName: chain.roomName, storey: chain.storey, activityName: rung.activityName }),
+    [chain, rung],
+  );
 
   const defaultDescription = useMemo(
     () =>
@@ -371,6 +381,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     setMaterialSource(a.materialSource || "");
     setMaterialContractorId(a.materialContractorId ?? null);
     setDescription(a.description || defaultDescription);
+    setPriority(a.priority || "");
     setRemarks(a.remarks || "");
     const qtyMap: Record<string, string> = {};
     for (const m of a.materials) qtyMap[m.itemId] = String(m.quantity);
@@ -410,6 +421,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
         materialContractorId,
         description: description || null,
         remarks: remarks || null,
+        priority: priority || null,
         materials,
         checkpoints,
       });
@@ -585,6 +597,34 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Activity Priority */}
+            <div>
+              <label className={labelCls}>
+                <Flag size={11} /> Priority
+              </label>
+              <div className="flex items-center gap-2">
+                <select value={priority} onChange={(e) => setPriority(e.target.value as AssignmentPriority | "")} className={inputCls}>
+                  <option value="">Select priority…</option>
+                  {ASSIGNMENT_PRIORITIES.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                {priority && (
+                  <span className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${PRIORITY_META[priority].className}`}>
+                    {priority}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Auto Name — fetched from the dependency (flat, room) and its activity; read-only */}
+            <div>
+              <label className={labelCls}>
+                <Link2 size={11} /> Auto Name
+              </label>
+              <input value={autoName} readOnly tabIndex={-1} title="Fetched automatically from the dependency — not editable" className={`${inputCls} cursor-default opacity-90`} />
             </div>
 
             {/* Description — auto-filled from location + activity, editable */}
