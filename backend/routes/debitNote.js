@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, ebProjectPredicate, ebProjectIdSql, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
 

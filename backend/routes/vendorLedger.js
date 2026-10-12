@@ -14,7 +14,6 @@
  */
 const express = require("express");
 const router = express.Router();
-router.use(apiRateLimit);
 const authenticateToken = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(authenticateToken);
