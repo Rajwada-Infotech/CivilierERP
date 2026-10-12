@@ -286,7 +286,7 @@ const FinanceDashboard = () => {
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
           <div style={{ flex: "1 1 320px", padding: "22px 22px 20px", minWidth: 0 }}>
             <p className="label">CivilierERP · Finance</p>
-            <h1 className="title" style={{ fontSize: "clamp(28px, 3.4vw, 44px)", margin: "8px 0 0", lineHeight: 1.05 }}>Cash in, cash out</h1>
+            <h1 className="title" style={{ fontSize: "clamp(28px, 3.4vw, 44px)", margin: "8px 0 0", lineHeight: 1.05 }}>Finance overview</h1>
             <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--ink-2)", maxWidth: "60ch" }}>
               What has been received and paid, how the last fortnight ran, and the cheques, cards and banks behind it.
             </p>
