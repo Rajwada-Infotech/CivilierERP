@@ -62,10 +62,12 @@ export const buildCivilWorkDprNavItems = (_pendingApprovalCount: number): NavIte
     path: "/civilworkdpr/amendment",
     pageKey: "civilworkdpr-amendment",
   },
+  // Same shape as the Finance module's Query menu: an expandable group whose children are the reports.
   {
     label: "Query",
     icon: SearchNormal1,
-    path: "/civilworkdpr/query",
-    pageKey: "civilworkdpr-query",
+    children: [
+      { label: "User-Wise Daily Work Report", path: "/civilworkdpr/query", pageKey: "civilworkdpr-query" },
+    ],
   },
 ];
