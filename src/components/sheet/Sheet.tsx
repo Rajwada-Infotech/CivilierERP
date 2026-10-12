@@ -87,6 +87,23 @@ export const SHEET_CSS = `
 .crm-sheet .seg button:hover { color: var(--ink); background: var(--blue-wash); }
 .crm-sheet .seg button.on { background: var(--ink); color: var(--sheet); }
 .crm-sheet .skel { background: var(--rule-soft); border-radius: 2px; animation: crm-pulse 1.4s ease-in-out infinite; }
+/* Entrance: the title block and each detail rise into place, one after another. */
+@keyframes crm-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes crm-title { from { opacity: 0; transform: translateY(0.35em); } to { opacity: 1; transform: none; } }
+@keyframes crm-rule { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.crm-sheet.sheet-in > * { animation: crm-rise .55s cubic-bezier(.2,.7,.2,1) both; }
+.crm-sheet.sheet-in > *:nth-child(2) { animation-delay: .06s; }
+.crm-sheet.sheet-in > *:nth-child(3) { animation-delay: .12s; }
+.crm-sheet.sheet-in > *:nth-child(4) { animation-delay: .18s; }
+.crm-sheet.sheet-in > *:nth-child(5) { animation-delay: .24s; }
+.crm-sheet.sheet-in > *:nth-child(6) { animation-delay: .30s; }
+.crm-sheet.sheet-in > *:nth-child(7) { animation-delay: .36s; }
+.crm-sheet.sheet-in > *:nth-child(n+8) { animation-delay: .42s; }
+.crm-sheet.sheet-in .title { animation: crm-title .8s cubic-bezier(.2,.7,.2,1) both; }
+.crm-sheet.sheet-in .cell > header > span:nth-child(3) { transform-origin: left center; animation: crm-rule .9s .25s cubic-bezier(.2,.7,.2,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .crm-sheet.sheet-in > *, .crm-sheet.sheet-in .title, .crm-sheet.sheet-in .cell > header > span:nth-child(3) { animation: none; }
+}
 @keyframes crm-pulse { 50% { opacity: .45; } }
 @keyframes crm-draw { from { stroke-dashoffset: var(--len, 1200); } to { stroke-dashoffset: 0; } }
 @keyframes crm-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }

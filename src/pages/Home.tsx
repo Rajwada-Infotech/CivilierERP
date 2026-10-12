@@ -1325,14 +1325,14 @@ export default function HomePage() {
   const today = new Date();
 
   return (
-    <div className="font-body px-3 sm:px-5 lg:px-8 py-4 sm:py-5">
+    <div className="font-body flex flex-col -m-4 md:-m-6" /* cancels the layout's page padding: the sheet's border runs right round the screen */ style={{ minHeight: "calc(100vh - 3.5rem)" }}>
       <style>{SHEET_CSS}</style>
-      <div className="crm-sheet">
+      <div className="crm-sheet sheet-in" style={{ flex: 1, margin: 6 }}>
         {/* Title block */}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
-          <div style={{ flex: "1 1 320px", padding: "22px 22px 20px", minWidth: 0 }}>
+          <div style={{ flex: "1 1 320px", padding: "28px 22px 26px", minWidth: 0 }}>
             <p className="label">CivilierERP · {role.replace(/_/g, " ") || "user"}</p>
-            <h1 className="title" style={{ fontSize: "clamp(30px, 4.2vw, 56px)", margin: "8px 0 0", lineHeight: 1.04, overflowWrap: "anywhere" }}>
+            <h1 className="title" style={{ fontSize: "clamp(40px, 6.6vw, 104px)", margin: "10px 0 0", lineHeight: 1, overflowWrap: "anywhere" }}>
               {greeting}, <span style={{ color: "var(--blue)" }}>{firstName}.</span>
             </h1>
             {spotlightModules.length > 0 && (
@@ -1384,7 +1384,7 @@ export default function HomePage() {
                     <div key={k.id} style={{ padding: "0 18px", borderLeft: i % 4 ? "1px solid var(--rule)" : 0, minWidth: 0 }}>
                       <div className="label" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.label}</div>
                       <div className="figure" style={{ fontSize: "clamp(26px, 3vw, 42px)", marginTop: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {kpiText(k) ?? <span className="skel" style={{ display: "inline-block", height: 30, width: 90 }} />}
+                        {typeof k.value === "number" ? <AnimatedCounter target={k.value} prefix={k.prefix} suffix={k.suffix} duration={1.2} /> : kpiText(k) ?? <span className="skel" style={{ display: "inline-block", height: 30, width: 90 }} />}
                       </div>
                       <div style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 8 }}>{MODULE_LABELS[k.module as HomeModuleId] ?? k.module}</div>
                     </div>
