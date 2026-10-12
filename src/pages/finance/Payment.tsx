@@ -2226,7 +2226,8 @@ const Payment: React.FC = () => {
               <h2 className="font-heading text-sm font-bold text-foreground">{editingId ? "Edit payment" : "New payment"}</h2>
             </div>
 
-            <div className="px-5 sm:px-6 py-6 space-y-7">
+            <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="px-5 sm:px-6 py-6 space-y-7 min-w-0">
               {/* ── 1. Link Expense Booking ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Link2} label="Expense Booking" />
@@ -3902,30 +3903,21 @@ const Payment: React.FC = () => {
               <div className="space-y-3">
                 <SectionHeader icon={Wallet} label="Payment Mode" />
                 <Field label="Mode" required>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-0">
                     {PAYMENT_MODES.filter((m) => !reissueCtx || m !== "Cash").map((m) => {
-                      const s = MODE_STYLE[m] ?? {
-                        ring: "ring-border bg-muted",
-                        text: "text-muted-foreground",
-                        dot: "bg-muted-foreground",
-                      };
                       const active = form.mode === m;
                       return (
                         <button
                           key={m}
                           type="button"
+                          aria-pressed={active}
                           onClick={() => handleModeChange(m)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
+                          className={`-ml-px first:ml-0 -mt-px px-3.5 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border transition-colors ${
                             active
-                              ? `${s.ring} ${s.text} border-transparent shadow-sm`
-                              : "bg-background border-border text-muted-foreground ring-transparent hover:border-primary/40"
+                              ? "relative z-[1] bg-foreground text-card border-foreground"
+                              : "bg-card text-muted-foreground border-foreground/40 hover:text-foreground hover:bg-primary/10"
                           }`}
                         >
-                          {active && (
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${s.dot}`}
-                            />
-                          )}
                           {m}
                         </button>
                       );
@@ -3987,12 +3979,10 @@ const Payment: React.FC = () => {
               )}
 
               {/* ── Save footer ── */}
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-4" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
                 <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                   {canSave ? (
-                    <span className="text-emerald-500 font-medium">
-                      Ready to save
-                    </span>
+                    <span className="font-medium text-foreground">Ready to save</span>
                   ) : (
                     "Fill in the required fields to save"
                   )}
@@ -4001,7 +3991,7 @@ const Payment: React.FC = () => {
                   <button
                     onClick={handleReset}
                     disabled={!isDirty && !editingId}
-                    className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                    className="flex-1 sm:flex-none px-4 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                   >
                     <RotateCcw size={12} />
                     {editingId ? "Cancel" : "Reset"}
@@ -4009,10 +3999,10 @@ const Payment: React.FC = () => {
                   <button
                     onClick={handleSave}
                     disabled={saving || !canSave}
-                    className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-opacity whitespace-nowrap"
+                    className="flex-1 sm:flex-none px-5 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground hover:bg-foreground/85 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
                   >
                     {saving ? (
-                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
                     ) : editingId ? (
                       <Check size={12} />
                     ) : (
@@ -4026,6 +4016,54 @@ const Payment: React.FC = () => {
                   </button>
                 </div>
               </div>
+            </div>
+
+            {/* ── The voucher, as it stands: fills in while the form is completed ── */}
+            <aside className="hidden lg:block" style={{ borderLeft: "1px solid hsl(var(--foreground))" }}>
+              <div className="sticky top-20 p-5">
+                <p className="label">Voucher</p>
+                <p className="figure" style={{ fontSize: 30, marginTop: 10, overflowWrap: "anywhere" }}>
+                  {Number(form.amount) > 0 ? formatINR(Number(form.amount)) : "₹—"}
+                </p>
+                {Number(form.tdsAmount) > 0 && (
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>
+                    less TDS {formatINR(Number(form.tdsAmount))} · net {formatINR(Math.max(0, Number(form.amount || 0) - Number(form.tdsAmount)))}
+                  </p>
+                )}
+
+                <div style={{ marginTop: 16 }}>
+                  {[
+                    { l: "Pay to", v: form.paidTo },
+                    { l: "For", v: form.paymentName },
+                    { l: "Company", v: form.company },
+                    { l: "Project", v: form.project },
+                    { l: "Date", v: form.date ? new Date(`${form.date}T12:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "" },
+                    { l: "Mode", v: [form.mode, form.bankName].filter(Boolean).join(" · ") },
+                    { l: "Against", v: form.expenseRef || form.jvNo || "" },
+                  ].map((r) => (
+                    <div key={r.l} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, padding: "8px 0", borderTop: "1px solid var(--rule-soft)" }}>
+                      <span className="label" style={{ flexShrink: 0 }}>{r.l}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: r.v ? 600 : 400, color: r.v ? "var(--ink)" : "var(--faint)", textAlign: "right", overflowWrap: "anywhere" }}>
+                        {r.v || "not set"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="label" style={{ marginTop: 18, marginBottom: 6 }}>Needed to save</p>
+                {[
+                  { l: "Payment purpose", ok: !!form.paymentName.trim() },
+                  { l: "Payment mode", ok: !!form.mode },
+                  { l: "Date", ok: !!form.date },
+                  { l: "Amount or an invoice", ok: Number(form.amount) > 0 || !!form.expenseRef },
+                ].map((c) => (
+                  <div key={c.l} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12, color: c.ok ? "var(--ink)" : "var(--graphite)" }}>
+                    <i className={c.ok ? undefined : "hatch"} style={{ width: 9, height: 9, flexShrink: 0, border: "1px solid var(--ink)", background: c.ok ? "var(--blue)" : undefined }} />
+                    {c.l}
+                  </div>
+                ))}
+              </div>
+            </aside>
             </div>
           </div>
         )}
