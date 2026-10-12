@@ -140,6 +140,7 @@ async function ensureCoApplicantFromCustomer(pool, customer, actorUserId = null)
       INSERT INTO dbo.CrmCoApplicant (BookingId, Name, Relation, Mobile, PanNo, Notes, SourceType, CreatedBy, CreatedAt)
       VALUES (@bid, @name, @rel, @mob, @pan, @note, @src, @cb, SYSDATETIME())
     `);
+  await require("./crmCoApplicantCustomer").linkCoApplicantsOf(pool, { bookingId: customer.BookingId }, actorUserId);
 }
 
 // Idempotent: returns the existing row (re-linking its workflow keys, and

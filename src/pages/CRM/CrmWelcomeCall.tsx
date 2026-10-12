@@ -1972,7 +1972,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
               {coApplicants.map((c: any) => (
                 <div key={c.Id} className="rounded-lg border border-border p-3">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="font-medium text-sm text-foreground">{c.Name}{c.Relation ? <span className="text-muted-foreground font-normal"> · {c.Relation}</span> : ""}</div>
+                    <div className="font-medium text-sm text-foreground">{c.ApplicantNo ? <span className="mr-1.5 rounded bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-primary">Applicant {c.ApplicantNo}</span> : null}{c.Name}{c.Relation ? <span className="text-muted-foreground font-normal"> · {c.Relation}</span> : ""}{c.CustomerNo ? <span className="text-muted-foreground font-normal text-xs"> · customer {c.CustomerNo}</span> : ""}</div>
                     {rights.canDelete && !vcState.locked && (
                       <button onClick={() => handleRemoveCoApplicant(c.Id)} className="text-xs text-red-600 hover:underline shrink-0">Remove</button>
                     )}
