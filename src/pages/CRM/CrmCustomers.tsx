@@ -11,7 +11,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, Search, ChevronRight, IdCard, IndianRupee, Lock, Pencil, BookUser,
-  User, MapPin, Briefcase, FileText, UserPlus, AlertTriangle, Trash2,
+  User, MapPin, Briefcase, FileText, UserPlus, AlertTriangle, Trash2, Check, X,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -141,7 +141,7 @@ function AddressFields({
   );
 }
 
-function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onDeleted }: { customer: any; canDelete?: boolean; onClose: () => void; onSaved: () => void; onDeleted?: () => void }) {
+function EditCustomerDialog({ customer, canDelete = false, startEditing = false, onClose, onSaved, onDeleted }: { customer: any; canDelete?: boolean; startEditing?: boolean; onClose: () => void; onSaved: () => void; onDeleted?: () => void }) {
   const [form, setForm] = useState({
     CustomerName: customer.CustomerName || "", Mobile: customer.Mobile || "",
     AltMobile: customer.AltMobile || "", Email: customer.Email || "",
@@ -164,7 +164,8 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
   // the classic "clicked a row to look, accidentally fat-fingered a field,
   // hit Save without noticing" class of data-corruption mistake on a record
   // this central (every Application/Booking reads its KYC off this row).
-  const [locked, setLocked] = useState(true);
+  // The table's Edit action opens it already unlocked (an explicit Edit click, same intent).
+  const [locked, setLocked] = useState(!startEditing);
   const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const [deleting, setDeleting] = useState(false);
@@ -237,14 +238,10 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
         <DialogHeader className="space-y-0.5">
           <DialogTitle className="font-heading text-base font-bold flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
-              <IdCard size={16} className="text-sky-500" /> {customer.CustomerNo} — Edit Customer
+              <IdCard size={16} className="text-sky-500" /> {customer.CustomerNo} — {locked ? "View" : "Edit"} Customer
             </span>
-            {locked ? (
-              <button onClick={() => setLocked(false)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0">
-                <Pencil size={12} /> Edit
-              </button>
-            ) : (
+            {/* Edit / Delete live in the table's Actions column — a row click opens this read-only. */}
+            {!locked && (
               <span className="flex items-center gap-1 text-xs font-medium text-sky-600 shrink-0">
                 <Pencil size={12} /> Editing
               </span>
@@ -254,7 +251,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
 
         {locked && (
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5">
-            <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+            <Lock size={11} /> View only — use Edit (pencil) in the table's Actions column to make changes.
           </div>
         )}
 
@@ -363,31 +360,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
         ) : null}
 
         <div className="flex justify-between items-center gap-2 pt-2.5 border-t border-border">
-          <div>
-            {locked && canDelete && (
-              confirmDelete ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Delete this customer?</span>
-                  <button onClick={() => setConfirmDelete(false)} disabled={deleting}
-                    className="px-2.5 py-1 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                  <button onClick={handleDelete} disabled={deleting}
-                    className="px-2.5 py-1 text-xs rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40">
-                    {deleting ? "Deleting…" : "Confirm Delete"}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  disabled={deleteBlocked}
-                  title={deleteBlocked
-                    ? `Cannot delete — active/approved booking(s): ${blockingBookings.map((a: any) => `${a.BookingNo} (${a.BookingStatus})`).join(", ")}. Cancel them first.`
-                    : "Delete this customer"}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-                  <Trash2 size={12} /> Delete Customer
-                </button>
-              )
-            )}
-          </div>
+          <div />
           {locked ? (
             <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           ) : (
@@ -416,6 +389,10 @@ const CrmCustomers: React.FC = () => {
   const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Actions column: open the dialog in edit mode / inline delete confirmation.
+  const [startEditing, setStartEditing] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
   // Row clicks only ever set local state — the URL stayed plain
@@ -423,7 +400,8 @@ const CrmCustomers: React.FC = () => {
   // nothing to copy/bookmark/share to jump straight back to this customer.
   // Kept in sync with ?customerId= the same way the deep-link read effect
   // below already reads it, instead of a one-shot self-clearing param.
-  const openCustomer = (id: number) => {
+  const openCustomer = (id: number, edit = false) => {
+    setStartEditing(edit);
     setEditingId(id);
     setSearchParams((sp) => { sp.set("customerId", String(id)); return sp; }, { replace: true });
   };
@@ -604,6 +582,7 @@ const CrmCustomers: React.FC = () => {
   // Every column's cell is wrapped with the same row-click handler so the
   // whole row stays clickable to open the edit dialog, matching the old
   // hand-rolled <tr onClick={...}> behavior.
+  const { canEdit, canDelete } = usePageRights("crm-customers");
   const customerColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "CustomerNo", header: "Customer No", size: 110,
       cell: (i) => (
@@ -656,15 +635,44 @@ const CrmCustomers: React.FC = () => {
           {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
         </div>
       ) },
-    { id: "chevron", header: "", size: 40, enableSorting: false,
-      cell: (i) => (
-        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
-          <ChevronRight size={14} className="text-muted-foreground" />
-        </div>
-      ) },
+    { id: "actions", header: "Actions", size: 96, enableSorting: false,
+      meta: { align: "right", className: "text-right" },
+      cell: (i) => {
+        const c = i.row.original;
+        if (deleteConfirmId === c.Id) {
+          return (
+            <div className="flex items-center justify-end gap-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">Delete?</span>
+              <button onClick={() => deleteCustomer(c)} disabled={deletingId === c.Id} className="p-1 rounded text-destructive hover:bg-destructive/10 disabled:opacity-40" title="Confirm delete"><Check size={13} /></button>
+              <button onClick={() => setDeleteConfirmId(null)} disabled={deletingId === c.Id} className="p-1 rounded text-muted-foreground hover:bg-muted" title="Cancel"><X size={13} /></button>
+            </div>
+          );
+        }
+        return (
+          <div className="flex items-center justify-end gap-2">
+            {canEdit && <button onClick={() => openCustomer(c.Id, true)} className="p-1 rounded text-blue-400 hover:bg-blue-400/10" title="Edit"><Pencil size={15} /></button>}
+            {canDelete && <button onClick={() => setDeleteConfirmId(c.Id)} className="p-1 rounded text-destructive hover:bg-destructive/10" title="Delete"><Trash2 size={15} /></button>}
+          </div>
+        );
+      } },
   ];
 
-  const { canDelete } = usePageRights("crm-customers");
+  // Same DELETE the detail dialog uses; the server refuses while the customer has live bookings.
+  async function deleteCustomer(c: any) {
+    setDeletingId(c.Id);
+    try {
+      const res = await fetchWithAuth(`${API}/${c.Id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to delete customer");
+      toast.success(`${c.CustomerNo} deleted`);
+      qc.invalidateQueries({ queryKey: ["crm-customers"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setDeletingId(null);
+      setDeleteConfirmId(null);
+    }
+  }
 
   const exportColumns: ExportColumn[] = [
     { header: "Customer No", accessor: "CustomerNo" },
@@ -896,6 +904,7 @@ const CrmCustomers: React.FC = () => {
         <EditCustomerDialog
           customer={editingCustomer}
           canDelete={canDelete}
+          startEditing={startEditing}
           onClose={closeCustomer}
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-customers"] })}
           onDeleted={() => { qc.invalidateQueries({ queryKey: ["crm-customers"] }); closeCustomer(); }}
