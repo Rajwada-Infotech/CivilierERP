@@ -22,6 +22,7 @@ import CrmAfsQueryPayment from "@/pages/CRM/CrmAfsQueryPayment";
 import CrmAfsRegistry from "@/pages/CRM/CrmAfsRegistry";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { useAgreementState } from "./hooks/useAgreementState";
 
 const API = "/api/crm/agreements";
 const USERS_API = "/api/users";
@@ -105,31 +106,26 @@ function agreementStepStates(a: any, documents: any[] | undefined): { label: str
 }
 function AgreementStepper({ steps, activeTab, onStepClick }: { steps: { label: string; state: StepState; tab: AgrTab }[]; activeTab: AgrTab; onStepClick: (t: AgrTab) => void }) {
   return (
-    <div className="flex items-center overflow-x-auto thin-scroll pb-1">
-      {steps.map((s, i) => (
-        <React.Fragment key={s.label}>
-          <button onClick={() => onStepClick(s.tab)}
-            className={`flex items-center gap-1.5 shrink-0 rounded-lg px-2 py-1.5 hover:bg-muted/60 transition-colors group ${activeTab === s.tab ? "bg-muted/50" : ""}`}>
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ring-2 ${
-              s.state === "done"
-                ? "bg-green-500 text-white ring-green-200 dark:ring-green-900"
-                : s.state === "current"
-                ? "bg-primary text-primary-foreground ring-primary/25"
-                : "bg-muted text-muted-foreground ring-transparent"}`}>
-              {s.state === "done" ? <Check size={11} /> : i + 1}
-            </span>
-            <span className={`text-[0.6875rem] font-semibold whitespace-nowrap leading-tight ${
-              s.state === "done" ? "text-green-600 dark:text-green-400"
-              : s.state === "current" ? "text-foreground"
-              : "text-muted-foreground/60"}`}>
-              {s.label}
-            </span>
+    <div className="flex items-center gap-2 flex-wrap pb-1">
+      {steps.map((s, i) => {
+        const isDone = s.state === "done";
+        const isCurrent = s.state === "current";
+        const isActiveTab = activeTab === s.tab;
+        return (
+          <button
+            key={s.label}
+            onClick={() => onStepClick(s.tab)}
+            title={`${s.label} (Navigates to ${s.tab} tab)`}
+            className={cn(
+              "w-5 h-5 rounded-full flex items-center justify-center text-[0.625rem] font-bold transition-all shadow-sm",
+              isDone ? "bg-emerald-500 text-white" : isCurrent ? "bg-primary text-primary-foreground ring-2 ring-primary/20 ring-offset-1 ring-offset-background scale-110" : "bg-muted text-muted-foreground hover:bg-muted/80",
+              isActiveTab && !isCurrent ? "ring-1 ring-foreground/20 ring-offset-1 ring-offset-background" : ""
+            )}
+          >
+            {isDone ? <Check size={10} strokeWidth={3} /> : i + 1}
           </button>
-          {i < steps.length - 1 && (
-            <div className={`w-4 h-px mx-0.5 shrink-0 ${steps[i + 1].state !== "upcoming" ? "bg-green-400" : "bg-border"}`} />
-          )}
-        </React.Fragment>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -632,28 +628,25 @@ const CrmAgreement: React.FC = () => {
     setSp((p) => { p.set("id", String(id)); return p; }, { replace: true });
   };
 
-  const [agrDialog, setAgrDialog] = useState(false);
-  const [docDialog, setDocDialog] = useState(false);
-  const [docRequestDialog, setDocRequestDialog] = useState(false);
-  const [sendDialog, setSendDialog] = useState(false);
-  const [proposeDateDialog, setProposeDateDialog] = useState(false);
-  const [sendDate, setSendDate] = useState("");
-  const [regDialog, setRegDialog] = useState(false);
-  const [regForm, setRegForm] = useState({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" });
-  const [regFeesLocked, setRegFeesLocked] = useState(false);
-  const [regSaving, setRegSaving] = useState(false);
-  const [agrForm, setAgrForm] = useState({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
-  const [docForm, setDocForm] = useState({ ...EMPTY_DOC_FORM });
-  const [docRequestForm, setDocRequestForm] = useState({ ...EMPTY_DOC_REQUEST_FORM });
-  const [showUrlField, setShowUrlField] = useState(false);
-  const [uploadingDocs, setUploadingDocs] = useState(false);
-  const [previewDoc, setPreviewDoc] = useState<any | null>(null);
-  const docFileInputRef = useRef<HTMLInputElement>(null);
-  const [editDialog, setEditDialog] = useState(false);
-  const [editForm, setEditForm] = useState({ LegalName: "", LegalAddress: "", PanNo: "", AadhaarNo: "", RevisionReason: "", LegalExecutiveId: "" });
-  const [editLocked, setEditLocked] = useState(true);
+  const {
+    agrDialog, setAgrDialog, docDialog, setDocDialog, docRequestDialog, setDocRequestDialog,
+    sendDialog, setSendDialog, proposeDateDialog, setProposeDateDialog, sendDate, setSendDate,
+    regDialog, setRegDialog, regForm, setRegForm, regFeesLocked, setRegFeesLocked,
+    regSaving, setRegSaving, agrForm, setAgrForm, docForm, setDocForm,
+    docRequestForm, setDocRequestForm, showUrlField, setShowUrlField,
+    uploadingDocs, setUploadingDocs, previewDoc, setPreviewDoc, docFileInputRef,
+    editDialog, setEditDialog, editForm, setEditForm, editLocked, setEditLocked,
+    saving, setSaving, proxyApproveDialog, setProxyApproveDialog, proxyRecheckDialog,
+    setProxyRecheckDialog, proxyDateDialog, setProxyDateDialog, proxyProposeDateDialog,
+    setProxyProposeDateDialog, proxyProposedDate, setProxyProposedDate, proxySaving, setProxySaving,
+    editingLegalExec, setEditingLegalExec, handleSaveAgreement, handleAddDocument,
+    handleRequestDocument, handleUploadDocFiles, handleDocStatusChange, handleSendToCustomer,
+    handleProposeDate, handleAcceptDate, handleAgreementAction, handleMarkRegistered,
+    handleProxyCustomerApprove, handleProxyDateAccept, handleProxyCustomerRecheck,
+    handleProxyProposeDate, handleTogglePortal, handleAssignLegal, handleSaveEdit
+  } = useAgreementState(selectedId, bkgFilter, qc, navigate, promptNextStep);
+
   const editInputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${editLocked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
-  const [saving, setSaving] = useState(false);
 
   const urlTab = TAB_SLUGS[(sp.get("tab") || "").toLowerCase()];
   const [agrTab, setAgrTabRaw] = useState<AgrTab>(urlTab || "Timeline");
@@ -787,413 +780,6 @@ const CrmAgreement: React.FC = () => {
       LegalAddress: f.LegalAddress || bkg.LegalAddress || "",
     }));
   }, [agrForm.BookingId, agrDialog]);
-
-  const handleSaveAgreement = async () => {
-    if (!agrForm.BookingId) { toast.error("Booking is required"); return; }
-    if (agrForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(agrForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
-    if (agrForm.AadhaarNo && !/^\d{12}$/.test(agrForm.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...agrForm,
-          BookingId: parseInt(agrForm.BookingId),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create agreement");
-      toast.success(`Agreement ${data.AgreementNo} created`);
-      setAgrDialog(false);
-      setAgrForm({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAddDocument = async () => {
-    if (selectedId == null) return;
-    if (!docForm.DocumentUrl.trim()) { toast.error("Enter a URL, or use the upload button to attach a file"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/documents`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(docForm),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add document");
-      toast.success("Document added");
-      setDocDialog(false);
-      setDocForm({ ...EMPTY_DOC_FORM });
-      setShowUrlField(false);
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRequestDocument = async () => {
-    if (selectedId == null) return;
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/documents/request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(docRequestForm),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to request document");
-      toast.success("Document requested — the customer will see it in their portal");
-      setDocRequestDialog(false);
-      setDocRequestForm({ ...EMPTY_DOC_REQUEST_FORM });
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleUploadDocFiles = async (files: FileList | null) => {
-    if (selectedId == null || !files?.length) return;
-    setUploadingDocs(true);
-    try {
-      const formData = new FormData();
-      formData.append("DocumentType", docForm.DocumentType);
-      if (docForm.IssuedBy) formData.append("IssuedBy", docForm.IssuedBy);
-      if (docForm.Remarks) formData.append("Remarks", docForm.Remarks);
-      Array.from(files).forEach((f) => formData.append("files", f));
-      const res = await fetchWithAuth(`${API}/${selectedId}/documents/upload`, { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
-      toast.success(`${data.count} file(s) uploaded`);
-      setDocDialog(false);
-      setDocForm({ ...EMPTY_DOC_FORM });
-      setShowUrlField(false);
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setUploadingDocs(false);
-      if (docFileInputRef.current) docFileInputRef.current.value = "";
-    }
-  };
-
-  const handleDocStatusChange = async (docId: number, status: string) => {
-    if (selectedId == null) return;
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/documents/${docId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Status: status }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update document");
-      toast.success(`Marked ${status}`);
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
-  };
-
-  const handleSendToCustomer = async (proposedDate: string) => {
-    if (selectedId == null) return;
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/send-to-customer`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ proposedDate: proposedDate || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Agreement sent to customer portal");
-      setSendDialog(false);
-      setSendDate("");
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleProposeDate = async (proposedDate: string) => {
-    if (selectedId == null || !proposedDate) { toast.error("Pick a date"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/propose-date`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ proposedDate }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Proposed date sent to customer");
-      setProposeDateDialog(false);
-      setSendDate("");
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAcceptDate = async () => {
-    if (selectedId == null) return;
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/date/accept`, { method: "PUT" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Date accepted — sent for super admin approval");
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAgreementAction = async (action: "mark-executed" | "mark-registered" | "cancel") => {
-    if (selectedId == null) return;
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/${action}`, { method: "PUT" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Agreement marked ${data.status}`);
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-      if (action === "mark-executed") {
-        promptNextStep(navigate, "Agreement executed — Legal Milestones and NOC can now begin.", "/crm/legal-milestones", "Go to Legal Milestones");
-      } else if (action === "mark-registered") {
-        promptNextStep(navigate, "Agreement registered — you may now request NOC and begin the possession process.", "/crm/noc", "Go to NOC");
-      }
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
-  };
-
-  const handleMarkRegistered = async () => {
-    if (selectedId == null) return;
-    if (!regForm.AfsRegistrationNo.trim()) { toast.error("AFS Registration No. is required"); return; }
-    if (!regForm.AfsRegistrationDate) { toast.error("AFS Registration Date is required"); return; }
-    setRegSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/mark-registered`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          AfsRegistrationNo: regForm.AfsRegistrationNo.trim(),
-          AfsRegistrationDate: regForm.AfsRegistrationDate,
-          AfsStampDuty: regForm.AfsStampDuty !== "" ? regForm.AfsStampDuty : undefined,
-          AfsRegistrationFee: regForm.AfsRegistrationFee !== "" ? regForm.AfsRegistrationFee : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Agreement marked Registered");
-      setRegDialog(false);
-      setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" });
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-      promptNextStep(navigate, "Agreement registered — you may now request Bank / Organisation NOC.", "/crm/noc", "Go to NOC");
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setRegSaving(false);
-    }
-  };
-
-  const [proxyApproveDialog, setProxyApproveDialog] = useState(false);
-  const [proxyRecheckDialog, setProxyRecheckDialog] = useState(false);
-  const [proxyDateDialog, setProxyDateDialog] = useState(false);
-  const [proxyProposeDateDialog, setProxyProposeDateDialog] = useState(false);
-  const [proxyProposedDate, setProxyProposedDate] = useState("");
-  const [proxySaving, setProxySaving] = useState(false);
-
-  const handleProxyCustomerApprove = async (method: ProxyMethod, remarks: string) => {
-    if (selectedId == null) return;
-    setProxySaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/proxy-customer-approve`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Customer approval recorded on their behalf");
-      setProxyApproveDialog(false);
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setProxySaving(false);
-    }
-  };
-
-  const handleProxyDateAccept = async (method: ProxyMethod, remarks: string) => {
-    if (selectedId == null) return;
-    setProxySaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/proxy-date-accept`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Customer date acceptance recorded on their behalf");
-      setProxyDateDialog(false);
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setProxySaving(false);
-    }
-  };
-
-  const handleProxyCustomerRecheck = async (method: ProxyMethod, remarks: string) => {
-    if (selectedId == null) return;
-    setProxySaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/proxy-customer-recheck`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Customer recheck request recorded on their behalf");
-      setProxyRecheckDialog(false);
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setProxySaving(false);
-    }
-  };
-
-  const handleProxyProposeDate = async (method: ProxyMethod, remarks: string) => {
-    if (selectedId == null || !proxyProposedDate) return;
-    setProxySaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/proxy-propose-date`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks, ProposedDate: proxyProposedDate }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Customer's proposed date recorded on their behalf");
-      setProxyProposeDateDialog(false);
-      setProxyProposedDate("");
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreement-date-history", selectedId] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setProxySaving(false);
-    }
-  };
-
-  const [togglingPortal, setTogglingPortal] = useState(false);
-  const handleTogglePortalAccess = async (deactivate: boolean) => {
-    if (selectedId == null) return;
-    setTogglingPortal(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/portal/${deactivate ? "deactivate" : "reactivate"}`, { method: "PUT" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(deactivate ? "Portal access deactivated" : "Portal access reactivated");
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setTogglingPortal(false);
-    }
-  };
-
-  const openEdit = () => {
-    if (!detail?.agreement) return;
-    setEditForm({
-      LegalName: detail.agreement.LegalName || detail.agreement.ApplicantName || "",
-      LegalAddress: detail.agreement.LegalAddress || "",
-      PanNo: detail.agreement.PanNo || detail.agreement.CustomerPanNo || "",
-      AadhaarNo: detail.agreement.AadhaarNo || detail.agreement.CustomerAadhaarNo || "",
-      RevisionReason: "",
-      LegalExecutiveId: detail.agreement.LegalExecutiveId != null ? String(detail.agreement.LegalExecutiveId) : "",
-    });
-    setEditLocked(true);
-    setEditDialog(true);
-  };
-
-  const [assigningLegal, setAssigningLegal] = useState(false);
-  const [editingLegalExec, setEditingLegalExec] = useState(false);
-  const handleAssignLegal = async (legalExecutiveId: string) => {
-    if (selectedId == null) return;
-    setAssigningLegal(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}/assign-legal`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ LegalExecutiveId: legalExecutiveId || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(legalExecutiveId ? "Legal executive assigned" : "Legal executive unassigned");
-      setEditingLegalExec(false);
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setAssigningLegal(false);
-    }
-  };
-
-  const handleSaveEdit = async () => {
-    if (selectedId == null) return;
-    if (editForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(editForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
-    if (editForm.AadhaarNo && !/^\d{12}$/.test(editForm.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${selectedId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editForm),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(data.versionBumped ? "Details updated — prior version preserved in history" : "Details updated");
-      setEditDialog(false);
-      setEditLocked(true);
-      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreement-revisions", selectedId] });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const rights = usePageRights("crm-agreements");
   const afsPayRights = usePageRights("crm-afs-query-payment");

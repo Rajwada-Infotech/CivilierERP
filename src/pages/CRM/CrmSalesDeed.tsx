@@ -28,6 +28,8 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { useRegistryState } from "./hooks/useRegistryState";
+import { useQueryPaymentState } from "./hooks/useQueryPaymentState";
 
 const API = "/api/crm/sales-deed";
 const USERS_API = "/api/users"; 
@@ -170,31 +172,26 @@ function deedStepStates(d: any, documents: any[] | undefined, context: any): { l
 
 function DeedStepper({ steps, activeTab, onStepClick }: { steps: { label: string; state: StepState; tab: DeedTab }[]; activeTab: DeedTab; onStepClick: (t: DeedTab) => void }) {
   return (
-    <div className="flex items-center overflow-x-auto thin-scroll pb-1">
-      {steps.map((s, i) => (
-        <React.Fragment key={s.label}>
-          <button onClick={() => onStepClick(s.tab)}
-            className={cn("flex items-center gap-1.5 shrink-0 rounded-lg px-2 py-1.5 hover:bg-muted/60 transition-colors group", activeTab === s.tab ? "bg-muted/50" : "")}>
-            <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ring-2",
-              s.state === "done"
-                ? "bg-emerald-500 text-white ring-emerald-200 dark:ring-emerald-900"
-                : s.state === "current"
-                ? "bg-primary text-primary-foreground ring-primary/25"
-                : "bg-muted text-muted-foreground ring-transparent")}>
-              {s.state === "done" ? <Check size={11} /> : i + 1}
-            </span>
-            <span className={cn("text-[0.6875rem] font-semibold whitespace-nowrap leading-tight",
-              s.state === "done" ? "text-emerald-600 dark:text-emerald-400"
-              : s.state === "current" ? "text-foreground"
-              : "text-muted-foreground/60")}>
-              {s.label}
-            </span>
+    <div className="flex items-center gap-2 flex-wrap pb-1">
+      {steps.map((s, i) => {
+        const isDone = s.state === "done";
+        const isCurrent = s.state === "current";
+        const isActiveTab = activeTab === s.tab;
+        return (
+          <button
+            key={s.label}
+            onClick={() => onStepClick(s.tab)}
+            title={`${s.label} (Navigates to ${s.tab} tab)`}
+            className={cn(
+              "w-5 h-5 rounded-full flex items-center justify-center text-[0.625rem] font-bold transition-all shadow-sm",
+              isDone ? "bg-emerald-500 text-white" : isCurrent ? "bg-primary text-primary-foreground ring-2 ring-primary/20 ring-offset-1 ring-offset-background scale-110" : "bg-muted text-muted-foreground hover:bg-muted/80",
+              isActiveTab && !isCurrent ? "ring-1 ring-foreground/20 ring-offset-1 ring-offset-background" : ""
+            )}
+          >
+            {isDone ? <Check size={10} strokeWidth={3} /> : i + 1}
           </button>
-          {i < steps.length - 1 && (
-            <div className={cn("w-4 h-px mx-0.5 shrink-0", steps[i + 1].state !== "upcoming" ? "bg-emerald-400" : "bg-border")} />
-          )}
-        </React.Fragment>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -528,9 +525,6 @@ const EMPTY_FORM = {
   StampDutyCredit: "", SubRegistrarOffice: "", DeedDate: "", RegistrationDeadline: "",
 };
 
-async function fetchAll(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
-}
 
 const PAGE_SIZE = 20;
 interface DeedListFilters {
@@ -603,64 +597,7 @@ const CrmSalesDeed: React.FC = () => {
   const [execSaving, setExecSaving] = useState(false);
   const [execEditing, setExecEditing] = useState(false);
 
-  // Registry (Sub-Registrar Office appointment/registration tracker) — merged
-  // in from the former standalone Registry page/API; this is the same
-  // workflow as before (start → schedule → reschedule → complete/cancel),
-  // now scoped to the current deed's booking instead of its own list.
-  const [regStarting, setRegStarting] = useState(false);
-  const [regScheduleOpen, setRegScheduleOpen] = useState<"first" | "reschedule" | null>(null);
-  const [regScheduledDate, setRegScheduledDate] = useState("");
-  const [regAppointmentTime, setRegAppointmentTime] = useState("");
-  const [regAppointmentOffice, setRegAppointmentOffice] = useState("");
-  const [regRescheduleReason, setRegRescheduleReason] = useState("");
-  const [regCompleteOpen, setRegCompleteOpen] = useState(false);
-  const [regCompleteForm, setRegCompleteForm] = useState({
-    RegistrationNo: "", BookNo: "", PartNo: "", SubRegistrarOffice: "",
-    RegistrationDate: new Date().toISOString().slice(0, 10),
-    WitnessNames: "", BuyerAttended: false, SellerAttended: false,
-  });
-  const [regCancelOpen, setRegCancelOpen] = useState(false);
-  const [regCancelReason, setRegCancelReason] = useState("");
-  const [regNewDocType, setRegNewDocType] = useState("Other");
-  const [regNewDocLabel, setRegNewDocLabel] = useState("");
-  const [regUploadingDoc, setRegUploadingDoc] = useState(false);
-  const [regRequestingDoc, setRegRequestingDoc] = useState(false);
-  const regFileInputRef = useRef<HTMLInputElement>(null);
   const CRM_REGISTRY_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "legal_head"];
-
-  // Query Payment (stamp duty / registration fee communicated to and paid by
-  // the customer) — merged in from the former standalone Query Payment page/
-  // API; same two-step workflow (send fee details → confirm paid), now
-  // scoped to the current deed's booking.
-  interface QPStagedFile { name: string; size: number; type: string; base64: string; dataUri: string; }
-  const qpFileToStaged = (f: File): Promise<QPStagedFile> => new Promise((res, rej) => {
-    const r = new FileReader(); r.onerror = () => rej(r.error);
-    r.onload = () => { const uri = r.result as string; res({ name: f.name, size: f.size, type: f.type, base64: uri.slice(uri.indexOf(",") + 1), dataUri: uri }); };
-    r.readAsDataURL(f);
-  });
-  const QP_MAX_FILE = 4 * 1024 * 1024;
-  const QP_MAX_TOTAL = 6 * 1024 * 1024;
-  const [qpStarting, setQpStarting] = useState(false);
-  const [qpStep, setQpStep] = useState<1 | 2>(1);
-  const [qpPendingFiles, setQpPendingFiles] = useState<QPStagedFile[]>([]);
-  const [qpSendConfirm, setQpSendConfirm] = useState(false);
-  const [qpSending, setQpSending] = useState(false);
-  const [qpConfirmAmt, setQpConfirmAmt] = useState("");
-  const [qpConfirmRem, setQpConfirmRem] = useState("");
-  const [qpProofFile, setQpProofFile] = useState<QPStagedFile | null>(null);
-  const [qpConfirming, setQpConfirming] = useState(false);
-  const [qpProxyFile, setQpProxyFile] = useState<File | null>(null);
-  const [qpProxyDialog, setQpProxyDialog] = useState(false);
-  const [qpProxySaving, setQpProxySaving] = useState(false);
-  const [qpEditingRemarks, setQpEditingRemarks] = useState(false);
-  const [qpRemarksText, setQpRemarksText] = useState("");
-  const [qpRemarksSaving, setQpRemarksSaving] = useState(false);
-  const qpInfoRef = useRef<HTMLInputElement>(null);
-  const qpProofRef = useRef<HTMLInputElement>(null);
-  const qpProxyRef = useRef<HTMLInputElement>(null);
-  const canConfirmQueryPayment =
-    CRM_REGISTRY_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase()) ||
-    canDoAction("approval-inbox" as any, "edit");
 
   // State management additions
   const [activeTab, setActiveTab] = useState<DeedTab>('Timeline');
@@ -752,101 +689,55 @@ const CrmSalesDeed: React.FC = () => {
     enabled: detail?.BookingId != null,
   });
 
-  // Registry tracker for the currently-selected deed's booking — one
-  // GET /registry/booking/:bookingId call gives the tracker row plus (via a
-  // second, id-scoped call once we know the id) its documents and history.
-  const { data: regByBooking, refetch: refetchRegByBooking } = useQuery({
-    queryKey: ["crm-sales-deed-registry-by-booking", detail ? String(detail.BookingId) : ""],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${API}/registry/booking/${detail?.BookingId}`);
-      if (!r.ok) return null;
-      return r.json();
-    },
-    enabled: detail?.BookingId != null,
-    staleTime: 15_000,
-  });
-  const registryId = regByBooking?.Id ?? null;
-  const { data: regDetailData, refetch: refetchRegDetail } = useQuery({
-    queryKey: ["crm-sales-deed-registry-detail", registryId],
-    queryFn: async () => {
-      if (registryId == null) return null;
-      const r = await fetchWithAuth(`${API}/registry/${registryId}`);
-      if (!r.ok) return null;
-      return r.json();
-    },
-    enabled: registryId != null,
-    staleTime: 15_000,
-  });
-  const { data: regEligibleBookings = [] } = useQuery({
-    queryKey: ["crm-sales-deed-registry-eligible"],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${API}/registry/eligible-bookings`);
-      if (!r.ok) return [];
-      return r.json();
-    },
-    staleTime: 60_000,
-  });
-  const registry = regDetailData?.registry ?? regByBooking ?? null;
-  const registryDocuments: any[] = regDetailData?.documents || [];
-  const registryHistory: any[] = regDetailData?.history || [];
-  const registryRequired = registryDocuments.filter((d) => d.IsMandatory);
-  const registrySupporting = registryDocuments.filter((d) => !d.IsMandatory);
-  const registryVerifiedCount = registryRequired.filter((d) => d.Status === 'Verified').length;
-  const registryLocked = registry && ["Completed", "Cancelled"].includes(registry.Status);
-  const canCompleteOrCancelRegistry =
-    CRM_REGISTRY_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase()) ||
-    canDoAction("approval-inbox" as any, "edit");
-  const registryStartEligible = detail?.BookingId
-    ? (regEligibleBookings as any[]).some((b: any) => String(b.Id) === String(detail.BookingId))
-    : false;
-  const invalidateRegistry = () => {
-    qc.invalidateQueries({ queryKey: ["crm-sales-deed-registry-by-booking"] });
-    qc.invalidateQueries({ queryKey: ["crm-sales-deed-registry-detail", registryId] });
-    qc.invalidateQueries({ queryKey: ["crm-sales-deed-registry-eligible"] });
-    refetchRegByBooking();
-    if (registryId) refetchRegDetail();
-  };
+  const {
+    regStarting, regScheduleOpen, setRegScheduleOpen,
+    regScheduledDate, setRegScheduledDate,
+    regAppointmentTime, setRegAppointmentTime,
+    regAppointmentOffice, setRegAppointmentOffice,
+    regRescheduleReason, setRegRescheduleReason,
+    regCompleteOpen, setRegCompleteOpen,
+    regCompleteForm, setRegCompleteForm,
+    regCancelOpen, setRegCancelOpen,
+    regCancelReason, setRegCancelReason,
+    regNewDocType, setRegNewDocType,
+    regNewDocLabel, setRegNewDocLabel,
+    regUploadingDoc, regRequestingDoc,
+    previewLoading: regPreviewLoading, regFileInputRef,
+    registry, registryDocuments, registryHistory,
+    registryRequired, registrySupporting,
+    registryVerifiedCount, registryLocked,
+    registryId, registryStartEligible,
+    canCompleteOrCancelRegistry,
+    invalidateRegistry,
+    handleStartRegistry, handleRegSchedule, handleRegComplete,
+    handleRegCancel, handleRegUploadDoc, handleRegRequestDoc,
+    handleRegVerifyDoc, handleRegRejectDoc,
+    handleRegPreviewDoc, handleRegDownloadDoc,
+  } = useRegistryState(detail, currentUser, canDoAction, () => { invalidate(); });
 
-  // Query Payment tracker for the currently-selected deed's booking.
-  const { data: qpDetail, refetch: refetchQp } = useQuery({
-    queryKey: ["crm-sales-deed-qp-by-booking", detail ? String(detail.BookingId) : ""],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${API}/query-payment/booking/${detail?.BookingId}`);
-      if (!r.ok) return null;
-      const row = await r.json();
-      if (!row) return null;
-      const r2 = await fetchWithAuth(`${API}/query-payment/${row.Id}`);
-      if (!r2.ok) return row;
-      return r2.json();
-    },
-    enabled: !!detail?.BookingId,
-    staleTime: 15_000,
-  });
-  const { data: qpEligibleBookings = [] } = useQuery({
-    queryKey: ["crm-sales-deed-qp-eligible"],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${API}/query-payment/eligible-bookings`);
-      if (!r.ok) return [];
-      return r.json();
-    },
-    staleTime: 60_000,
-  });
-  const qpStartEligible = detail?.BookingId
-    ? (qpEligibleBookings as any[]).some((b: any) => String(b.Id) === String(detail.BookingId))
-    : false;
-  const qpInfoAttachments = (qpDetail?.attachments || []).filter((a: any) => a.DocType === "Info");
-  const qpProofAttachments = (qpDetail?.attachments || []).filter((a: any) => a.DocType === "Proof");
-  const qpConfirmed = qpDetail?.Status === "Confirmed";
-  const invalidateQp = () => {
-    qc.invalidateQueries({ queryKey: ["crm-sales-deed-qp-by-booking"] });
-    qc.invalidateQueries({ queryKey: ["crm-sales-deed-qp-eligible"] });
-    refetchQp();
-  };
-  useEffect(() => {
-    if (!qpDetail) return;
-    setQpStep(qpDetail.Status === CrmStatus.PENDING ? 1 : 2);
-    setQpPendingFiles([]); setQpProofFile(null); setQpSendConfirm(false); setQpEditingRemarks(false);
-  }, [qpDetail?.Id]);
+  const {
+    qpStarting, qpStep, setQpStep,
+    qpPendingFiles, setQpPendingFiles,
+    qpSendConfirm, setQpSendConfirm,
+    qpSending, qpConfirmAmt, setQpConfirmAmt,
+    qpConfirmRem, setQpConfirmRem,
+    qpProofFile, setQpProofFile,
+    qpConfirming, qpProxyFile, setQpProxyFile,
+    qpProxyDialog, setQpProxyDialog,
+    qpProxySaving, qpEditingRemarks, setQpEditingRemarks,
+    qpRemarksText, setQpRemarksText,
+    qpRemarksSaving,
+    qpInfoRef, qpProofRef, qpProxyRef,
+    qpDetail, qpStartEligible,
+    qpInfoAttachments, qpProofAttachments,
+    qpConfirmed, canConfirmQueryPayment,
+    invalidateQp, qpStageFiles,
+    handleStartQp, handleQpSendInfo, handleQpConfirm,
+    handleQpSaveRemarks, handleQpProxyProof,
+    qpOpenAttachment,
+  } = useQueryPaymentState(detail, currentUser, canDoAction, () => { invalidate(); });
+
+
 
   const agreementRegistered = context?.agreement?.Status === "Registered";
   const isLoanFinanced = context?.booking?.FinancingType === "LoanFinanced";
@@ -918,278 +809,7 @@ const CrmSalesDeed: React.FC = () => {
     if (detailId != null) invalidateDetail();
   };
 
-  // ── Registry handlers ──────────────────────────────────────────────────
-  const handleStartRegistry = async () => {
-    if (detail?.BookingId == null) return;
-    setRegStarting(true);
-    try {
-      const res = await fetchWithAuth(`${API}/registry`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ BookingId: detail.BookingId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`${data.RegNo} started`);
-      invalidate(); invalidateRegistry();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setRegStarting(false); }
-  };
 
-  const handleRegSchedule = async () => {
-    if (registryId == null || !regScheduledDate) { toast.error("Date is required"); return; }
-    const isReschedule = regScheduleOpen === "reschedule";
-    if (!isReschedule && !regAppointmentOffice.trim()) { toast.error("Sub-Registrar Office is required"); return; }
-    if (isReschedule && !regRescheduleReason.trim()) { toast.error("A reason is required to reschedule"); return; }
-    try {
-      const res = await fetchWithAuth(`${API}/registry/${registryId}/${isReschedule ? "reschedule" : "schedule"}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(isReschedule
-          ? { ScheduledDate: regScheduledDate, AppointmentTime: regAppointmentTime, AppointmentOffice: regAppointmentOffice, Reason: regRescheduleReason.trim() }
-          : { ScheduledDate: regScheduledDate, AppointmentTime: regAppointmentTime, AppointmentOffice: regAppointmentOffice.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(isReschedule ? "Appointment rescheduled" : "Appointment scheduled");
-      setRegScheduleOpen(null); setRegScheduledDate(""); setRegAppointmentTime(""); setRegAppointmentOffice(""); setRegRescheduleReason("");
-      invalidateRegistry();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
-
-  const handleRegComplete = async () => {
-    if (registryId == null) return;
-    if (!regCompleteForm.RegistrationNo.trim()) { toast.error("Registration No. is required"); return; }
-    if (!regCompleteForm.WitnessNames.trim()) { toast.error("Witness names are required"); return; }
-    if (!regCompleteForm.BuyerAttended || !regCompleteForm.SellerAttended) { toast.error("Both parties' attendance must be confirmed"); return; }
-    try {
-      const res = await fetchWithAuth(`${API}/registry/${registryId}/complete`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(regCompleteForm),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Registry completed — Sale Deed marked Registered");
-      setRegCompleteOpen(false);
-      setRegCompleteForm({ RegistrationNo: "", BookNo: "", PartNo: "", SubRegistrarOffice: "", RegistrationDate: new Date().toISOString().slice(0, 10), WitnessNames: "", BuyerAttended: false, SellerAttended: false });
-      invalidate(); invalidateRegistry();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
-
-  const handleRegCancel = async () => {
-    if (registryId == null || !regCancelReason.trim()) { toast.error("A reason is required"); return; }
-    try {
-      const res = await fetchWithAuth(`${API}/registry/${registryId}/cancel`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Reason: regCancelReason.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Registry cancelled");
-      setRegCancelOpen(false); setRegCancelReason("");
-      invalidateRegistry();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
-
-  const handleRegUploadDoc = async (file: File, documentType: string, label?: string) => {
-    if (registryId == null) return;
-    setRegUploadingDoc(true);
-    try {
-      const formData = new FormData();
-      formData.append('files', file);
-      formData.append('DocumentType', documentType);
-      if (label) formData.append('Label', label);
-      const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/upload`, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Document uploaded");
-      invalidateRegistry();
-      setRegNewDocLabel('');
-      if (regFileInputRef.current) regFileInputRef.current.value = '';
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setRegUploadingDoc(false); }
-  };
-
-  const handleRegRequestDoc = async (documentType: string, label?: string) => {
-    if (registryId == null) return;
-    setRegRequestingDoc(true);
-    try {
-      const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/request`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ DocumentType: documentType, Label: label, IsMandatory: true }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Document requested");
-      invalidateRegistry();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setRegRequestingDoc(false); }
-  };
-
-  const handleRegVerifyDoc = async (docId: number) => {
-    if (registryId == null) return;
-    try {
-      const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/${docId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ Status: 'Verified' }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Document verified");
-      invalidateRegistry();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
-
-  const handleRegRejectDoc = async (docId: number) => {
-    if (registryId == null) return;
-    const remarks = window.prompt("Describe what's wrong with this document (required):");
-    if (!remarks?.trim()) return;
-    try {
-      const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/${docId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ Status: 'Rejected', Remarks: remarks.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Document rejected");
-      invalidateRegistry();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
-
-  const handleRegPreviewDoc = async (doc: any) => {
-    setPreviewLoading(doc.Id);
-    try {
-      const res = await fetchWithAuth(`${API}/registry/documents/file/${doc.Id}`);
-      if (!res.ok) throw new Error("Could not load file");
-      const blob = await res.blob();
-      setPreviewDoc({ url: URL.createObjectURL(blob), mime: doc.MimeType, name: doc.FileName || doc.DocumentType });
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setPreviewLoading(null); }
-  };
-  const handleRegDownloadDoc = async (doc: any) => {
-    try {
-      const res = await fetchWithAuth(`${API}/registry/documents/file/${doc.Id}`);
-      if (!res.ok) throw new Error("Could not download file");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = doc.FileName || doc.DocumentType || 'document';
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
-
-  // ── Query Payment handlers ─────────────────────────────────────────────
-  const qpStageFiles = async (files: FileList | null, multi = true) => {
-    if (!files?.length) return;
-    const arr = Array.from(files);
-    const big = arr.find((f) => f.size > QP_MAX_FILE);
-    if (big) { toast.error(`${big.name} is too large (max 4 MB)`); return; }
-    const total = qpPendingFiles.reduce((s, f) => s + f.size, 0) + arr.reduce((s, f) => s + f.size, 0);
-    if (total > QP_MAX_TOTAL) { toast.error("Total files can't exceed 6 MB"); return; }
-    try {
-      const staged = await Promise.all(arr.map(qpFileToStaged));
-      if (multi) setQpPendingFiles((p) => [...p, ...staged]);
-      else setQpProofFile(staged[0]);
-    } catch { toast.error("Failed to read file"); }
-  };
-
-  const handleStartQp = async () => {
-    if (!detail?.BookingId) return;
-    setQpStarting(true);
-    try {
-      const res = await fetchWithAuth(`${API}/query-payment`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ BookingId: detail.BookingId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`${data.QPNo} started`);
-      invalidate(); invalidateQp();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setQpStarting(false); }
-  };
-
-  const handleQpSendInfo = async () => {
-    if (!qpDetail?.Id || !qpPendingFiles.length) return;
-    setQpSending(true);
-    try {
-      const res = await fetchWithAuth(`${API}/query-payment/${qpDetail.Id}/info`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files: qpPendingFiles.map((f) => ({ fileName: f.name, mimeType: f.type, base64: f.base64 })) }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Payment details sent to customer");
-      setQpPendingFiles([]); setQpSendConfirm(false);
-      invalidateQp(); invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setQpSending(false); }
-  };
-
-  const handleQpConfirm = async () => {
-    if (!qpDetail?.Id) return;
-    setQpConfirming(true);
-    try {
-      const res = await fetchWithAuth(`${API}/query-payment/${qpDetail.Id}/confirm`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ConfirmedAmount: qpConfirmAmt || undefined,
-          Remarks: qpConfirmRem || undefined,
-          proof: qpProofFile ? { fileName: qpProofFile.name, mimeType: qpProofFile.type, base64: qpProofFile.base64 } : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Government payment confirmed");
-      setQpConfirmAmt(""); setQpConfirmRem(""); setQpProofFile(null);
-      invalidateQp(); invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setQpConfirming(false); }
-  };
-
-  const handleQpSaveRemarks = async () => {
-    if (!qpDetail?.Id) return;
-    setQpRemarksSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/query-payment/${qpDetail.Id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Remarks: qpRemarksText }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Remarks saved");
-      setQpEditingRemarks(false);
-      invalidateQp();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setQpRemarksSaving(false); }
-  };
-
-  const handleQpProxyProof = async (method: ProxyMethod, remarks: string) => {
-    if (!qpDetail?.Id || !qpProxyFile) return;
-    setQpProxySaving(true);
-    try {
-      const fd = new FormData(); fd.append("file", qpProxyFile); fd.append("ProxyMethod", method); fd.append("ProxyRemarks", remarks);
-      const res = await fetchWithAuth(`${API}/query-payment/${qpDetail.Id}/proxy-proof`, { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Proof uploaded on customer's behalf");
-      setQpProxyDialog(false); setQpProxyFile(null);
-      if (qpProxyRef.current) qpProxyRef.current.value = "";
-      invalidateQp();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setQpProxySaving(false); }
-  };
-
-  const qpOpenAttachment = async (a: any) => {
-    try {
-      const res = await fetchWithAuth(`${API}/query-payment/attachment/${a.AttachmentId}`);
-      if (!res.ok) throw new Error("Failed");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const win = window.open(url, "_blank");
-      if (!win) { const anchor = document.createElement("a"); anchor.href = url; anchor.download = a.FileName; anchor.click(); }
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    } catch { toast.error("Could not open attachment"); }
-  };
 
   const handleCreate = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
@@ -2530,8 +2150,8 @@ const CrmSalesDeed: React.FC = () => {
                                           </div>
                                           <div className="flex items-center gap-2 mt-1.5 pl-6">
                                             {doc.HasFile && (doc.MimeType?.startsWith('image/') || doc.MimeType === 'application/pdf') && (
-                                              <button data-row-view onClick={() => handleRegPreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-[0.6875rem] text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
-                                                {previewLoading === doc.Id ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />} Preview
+                                              <button data-row-view onClick={() => handleRegPreviewDoc(doc, setPreviewDoc)} disabled={regPreviewLoading === doc.Id} className="text-[0.6875rem] text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
+                                                {regPreviewLoading === doc.Id ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />} Preview
                                               </button>
                                             )}
                                             {doc.HasFile && (
