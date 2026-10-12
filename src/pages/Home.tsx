@@ -1332,7 +1332,7 @@ export default function HomePage() {
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
           <div style={{ flex: "1 1 320px", padding: "28px 22px 26px", minWidth: 0 }}>
             <p className="label">CivilierERP · {role.replace(/_/g, " ") || "user"}</p>
-            <h1 className="title" style={{ fontSize: "clamp(40px, 6.6vw, 104px)", margin: "10px 0 0", lineHeight: 1, overflowWrap: "anywhere" }}>
+            <h1 className="title" style={{ fontSize: "clamp(34px, 5vw, 76px)", margin: "10px 0 0", lineHeight: 1, overflowWrap: "anywhere" }}>
               {greeting}, <span style={{ color: "var(--blue)" }}>{firstName}.</span>
             </h1>
             {spotlightModules.length > 0 && (
