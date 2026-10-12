@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-router.use(apiRateLimit);
 
 const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");

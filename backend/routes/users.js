@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-router.use(apiRateLimit);
 const { getPool, sql, queryWithRetry } = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
