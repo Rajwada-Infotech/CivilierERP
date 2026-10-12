@@ -299,6 +299,7 @@ function ChainGroupList({
                       <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
                         <th className="px-5 py-2">Activity</th>
                         <th className="px-3 py-2">Engineer</th>
+                        <th className="px-3 py-2">Tag</th>
                         <th className="px-3 py-2">Start Date</th>
                         <th className="px-3 py-2">Material</th>
                         <th className="px-3 py-2">Photos</th>
@@ -325,6 +326,13 @@ function ChainGroupList({
                               <UserRound size={11} className="text-muted-foreground shrink-0" />
                               {row.engineerNames || <span className="text-muted-foreground italic">Unassigned</span>}
                             </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            {row.tagName ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 whitespace-nowrap">{row.tagName}</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
                           </td>
                           <td className="px-3 py-3">
                             <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
