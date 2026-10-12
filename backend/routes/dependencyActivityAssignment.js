@@ -1,5 +1,33 @@
 const express = require("express");
 const router = express.Router();
+
+// ── "Auto Name" search ───────────────────────────────────────────────────────
+// An activity's Auto Name is "<flat>, <room> and <activity>" (e.g. "NS/n1/101, Hall Room and
+// 2.1 Column and Beam Fiver net Fix"). Searching splits what was typed into words (dropping the
+// joining "and") and requires EVERY word to match somewhere in the activity, flat, room, tower,
+// project, chain alias (or, where asked, an engineer's name) — so a whole Auto Name or any pieces of
+// it, in any order, finds the activity. A single word behaves exactly as the old search did.
+function searchTokens(search) {
+  return String(search || "").toLowerCase().split(/[\s,>]+/).filter((t) => t && t !== "and").slice(0, 8);
+}
+function bindSearchTokens(request, tokens) {
+  tokens.forEach((t, i) => request.input(`st${i}`, sql.NVarChar(200), `%${t.replace(/[[\]%_]/g, (c) => `[${c}]`)}%`));
+}
+// SQL (no leading AND) matching every token; `withEngineer` also lets a token match an engineer's name.
+function tokenSearchCond(tokens, withEngineer) {
+  return tokens
+    .map((_, i) => `(
+        am.activity_name LIKE @st${i} OR dm.Alias LIKE @st${i} OR ep.name LIKE @st${i} OR
+        bm.BlockName LIKE @st${i} OR um.UnitName LIKE @st${i} OR rm.RoomName LIKE @st${i}${
+          withEngineer
+            ? ` OR EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer sdae JOIN dbo.users su ON su.id = sdae.EngineerId
+                WHERE sdae.AssignmentId = daa.Id AND su.name LIKE @st${i})`
+            : ""
+        }
+      )`)
+    .join(" AND ");
+}
+
 const multer = require("multer");
 const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -67,6 +95,8 @@ const PHOTO_PHASES = new Set(["before", "after"]);
 
 const STATUS_VALUES = new Set(["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
+// Activity Priority set on the Work Allocation form (dbo.DependencyActivityAssignment.Priority; NULL = none).
+const PRIORITY_VALUES = new Set(["Low", "High", "Urgent", "Very Urgent"]);
 
 // Rework forks a brand-new assignment attempt instead of mutating the
 // rejected one in place (see migration 488's own comment) — the redo goes
@@ -79,7 +109,7 @@ const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
 async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, source, actor) {
   const old = (await new sql.Request(tx).input("id", sql.Int, oldAssignmentId).query(`
     SELECT AttemptNo, LabourSource, MaterialSource, LabourContractorId, MaterialContractorId,
-           Description, ApprovalLevelsJson
+           Description, ApprovalLevelsJson, Priority
     FROM dbo.DependencyActivityAssignment WHERE Id = @id
   `)).recordset[0];
 
@@ -110,16 +140,17 @@ async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, sour
     .input("materialContractorId", sql.Int, old?.MaterialContractorId ?? null)
     .input("description", sql.NVarChar(500), old?.Description || null)
     .input("approvalLevelsJson", sql.NVarChar(sql.MAX), old?.ApprovalLevelsJson || "[]")
+    .input("priority", sql.NVarChar(20), old?.Priority || null)
     .input("by", sql.NVarChar(200), actor)
     .query(`
       INSERT INTO dbo.DependencyActivityAssignment
         (DependencyMasterActivityId, Status, AttemptNo, ReworkFromAssignmentId,
          LabourSource, MaterialSource, LabourContractorId, MaterialContractorId,
-         Description, ApprovalLevelsJson, CreatedBy)
+         Description, ApprovalLevelsJson, Priority, CreatedBy)
       OUTPUT INSERTED.Id AS id
       VALUES (@rungId, 'PENDING', @attemptNo, @reworkFrom,
               @labourSource, @materialSource, @labourContractorId, @materialContractorId,
-              @description, @approvalLevelsJson, @by)
+              @description, @approvalLevelsJson, @priority, @by)
     `);
   const newAssignmentId = ins.recordset[0].id;
 
@@ -263,14 +294,10 @@ router.get(
       request.input("rungIdFilter", sql.Int, rungIdFilter);
       conds.push("daa.DependencyMasterActivityId = @rungIdFilter");
     }
-    if (search) {
-      request.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push(`(
-        am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
-        bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search OR
-        EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer sdae JOIN dbo.users su ON su.id = sdae.EngineerId
-                WHERE sdae.AssignmentId = daa.Id AND su.name LIKE @search)
-      )`);
+    const tokens = search ? searchTokens(search) : [];
+    if (tokens.length) {
+      bindSearchTokens(request, tokens);
+      conds.push(`(${tokenSearchCond(tokens, true)})`);
     }
     if (qcPending) {
       conds.push("ISNULL((SELECT TOP 1 qcp.Decision FROM dbo.DependencyActivityQc qcp WHERE qcp.AssignmentId = daa.Id ORDER BY qcp.QcAt DESC, qcp.Id DESC), '') <> 'APPROVED'");
@@ -309,6 +336,7 @@ router.get(
         CASE daa.MaterialSource WHEN 'CONTRACTOR' THEN mc.LHeadName WHEN 'DEVELOPER' THEN dev.name END AS materialSourceName,
         daa.Description AS description,
         daa.Remarks AS remarks,
+        daa.Priority AS priority,
         daa.Status AS status,
         daa.PreCancelStatus AS preCancelStatus,
         daa.ProgressPercent AS progressPercent,
@@ -419,14 +447,11 @@ router.get(
       const pool = await getPool();
 
       const projectCond = Number.isFinite(projectFilterId) ? " AND dm.ProjectId = @projectFilterId" : "";
-      const searchCond = search ? `
-          AND (
-            am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
-            bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search
-          )` : "";
+      const tokens = search ? searchTokens(search) : [];
+      const searchCond = tokens.length ? ` AND ${tokenSearchCond(tokens, false)}` : "";
 
       const countsReq = pool.request();
-      if (search) countsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (tokens.length) bindSearchTokens(countsReq, tokens);
       if (projectCond) countsReq.input("projectFilterId", sql.Int, projectFilterId);
       // Started now, awaited below: the status counts and the room list are
       // independent aggregates over the same tables, so they run in parallel
@@ -445,7 +470,7 @@ router.get(
         GROUP BY daa.Status
       `);
       const roomsReq = pool.request();
-      if (search) roomsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (tokens.length) bindSearchTokens(roomsReq, tokens);
       if (projectCond) roomsReq.input("projectFilterId", sql.Int, projectFilterId);
       if (statusFilter && STATUS_VALUES.has(statusFilter)) roomsReq.input("statusFilter", sql.NVarChar(20), statusFilter);
       const roomsPromise = roomsReq.query(`
@@ -608,9 +633,10 @@ const transferFilters = (req, request) => {
     request.input("rungFilter", sql.Int, rungId);
     cond += " AND dma.Id = @rungFilter";
   }
-  if (search) {
-    request.input("search", sql.NVarChar(200), `%${search}%`);
-    cond += " AND (am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search)";
+  const tokens = search ? searchTokens(search) : [];
+  if (tokens.length) {
+    bindSearchTokens(request, tokens);
+    cond += ` AND ${tokenSearchCond(tokens, false)}`;
   }
   return cond;
 };
@@ -1935,7 +1961,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         Id AS assignmentId, StartDate AS startDate, Days AS days, EndDate AS endDate,
         LabourSource AS labourSource, MaterialSource AS materialSource,
         LabourContractorId AS labourContractorId, MaterialContractorId AS materialContractorId,
-        Description AS description, Remarks AS remarks, ApprovalLevelsJson AS approvalLevelsJson,
+        Description AS description, Remarks AS remarks, Priority AS priority, ApprovalLevelsJson AS approvalLevelsJson,
         ReworkFromAssignmentId AS reworkFromAssignmentId
       FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1
     `);
@@ -2101,6 +2127,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
             qcStatus,
             description: assignment.description,
             remarks: assignment.remarks,
+            priority: assignment.priority ?? null,
             materials,
             checkpoints,
           }
@@ -2123,7 +2150,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
 
   const {
     engineerIds, qcUserIds, approvalLevels, startDate, days, endDate, labourSource, materialSource,
-    labourContractorId, materialContractorId, description, remarks, materials, checkpoints,
+    labourContractorId, materialContractorId, description, remarks, materials, checkpoints, priority,
   } = req.body;
 
   if (engineerIds != null && !Array.isArray(engineerIds)) {
@@ -2185,6 +2212,9 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
   if (materialSource && !SOURCE_VALUES.has(materialSource)) {
     return res.status(400).json({ error: `materialSource must be one of: ${[...SOURCE_VALUES].join(", ")}` });
   }
+  if (priority && !PRIORITY_VALUES.has(priority)) {
+    return res.status(400).json({ error: `priority must be one of: ${[...PRIORITY_VALUES].join(", ")}` });
+  }
 
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -2209,6 +2239,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .input("materialContractorId", sql.Int, Number.isFinite(materialContractorId) ? materialContractorId : null)
         .input("description", sql.NVarChar(500), description || null)
         .input("remarks", sql.NVarChar(1000), remarks || null)
+        .input("priority", sql.NVarChar(20), priority || null)
         .input("approvalLevelsJson", sql.NVarChar(sql.MAX), approvalLevelsJson);
 
     let assignmentId;
@@ -2222,7 +2253,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
           SET StartDate = @startDate, Days = @days, EndDate = @endDate,
               LabourSource = @labourSource, MaterialSource = @materialSource,
               LabourContractorId = @labourContractorId, MaterialContractorId = @materialContractorId,
-              Description = @description, Remarks = @remarks, ApprovalLevelsJson = @approvalLevelsJson,
+              Description = @description, Remarks = @remarks, Priority = @priority, ApprovalLevelsJson = @approvalLevelsJson,
               UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
@@ -2233,10 +2264,10 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .query(`
           INSERT INTO dbo.DependencyActivityAssignment
             (DependencyMasterActivityId, StartDate, Days, EndDate, LabourSource, MaterialSource,
-             LabourContractorId, MaterialContractorId, Description, Remarks, ApprovalLevelsJson, CreatedBy)
+             LabourContractorId, MaterialContractorId, Description, Remarks, Priority, ApprovalLevelsJson, CreatedBy)
           OUTPUT INSERTED.Id AS id
           VALUES (@rungId, @startDate, @days, @endDate, @labourSource, @materialSource,
-                  @labourContractorId, @materialContractorId, @description, @remarks, @approvalLevelsJson, @createdBy)
+                  @labourContractorId, @materialContractorId, @description, @remarks, @priority, @approvalLevelsJson, @createdBy)
         `);
       assignmentId = inserted.recordset[0].id;
     }

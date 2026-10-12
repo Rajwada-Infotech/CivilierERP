@@ -13,6 +13,7 @@ import { ActivityRow } from "@/components/ActivityRow";
 import { ScopeTree } from "@/components/ScopeTree";
 import { ShowMore, useIncremental } from "@/components/ShowMore";
 import { usePageRights } from "@/hooks/usePageRights";
+import { AutoNameLookup } from "@/components/AutoNameLookup";
 import { getRoomActivities, getScopeProjects, getScopeSummary, type ScopeRoom } from "@/api/cwdApi";
 
 const ACCENT = "#0891b2";
@@ -40,6 +41,7 @@ function RoomActivities({ room, status }: { room: ScopeRoom; status: string }) {
 export default function ReportingScreen() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const qc = useQueryClient();
+  const navigation = useNavigation<{ navigate: (name: string, params?: object) => void }>();
   const [status, setStatus] = useState<string>("ALL");
   const [projectId, setProjectId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -96,13 +98,15 @@ export default function ReportingScreen() {
           />
         }
       >
+        <AutoNameLookup onOpen={(rungId) => navigation.navigate("ActivityDetail", { rungId })} />
+
         {/* Search */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, borderRadius: 12, paddingHorizontal: 12 }}>
           <Search size={14} color={colors.mutedForeground} />
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search activity, location or chain…"
+            placeholder="Search by Auto Name, activity, location or chain…"
             placeholderTextColor={`${colors.mutedForeground}99`}
             style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 13, paddingVertical: 10 }}
           />

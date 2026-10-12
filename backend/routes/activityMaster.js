@@ -6,6 +6,7 @@ const router = express.Router();
 const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { findOrCreateTag } = require("./dprTagMaster");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DB Schema (from sp_help):
@@ -20,6 +21,7 @@ const { getPool, sql } = require("../db");
 //   belongsTo         nvarchar(200) → sql.NVarChar(200)
 //   gl_head_id        int NULL      → sql.Int   (migration 315, Activities only)
 //   days_of_completion int NULL     → sql.Int   (migration 533, Activities only, 1-3650)
+//   TagId             int NULL      → sql.Int   (migration 556, Activities only, → DprTagMaster)
 //
 // activity_type:  0 = Group    → group_id = NULL,      belongsTo = NULL
 // activity_type:  1 = Activity → group_id = INT id,    belongsTo = String(group_id)
@@ -58,9 +60,12 @@ router.get("/", cache("activity-master", 300), async (req, res) => {
         am.hsn_code,
         am.gl_head_id,
         am.days_of_completion,
+        am.TagId AS tag_id,
+        tg.TagName AS tag_name,
         gl.LHeadName AS gl_head_name
       FROM dbo.ActivityMaster am
       LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = am.gl_head_id
+      LEFT JOIN dbo.DprTagMaster tg ON tg.Id = am.TagId
       ORDER BY am.id ASC
     `);
     res.json(result.recordset);
@@ -93,9 +98,12 @@ router.get("/:id", async (req, res) => {
           am.hsn_code,
           am.gl_head_id,
           am.days_of_completion,
+          am.TagId AS tag_id,
+          tg.TagName AS tag_name,
           gl.LHeadName AS gl_head_name
         FROM dbo.ActivityMaster am
         LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = am.gl_head_id
+        LEFT JOIN dbo.DprTagMaster tg ON tg.Id = am.TagId
         WHERE am.id = @id
       `);
 
@@ -120,6 +128,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     hsn_code, // only for Activity (activity_type === 1)
     gl_head_id, // only for Activity (activity_type === 1)
     days_of_completion, // only for Activity (activity_type === 1)
+    tag_name, // only for Activity; created in the Tag Master when new
   } = req.body;
 
   // ── Validation ───────────────────────────────────────────────────────────
@@ -149,6 +158,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     const pool = getPool();
     const now = new Date();
     const userEmail = req.user?.email || null;
+    const tagId = activity_type === 1 ? await findOrCreateTag(pool, tag_name, userEmail) : null;
 
     const insertResult = await pool
       .request()
@@ -163,16 +173,17 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("hsn_code", sql.NVarChar(50), resolvedHsnCode) // nvarchar(50) — null for Groups
       .input("gl_head_id", sql.Int, resolvedGlHeadId) // null for Groups
       .input("days_of_completion", sql.Int, resolvedDays) // null for Groups / when not set
+      .input("tag_id", sql.Int, tagId)
       .query(`
         INSERT INTO dbo.ActivityMaster
           (activity_name, short_description, activity_type, group_id,
            is_active, created_by, created_datetime, belongsTo, hsn_code,
-           gl_head_id, days_of_completion)
+           gl_head_id, days_of_completion, TagId)
         OUTPUT INSERTED.id AS id
         VALUES
           (@activity_name, @short_description, @activity_type, @group_id,
            @is_active, @created_by, @created_datetime, @belongsTo, @hsn_code,
-           @gl_head_id, @days_of_completion)
+           @gl_head_id, @days_of_completion, @tag_id)
       `);
 
     await bumpCacheVersion("activity-master");
@@ -197,6 +208,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     hsn_code, // only for Activity (activity_type === 1)
     gl_head_id, // only for Activity (activity_type === 1)
     days_of_completion, // only for Activity (activity_type === 1)
+    tag_name, // only for Activity; created in the Tag Master when new
   } = req.body;
 
   // ── Validation ───────────────────────────────────────────────────────────
@@ -227,6 +239,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     const pool = getPool();
     const now = new Date();
     const userEmail = req.user?.email || null;
+    const tagId = activity_type === 1 ? await findOrCreateTag(pool, tag_name, userEmail) : null;
 
     const result = await pool
       .request()
@@ -242,6 +255,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("hsn_code", sql.NVarChar(50), resolvedHsnCode) // nvarchar(50) — null for Groups
       .input("gl_head_id", sql.Int, resolvedGlHeadId) // null for Groups
       .input("days_of_completion", sql.Int, resolvedDays) // null for Groups / when not set
+      .input("tag_id", sql.Int, tagId)
       .query(`
         UPDATE dbo.ActivityMaster SET
           activity_name     = @activity_name,
@@ -254,7 +268,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           belongsTo         = @belongsTo,
           hsn_code          = @hsn_code,
           gl_head_id        = @gl_head_id,
-          days_of_completion = @days_of_completion
+          days_of_completion = @days_of_completion,
+          TagId             = @tag_id
         WHERE id = @id
       `);
 

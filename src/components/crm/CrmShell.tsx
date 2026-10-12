@@ -104,7 +104,7 @@ export const CrmShell: React.FC<CrmShellProps> = ({
           }}
         />
 
-        <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative z-10 shell-head flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
           <div className="flex items-center gap-3 min-w-0">
             {/* Icon badge */}
             <div

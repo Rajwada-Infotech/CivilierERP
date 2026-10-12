@@ -1,3 +1,4 @@
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { useLiveData } from "@/hooks/useLiveData";
 import { autoPostKey, autoPostUrl, nextEntryToAutoPost } from "./paymentAutoPost";
 import React from "react";
@@ -155,6 +156,7 @@ const Payment: React.FC = () => {
   const [projectFilter, setProjectFilter] = useState("");
   const [finYearFilter, setFinYearFilter] = useState("");
   const [docNumberFilter, setDocNumberFilter] = useState("");
+  const [chequeNoFilter, setChequeNoFilter] = useState("");
   // Payment Date range (np.PDate) — was a single exact-match date filter,
   // now a From/To range for a more useful list-view search.
   const [dateFromFilter, setDateFromFilter] = useState("");
@@ -530,6 +532,7 @@ const Payment: React.FC = () => {
       projectFilter,
       finYearFilter,
       docNumberFilter,
+      chequeNoFilter,
       dateFromFilter,
       dateToFilter,
     ],
@@ -548,6 +551,7 @@ const Payment: React.FC = () => {
         "",
         dateFromFilter,
         dateToFilter,
+        chequeNoFilter,
       ),
     staleTime: 0,
   });
@@ -782,13 +786,14 @@ const Payment: React.FC = () => {
         "",
         dateFromFilter,
         dateToFilter,
+        chequeNoFilter,
       );
       all = all.concat(Array.isArray(data?.data) ? data.data : []);
       pages = data?.totalPages ?? 1;
       p += 1;
     } while (p <= pages);
     return all.map(dbToRecord) as unknown as Record<string, unknown>[];
-  }, [supplierFilter, companyNameFilter, projectFilter, finYearFilter, docNumberFilter, dateFromFilter, dateToFilter]);
+  }, [supplierFilter, companyNameFilter, projectFilter, finYearFilter, docNumberFilter, chequeNoFilter, dateFromFilter, dateToFilter]);
 
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
@@ -2625,20 +2630,17 @@ const Payment: React.FC = () => {
                       label="Payee / Party"
                       hint="Required for On Account tracking — who this payment is being made to"
                     >
+                      {/* Searchable: type part of a name (or its group - Vendors, Contractors...) to narrow the list. */}
                       <div className="relative">
-                        <Users
-                          size={13}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                        <select
+                        <SearchableNativeSelect
                           value={form.partyId !== null ? String(form.partyId) : ""}
+                          searchPlaceholder="Search party…"
                           onChange={(e) => {
                             const id = e.target.value;
                             const opt = supplierOptions.find((s) => String(s.id) === id);
                             set("partyId", id ? Number(id) : null);
                             set("paidTo", opt?.label || "");
                           }}
-                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                         >
                           <option value="">Select party…</option>
                           {(() => {
@@ -2665,11 +2667,7 @@ const Payment: React.FC = () => {
                               </optgroup>
                             ));
                           })()}
-                        </select>
-                        <ChevronDown
-                          size={11}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
+                        </SearchableNativeSelect>
                       </div>
                     </Field>
                     {renderTdsField()}
@@ -4157,6 +4155,7 @@ const Payment: React.FC = () => {
                 projectFilter ||
                 finYearFilter ||
                 docNumberFilter ||
+                chequeNoFilter ||
                 dateFromFilter ||
                 dateToFilter ||
                 supplierFilter
@@ -4167,6 +4166,7 @@ const Payment: React.FC = () => {
                 setProjectFilter("");
                 setFinYearFilter("");
                 setDocNumberFilter("");
+                setChequeNoFilter("");
                 setDateFromFilter("");
                 setDateToFilter("");
                 setSupplierFilter("");
@@ -4195,6 +4195,7 @@ const Payment: React.FC = () => {
                               projectFilter,
                               finYearFilter,
                               docNumberFilter,
+                              chequeNoFilter,
                               dateFromFilter,
                               dateToFilter,
                               supplierFilter,
@@ -4366,6 +4367,40 @@ const Payment: React.FC = () => {
                           </div>
                         </div>
 
+                        {/* 4b. Cheque Number */}
+                        <div className="space-y-1.5">
+                          <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Landmark size={10} /> Cheque Number
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="e.g. 004512 (any part)"
+                              aria-label="Cheque number"
+                              value={chequeNoFilter}
+                              onChange={(e) => {
+                                setChequeNoFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                            {chequeNoFilter && (
+                              <button
+                                type="button"
+                                aria-label="Clear cheque number"
+                                onClick={() => {
+                                  setChequeNoFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
                         {/* 5. Payment Date range */}
                         <div className="space-y-1.5">
                           <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -4519,6 +4554,21 @@ const Payment: React.FC = () => {
                           <button
                             onClick={() => {
                               setDocNumberFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
+                        </span>
+                      )}
+                      {chequeNoFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                          <Landmark size={9} />
+                          Cheque: {chequeNoFilter}
+                          <button
+                            onClick={() => {
+                              setChequeNoFilter("");
                               setPage(1);
                             }}
                             className="ml-0.5 hover:text-destructive"
