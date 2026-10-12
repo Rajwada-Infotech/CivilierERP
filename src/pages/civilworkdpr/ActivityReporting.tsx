@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { useQuery } from "@tanstack/react-query";
@@ -568,7 +568,31 @@ export default function ActivityReporting() {
     setDetailTab(tab);
   };
 
-  // Opened from a report row (?rung=): open that activity's detail straight away, once.
+  // Opened from a report row (?rung=): open that activity's detail straight away, once. When the link says where
+  // it came from (router state `returnTo`, e.g. the Civil Work DPR Query page), closing the popup goes back there.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const returnToRef = useRef<string | null>((location.state as { returnTo?: string } | null)?.returnTo ?? null);
+  const openedFromLinkRef = useRef(false);
+  const closeDetail = () => {
+    setDetailRow(null);
+    if (openedFromLinkRef.current && returnToRef.current) {
+      openedFromLinkRef.current = false;
+      const target = returnToRef.current;
+      // The popup's own history entry (see useOverlayBackClose) is removed with an asynchronous history.back() when
+      // it closes — go back to the origin only after that has settled, or it would pop the page we just opened.
+      let done = false;
+      const go = () => {
+        if (done) return;
+        done = true;
+        window.removeEventListener("popstate", go);
+        clearTimeout(timer);
+        navigate(target);
+      };
+      const timer = setTimeout(go, 300);
+      window.addEventListener("popstate", go);
+    }
+  };
   const [searchParams, setSearchParams] = useSearchParams();
   const linkedRung = readChainLink(searchParams).rungId;
   useEffect(() => {
@@ -577,8 +601,10 @@ export default function ActivityReporting() {
     getReportedAssignments({ rungId: linkedRung })
       .then((rows) => {
         if (cancelled) return;
-        if (rows[0]) openDetail(rows[0]);
-        else toast.error("That activity is not in Activity Reporting (it may be outside your projects or its chain retired).");
+        if (rows[0]) {
+          openedFromLinkRef.current = true;
+          openDetail(rows[0]);
+        } else toast.error("That activity is not in Activity Reporting (it may be outside your projects or its chain retired).");
       })
       .catch((e) => {
         if (!cancelled) toast.error(e instanceof Error ? e.message : "Could not open that activity.");
@@ -764,7 +790,7 @@ export default function ActivityReporting() {
         )}
       </CivilWorkDprShell>
       {detailRow && (
-        <ActivityDetailModal row={detailRow} initialTab={detailTab} onClose={() => setDetailRow(null)} />
+        <ActivityDetailModal row={detailRow} initialTab={detailTab} onClose={closeDetail} />
       )}
     </>
   );

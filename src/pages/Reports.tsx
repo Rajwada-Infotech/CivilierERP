@@ -2935,7 +2935,19 @@ const ReportTable: React.FC<{
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
+  // The Query page opens an activity in Reporting and comes back: keep its project / user / date / page choices
+  // for that round trip (this tab only).
+  const savedCtx = useMemo(() => {
+    if (!onRowOpen) return null;
+    try {
+      return JSON.parse(sessionStorage.getItem(`query-ctx:${report.id}`) || "null") as
+        { projectIds?: string[]; userIds?: string[]; userDate?: string; page?: number } | null;
+    } catch {
+      return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [page, setPage] = useState(savedCtx?.page ?? 1);
   const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
   // Civil Work DPR rows carry the activity / chain they are about: offer to open it in the pages that work on it.
   const reportNavigate = useNavigate();
@@ -3008,9 +3020,9 @@ const ReportTable: React.FC<{
       .then((list) => setTagOptions(list.map((t) => ({ id: String(t.id), label: t.tagName }))))
       .catch(() => {});
   }, [isTagWise]);
-  const [userIds, setUserIds] = useState<string[]>([]);
+  const [userIds, setUserIds] = useState<string[]>(savedCtx?.userIds ?? []);
   // Its own Date field, right in the report's toolbar (starts on today): one day's records only.
-  const [userDate, setUserDate] = useState<string>(() => (startWithoutDate ? "" : todayIstDate()));
+  const [userDate, setUserDate] = useState<string>(() => savedCtx?.userDate ?? (startWithoutDate ? "" : todayIstDate()));
   const [userOptions, setUserOptions] = useState<MultiSelectOption[]>([]);
   useEffect(() => {
     if (!isUserWise) return;
@@ -3025,7 +3037,7 @@ const ReportTable: React.FC<{
   // dropdowns) — ReportTable remounts per report (key=report.id) so these
   // reset on their own when you switch reports.
   const [companyIds, setCompanyIds] = useState<string[]>([]);
-  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [projectIds, setProjectIds] = useState<string[]>(savedCtx?.projectIds ?? []);
   // Expense Register also gets its own inline Date Range filter — the
   // shared Day/Range toggle above (SectionFilters) already wires "from"/
   // "to" through buildParams() below, but it lives in the parent, a full
@@ -3035,6 +3047,12 @@ const ReportTable: React.FC<{
   // shared filter the same way those already do.
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  useEffect(() => {
+    if (!onRowOpen) return;
+    try {
+      sessionStorage.setItem(`query-ctx:${report.id}`, JSON.stringify({ projectIds, userIds, userDate, page }));
+    } catch { /* storage unavailable — just don't remember */ }
+  }, [onRowOpen, report.id, projectIds, userIds, userDate, page]);
   useEffect(() => {
     if (!isExpenseRegister) return;
     fetchWithAuth("/api/general-ledger/options")

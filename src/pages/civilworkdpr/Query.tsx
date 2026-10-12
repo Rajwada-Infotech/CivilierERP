@@ -21,7 +21,9 @@ export default function Query() {
           const rung = Number(row.rungId);
           if (!Number.isInteger(rung) || rung <= 0) return;
           const chain = Number(row.chainId);
-          navigate(`/civilworkdpr/activity-reporting?rung=${rung}${Number.isInteger(chain) && chain > 0 ? `&chain=${chain}` : ""}`);
+          navigate(`/civilworkdpr/activity-reporting?rung=${rung}${Number.isInteger(chain) && chain > 0 ? `&chain=${chain}` : ""}`, {
+            state: { returnTo: "/civilworkdpr/query" },
+          });
         }}
         onClose={() => navigate("/civilworkdpr")}
       />
