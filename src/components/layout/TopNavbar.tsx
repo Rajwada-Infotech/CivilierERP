@@ -27,6 +27,7 @@ import {
   Element4,
 } from "iconsax-react";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { type SetupItem, financeSetupItems, salesSetupItems, maintenanceSetupItems, hrPayrollSetupItems, materialSetupItems, fixedAssetSetupItems, followupSetupItems, engineeringSetupItems, civilWorkDprSetupItems, salesAutomationSetupItems, crmSetupItems, adminSetupItems } from "./setupMenus";
 
 // ─── useClickOutside ──────────────────────────────────────────────────────────
@@ -153,7 +154,7 @@ const SetupDropdown = ({
               : modVars
           }
         >
-          <Setting2
+          <ChromeIcons.setup
             size={13}
             variant="Outline"
             color="currentColor"
@@ -848,7 +849,7 @@ export const TopNavbar = () => {
               }}
               className={`nav-pill-btn ${isActive("/reports") ? "nav-pill-btn--active" : ""}`}
             >
-              <Chart size={13} variant="Outline" color="currentColor" />
+              <ChromeIcons.reports size={14} />
               <span>Reports</span>
             </button>
 
@@ -859,7 +860,7 @@ export const TopNavbar = () => {
               }}
               className={`nav-pill-btn ${isActive("/widgets") ? "nav-pill-btn--active" : ""}`}
             >
-              <Element4 size={13} variant="Outline" color="currentColor" />
+              <ChromeIcons.widgets size={14} />
               <span>Widgets</span>
             </button>
           </div>
@@ -876,9 +877,9 @@ export const TopNavbar = () => {
               style={{ border: "1px solid hsl(var(--foreground))" }}
             >
               {navCollapsed ? (
-                <SidebarLeft size={15} variant="Outline" />
+                <ChromeIcons.sidebarExpand size={17} />
               ) : (
-                <SidebarLeft size={15} variant="Bold" />
+                <ChromeIcons.sidebarCollapse size={17} />
               )}
             </button>
           </div>

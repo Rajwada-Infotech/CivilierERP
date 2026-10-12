@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from
 import ReactDOM from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { MODULES, ADMIN_MODULE } from "./moduleDefs";
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, Module, firstAccessibleAdminPath, hasAnyAdminPageRight, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
@@ -222,7 +222,7 @@ export const ModuleStrip: React.FC = () => {
                   transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
                   className="relative flex items-center justify-center pb-1"
                 >
-                  <ChevronDown
+                  <ChromeIcons.down
                     size={13}
                     strokeWidth={2.6}
                     style={{ color: "hsl(var(--muted-foreground))" }}
@@ -249,7 +249,7 @@ export const ModuleStrip: React.FC = () => {
                   style={{ border: "1px solid hsl(var(--foreground))" }}
                   title="Expand menu"
                 >
-                  <ChevronRight size={13} strokeWidth={2.4} />
+                  <ChromeIcons.right size={15} />
                 </motion.button>
               )}
             </AnimatePresence>
