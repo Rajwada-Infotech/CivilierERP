@@ -473,7 +473,7 @@ export default function EmployeeMaster() {
     { name: "bankIFSC", label: "IFSC Code", type: "text", uppercase: true },
 
     { name: "sec-statutory", label: "Statutory Details", type: "section" },
-    { name: "pan", label: "PAN", type: "text", uppercase: true },
+    { name: "pan", label: "PAN (Permanent Account Number)", type: "text", uppercase: true },
     { name: "aadhaar", label: "Aadhaar", type: "text" },
     { name: "uan", label: "UAN", type: "text" },
     { name: "esicNumber", label: "ESIC Number", type: "text" },
@@ -581,7 +581,7 @@ export default function EmployeeMaster() {
               { header: "Cost Centre", accessor: "costCenterName" },
               { header: "Mobile", accessor: "mobile" },
               { header: "Email", accessor: "email" },
-              { header: "PAN", accessor: "pan" },
+              { header: "PAN (Permanent Account Number)", accessor: "pan" },
               { header: "Aadhaar", accessor: "aadhaar" },
               { header: "Status", accessor: (r) => (r.isActive ? "Active" : "Inactive") },
             ],

@@ -57,8 +57,8 @@ function buildPaymentHtml(r: PaymentRecord, supplier: ChainSummary["supplier"] |
         row("Address", supplier.address),
         row("Contact No.", supplier.phone),
         row("Email", supplier.email),
-        row("GST No.", supplier.gst),
-        row("PAN No.", supplier.pan),
+        row("GSTIN (GST Identification Number)", supplier.gst),
+        row("PAN (Permanent Account Number)", supplier.pan),
       ].join("")
     : "";
 

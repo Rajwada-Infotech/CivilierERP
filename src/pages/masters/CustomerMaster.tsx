@@ -165,8 +165,8 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Contact Person", accessor: "LHeadContactPerson" },
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },
-  { header: "GST Number", accessor: "LGST" },
-  { header: "PAN Number", accessor: "LHeadPan" },
+  { header: "GSTIN (GST Identification Number)", accessor: "LGST" },
+  { header: "PAN (Permanent Account Number)", accessor: "LHeadPan" },
   { header: "GST Type", accessor: "LGSTType" },
   { header: "GST State", accessor: "LGSTState" },
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
@@ -222,7 +222,7 @@ function buildCustomerColumns(
     },
     {
       accessorKey: "LGST",
-      header: "GST No.",
+      header: "GSTIN (GST Identification Number)",
       cell: ({ getValue }) => (
         <span className="font-mono text-xs font-semibold text-primary">
           {(getValue() as string) || "—"}
@@ -529,8 +529,8 @@ const CustomerMaster: React.FC = () => {
         <tr><td>Contact Person</td><td>${c.LHeadContactPerson || "—"}</td></tr>
         <tr><td>Phone</td><td>${c.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${c.LHeadEmail || "—"}</td></tr>
-        <tr><td>GST Number</td><td>${c.LGST || "—"}</td></tr>
-        <tr><td>PAN Number</td><td>${c.LHeadPan || "—"}</td></tr>
+        <tr><td>GSTIN (GST Identification Number)</td><td>${c.LGST || "—"}</td></tr>
+        <tr><td>PAN (Permanent Account Number)</td><td>${c.LHeadPan || "—"}</td></tr>
         <tr><td>GST Type</td><td>${c.LGSTType || "—"}</td></tr>
         <tr><td>GST State</td><td>${c.LGSTState || "—"}</td></tr>
         <tr><td>Payment Terms</td><td>${c.LHeadPaymentTerms || "—"}</td></tr>
@@ -832,10 +832,10 @@ const CustomerMaster: React.FC = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
-                {/* GST Number */}
+                {/* GSTIN (GST Identification Number) */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    GST Number
+                    GSTIN (GST Identification Number)
                   </label>
                   <input
                     value={form.LGST}
@@ -854,7 +854,7 @@ const CustomerMaster: React.FC = () => {
                 {/* PAN */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    PAN Number
+                    PAN (Permanent Account Number)
                   </label>
                   <input
                     value={form.LHeadPan}
@@ -1058,12 +1058,12 @@ const CustomerMaster: React.FC = () => {
                 },
                 { label: "Email", value: viewRecord.LHeadEmail || "—" },
                 {
-                  label: "GST Number",
+                  label: "GSTIN (GST Identification Number)",
                   value: viewRecord.LGST || "—",
                   mono: true,
                 },
                 {
-                  label: "PAN Number",
+                  label: "PAN (Permanent Account Number)",
                   value: viewRecord.LHeadPan || "—",
                   mono: true,
                 },

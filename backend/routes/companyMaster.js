@@ -31,7 +31,7 @@ function normalizeCompanyGst(f) {
   const gstDate = f.gstDate || null;
 
   if (!gstNumber) {
-    return { error: "GST Number is required for registered companies" };
+    return { error: "GSTIN is required for registered companies" };
   }
   if (!gstDate) {
     return {

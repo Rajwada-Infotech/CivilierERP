@@ -383,7 +383,7 @@ function buildEnterpriseColumns(
     },
     {
       accessorKey: "pan",
-      header: "PAN",
+      header: "PAN (Permanent Account Number)",
       cell: ({ getValue }) => (
         <span className="font-mono text-xs text-muted-foreground">
           {(getValue() as string) || "—"}
@@ -551,7 +551,7 @@ export default function EnterpriseMaster() {
       { header: "Name", accessor: "name" },
       { header: "Short Name", accessor: "short_name" },
       { header: "Type", accessor: "entity_type" },
-      { header: "PAN", accessor: "pan" },
+      { header: "PAN (Permanent Account Number)", accessor: "pan" },
       { header: "GST Type", accessor: "gst_type" },
       { header: "Phone", accessor: "phone_number" },
       { header: "Status", accessor: "status" },
