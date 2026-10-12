@@ -203,7 +203,11 @@ router.get("/applications", async (req, res) => {
         ag.Status AS AgreementStatus, ag.SentToCustomerAt,
         ag.CustomerApprovalStatus, ag.SeniorApprovalStatus,
         sd.Status AS SalesDeedStatus, sd.CustomerApprovalStatus AS DeedCustomerApprovalStatus,
-        h.Status AS HandoverStatus, h.ActualHandoverDate
+        h.Status AS HandoverStatus, h.ActualHandoverDate,
+        -- Co-applicants (Applicant 2, 3 ...) in order, for "Mr. Roy & Mrs. Roy".
+        STUFF((SELECT N'|' + c.Name FROM dbo.CrmCoApplicant c
+               WHERE c.IsActive = 1 AND (c.ApplicationId = a.Id OR (b.Id IS NOT NULL AND c.BookingId = b.Id))
+               ORDER BY c.CreatedAt, c.Id FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 1, N'') AS CoApplicantNames
       FROM dbo.CrmApplication a
       LEFT JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id AND b.IsActive = 1
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id

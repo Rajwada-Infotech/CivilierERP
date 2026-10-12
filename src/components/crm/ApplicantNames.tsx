@@ -8,8 +8,9 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 type NamesMap = { byApplication: Record<string, string[]>; byBooking: Record<string, string[]> };
 
-export function useCoApplicantNames() {
+export function useCoApplicantNames(enabled = true) {
   return useQuery<NamesMap>({
+    enabled,
     queryKey: ["crm-co-applicant-names"],
     queryFn: async () => {
       const r = await fetchWithAuth("/api/crm/co-applicants/names");
@@ -35,10 +36,17 @@ export function applicantNamesText(mainName: string | null | undefined, others: 
 }
 
 export function ApplicantNames({
-  name, bookingId, applicationId, className = "",
-}: { name: string | null | undefined; bookingId?: number | null; applicationId?: number | null; className?: string }) {
-  const { data } = useCoApplicantNames();
-  const others = coApplicantsOf(data, { bookingId, applicationId }, name);
+  name, bookingId, applicationId, className = "", coApplicants,
+}: {
+  name: string | null | undefined; bookingId?: number | null; applicationId?: number | null; className?: string;
+  /** Names already in hand (e.g. the customer portal, which can't call the staff list). */
+  coApplicants?: string[];
+}) {
+  const { data } = useCoApplicantNames(coApplicants === undefined);
+  const main = String(name || "").trim().toLowerCase();
+  const others = coApplicants !== undefined
+    ? coApplicants.filter((n) => n && n.trim().toLowerCase() !== main)
+    : coApplicantsOf(data, { bookingId, applicationId }, name);
   return (
     <span className={className} title={others.length ? applicantNamesText(name, others) : undefined}>
       <span>{name || "—"}</span>

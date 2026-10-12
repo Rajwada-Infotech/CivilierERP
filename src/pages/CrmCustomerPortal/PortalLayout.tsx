@@ -104,7 +104,7 @@ function ApplicationSelector({
                       {app.ProjectName || "Project"}{app.UnitNo ? ` · Unit ${app.UnitNo}` : ""}
                     </p>
                     <p className="text-xs mt-0.5" style={{ color: TEXT_MUTED }}>
-                      <ApplicantNames name={app.ApplicantName} bookingId={app.BookingId} applicationId={app.ApplicationId} />
+                      <ApplicantNames name={app.ApplicantName} coApplicants={app.CoApplicantNames ? String(app.CoApplicantNames).split("|") : []} />
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
