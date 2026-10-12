@@ -58,7 +58,9 @@ export const getPayments = async (
   // creation date / exact payment date respectively) since a from/to range
   // is what the list UI actually exposes.
   dateFrom = "",
-  dateTo = ""
+  dateTo = "",
+  // Cheque number (contains) - finds the payments made with that cheque.
+  chequeNo = ""
 ) => {
   const params = new URLSearchParams({
     page: String(page),
@@ -75,6 +77,7 @@ export const getPayments = async (
   if (remarks) params.set("remarks", remarks);
   if (dateFrom) params.set("from", dateFrom);
   if (dateTo) params.set("to", dateTo);
+  if (chequeNo) params.set("chequeNo", chequeNo);
 
   const res = await fetchWithAuth(`${BASE_URL}?${params.toString()}`);
   if (!res.ok)
