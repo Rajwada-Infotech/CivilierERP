@@ -371,7 +371,7 @@ const PasswordResetPage = lazy(
   () => import("./pages/admin/security/PasswordReset"),
 );
 const ActivityBrowserPage = lazy(
-  () => import("./pages/admin/Activitybrowser/ActivityBrowser"),
+  () => import("./pages/admin/Activitybrowser/ActivityBrowserHome"),
 );
 
 // Admin Masters
