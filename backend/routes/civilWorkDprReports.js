@@ -364,12 +364,19 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
     } else conds.push(`dl.LogDate = ${TODAY}`);
     // Validated integers only, so inlining the list is injection-safe.
     if (userIds.length) conds.push(`u.id IN (${userIds.join(",")})`);
+    // Auto Name search: every word typed (the joining "and" dropped) must match the flat, room, activity, chain,
+    // tower or project, in any order — so a whole Auto Name or pieces of it find the record.
+    const tokens = String(req.query.search ?? "").toLowerCase().split(/[\s,>]+/).filter((t) => t && t !== "and").slice(0, 8);
+    tokens.forEach((_, i) => {
+      conds.push(`(am.activity_name LIKE @st${i} OR dm.Alias LIKE @st${i} OR ep.name LIKE @st${i} OR bm.BlockName LIKE @st${i} OR um.UnitName LIKE @st${i} OR rm.RoomName LIKE @st${i})`);
+    });
     if (byTag) {
       const tagIds = [
         ...new Set(String(req.query.tagId ?? "").split(",").map((x) => parseInt(x.trim(), 10)).filter(Number.isInteger)),
       ].slice(0, 200);
-      conds.push("am.TagId IS NOT NULL");
-      if (tagIds.length) conds.push(`am.TagId IN (${tagIds.join(",")})`);
+      // The effective tag: the one set on this reported activity, else its Activity Master default.
+      conds.push("COALESCE(dma.TagId, am.TagId) IS NOT NULL");
+      if (tagIds.length) conds.push(`COALESCE(dma.TagId, am.TagId) IN (${tagIds.join(",")})`);
     }
     const where = `WHERE ${conds.join(" AND ")}`;
     const from = `
@@ -386,7 +393,7 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
       JOIN dbo.users u ON u.id = dae.EngineerId
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
-      LEFT JOIN dbo.DprTagMaster tg ON tg.Id = am.TagId
+      LEFT JOIN dbo.DprTagMaster tg ON tg.Id = COALESCE(dma.TagId, am.TagId)
       LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
@@ -405,6 +412,7 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
         : "u.name, dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC",
       bind: bindFilters(p, (r) => {
         if (single) r.input("date", sql.Date, single);
+        tokens.forEach((t, i) => r.input(`st${i}`, sql.NVarChar(200), `%${t.replace(/[[\]%_]/g, (c) => `[${c}]`)}%`));
       }),
     });
   } catch (err) {
