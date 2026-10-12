@@ -3,7 +3,7 @@ import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,6 +104,33 @@ function GLBadge({ status, postedToGL }: { status: string; postedToGL?: boolean 
     </span>
   );
 }
+
+/** A square mark and a word in capitals - the same vocabulary as the Payments list. */
+function SheetMark({ text, tone }: { text: string; tone: "done" | "waiting" | "stopped" | "none" }) {
+  if (tone === "none") return <span className="text-muted-foreground text-xs">—</span>;
+  const ink = tone === "stopped" ? "hsl(var(--destructive))" : "hsl(var(--foreground))";
+  return (
+    <span className="inline-flex items-center gap-1.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap" style={{ color: ink }}>
+      <i
+        className="shrink-0"
+        style={{
+          width: 8,
+          height: 8,
+          border: `1px solid ${ink}`,
+          background:
+            tone === "stopped"
+              ? "hsl(var(--destructive))"
+              : tone === "waiting"
+                ? "repeating-linear-gradient(135deg, hsl(var(--foreground)) 0, hsl(var(--foreground)) 1px, transparent 1px, transparent 3px)"
+                : "hsl(var(--primary))",
+        }}
+      />
+      {text}
+    </span>
+  );
+}
+const statusTone = (status: string): "done" | "waiting" | "stopped" =>
+  /reject|cancel|delete/i.test(status) ? "stopped" : /approved|posted|success/i.test(status) ? "done" : "waiting";
 
 function fmtDate(d?: string | null) {
   if (!d) return "—";
@@ -449,12 +476,21 @@ export default function JournalVoucher() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Journal Voucher"]} />
-      <FinanceShell
-        title="Journal Voucher"
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Journal vouchers"
         subtitle="Correct account-head mismatches with balanced multi-line entries"
-        icon={Scale}
         action={
           <div className="flex items-center gap-2">
+            {rights.canCreate && (
+              <Button
+                onClick={() => setDialogOpen(true)}
+                className="gap-1.5 shrink-0 bg-foreground text-card hover:bg-foreground/85 font-heading font-semibold uppercase tracking-[0.1em] text-[0.625rem] px-3 sm:px-4 py-2 h-auto"
+              >
+                <Plus size={13} />
+                <span className="hidden sm:inline">New voucher</span>
+              </Button>
+            )}
             <ExportMenu
               data={filtered as unknown as Record<string, unknown>[]}
               columns={exportColumns}
@@ -465,53 +501,41 @@ export default function JournalVoucher() {
             <button
               onClick={load}
               disabled={loading}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
+              title="Refresh"
+              className="w-8 h-8 flex items-center justify-center border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
             </button>
-            {rights.canCreate && (
-              <Button
-                onClick={() => setDialogOpen(true)}
-                className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-accent transition-all"
-              >
-                <Plus size={13} />
-                <span className="hidden sm:inline">New Journal Voucher</span>
-              </Button>
-            )}
           </div>
         }
       >
 
-        {/* ── Stat pills ── */}
+        {/* ── Counts ── */}
         {!loading && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+          <div className="statrow four">
             {[
-              { label: "Total",    value: stats.total,    color: "text-foreground",     bg: "bg-muted/30",          icon: FileText },
-              { label: "Approved", value: stats.approved, color: "text-emerald-600",    bg: "bg-emerald-500/5",     icon: CheckCircle2 },
-              { label: "Pending",  value: stats.pending,  color: "text-amber-600",      bg: "bg-amber-500/5",       icon: Clock },
-              { label: "Draft",    value: stats.draft,    color: "text-slate-500",      bg: "bg-slate-500/5",       icon: FileText },
-            ].map(({ label, value, color, bg, icon: Icon }) => (
-              <div key={label} className={cn("flex items-center gap-3 px-4 py-3 rounded-xl border border-border", bg)}>
-                <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", bg)}>
-                  <Icon size={14} className={color} />
-                </div>
-                <div>
-                  <p className="text-lg font-bold text-foreground leading-none">{value}</p>
-                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{label}</p>
-                </div>
+              { label: "Vouchers", value: stats.total, note: "in all" },
+              { label: "Approved", value: stats.approved, note: "settled" },
+              { label: "Pending", value: stats.pending, note: "awaiting approval" },
+              { label: "Draft", value: stats.draft, note: "not yet submitted" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(22px, 2.4vw, 32px)", marginTop: 9 }}>{Number(x.value || 0).toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
               </div>
             ))}
           </div>
         )}
 
         {/* ── Search ── */}
-        <div className="relative mb-4">
+        <div className="relative">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by JV number, narration, or status…"
-            className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            className="w-full pl-8 pr-8 py-2.5 border border-foreground/40 bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground transition-colors"
           />
           {search && (
             <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -521,7 +545,7 @@ export default function JournalVoucher() {
         </div>
 
         {/* ── Table ── */}
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
 
           {/* ── Mobile cards (< md) ─────────────────────────────────────────── */}
           <div className="md:hidden divide-y divide-border">
@@ -543,7 +567,7 @@ export default function JournalVoucher() {
                   {!search && rights.canCreate && (
                     <button
                       onClick={() => setDialogOpen(true)}
-                      className="flex items-center gap-1.5 mt-1 px-4 py-2 rounded-lg gradient-accent text-white text-xs font-semibold"
+                      className="flex items-center gap-1.5 mt-1 px-4 py-2 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
                     >
                       <Plus size={12} /> Create First Voucher
                     </button>
@@ -610,107 +634,105 @@ export default function JournalVoucher() {
           </div>
 
           {/* ── Desktop table (md+) ─────────────────────────────────────────── */}
-          <table className="w-full text-sm hidden md:table">
+          <table className="w-full text-sm hidden md:table" style={{ borderCollapse: "collapse" }}>
             <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">JV No</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Company / Project</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Narration</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground">GL</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground">Actions</th>
+              <tr style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                {[
+                  { h: "No.", right: false },
+                  { h: "Voucher", right: false },
+                  { h: "Date", right: false },
+                  { h: "Company / project", right: false },
+                  { h: "Narration", right: false },
+                  { h: "Amount", right: true },
+                  { h: "Status", right: false },
+                  { h: "Ledger", right: false },
+                  { h: "", right: true },
+                ].map((c, i) => (
+                  <th key={i} className={`px-3 py-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground ${c.right ? "text-right" : "text-left"}`}>
+                    {c.h}
+                  </th>
+                ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center">
+                  <td colSpan={9} className="py-16 text-center">
                     <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
                     <p className="text-sm text-muted-foreground mt-2">Loading vouchers…</p>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-20 text-center">
+                  <td colSpan={9} className="py-20 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <Scale size={36} className="opacity-20" />
-                      <p className="text-sm font-medium">
-                        {search ? "No vouchers match your search" : "No journal vouchers yet"}
-                      </p>
+                      <p className="text-sm font-medium">{search ? "No vouchers match your search" : "No journal vouchers yet"}</p>
                       {search && (
-                        <button onClick={() => setSearch("")} className="text-xs text-primary hover:underline">
-                          Clear search
-                        </button>
+                        <button onClick={() => setSearch("")} className="text-xs text-foreground underline">Clear search</button>
                       )}
                       {!search && rights.canCreate && (
                         <button
                           onClick={() => setDialogOpen(true)}
-                          className="flex items-center gap-1.5 mt-1 px-4 py-2 rounded-lg gradient-accent text-white text-xs font-semibold"
+                          className="flex items-center gap-1.5 mt-1 px-4 py-2 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
                         >
-                          <Plus size={12} /> Create First Voucher
+                          <Plus size={12} /> Create first voucher
                         </button>
                       )}
                     </div>
                   </td>
                 </tr>
               ) : (
-                filtered.map((v) => (
+                filtered.map((v, i) => (
                   <tr
                     key={v.JVID}
                     onClick={() => openJVDetail(v.JVID)}
-                    className="hover:bg-muted/30 transition-colors group cursor-pointer"
+                    className="hover:bg-primary/[0.06] transition-colors cursor-pointer align-top"
+                    style={{ borderBottom: "1px solid hsl(var(--border) / 0.6)" }}
                   >
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
-                        {v.JVNo || `JV-${v.JVID}`}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{fmtDate(v.JVDate)}</td>
-                    <td className="px-4 py-3 text-sm">
+                    <td className="px-3 py-3 font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
+                    <td className="px-3 py-3 font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground whitespace-nowrap">{v.JVNo || `JV-${v.JVID}`}</td>
+                    <td className="px-3 py-3 text-[0.75rem] text-foreground tabular-nums whitespace-nowrap">{fmtDate(v.JVDate)}</td>
+                    <td className="px-3 py-3">
                       {v.CompanyName ? (
                         <>
-                          <p className="text-foreground truncate max-w-[160px]">{v.CompanyName}</p>
-                          {v.ProjectName && (
-                            <p className="text-[0.6875rem] text-muted-foreground truncate max-w-[160px]">{v.ProjectName}</p>
-                          )}
+                          <p className="text-[0.8125rem] font-semibold text-foreground truncate max-w-[180px]">{v.CompanyName}</p>
+                          {v.ProjectName && <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate max-w-[180px]">{v.ProjectName}</p>}
                         </>
                       ) : (
-                        <span className="italic text-muted-foreground/50">—</span>
+                        <span className="text-muted-foreground text-xs">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm text-foreground max-w-xs">
-                      <p className="truncate">{v.Narration || <span className="italic text-muted-foreground/50">—</span>}</p>
+                    <td className="px-3 py-3 text-[0.8125rem] text-foreground/85 max-w-xs">
+                      <p className="line-clamp-2">{v.Narration || <span className="text-muted-foreground">—</span>}</p>
                     </td>
-                    <td className="px-4 py-3 text-right font-medium text-foreground tabular-nums">
-                      {formatINR(v.TotalAmount || 0)}
+                    <td className="px-3 py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">{formatINR(v.TotalAmount || 0)}</td>
+                    <td className="px-3 py-3"><SheetMark text={v.Status || "—"} tone={statusTone(v.Status || "")} /></td>
+                    <td className="px-3 py-3">
+                      <SheetMark
+                        text={v.PostedToGL ? "Posted" : "Not posted"}
+                        tone={v.Status !== "Approved" ? "none" : v.PostedToGL ? "done" : "stopped"}
+                      />
                     </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={v.Status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-3 py-3 text-right">
                       <div className="flex justify-end gap-1">
                         {rights.canEdit && (
                           <button
                             disabled={editLoading}
                             onClick={(e) => { e.stopPropagation(); startEdit(v); }}
                             title={editTitle(v.Status)}
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
+                            className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40"
                           >
-                            <Pencil size={13} />
+                            <Pencil size={12} />
                           </button>
                         )}
                         {rights.canDelete && (
                           <button
                             onClick={(e) => { e.stopPropagation(); setDeleteId(v.JVID); }}
                             title="Delete"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            className="p-1.5 border border-destructive/30 text-destructive/70 hover:text-destructive hover:border-destructive transition-colors"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={12} />
                           </button>
                         )}
                       </div>
@@ -722,19 +744,19 @@ export default function JournalVoucher() {
           </table>
 
           {!loading && filtered.length > 0 && search && (
-            <div className="px-4 py-2.5 border-t border-border bg-muted/20">
-              <p className="text-xs text-muted-foreground">
+            <div className="px-3 py-2.5" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
+              <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Showing {filtered.length} of {vouchers.length} vouchers
               </p>
             </div>
           )}
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {/* ── New JV Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden" onKeyDown={preventEnterSubmit}>
-          <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
+        <DialogContent className="max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden rounded-none border-foreground" onKeyDown={preventEnterSubmit}>
+          <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">
                 <Scale size={15} className="text-primary" />
@@ -913,7 +935,7 @@ export default function JournalVoucher() {
             <button
               onClick={submit}
               disabled={saving || !totals.balanced}
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground/85 transition-colors disabled:opacity-50"
             >
               {saving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
               {saving ? "Saving…" : editingId ? "Save Changes" : "Save & Submit"}
@@ -924,14 +946,14 @@ export default function JournalVoucher() {
 
       {/* ── Voucher detail ── */}
       <Dialog open={viewingJVLoading || !!viewingJV} onOpenChange={(o) => { if (!o) setViewingJV(null); }}>
-        <DialogContent className="max-w-lg p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden">
+        <DialogContent className="max-w-lg p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden rounded-none border-foreground">
           {viewingJVLoading ? (
             <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground text-sm">
               <Loader2 size={16} className="animate-spin" /> Loading voucher…
             </div>
           ) : viewingJV ? (
             <>
-              <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
+              <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
                     {viewingJV.JVNo || `JV-${viewingJV.JVID}`}
