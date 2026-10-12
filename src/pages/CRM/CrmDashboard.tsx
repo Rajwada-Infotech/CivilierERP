@@ -10,8 +10,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 // The module sells buildings, so the page borrows the drawing office's own language instead of generic dashboard
 // cards: one bordered sheet with a title block, lettered details (A-H), dimension lines for anything that is a span
 // (collected against demanded), hatching for what is not yet built (money not yet received), and a red pencil used for
-// one thing only - items that need someone's attention. The sheet keeps its own paper palette in every app theme, on
-// purpose: a drawing does not change colour with the room.
+// one thing only - items that need someone's attention. Colours and fonts come from the app theme (card, foreground,
+// border, primary, destructive; Sora and DM Sans), so the sheet follows whichever theme is selected.
 
 const API = "/api/crm/dashboard";
 
@@ -35,18 +35,21 @@ const sumCount = (rows: any[] = []) => rows.reduce((s, r) => s + n0(r.Count), 0)
 // ── The sheet's own styles ──────────────────────────────────────────────────
 const SHEET_CSS = `
 .crm-sheet {
-  --paper: #EEF2F5;
-  --sheet: #F8FAFB;
-  --ink: #10243E;
-  --ink-2: #33475F;
-  --graphite: #6B7C8F;
-  --rule: #C3CFDA;
-  --rule-soft: #DDE5EC;
-  --blue: #1F4E8C;
-  --blue-wash: rgba(31, 78, 140, 0.10);
-  --red: #CF3A27;
-  --red-wash: rgba(207, 58, 39, 0.09);
-  --grid: rgba(16, 36, 62, 0.045);
+  --sheet: hsl(var(--card));
+  --ink: hsl(var(--foreground));
+  --ink-2: hsl(var(--foreground) / 0.78);
+  --graphite: hsl(var(--muted-foreground));
+  --faint: hsl(var(--muted-foreground) / 0.6);
+  --rule: hsl(var(--border));
+  --rule-soft: hsl(var(--border) / 0.55);
+  --blue: hsl(var(--primary));
+  --blue-mid: hsl(var(--primary) / 0.55);
+  --blue-wash: hsl(var(--primary) / 0.10);
+  --blue-tint: hsl(var(--primary) / 0.18);
+  --red: hsl(var(--destructive));
+  --red-wash: hsl(var(--destructive) / 0.10);
+  --grid: hsl(var(--foreground) / 0.04);
+  --hatch: hsl(var(--foreground) / 0.24);
   color: var(--ink);
   background-color: var(--sheet);
   background-image:
@@ -56,18 +59,18 @@ const SHEET_CSS = `
   border: 1.5px solid var(--ink);
   outline: 1px solid var(--rule);
   outline-offset: 5px;
-  font-family: "DM Sans", system-ui, sans-serif;
+  font-family: "DM Sans", sans-serif;
   font-variant-numeric: tabular-nums;
   margin: 6px;
 }
 .crm-sheet * { box-sizing: border-box; }
-.crm-sheet .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.crm-sheet .mono { font-family: "DM Sans", sans-serif; }
 .crm-sheet .label {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--graphite);
+  font-family: "Sora", sans-serif; font-weight: 600;
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--graphite);
 }
 .crm-sheet .figure { font-family: "Sora", sans-serif; font-weight: 600; letter-spacing: -0.02em; color: var(--ink); line-height: 1; }
-.crm-sheet .title { font-family: "Fraunces", Georgia, serif; font-weight: 500; font-style: italic; letter-spacing: -0.01em; }
+.crm-sheet .title { font-family: "Sora", sans-serif; font-weight: 700; letter-spacing: -0.03em; }
 .crm-sheet .cell { border-top: 1px solid var(--rule); padding: 20px 22px 22px; min-width: 0; }
 .crm-sheet .cell + .cell { border-left: 1px solid var(--rule); }
 .crm-sheet .stack { display: flex; flex-direction: column; min-width: 0; }
@@ -75,11 +78,11 @@ const SHEET_CSS = `
 .crm-sheet .stack + .cell { border-left: 1px solid var(--rule); }
 .crm-sheet .tag {
   display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%;
-  border: 1.5px solid var(--ink); font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 600; color: var(--ink);
+  border: 1.5px solid var(--ink); font-family: "Sora", sans-serif; font-size: 11px; font-weight: 600; color: var(--ink);
   background: var(--sheet); flex-shrink: 0;
 }
 .crm-sheet .hatch {
-  background-image: repeating-linear-gradient(135deg, var(--rule) 0, var(--rule) 1px, transparent 1px, transparent 6px);
+  background-image: repeating-linear-gradient(135deg, var(--hatch) 0, var(--hatch) 1px, transparent 1px, transparent 6px);
 }
 .crm-sheet button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
 .crm-sheet button:focus-visible, .crm-sheet select:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
@@ -89,8 +92,9 @@ const SHEET_CSS = `
 .crm-sheet .row.hot:hover { background: var(--red-wash); }
 .crm-sheet .link { border-bottom: 1px dashed var(--graphite); }
 .crm-sheet .link:hover { color: var(--blue); border-bottom-color: var(--blue); }
+.crm-sheet select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
 .crm-sheet select {
-  font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink); background: transparent; border: 0;
+  font-family: "DM Sans", sans-serif; font-size: 13px; font-weight: 600; color: var(--ink); background: transparent; border: 0;
   padding: 0 14px 0 0; cursor: pointer; max-width: 100%;
 }
 .crm-sheet .grid2 { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
@@ -156,10 +160,10 @@ const PipelineSection: React.FC<{ funnel: any; onOpen: (path: string) => void }>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Sales pipeline from applications to possessions">
         <defs>
           <pattern id="crm-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-            <line x1="0" y1="0" x2="0" y2="6" stroke="#1F4E8C" strokeWidth="1" opacity="0.35" />
+            <line x1="0" y1="0" x2="0" y2="6" stroke="var(--blue)" strokeWidth="1" opacity="0.35" />
           </pattern>
         </defs>
-        <line x1="0" y1={mid} x2={W} y2={mid} stroke="#C3CFDA" strokeDasharray="10 4 2 4" />
+        <line x1="0" y1={mid} x2={W} y2={mid} stroke="var(--rule)" strokeDasharray="10 4 2 4" />
         {stages.map((s, i) => {
           const x = i * (bw + gap);
           const h = half(s.value);
@@ -168,11 +172,11 @@ const PipelineSection: React.FC<{ funnel: any; onOpen: (path: string) => void }>
           return (
             <g key={s.key}>
               {next && (
-                <polygon points={`${x + bw},${mid - h} ${x + bw + gap},${mid - nh} ${x + bw + gap},${mid + nh} ${x + bw},${mid + h}`} fill="url(#crm-hatch)" stroke="#1F4E8C" strokeOpacity="0.35" />
+                <polygon points={`${x + bw},${mid - h} ${x + bw + gap},${mid - nh} ${x + bw + gap},${mid + nh} ${x + bw},${mid + h}`} fill="url(#crm-hatch)" stroke="var(--blue)" strokeOpacity="0.35" />
               )}
-              <rect x={x} y={mid - h} width={bw} height={h * 2} fill="#1F4E8C" fillOpacity={1 - i * 0.17} stroke="#10243E" strokeWidth="1.2" />
+              <rect x={x} y={mid - h} width={bw} height={h * 2} fill="var(--blue)" fillOpacity={1 - i * 0.17} stroke="var(--ink)" strokeWidth="1.2" />
               {next && (
-                <text x={x + bw + gap / 2} y={mid + 4} textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="11" fill="#10243E">
+                <text x={x + bw + gap / 2} y={mid + 4} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="11" fill="var(--ink)">
                   {s.value > 0 ? `${Math.round((next.value / s.value) * 100)}%` : "—"}
                 </text>
               )}
@@ -217,8 +221,8 @@ const TrendPlot: React.FC<{ rows: any[] }> = ({ rows }) => {
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Money received, bookings and applications by month" onMouseLeave={() => setHover(null)}>
         {[0, 0.5, 1].map((t) => (
           <g key={t}>
-            <line x1={padL} x2={W - padR} y1={y(maxMoney * t, maxMoney)} y2={y(maxMoney * t, maxMoney)} stroke="#C3CFDA" strokeDasharray={t === 0 ? undefined : "2 5"} />
-            {t > 0 && <text x={padL + 2} y={y(maxMoney * t, maxMoney) - 4} fontFamily="JetBrains Mono, monospace" fontSize="9" fill="#6B7C8F">{money(maxMoney * t)}</text>}
+            <line x1={padL} x2={W - padR} y1={y(maxMoney * t, maxMoney)} y2={y(maxMoney * t, maxMoney)} stroke="var(--rule)" strokeDasharray={t === 0 ? undefined : "2 5"} />
+            {t > 0 && <text x={padL + 2} y={y(maxMoney * t, maxMoney) - 4} fontFamily="DM Sans, sans-serif" fontSize="9" fill="var(--graphite)">{money(maxMoney * t)}</text>}
           </g>
         ))}
         {rows.map((r, i) => {
@@ -226,19 +230,19 @@ const TrendPlot: React.FC<{ rows: any[] }> = ({ rows }) => {
           const w = Math.min(34, slot * 0.52);
           return (
             <g key={r.MonthLabel || i} onMouseEnter={() => setHover(i)}>
-              <rect x={padL + slot * i} y={top - 8} width={slot} height={H - top + 8} fill={hover === i ? "rgba(31,78,140,0.07)" : "transparent"} />
-              <rect x={cx(i) - w / 2} y={base - h} width={w} height={Math.max(0, h)} fill="#1F4E8C" fillOpacity={hover == null || hover === i ? 0.9 : 0.4} />
-              <text x={cx(i)} y={base + 16} textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="10" fill={hover === i ? "#10243E" : "#6B7C8F"}>{String(r.MonthLabel || "").slice(0, 3).toUpperCase()}</text>
-              <text x={cx(i)} y={base + 29} textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="8" fill="#9AA8B6">{String(r.MonthLabel || "").slice(-2)}</text>
+              <rect x={padL + slot * i} y={top - 8} width={slot} height={H - top + 8} fill={hover === i ? "var(--blue-wash)" : "transparent"} />
+              <rect x={cx(i) - w / 2} y={base - h} width={w} height={Math.max(0, h)} fill="var(--blue)" fillOpacity={hover == null || hover === i ? 0.9 : 0.4} />
+              <text x={cx(i)} y={base + 16} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="10" fill={hover === i ? "var(--ink)" : "var(--graphite)"}>{String(r.MonthLabel || "").slice(0, 3).toUpperCase()}</text>
+              <text x={cx(i)} y={base + 29} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="8" fill="var(--faint)">{String(r.MonthLabel || "").slice(-2)}</text>
             </g>
           );
         })}
         {rows.length > 1 && (
           <>
-            <path d={line("Applications")} fill="none" stroke="#6B7C8F" strokeWidth="1.4" strokeDasharray="4 4" pointerEvents="none" />
-            <path className="draw" d={line("Bookings")} fill="none" stroke="#10243E" strokeWidth="2" strokeLinejoin="round" pointerEvents="none" />
+            <path d={line("Applications")} fill="none" stroke="var(--graphite)" strokeWidth="1.4" strokeDasharray="4 4" pointerEvents="none" />
+            <path className="draw" d={line("Bookings")} fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round" pointerEvents="none" />
             {rows.map((r, i) => (
-              <circle key={i} cx={cx(i)} cy={y(n0(r.Bookings), maxCount)} r={hover === i ? 4.5 : 3} fill="#F8FAFB" stroke="#10243E" strokeWidth="1.6" pointerEvents="none" />
+              <circle key={i} cx={cx(i)} cy={y(n0(r.Bookings), maxCount)} r={hover === i ? 4.5 : 3} fill="var(--sheet)" stroke="var(--ink)" strokeWidth="1.6" pointerEvents="none" />
             ))}
           </>
         )}
@@ -249,11 +253,11 @@ const TrendPlot: React.FC<{ rows: any[] }> = ({ rows }) => {
 
 // ── H: one register = one bar split by status ───────────────────────────────
 const STATUS_TONE: Record<string, { fill: string; hatch?: boolean }> = {
-  Approved: { fill: "#1F4E8C" }, Confirmed: { fill: "#1F4E8C" }, Completed: { fill: "#10243E" }, Resolved: { fill: "#1F4E8C" },
-  Closed: { fill: "#10243E" }, Pending: { fill: "#C3CFDA", hatch: true }, Draft: { fill: "#DDE5EC", hatch: true }, Scheduled: { fill: "#7C9CC4" },
-  Open: { fill: "#CF3A27" }, Cancelled: { fill: "#CF3A27" }, Rejected: { fill: "#CF3A27" },
+  Approved: { fill: "var(--blue)" }, Confirmed: { fill: "var(--blue)" }, Completed: { fill: "var(--ink)" }, Resolved: { fill: "var(--blue)" },
+  Closed: { fill: "var(--ink)" }, Pending: { fill: "var(--rule)", hatch: true }, Draft: { fill: "var(--rule-soft)", hatch: true }, Scheduled: { fill: "var(--blue-mid)" },
+  Open: { fill: "var(--red)" }, Cancelled: { fill: "var(--red)" }, Rejected: { fill: "var(--red)" },
 };
-const tone = (status: string) => STATUS_TONE[status] || { fill: "#9AA8B6" };
+const tone = (status: string) => STATUS_TONE[status] || { fill: "var(--faint)" };
 
 const Register: React.FC<{ name: string; rows: any[]; onOpen: () => void }> = ({ name, rows, onOpen }) => {
   const total = sumCount(rows);
@@ -403,7 +407,7 @@ const CrmDashboard: React.FC = () => {
                     <div className="grow" style={{ width: `${paidPct}%`, background: "var(--blue)" }} />
                     <div className="hatch" style={{ flex: 1, position: "relative" }}>
                       {next30Pct > 0 && paidPct < 100 && (
-                        <div title={`${money(next30)} falls due in the next 30 days`} style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${(next30Pct / (100 - paidPct)) * 100}%`, borderRight: "1.5px dashed var(--ink)", background: "rgba(31,78,140,0.16)" }} />
+                        <div title={`${money(next30)} falls due in the next 30 days`} style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${(next30Pct / (100 - paidPct)) * 100}%`, borderRight: "1.5px dashed var(--ink)", background: "var(--blue-tint)" }} />
                       )}
                     </div>
                   </div>
@@ -416,7 +420,7 @@ const CrmDashboard: React.FC = () => {
                 <div className="mono" style={{ display: "flex", flexWrap: "wrap", gap: "6px 22px", marginTop: 18, fontSize: 11, color: "var(--ink-2)" }}>
                   <span><i style={{ display: "inline-block", width: 10, height: 10, background: "var(--blue)", marginRight: 6 }} />Received</span>
                   <span><i className="hatch" style={{ display: "inline-block", width: 10, height: 10, border: "1px solid var(--rule)", marginRight: 6 }} />Not yet received</span>
-                  <span><i style={{ display: "inline-block", width: 10, height: 10, background: "rgba(31,78,140,0.16)", borderRight: "1.5px dashed var(--ink)", marginRight: 6 }} />Due within 30 days</span>
+                  <span><i style={{ display: "inline-block", width: 10, height: 10, background: "var(--blue-tint)", borderRight: "1.5px dashed var(--ink)", marginRight: 6 }} />Due within 30 days</span>
                   {n0(payments.OverdueCount) > 0 && (
                     <button onClick={() => navigate("/crm/payments")} style={{ color: "var(--red)", fontWeight: 600 }}>
                       ✕ {fmtInt(payments.OverdueCount)} milestone{n0(payments.OverdueCount) === 1 ? "" : "s"} overdue
