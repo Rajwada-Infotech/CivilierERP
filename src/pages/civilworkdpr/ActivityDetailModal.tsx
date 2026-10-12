@@ -20,6 +20,7 @@ import {
   ZoomOut,
   Package,
   UserRound,
+  Link2,
   CalendarDays,
   RotateCcw,
   Users2,
@@ -37,6 +38,7 @@ import {
   MessageSquare,
   type LucideIcon,
 } from "lucide-react";
+import { dependencyAutoName } from "@/lib/dependencyAutoName";
 import {
   getActivityPhotos,
   carryForwardPhotos,
@@ -856,6 +858,15 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
 
   return (
     <div className="flex flex-col gap-5">
+      {/* Auto Name — flat, room and activity, derived from the dependency; read-only */}
+      <div>
+        <p className="flex items-center gap-1.5 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">
+          <Link2 size={11} /> Auto Name
+        </p>
+        <p className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground select-text">
+          {dependencyAutoName({ flatName: row.flatName, alias: row.alias, roomName: row.roomName, storey: row.storey, activityName: row.activityName }) || "—"}
+        </p>
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <Field label="Engineer">
           <span className="flex items-center gap-1.5">
