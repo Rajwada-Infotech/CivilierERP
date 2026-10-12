@@ -71,7 +71,7 @@ const Dropdown = ({
       {trigger}
       <div
         style={style}
-        className={`absolute top-full mt-2.5 z-50 rounded-2xl border border-border/60 bg-card/95 backdrop-blur-2xl shadow-2xl transition-all duration-200 origin-top overflow-visible
+        className={`absolute top-full mt-2.5 z-50 border border-foreground bg-card shadow-[5px_5px_0_hsl(var(--foreground)/0.12)] transition-all duration-200 origin-top overflow-visible
           ${open ? "opacity-100 scale-100 pointer-events-auto translate-y-0" : "opacity-0 scale-95 pointer-events-none -translate-y-2"} ${className || ""}`}
       >
         {children}
@@ -169,7 +169,7 @@ const SetupDropdown = ({
     >
       {/* ── Gradient header ── */}
       <div
-        className="relative px-4 pt-4 pb-3.5 overflow-hidden rounded-t-2xl"
+        className="relative px-4 pt-4 pb-3.5 overflow-hidden rounded-none"
         style={{
           background: `linear-gradient(135deg,
             hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.18) 0%,
@@ -189,7 +189,7 @@ const SetupDropdown = ({
         <div className="relative flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+              className="w-9 h-9 rounded-none flex items-center justify-center shadow-lg shrink-0"
               style={{
                 background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)`,
                 border: `1.5px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.4)`,
@@ -240,7 +240,7 @@ const SetupDropdown = ({
                   navigate(path);
                   onClose();
                 }}
-                className={`setup-item group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-200 active:scale-[0.93] cursor-pointer
+                className={`setup-item group flex flex-col items-center gap-1.5 p-2.5 rounded-none border transition-all duration-200 active:scale-[0.93] cursor-pointer
                   ${isActivePath ? "shadow-sm" : "border-transparent hover:border-border hover:bg-muted/50"}`}
                 style={{
                   animationDelay: `${i * 35}ms`,
@@ -254,7 +254,7 @@ const SetupDropdown = ({
               >
                 <div className="relative w-9 h-9 flex items-center justify-center">
                   <div
-                    className={`absolute inset-0 rounded-xl transition-all duration-200 ${isActivePath ? "" : "bg-muted/60 group-hover:bg-muted"}`}
+                    className={`absolute inset-0 rounded-none transition-all duration-200 ${isActivePath ? "" : "bg-muted/60 group-hover:bg-muted"}`}
                     style={
                       isActivePath
                         ? {
@@ -264,13 +264,13 @@ const SetupDropdown = ({
                     }
                   />
                   <div
-                    className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                    className="absolute inset-0 rounded-none opacity-0 group-hover:opacity-100 transition-opacity duration-200"
                     style={{
                       boxShadow: `0 0 0 1.5px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35), 0 4px 12px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)`,
                     }}
                   />
                   <div
-                    className="setup-icon-shimmer absolute inset-0 rounded-xl pointer-events-none opacity-0 group-hover:opacity-100"
+                    className="setup-icon-shimmer absolute inset-0 rounded-none pointer-events-none opacity-0 group-hover:opacity-100"
                     style={{
                       background: `linear-gradient(105deg, transparent 30%, hsl(0 0% 100% / 0.12) 50%, transparent 70%)`,
                       backgroundSize: "200% 100%",
@@ -301,7 +301,7 @@ const SetupDropdown = ({
 
       {/* ── Footer ── */}
       <div
-        className="px-4 py-2.5 rounded-b-2xl flex items-center justify-between"
+        className="px-4 py-2.5 rounded-none flex items-center justify-between"
         style={{
           borderTop: `1px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)`,
           background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.04)`,
@@ -381,7 +381,7 @@ const UserMenuContent: React.FC<{
     <>
       {/* ── Identity banner ── */}
       <div
-        className="relative -m-1 mb-1 px-4 pt-4 pb-3.5 rounded-t-2xl overflow-hidden"
+        className="relative -m-1 mb-1 px-4 pt-4 pb-3.5 rounded-none overflow-hidden"
         style={cascade(0)}
       >
         <div
@@ -443,14 +443,14 @@ const UserMenuContent: React.FC<{
           else navigate("/user/profile");
         }}
         style={cascade(2)}
-        className="w-full flex items-center gap-2 px-3 py-2 mt-1 text-sm rounded-lg hover:bg-muted transition-colors text-foreground"
+        className="w-full flex items-center gap-2 px-3 py-2 mt-1 text-sm rounded-none hover:bg-muted transition-colors text-foreground"
       >
         <Profile size={14} /> Profile
       </button>
       <button
         onMouseDown={handleLogout}
         style={cascade(3)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-destructive/10 transition-colors text-destructive"
+        className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-none hover:bg-destructive/10 transition-colors text-destructive"
       >
         <Logout size={14} /> Sign Out
       </button>
@@ -685,35 +685,34 @@ export const TopNavbar = () => {
         .nav-pill-btn {
           display: inline-flex;
           align-items: center;
-          gap: 0.375rem;
-          padding: 0.375rem 0.75rem;
-          border-radius: 9999px;
-          font-size: 0.8125rem;
-          font-weight: 500;
-          font-family: var(--font-heading, inherit);
-          color: hsl(var(--foreground) / 0.70);
+          gap: 0.4rem;
+          padding: 0.45rem 0.85rem;
+          font-size: 0.625rem;
+          font-weight: 600;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          font-family: "Sora", sans-serif;
+          color: hsl(var(--muted-foreground));
           background: transparent;
-          border: 1px solid transparent;
-          transition: background 150ms, border-color 150ms, color 150ms;
+          border: 0;
+          transition: background 150ms, color 150ms;
           white-space: nowrap;
           cursor: pointer;
         }
         .nav-pill-btn:hover {
-          background: rgba(128,128,128,0.15);
-          border-color: rgba(128,128,128,0.20);
+          background: hsl(var(--primary) / 0.10);
           color: hsl(var(--foreground));
         }
-        .nav-pill-btn--active {
-          background: rgba(128,128,128,0.15);
-          border-color: rgba(128,128,128,0.20);
-          color: hsl(var(--foreground));
+        .nav-pill-btn--active, .nav-pill-btn--active:hover {
+          background: hsl(var(--foreground));
+          color: hsl(var(--card));
         }
 
         /* pill nav genie — expand: pinched sliver → full pill */
         @keyframes genie-expand {
           0%   {
             opacity: 0;
-            clip-path: inset(0% 48% 0% 48% round 99px);
+            clip-path: inset(0% 48% 0% 48% round 0px);
             transform: translateX(-50%) scaleY(0.4);
             filter: blur(6px);
           }
@@ -722,7 +721,7 @@ export const TopNavbar = () => {
             filter: blur(1px);
           }
           70%  {
-            clip-path: inset(0% 0% 0% 0% round 99px);
+            clip-path: inset(0% 0% 0% 0% round 0px);
             transform: translateX(-50%) scaleY(1.06);
           }
           100% {
@@ -737,17 +736,17 @@ export const TopNavbar = () => {
         @keyframes genie-collapse {
           0%   {
             opacity: 1;
-            clip-path: inset(0% 0% 0% 0% round 99px);
+            clip-path: inset(0% 0% 0% 0% round 0px);
             transform: translateX(-50%) scaleY(1);
             filter: blur(0px);
           }
           50%  {
-            clip-path: inset(0% 42% 0% 42% round 99px);
+            clip-path: inset(0% 42% 0% 42% round 0px);
             filter: blur(2px);
           }
           100% {
             opacity: 0;
-            clip-path: inset(0% 50% 0% 50% round 99px);
+            clip-path: inset(0% 50% 0% 50% round 0px);
             transform: translateX(-50%) scaleY(0.3);
             filter: blur(6px);
           }
@@ -800,7 +799,16 @@ export const TopNavbar = () => {
         }
       `}</style>
 
-      <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center px-3 sm:px-4 gap-3 border-b border-border bg-card/90 backdrop-blur-xl">
+      <header
+        className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center px-3 sm:px-4 gap-3"
+        style={{
+          backgroundColor: "hsl(var(--card))",
+          backgroundImage:
+            "linear-gradient(hsl(var(--foreground) / 0.04) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--foreground) / 0.04) 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+          borderBottom: "1.5px solid hsl(var(--foreground))",
+        }}
+      >
         {/* ── Logo ── */}
         <button
           onClick={() => navigate("/home")}
@@ -815,58 +823,10 @@ export const TopNavbar = () => {
         {/* ── Center pill nav — absolute center of the header ── */}
         <nav
           className={`hidden md:flex items-center gap-0.5 absolute left-1/2 ${pillNavClass}`}
-          style={
-            isDark
-              ? {
-                  borderRadius: "9999px",
-                  padding: "0.25rem",
-                  background: "rgba(15, 17, 26, 0.52)",
-                  border: "1px solid rgba(255,255,255,0.13)",
-                  boxShadow:
-                    "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
-                  backdropFilter: "blur(22px) saturate(160%)",
-                  WebkitBackdropFilter: "blur(22px) saturate(160%)",
-                }
-              : {
-                  borderRadius: "9999px",
-                  padding: "0.25rem",
-                  background: "rgba(255,255,255,0.42)",
-                  border: "1px solid rgba(255,255,255,0.65)",
-                  boxShadow:
-                    "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
-                  backdropFilter: "blur(22px) saturate(180%)",
-                  WebkitBackdropFilter: "blur(22px) saturate(180%)",
-                }
-          }
+          style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--foreground))" }}
         >
-          {/* Dot grid + glow — clipped to pill, tracks active module color */}
-          {(() => {
-            const modKey = isAdminPage ? "admin" : (activeModule ?? "finance");
-            const glowRgb = MODULE_GLOW_RGB[modKey] ?? MODULE_GLOW_RGB.finance;
-            return (
-              <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none z-0">
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    backgroundImage:
-                      "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
-                    backgroundSize: "14px 14px",
-                  }}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    background: `radial-gradient(ellipse at 50% 0%, rgba(${glowRgb},0.38) 0%, rgba(${glowRgb},0.12) 50%, transparent 80%)`,
-                  }}
-                />
-              </div>
-            );
-          })()}
-
           {/* Content — sits above glow */}
-          <div className="relative z-10 flex items-center gap-0.5">
+          <div className="relative z-10 flex items-center">
             {!isHome && setupConfig.available && (
               <SetupDropdown
                 open={setupOpen}
@@ -909,18 +869,11 @@ export const TopNavbar = () => {
         <div className="hidden md:flex items-center gap-1.5 ml-auto shrink-0">
           {/* Collapse sidebar toggle */}
           <div className="relative shrink-0">
-            {/* Rotating conic-gradient arc ring */}
-            <span
-              className="absolute -inset-[2px] rounded-full pointer-events-none opacity-70"
-              style={{
-                background: `conic-gradient(from 0deg, transparent 60%, rgba(${activeGlowRgb},0.85) 80%, transparent 100%)`,
-                animation: "spin-ring 3s linear infinite",
-              }}
-            />
             <button
               onClick={() => setNavCollapsed(!navCollapsed)}
               title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center border border-border bg-muted hover:bg-muted/80 text-foreground transition-all duration-200 active:scale-90 hover:scale-105"
+              className="relative z-10 w-8 h-8 flex items-center justify-center text-foreground hover:bg-primary/10 transition-colors duration-150"
+              style={{ border: "1px solid hsl(var(--foreground))" }}
             >
               {navCollapsed ? (
                 <SidebarLeft size={15} variant="Outline" />

@@ -1,0 +1,141 @@
+import React from "react";
+
+// The "drawing sheet" look shared by the Home screen and the CRM dashboard: one bordered sheet on a faint grid, a title
+// block, lettered details, dimension lines and hatching. Colours and fonts come from the app theme.
+
+// ── The sheet's own styles ──────────────────────────────────────────────────
+export const SHEET_CSS = `
+.crm-sheet {
+  --sheet: hsl(var(--card));
+  --ink: hsl(var(--foreground));
+  --ink-2: hsl(var(--foreground) / 0.78);
+  --graphite: hsl(var(--muted-foreground));
+  --faint: hsl(var(--muted-foreground) / 0.6);
+  --rule: hsl(var(--border));
+  --rule-soft: hsl(var(--border) / 0.55);
+  --blue: hsl(var(--primary));
+  --blue-mid: hsl(var(--primary) / 0.55);
+  --blue-wash: hsl(var(--primary) / 0.10);
+  --blue-tint: hsl(var(--primary) / 0.18);
+  --red: hsl(var(--destructive));
+  --red-wash: hsl(var(--destructive) / 0.10);
+  --grid: hsl(var(--foreground) / 0.04);
+  --hatch: hsl(var(--foreground) / 0.24);
+  color: var(--ink);
+  background-color: var(--sheet);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  border: 1.5px solid var(--ink);
+  outline: 1px solid var(--rule);
+  outline-offset: 5px;
+  font-family: "DM Sans", sans-serif;
+  font-variant-numeric: tabular-nums;
+  margin: 6px;
+}
+.crm-sheet * { box-sizing: border-box; }
+.crm-sheet .mono { font-family: "DM Sans", sans-serif; }
+.crm-sheet .label {
+  font-family: "Sora", sans-serif; font-weight: 600;
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--graphite);
+}
+.crm-sheet .figure { font-family: "Sora", sans-serif; font-weight: 600; letter-spacing: -0.02em; color: var(--ink); line-height: 1; }
+.crm-sheet .title { font-family: "Sora", sans-serif; font-weight: 700; letter-spacing: -0.03em; }
+.crm-sheet .cell { border-top: 1px solid var(--rule); padding: 20px 22px 22px; min-width: 0; }
+.crm-sheet .cell + .cell { border-left: 1px solid var(--rule); }
+.crm-sheet .stack { display: flex; flex-direction: column; min-width: 0; }
+.crm-sheet .stack > .cell + .cell { border-left: 0; flex: 1; }
+.crm-sheet .stack + .cell { border-left: 1px solid var(--rule); }
+.crm-sheet .tag {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%;
+  border: 1.5px solid var(--ink); font-family: "Sora", sans-serif; font-size: 11px; font-weight: 600; color: var(--ink);
+  background: var(--sheet); flex-shrink: 0;
+}
+.crm-sheet .hatch {
+  background-image: repeating-linear-gradient(135deg, var(--hatch) 0, var(--hatch) 1px, transparent 1px, transparent 6px);
+}
+.crm-sheet button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.crm-sheet button:focus-visible, .crm-sheet select:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.crm-sheet .row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 56px; align-items: center; gap: 12px; width: 100%;
+  padding: 9px 6px; border-bottom: 1px solid var(--rule-soft); transition: background-color .15s; }
+.crm-sheet .row:hover { background: var(--blue-wash); }
+.crm-sheet .row.hot:hover { background: var(--red-wash); }
+.crm-sheet .link { border-bottom: 1px dashed var(--graphite); }
+.crm-sheet .link:hover { color: var(--blue); border-bottom-color: var(--blue); }
+.crm-sheet select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
+.crm-sheet select {
+  font-family: "DM Sans", sans-serif; font-size: 13px; font-weight: 600; color: var(--ink); background: transparent; border: 0;
+  padding: 0 14px 0 0; cursor: pointer; max-width: 100%;
+}
+.crm-sheet .grid2 { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
+.crm-sheet .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.crm-sheet table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.crm-sheet th { text-align: left; padding: 0 10px 8px 0; border-bottom: 1px solid var(--ink); font-family: "Sora", sans-serif; font-weight: 600;
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--graphite); white-space: nowrap; }
+.crm-sheet td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+.crm-sheet tbody tr.go { cursor: pointer; transition: background-color .15s; }
+.crm-sheet tbody tr.go:hover { background: var(--blue-wash); }
+.crm-sheet .num { text-align: right; padding-right: 0; white-space: nowrap; }
+.crm-sheet .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.crm-sheet .noscroll { scrollbar-width: none; -ms-overflow-style: none; }
+.crm-sheet .noscroll::-webkit-scrollbar { display: none; }
+.crm-sheet .seg { display: inline-flex; border: 1px solid var(--ink); }
+.crm-sheet .seg button { padding: 5px 11px; font-family: "Sora", sans-serif; font-weight: 600; font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--graphite); text-align: center; transition: background-color .15s, color .15s; }
+.crm-sheet .seg button + button { border-left: 1px solid var(--ink); }
+.crm-sheet .seg button:hover { color: var(--ink); background: var(--blue-wash); }
+.crm-sheet .seg button.on { background: var(--ink); color: var(--sheet); }
+.crm-sheet .skel { background: var(--rule-soft); border-radius: 2px; animation: crm-pulse 1.4s ease-in-out infinite; }
+@keyframes crm-pulse { 50% { opacity: .45; } }
+@keyframes crm-draw { from { stroke-dashoffset: var(--len, 1200); } to { stroke-dashoffset: 0; } }
+@keyframes crm-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.crm-sheet .grow { transform-origin: left center; animation: crm-grow .9s cubic-bezier(.2,.7,.2,1) both; }
+.crm-sheet .draw { stroke-dasharray: var(--len, 1200); animation: crm-draw 1.4s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .crm-sheet .grow, .crm-sheet .draw, .crm-sheet table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.crm-sheet th { text-align: left; padding: 0 10px 8px 0; border-bottom: 1px solid var(--ink); font-family: "Sora", sans-serif; font-weight: 600;
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--graphite); white-space: nowrap; }
+.crm-sheet td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+.crm-sheet tbody tr.go { cursor: pointer; transition: background-color .15s; }
+.crm-sheet tbody tr.go:hover { background: var(--blue-wash); }
+.crm-sheet .num { text-align: right; padding-right: 0; white-space: nowrap; }
+.crm-sheet .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.crm-sheet .skel { animation: none; } }
+@media (max-width: 720px) {
+  .crm-sheet .titleblock { max-width: none !important; border-left: 0 !important; border-top: 1px solid var(--ink); }
+  .crm-sheet .stages .label { font-size: 8.5px; letter-spacing: 0.04em; }
+  .crm-sheet .stages .figure { font-size: 20px !important; }
+}
+@media (max-width: 1023px) {
+  .crm-sheet .grid2, .crm-sheet .grid3 { grid-template-columns: minmax(0, 1fr); }
+  .crm-sheet .grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .crm-sheet .cell + .cell, .crm-sheet .stack + .cell { border-left: 0; }
+  .crm-sheet .cell { padding: 18px 16px 20px; }
+}
+`;
+
+// ── Small drawing parts ─────────────────────────────────────────────────────
+export const Detail: React.FC<{ tag: string; title: string; note?: string; children: React.ReactNode; className?: string }> = ({ tag, title, note, children, className }) => (
+  <section className={`cell ${className || ""}`}>
+    <header style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+      <span className="tag">{tag}</span>
+      <h2 className="label" style={{ color: "var(--ink)", margin: 0 }}>{title}</h2>
+      <span style={{ flex: 1, height: 1, background: "var(--rule)" }} />
+      {note && <span className="label">{note}</span>}
+    </header>
+    {children}
+  </section>
+);
+
+/** A dimension line: a measured span with end ticks and its value written on it. */
+export const Dimension: React.FC<{ from: number; to: number; text: string; color?: string }> = ({ from, to, text, color = "var(--graphite)" }) => (
+  <div style={{ position: "relative", height: 22, marginTop: 6 }}>
+    <div style={{ position: "absolute", left: `${from}%`, width: `${Math.max(0, to - from)}%`, top: 6, height: 1, background: color }}>
+      <span style={{ position: "absolute", left: 0, top: -4, width: 1, height: 9, background: color }} />
+      <span style={{ position: "absolute", right: 0, top: -4, width: 1, height: 9, background: color }} />
+      <span className="mono" style={{ position: "absolute", left: "50%", top: 5, transform: "translateX(-50%)", fontSize: 10, color, whiteSpace: "nowrap", background: "var(--sheet)", padding: "0 6px" }}>{text}</span>
+    </div>
+  </div>
+);
+
+export const Skel: React.FC<{ h?: number; w?: string }> = ({ h = 14, w = "100%" }) => <div className="skel" style={{ height: h, width: w, marginBottom: 10 }} />;
