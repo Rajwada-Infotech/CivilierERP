@@ -1712,6 +1712,13 @@ async function requireInvoiceableCustomer(pool, bookingId) {
   if (mode === "NonInvoice") {
     return "This customer is set to Non-Invoice — they get one final invoice for the grand total once everything is paid (Generate final invoice), not milestone invoices. Change it on the Customer's record (CRM → Customers) if this is incorrect.";
   }
+  // A booking already invoiced in full (its final invoice, e.g. issued while
+  // the customer was Non-Invoice) can't be invoiced again milestone by milestone.
+  const fin = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 InvoiceNo FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Final' AND Status <> 'Void'");
+  if (fin.recordset.length) {
+    return `This booking already has its final invoice (${fin.recordset[0].InvoiceNo}) for the grand total — void it first if milestone invoices are needed instead.`;
+  }
   return null;
 }
 
