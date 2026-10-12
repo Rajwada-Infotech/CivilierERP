@@ -96,6 +96,9 @@ function ApplicationSelector({
                       <span className="text-xs font-semibold tracking-wide" style={{ ...mono, color: GOLD }}>
                         {app.ApplicationNo}
                       </span>
+                      {app.IsCoApplicant ? (
+                        <span className="text-[0.65rem] px-1.5 py-0.5 rounded-full border" style={{ color: TEXT_MUTED, borderColor: HAIRLINE }}>Co-applicant · view only</span>
+                      ) : null}
                       {app.BookingNo && (
                         <span className="text-xs" style={{ color: TEXT_MUTED }}>→ {app.BookingNo}</span>
                       )}
@@ -415,6 +418,11 @@ const PortalLayout: React.FC = () => {
             <PortalSkeleton />
           ) : (
             <Suspense fallback={<PortalSkeleton />}>
+              {selectedApp?.IsCoApplicant ? (
+                <div className="mb-4 rounded-xl border px-4 py-3 text-sm" style={{ borderColor: HAIRLINE, color: TEXT_MUTED, background: "white" }}>
+                  You are a co-applicant on this booking — you can follow everything here; approvals, uploads and requests are made by the main applicant, {selectedApp.ApplicantName}.
+                </div>
+              ) : null}
               <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />
             </Suspense>
           )}

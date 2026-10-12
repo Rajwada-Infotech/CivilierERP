@@ -161,6 +161,10 @@ router.post("/change-password", async (req, res) => {
 // Returns the validated integer applicationId on success, throws 403 on failure.
 // This is the server-side enforcement of Option A: JWT carries customerId,
 // applicationId is a request-scoped param, validated here on every request.
+// The logged-in customer (@cid) is a co-applicant on application `a`.
+const CO_APPLICANT_OF = (a) => `EXISTS (SELECT 1 FROM dbo.CrmCoApplicant co WHERE co.IsActive = 1 AND co.CustomerId = @cid
+  AND (co.ApplicationId = ${a}.Id OR co.BookingId IN (SELECT bx.Id FROM dbo.CrmBooking bx WHERE bx.ApplicationId = ${a}.Id)))`;
+
 async function resolveAndAssertApplication(pool, req, res) {
   const raw = req.query.applicationId || req.params.applicationId;
   const appId = parseInt(raw, 10);
@@ -168,18 +172,25 @@ async function resolveAndAssertApplication(pool, req, res) {
     res.status(400).json({ error: "applicationId is required" });
     return null;
   }
+  // The main applicant can see and act; a co-applicant (Applicant 2, 3 ...)
+  // linked to this customer can only see (read-only: GET requests).
   const check = await pool.request()
     .input("aid", sql.Int, appId)
     .input("cid", sql.Int, req.portalUser.customerId)
     .query(`
-      SELECT a.Id
+      SELECT a.Id,
+             CASE WHEN a.CustomerId = @cid THEN 1 ELSE 0 END AS IsMain,
+             CASE WHEN ${CO_APPLICANT_OF("a")} THEN 1 ELSE 0 END AS IsCo
       FROM dbo.CrmApplication a
-      WHERE a.Id = @aid
-        AND a.CustomerId = @cid
-        AND a.IsActive = 1
+      WHERE a.Id = @aid AND a.IsActive = 1
     `);
-  if (!check.recordset.length) {
+  const row = check.recordset[0];
+  if (!row || (!row.IsMain && !row.IsCo)) {
     res.status(403).json({ error: "Application not found or does not belong to this account" });
+    return null;
+  }
+  if (!row.IsMain && req.method !== "GET") {
+    res.status(403).json({ error: "As a co-applicant you can view this booking; the main applicant takes the actions." });
     return null;
   }
   return appId;
@@ -195,6 +206,7 @@ router.get("/applications", async (req, res) => {
     const result = await pool.request().input("cid", sql.Int, customerId).query(`
       SELECT
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Status AS ApplicationStatus,
+        CASE WHEN a.CustomerId = @cid THEN 0 ELSE 1 END AS IsCoApplicant,
         a.InterestedProject, a.CreatedAt AS ApplicationDate,
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
@@ -214,7 +226,7 @@ router.get("/applications", async (req, res) => {
       LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id
       LEFT JOIN dbo.CrmHandover h ON h.BookingId = b.Id
-      WHERE a.CustomerId = @cid AND a.IsActive = 1
+      WHERE a.IsActive = 1 AND (a.CustomerId = @cid OR ${CO_APPLICANT_OF("a")})
       ORDER BY a.CreatedAt DESC
     `);
     res.json(result.recordset);
