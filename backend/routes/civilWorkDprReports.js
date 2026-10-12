@@ -374,8 +374,9 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
       const tagIds = [
         ...new Set(String(req.query.tagId ?? "").split(",").map((x) => parseInt(x.trim(), 10)).filter(Number.isInteger)),
       ].slice(0, 200);
-      conds.push("am.TagId IS NOT NULL");
-      if (tagIds.length) conds.push(`am.TagId IN (${tagIds.join(",")})`);
+      // The effective tag: the one set on this reported activity, else its Activity Master default.
+      conds.push("COALESCE(dma.TagId, am.TagId) IS NOT NULL");
+      if (tagIds.length) conds.push(`COALESCE(dma.TagId, am.TagId) IN (${tagIds.join(",")})`);
     }
     const where = `WHERE ${conds.join(" AND ")}`;
     const from = `
@@ -392,7 +393,7 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
       JOIN dbo.users u ON u.id = dae.EngineerId
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
-      LEFT JOIN dbo.DprTagMaster tg ON tg.Id = am.TagId
+      LEFT JOIN dbo.DprTagMaster tg ON tg.Id = COALESCE(dma.TagId, am.TagId)
       LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId

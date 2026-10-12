@@ -225,6 +225,7 @@ function ChainGroupList({
                           </span>
                           <div onClick={(e) => e.stopPropagation()} className="shrink-0 flex flex-col items-end gap-0.5">
                             <PriorityBadge priority={row.priority} />
+                            {row.tagName && <span className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400" title="Tag">{row.tagName}</span>}
                             <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
                             <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} />
                           </div>
