@@ -1,3 +1,4 @@
+import { bankReportChequeNo } from "@/lib/bankReportCheque";
 import { chainLinksForRow } from "@/lib/civilWorkDprLinks";
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { fmtIstIso } from "@/lib/istTime";
@@ -476,6 +477,8 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Party", accessor: "PaymentName" },
       { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
       { header: "Mode", accessor: "Mode" },
+      // Cheque number, for the rows paid by cheque (a dash for every other mode).
+      { header: "Cheque No", accessor: (r) => bankReportChequeNo(r) },
       { header: "Doc No", accessor: "DocNo" },
       {
         header: "Cleared",
