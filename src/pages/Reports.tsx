@@ -2927,11 +2927,27 @@ const ReportTable: React.FC<{
   companies: CompanyOption[];
   projects: { id: number; name: string }[];
   onClose: () => void;
-}> = ({ report, filters, companies, projects, onClose }) => {
+  /** When set, clicking a row calls this instead of opening the row-detail dialog (the Civil Work DPR Query page). */
+  onRowOpen?: (row: Record<string, unknown>) => void;
+  /** Start the inline Date field empty (the Query page shows the section bar's range instead of today only). */
+  startWithoutDate?: boolean;
+}> = ({ report, filters, companies, projects, onClose, onRowOpen, startWithoutDate }) => {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
+  // The Query page opens an activity in Reporting and comes back: keep its project / user / date / page choices
+  // for that round trip (this tab only).
+  const savedCtx = useMemo(() => {
+    if (!onRowOpen) return null;
+    try {
+      return JSON.parse(sessionStorage.getItem(`query-ctx:${report.id}`) || "null") as
+        { projectIds?: string[]; userIds?: string[]; userDate?: string; page?: number } | null;
+    } catch {
+      return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [page, setPage] = useState(savedCtx?.page ?? 1);
   const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
   // Civil Work DPR rows carry the activity / chain they are about: offer to open it in the pages that work on it.
   const reportNavigate = useNavigate();
@@ -3004,9 +3020,9 @@ const ReportTable: React.FC<{
       .then((list) => setTagOptions(list.map((t) => ({ id: String(t.id), label: t.tagName }))))
       .catch(() => {});
   }, [isTagWise]);
-  const [userIds, setUserIds] = useState<string[]>([]);
+  const [userIds, setUserIds] = useState<string[]>(savedCtx?.userIds ?? []);
   // Its own Date field, right in the report's toolbar (starts on today): one day's records only.
-  const [userDate, setUserDate] = useState<string>(() => todayIstDate());
+  const [userDate, setUserDate] = useState<string>(() => savedCtx?.userDate ?? (startWithoutDate ? "" : todayIstDate()));
   const [userOptions, setUserOptions] = useState<MultiSelectOption[]>([]);
   useEffect(() => {
     if (!isUserWise) return;
@@ -3021,7 +3037,7 @@ const ReportTable: React.FC<{
   // dropdowns) — ReportTable remounts per report (key=report.id) so these
   // reset on their own when you switch reports.
   const [companyIds, setCompanyIds] = useState<string[]>([]);
-  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [projectIds, setProjectIds] = useState<string[]>(savedCtx?.projectIds ?? []);
   // Expense Register also gets its own inline Date Range filter — the
   // shared Day/Range toggle above (SectionFilters) already wires "from"/
   // "to" through buildParams() below, but it lives in the parent, a full
@@ -3031,6 +3047,12 @@ const ReportTable: React.FC<{
   // shared filter the same way those already do.
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  useEffect(() => {
+    if (!onRowOpen) return;
+    try {
+      sessionStorage.setItem(`query-ctx:${report.id}`, JSON.stringify({ projectIds, userIds, userDate, page }));
+    } catch { /* storage unavailable — just don't remember */ }
+  }, [onRowOpen, report.id, projectIds, userIds, userDate, page]);
   useEffect(() => {
     if (!isExpenseRegister) return;
     fetchWithAuth("/api/general-ledger/options")
@@ -3666,7 +3688,7 @@ const ReportTable: React.FC<{
                 {pageRows.map((row, i) => (
                   <tr
                     key={i}
-                    onClick={() => setSelectedRow(row)}
+                    onClick={() => (onRowOpen ? onRowOpen(row) : setSelectedRow(row))}
                     className="hover:bg-muted/20 transition-colors cursor-pointer"
                   >
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">
@@ -3828,6 +3850,40 @@ const ReportTile: React.FC<{
 // isMarketingHeadPage) — showing Finance/Material/Admin tiles they can't
 // actually open would just be a dead end (backend 403s on click).
 const MARKETING_HEAD_SECTION_IDS = new Set(["sales-automation", "crm"]);
+
+const daysAgoIst = (n: number) => {
+  const d = new Date(`${todayIstDate()}T00:00:00`);
+  d.setDate(d.getDate() - n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/** One report shown on its own page (Civil Work DPR > Query) — the same definition and table as in Reports. */
+export const QueryReportTable: React.FC<{
+  reportId: string;
+  onClose: () => void;
+  onRowOpen: (row: Record<string, unknown>) => void;
+}> = ({ reportId, onClose, onRowOpen }) => {
+  const report = REPORT_MAP.get(reportId);
+  const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    fetchProjectOptions()
+      .then((l) => setProjects(Array.isArray(l) ? l : []))
+      .catch(() => setProjects([]));
+  }, []);
+  if (!report) return null;
+  return (
+    <ReportTable
+      report={report}
+      // Query shows the last 30 days (not just today) so records are there on opening; picking a date narrows to that day.
+      filters={{ companyId: "", projectId: "", finYearId: "", dateMode: "range", singleDate: "", rangeFrom: daysAgoIst(30), rangeTo: todayIstDate() }}
+      companies={[]}
+      projects={projects}
+      onClose={onClose}
+      onRowOpen={onRowOpen}
+      startWithoutDate
+    />
+  );
+};
 
 const Reports: React.FC = () => {
   usePageRights("reports");
