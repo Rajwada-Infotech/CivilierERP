@@ -8,14 +8,14 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
-const rateLimit = require("../middleware/rateLimiter");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 router.get("/", requirePageRight("crm-brokerage-rate-tiers", "view"), async (req, res) => {
   try {

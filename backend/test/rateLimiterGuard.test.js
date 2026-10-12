@@ -45,8 +45,8 @@ describe("the shared rateLimiter", () => {
 });
 
 describe("no route file brings back an IP-counted limiter", () => {
-  // server.js builds the global and login limiters itself, with explicit keys; the wrapper is the one allowed importer.
-  const ALLOWED = new Set(["rateLimiter.js"]);
+  // server.js builds the global and login limiters itself, with explicit keys; the wrapper and apiRateLimit.js (which CodeQL only recognises when it sees express-rate-limit called directly) are the allowed importers.
+  const ALLOWED = new Set(["rateLimiter.js", "apiRateLimit.js"]);
   const dirs = ["routes", "middleware", "services"];
 
   test.each(dirs)("%s/ never requires express-rate-limit directly", (dir) => {

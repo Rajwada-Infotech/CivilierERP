@@ -3,14 +3,14 @@ const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 // Project access: a customer opens only if one of their applications is in the user's projects.
 router.param("id", require("../services/projectScope").crmCustomerGuard);
-const rateLimit = require("../middleware/rateLimiter");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // GET / — the Applicant Ledger's customer list: every customer with a
 // rolled-up application/booking count and financial position, searchable by

@@ -4,7 +4,7 @@ const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmExtraCharge", { withApplication: true })); }
-const rateLimit = require("../middleware/rateLimiter");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
@@ -15,7 +15,7 @@ const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, resolveExtraWorkHsn, getHsnRate, isLandSale } = require("../services/crmGst");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // Same re-derive-from-source pattern as crmParking.js's rollup — delegates
 // ParkingTotal/ExtraChargesTotal/GrandTotal AND the fixed HSN-driven GST
