@@ -112,13 +112,13 @@ const IconChip = ({
   const pad = compact ? 6 : 12;
   return (
     <span
-      className="flex items-center justify-center rounded-md shrink-0 transition-colors bg-sidebar-accent/50 text-sidebar-foreground/60"
+      className="flex items-center justify-center shrink-0 transition-colors text-sidebar-foreground/60"
       style={{
-        width: size + pad,
+        width: compact ? 10 : 14,
         height: size + pad,
       }}
     >
-      <span className={`rounded-full ${active ? "w-2 h-2 bg-sidebar-primary" : "w-1.5 h-1.5 bg-current"}`} />
+      <span className={`rounded-full ${active ? "w-1.5 h-1.5 bg-sidebar-primary" : "w-1 h-1 bg-current"}`} />
     </span>
   );
 };
@@ -341,7 +341,7 @@ export const NavGroup = ({
                 onClick={() => toggleSection(section.label)}
                 className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[0.6875rem] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-current shrink-0" />
+                <span className="w-1 h-1 rounded-full bg-current shrink-0" />
                 <OverflowTooltip text={section.label}>
                   <span className="flex-1 text-left truncate font-medium">
                     {section.label}
