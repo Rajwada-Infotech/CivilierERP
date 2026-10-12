@@ -755,14 +755,14 @@ export default function JournalVoucher() {
 
       {/* ── New JV Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden rounded-none border-foreground" onKeyDown={preventEnterSubmit}>
-          <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border">
+        <DialogContent className="sheet-frame max-w-2xl p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
+          <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-foreground">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 sm:w-8 sm:h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">
                 <Scale size={15} className="text-primary" />
               </div>
               <div className="min-w-0">
-                <DialogTitle className="text-sm font-semibold">
+                <DialogTitle className="font-heading text-base font-bold tracking-tight">
                   {editingId ? "Edit Journal Voucher" : "New Journal Voucher"}
                 </DialogTitle>
                 <DialogDescription className="text-[0.6875rem] mt-0.5">
@@ -778,7 +778,7 @@ export default function JournalVoucher() {
             {/* Header fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Company *</label>
+                <label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Company *</label>
                 <Select
                   value={companyId}
                   onValueChange={(v) => { setCompanyId(v); setProjectId(""); }}
@@ -794,7 +794,7 @@ export default function JournalVoucher() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Project</label>
+                <label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Project</label>
                 <Select
                   value={projectId}
                   onValueChange={setProjectId}
@@ -811,11 +811,11 @@ export default function JournalVoucher() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Date</label>
+                <label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Date</label>
                 <DateInput value={jvDate} onChange={(e) => setJvDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Narration</label>
+                <label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Narration</label>
                 <Input value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this Journal Voucher" />
               </div>
             </div>
@@ -825,7 +825,7 @@ export default function JournalVoucher() {
             <div className="rounded-xl border border-border overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[480px]">
-                  <thead className="bg-muted/40 border-b border-border">
+                  <thead style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
                     <tr>
                       <th className="px-3 py-2 text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Account Head</th>
                       <th className="px-3 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground w-28 sm:w-32">Debit</th>
@@ -879,7 +879,7 @@ export default function JournalVoucher() {
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot className="border-t border-border bg-muted/20">
+                  <tfoot className="border-t border-foreground">
                     <tr>
                       <td className="px-3 py-2">
                         <button onClick={addLine} className="flex items-center gap-1 text-xs text-primary hover:underline">
@@ -924,11 +924,11 @@ export default function JournalVoucher() {
             />
           </div>
 
-          <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/20">
+          <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-foreground">
             <button
               onClick={() => { setDialogOpen(false); resetForm(); }}
               disabled={saving}
-              className="w-full sm:w-auto px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+              className="w-full sm:w-auto px-4 py-2.5 border border-foreground/40 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
             >
               Cancel
             </button>
@@ -946,14 +946,14 @@ export default function JournalVoucher() {
 
       {/* ── Voucher detail ── */}
       <Dialog open={viewingJVLoading || !!viewingJV} onOpenChange={(o) => { if (!o) setViewingJV(null); }}>
-        <DialogContent className="max-w-lg p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden rounded-none border-foreground">
+        <DialogContent className="sheet-frame max-w-lg p-0 gap-0 flex flex-col max-h-[85dvh] overflow-hidden" style={{ margin: 0 }}>
           {viewingJVLoading ? (
             <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground text-sm">
               <Loader2 size={16} className="animate-spin" /> Loading voucher…
             </div>
           ) : viewingJV ? (
             <>
-              <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-border">
+              <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-foreground">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
                     {viewingJV.JVNo || `JV-${viewingJV.JVID}`}
@@ -1076,10 +1076,10 @@ export default function JournalVoucher() {
                 )}
               </div>
 
-              <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/20">
+              <DialogFooter className="shrink-0 px-4 sm:px-5 py-3.5 border-t border-foreground">
                 <button
                   onClick={() => setViewingJV(null)}
-                  className="w-full sm:w-auto px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+                  className="w-full sm:w-auto px-4 py-2.5 border border-foreground/40 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                 >
                   Close
                 </button>
