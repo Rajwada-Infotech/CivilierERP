@@ -2929,7 +2929,9 @@ const ReportTable: React.FC<{
   onClose: () => void;
   /** When set, clicking a row calls this instead of opening the row-detail dialog (the Civil Work DPR Query page). */
   onRowOpen?: (row: Record<string, unknown>) => void;
-}> = ({ report, filters, companies, projects, onClose, onRowOpen }) => {
+  /** Start the inline Date field empty (the Query page shows the section bar's range instead of today only). */
+  startWithoutDate?: boolean;
+}> = ({ report, filters, companies, projects, onClose, onRowOpen, startWithoutDate }) => {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -3008,7 +3010,7 @@ const ReportTable: React.FC<{
   }, [isTagWise]);
   const [userIds, setUserIds] = useState<string[]>([]);
   // Its own Date field, right in the report's toolbar (starts on today): one day's records only.
-  const [userDate, setUserDate] = useState<string>(() => todayIstDate());
+  const [userDate, setUserDate] = useState<string>(() => (startWithoutDate ? "" : todayIstDate()));
   const [userOptions, setUserOptions] = useState<MultiSelectOption[]>([]);
   useEffect(() => {
     if (!isUserWise) return;
@@ -3831,6 +3833,12 @@ const ReportTile: React.FC<{
 // actually open would just be a dead end (backend 403s on click).
 const MARKETING_HEAD_SECTION_IDS = new Set(["sales-automation", "crm"]);
 
+const daysAgoIst = (n: number) => {
+  const d = new Date(`${todayIstDate()}T00:00:00`);
+  d.setDate(d.getDate() - n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 /** One report shown on its own page (Civil Work DPR > Query) — the same definition and table as in Reports. */
 export const QueryReportTable: React.FC<{
   reportId: string;
@@ -3848,11 +3856,13 @@ export const QueryReportTable: React.FC<{
   return (
     <ReportTable
       report={report}
-      filters={{ companyId: "", projectId: "", finYearId: "", dateMode: "single", singleDate: "", rangeFrom: "", rangeTo: "" }}
+      // Query shows the last 30 days (not just today) so records are there on opening; picking a date narrows to that day.
+      filters={{ companyId: "", projectId: "", finYearId: "", dateMode: "range", singleDate: "", rangeFrom: daysAgoIst(30), rangeTo: todayIstDate() }}
       companies={[]}
       projects={projects}
       onClose={onClose}
       onRowOpen={onRowOpen}
+      startWithoutDate
     />
   );
 };
