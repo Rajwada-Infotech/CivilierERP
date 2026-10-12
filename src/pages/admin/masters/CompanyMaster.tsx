@@ -245,11 +245,11 @@ function printCompanyPreview(c: Company) {
       {
         title: "Legal / Compliance",
         fields: [
-          { label: "CIN Number", value: c.cinNumber },
-          { label: "PAN Number", value: c.panNumber },
-          { label: "TAN Number", value: c.tanNumber },
+          { label: "CIN (Corporate Identity Number)", value: c.cinNumber },
+          { label: "PAN (Permanent Account Number)", value: c.panNumber },
+          { label: "TAN (Tax Deduction and Collection Account Number)", value: c.tanNumber },
           { label: "GST Status", value: c.gstType },
-          { label: "GST Number", value: c.gstNumber },
+          { label: "GSTIN (GST Identification Number)", value: c.gstNumber },
           { label: "GST Registration Date", value: c.gstDate },
           { label: "Trade License No.", value: c.tradeLicenseNo },
           { label: "Trade License Date", value: c.tradeLicenseDate },
@@ -356,11 +356,11 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
             <Row label="Auditor Name" value={c.auditorName} />
 
             <Section title="Legal / Compliance" />
-            <Row label="CIN Number" value={c.cinNumber} />
-            <Row label="PAN Number" value={c.panNumber} />
-            <Row label="TAN Number" value={c.tanNumber} />
+            <Row label="CIN (Corporate Identity Number)" value={c.cinNumber} />
+            <Row label="PAN (Permanent Account Number)" value={c.panNumber} />
+            <Row label="TAN (Tax Deduction and Collection Account Number)" value={c.tanNumber} />
             <Row label="GST Status" value={c.gstType} />
-            <Row label="GST Number" value={c.gstNumber} />
+            <Row label="GSTIN (GST Identification Number)" value={c.gstNumber} />
             <Row label="GST Date" value={c.gstDate} />
             <Row label="Trade License No." value={c.tradeLicenseNo} />
             <Row label="Trade License Date" value={c.tradeLicenseDate} />
@@ -602,8 +602,8 @@ export default function CompanyMaster() {
     mutationFn: async () => {
       if (form.gstType === "Registered") {
         if (!form.gstNumber.trim()) {
-          setGstError("GST Number is required for registered companies");
-          throw new Error("GST Number is required for registered companies");
+          setGstError("GSTIN is required for registered companies");
+          throw new Error("GSTIN is required for registered companies");
         }
         if (!GSTIN_REGEX.test(form.gstNumber.trim().toUpperCase())) {
           setGstError("Enter a valid 15-character GSTIN (e.g. 27AAAAA0000A1Z5)");
@@ -1145,9 +1145,9 @@ export default function CompanyMaster() {
               {/* Legal tab */}
               {activeTab === "legal" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {fi("CIN Number", "cinNumber")}
-                  {fi("PAN Number", "panNumber", "text", "AAAAA0000A")}
-                  {fi("TAN Number", "tanNumber")}
+                  {fi("CIN (Corporate Identity Number)", "cinNumber")}
+                  {fi("PAN (Permanent Account Number)", "panNumber", "text", "AAAAA0000A")}
+                  {fi("TAN (Tax Deduction and Collection Account Number)", "tanNumber")}
 
                   <div className="col-span-full pt-2">
                     <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest mb-3 border-b border-border pb-1">
@@ -1175,7 +1175,7 @@ export default function CompanyMaster() {
                     </div>
                   </div>
                   <div>
-                    {fi("GST Number", "gstNumber", "text", "Enter GSTIN (e.g. 27AAAAA0000A1Z5)", {
+                    {fi("GSTIN (GST Identification Number)", "gstNumber", "text", "Enter GSTIN (e.g. 27AAAAA0000A1Z5)", {
                       disabled: form.gstType !== "Registered",
                       title: "Available only for registered companies",
                       required: form.gstType === "Registered",
