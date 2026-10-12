@@ -3,7 +3,7 @@ import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SheetShell } from "@/components/sheet/Sheet";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,33 +104,6 @@ function GLBadge({ status, postedToGL }: { status: string; postedToGL?: boolean 
     </span>
   );
 }
-
-/** A square mark and a word in capitals - the same vocabulary as the Payments list. */
-function SheetMark({ text, tone }: { text: string; tone: "done" | "waiting" | "stopped" | "none" }) {
-  if (tone === "none") return <span className="text-muted-foreground text-xs">—</span>;
-  const ink = tone === "stopped" ? "hsl(var(--destructive))" : "hsl(var(--foreground))";
-  return (
-    <span className="inline-flex items-center gap-1.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap" style={{ color: ink }}>
-      <i
-        className="shrink-0"
-        style={{
-          width: 8,
-          height: 8,
-          border: `1px solid ${ink}`,
-          background:
-            tone === "stopped"
-              ? "hsl(var(--destructive))"
-              : tone === "waiting"
-                ? "repeating-linear-gradient(135deg, hsl(var(--foreground)) 0, hsl(var(--foreground)) 1px, transparent 1px, transparent 3px)"
-                : "hsl(var(--primary))",
-        }}
-      />
-      {text}
-    </span>
-  );
-}
-const statusTone = (status: string): "done" | "waiting" | "stopped" =>
-  /reject|cancel|delete/i.test(status) ? "stopped" : /approved|posted|success/i.test(status) ? "done" : "waiting";
 
 function fmtDate(d?: string | null) {
   if (!d) return "—";

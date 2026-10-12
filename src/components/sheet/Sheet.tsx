@@ -200,3 +200,31 @@ export const Dimension: React.FC<{ from: number; to: number; text: string; color
 );
 
 export const Skel: React.FC<{ h?: number; w?: string }> = ({ h = 14, w = "100%" }) => <div className="skel" style={{ height: h, width: w, marginBottom: 10 }} />;
+
+/** Status on a sheet: a square mark and a word in capitals. Solid is settled, hatched is in progress, red has stopped. */
+export const SheetMark: React.FC<{ text: string; tone: "done" | "waiting" | "stopped" | "none" }> = ({ text, tone }) => {
+  if (tone === "none") return <span className="text-muted-foreground text-xs">—</span>;
+  const ink = tone === "stopped" ? "hsl(var(--destructive))" : "hsl(var(--foreground))";
+  return (
+    <span className="inline-flex items-center gap-1.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap" style={{ color: ink }}>
+      <i
+        className="shrink-0"
+        style={{
+          width: 8,
+          height: 8,
+          border: `1px solid ${ink}`,
+          background:
+            tone === "stopped"
+              ? "hsl(var(--destructive))"
+              : tone === "waiting"
+                ? "repeating-linear-gradient(135deg, hsl(var(--foreground)) 0, hsl(var(--foreground)) 1px, transparent 1px, transparent 3px)"
+                : "hsl(var(--primary))",
+        }}
+      />
+      {text}
+    </span>
+  );
+};
+
+export const statusTone = (status: string): "done" | "waiting" | "stopped" =>
+  /reject|cancel|delete|bounce|fail/i.test(status) ? "stopped" : /approved|posted|success|cleared|closed/i.test(status) ? "done" : "waiting";
