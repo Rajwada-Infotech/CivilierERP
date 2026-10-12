@@ -429,7 +429,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                     </div>
                     {!hasBanks && picked?.BookingId != null && (
                       <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400">
-                        ⚠ No bank details on file for this customer — enter them here before raising the refund.
+                        No bank details on file for this customer — needed only for an NEFT / RTGS / IMPS / UPI refund; a Cheque refund needs none.
                       </p>
                     )}
                   </div>

@@ -30,6 +30,11 @@ const FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super
 // only ever a same-day mode preference, not a dated instrument. Optional
 // everywhere it's used — never required to raise or approve a refund.
 const ALLOWED_REFUND_MODES = new Set(["Cheque", "NEFT", "RTGS", "IMPS", "UPI"]);
+// Like a money receipt, the payment mode decides what a payout needs: a
+// transfer needs the customer's account; a cheque is written to their name
+// and needs none. No mode yet = Finance chooses it on the voucher.
+const TRANSFER_REFUND_MODES = new Set(["NEFT", "RTGS", "IMPS", "UPI"]);
+const needsCustomerAccount = (mode) => TRANSFER_REFUND_MODES.has(String(mode || "").trim());
 function validatePaymentMode(raw) {
   if (raw != null && raw !== "" && !ALLOWED_REFUND_MODES.has(raw)) {
     throw new Error(`PaymentMode must be one of: ${[...ALLOWED_REFUND_MODES].join(", ")}`);
@@ -500,7 +505,7 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
     // Finance -> Payments, where Finance approves it once. So everything the
     // voucher needs is checked BEFORE the approval is recorded.
     const pre = (await pool.request().input("id", sql.Int, id).query(`
-      SELECT r.Status, r.RefundBankLHeadId, r.CustomerBankName, r.CustomerAccountNo, r.NetAmount, r.ProjectId,
+      SELECT r.Status, r.RefundBankLHeadId, r.CustomerBankName, r.CustomerAccountNo, r.NetAmount, r.ProjectId, r.PreferredPaymentMode,
              (SELECT COUNT(*) FROM dbo.CrmProjectBank pb WHERE pb.ProjectId = r.ProjectId) AS ProjectBanks,
              (SELECT MIN(pb.BankLHeadId) FROM dbo.CrmProjectBank pb WHERE pb.ProjectId = r.ProjectId) AS OnlyProjectBank
       FROM dbo.CrmRefund r WHERE r.Id = @id`)).recordset[0];
@@ -510,7 +515,7 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
       // The company bank is Finance's call, as for every payout (brokerage
       // etc.): when neither the refund nor the project names one, Finance
       // picks it on the voucher in Payments before approving it there.
-      if (!pre.CustomerBankName && !pre.CustomerAccountNo) return res.status(400).json({ error: "Add the customer's bank details to the refund before approving it." });
+      if (needsCustomerAccount(pre.PreferredPaymentMode) && !pre.CustomerAccountNo) return res.status(400).json({ error: `A ${pre.PreferredPaymentMode} refund needs the customer's bank account — add it to the refund, or choose Cheque.` });
       if (!(Number(pre.NetAmount) > 0)) return res.status(400).json({ error: "The refund's net amount must be more than zero." });
     }
     const result = await approvalTransition("crm-refunds", id, "Approved", userEmail, req.user?.role, null, req.user?.userId ?? null);
@@ -591,7 +596,6 @@ async function raisePayoutVoucher(tx, rf, opts) {
       }
     }
     const bankId = opts.bankId != null ? opts.bankId : rf.RefundBankLHeadId;
-    if (!rf.CustomerBankName && !rf.CustomerAccountNo) { throw new RefundPayoutError("Customer bank details are missing — add them to the refund before disbursing", 400); }
     const net = Number(rf.NetAmount) || 0;
     if (net <= 0) { throw new RefundPayoutError("Net refund amount must be greater than 0", 400); }
 
@@ -602,6 +606,9 @@ async function raisePayoutVoucher(tx, rf, opts) {
     let paymentMode;
     try { paymentMode = validatePaymentMode(opts.paymentMode ?? rf.PreferredPaymentMode); }
     catch (e) { throw new RefundPayoutError(e.message, 400); }
+    if (needsCustomerAccount(paymentMode) && !rf.CustomerAccountNo) {
+      throw new RefundPayoutError(`A ${paymentMode} refund needs the customer's bank account — add it to the refund, or choose Cheque`, 400);
+    }
 
     // Bank name is known the moment bankId is — resolving and storing it
     // now (instead of leaving PBankName blank for Finance to fill in later)

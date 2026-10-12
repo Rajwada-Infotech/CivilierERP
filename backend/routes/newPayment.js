@@ -1684,7 +1684,7 @@ router.put("/:id/approve", async (req, res) => {
     // refund's NetAmount.
     const refundGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
       SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmRefundId,
-             r.NetAmount
+             r.NetAmount, r.RefundNo, r.CustomerAccountNo
       FROM dbo.NewPayment np
       LEFT JOIN dbo.CrmRefund r ON r.Id = np.SourceCrmRefundId
       WHERE np.PPaymentID = @PPaymentID
@@ -1706,6 +1706,12 @@ router.put("/:id/approve", async (req, res) => {
       if (!refundRow.PDate || !String(refundRow.PMode || "").trim() || !normalizeBankId(refundRow.PBankID)) {
         return res.status(400).json({
           error: "Complete refund payment date, payment mode, and bank before approval.",
+        });
+      }
+      // A transfer pays into the customer's account — it must be on the refund.
+      if (["NEFT", "RTGS", "IMPS", "UPI"].includes(String(refundRow.PMode).trim()) && !String(refundRow.CustomerAccountNo || "").trim()) {
+        return res.status(400).json({
+          error: `A ${refundRow.PMode} refund needs the customer's bank account — add it on refund ${refundRow.RefundNo}, or pay by Cheque.`,
         });
       }
       const netAmount = Number(refundRow.NetAmount) || 0;
