@@ -343,52 +343,11 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email);
 
-    // Invoice / Non-Invoice — defaults to NonInvoice (matches the column's
-    // own DB default) when omitted or an unrecognised value is sent, rather
-    // than trusting an arbitrary client string straight into a CHECK-
-    // constrained column.
-    const invoiceMode = b.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice";
-
-    const cur = resolveCurrentAddress(b);
-    const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
-    const result = await pool.request()
-      .input("no",       sql.NVarChar(30),  customerNo)
-      .input("lid",       sql.Int,           b.LeadId !== undefined && b.LeadId !== null && b.LeadId !== "" ? parseInt(b.LeadId) : null)
-      .input("name",      sql.NVarChar(200), b.CustomerName?.trim() || null)
-      .input("mob",       sql.NVarChar(20),  b.Mobile?.trim() || null)
-      .input("altmob",    sql.NVarChar(20),  b.AltMobile || null)
-      .input("email",     sql.NVarChar(200), email)
-      .input("pan",       sql.NVarChar(20),  b.PanNo?.trim() || null)
-      .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo || null)
-      .input("occ",       sql.NVarChar(100), b.Occupation || null)
-      .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
-      .input("addr",      sql.NVarChar(500), b.PermanentAddress?.trim() || null)
-      .input("city",      sql.NVarChar(100), b.PermanentCity || null)
-      .input("state",     sql.NVarChar(100), b.PermanentState || null)
-      .input("pin",       sql.NVarChar(10),  b.PermanentPincode || null)
-      .input("curaddr",   sql.NVarChar(500), cur.currentAddress)
-      .input("curcity",   sql.NVarChar(100), cur.currentCity)
-      .input("curstate",  sql.NVarChar(100), cur.currentState)
-      .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
-      .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
-      .input("dob",       sql.Date,          b.DateOfBirth || null)
-      .input("invmode",   sql.NVarChar(20),  invoiceMode)
-      .input("notes",     sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",        sql.Int,           actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmCustomer
-          (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, PanNo, AadhaarNo, Occupation, AnnualIncome,
-           Address, City, State, Pincode,
-           CurrentAddress, CurrentCity, CurrentState, CurrentPincode, IsCurrentSameAsPermanent,
-           DateOfBirth, InvoiceMode, Notes,
-           CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @aadhaar, @occ, @income,
-                @addr, @city, @state, @pin,
-                @curaddr, @curcity, @curstate, @curpin, @cursame,
-                @dob, @invmode, @notes, @cb, SYSDATETIME())
-      `);
-    const newId = result.recordset[0].Id;
+    // The insert is shared with the bulk import (services/crmCustomerImport.js):
+    // InvoiceMode defaults to NonInvoice for anything but "Invoice" (CHECK-
+    // constrained column), current address follows IsCurrentSameAsPermanent.
+    const { insertCrmCustomer } = require("../services/crmCustomerImport");
+    const { id: newId, customerNo } = await insertCrmCustomer(pool, { ...b, Email: email }, actorId(req));
 
     // Eagerly create the "Customer Master" ledger head (dbo.AccountHeadMaster,
     // LHeadType='C') instead of waiting for the first GL-posting event —
@@ -410,6 +369,42 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     }
     console.error("[crm-customers] POST error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Bulk import (CRM → Customers → Import) ─────────────────────────────────
+// The browser reads the .xlsx / .csv and maps its columns; rows arrive as
+// { rowNo, cells: { CustomerName, Mobile, ... } }. /preview only reads; /apply
+// re-checks everything itself (never trusts a preview) and saves row by row.
+// See services/crmCustomerImport.js for the cleaning, rules and matching.
+router.get("/import/fields", requirePageRight("crm-customers", "create"), (req, res) => {
+  const { FIELDS, MAX_ROWS } = require("../services/crmCustomerImport");
+  res.json({ fields: FIELDS, maxRows: MAX_ROWS });
+});
+
+router.post("/import/preview", requirePageRight("crm-customers", "create"), async (req, res) => {
+  try {
+    const { analyze } = require("../services/crmCustomerImport");
+    res.json(await analyze(getPool(), req.body?.rows));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error("[crm-customers] POST /import/preview:", e.message);
+    res.status(500).json({ error: "Could not check the file" });
+  }
+});
+
+router.post("/import/apply", requirePageRight("crm-customers", "create"), async (req, res) => {
+  try {
+    const { apply } = require("../services/crmCustomerImport");
+    const existing = req.body?.existing === "fill" ? "fill" : "skip";
+    const out = await apply(getPool(), req.body?.rows, {
+      existing, fileName: req.body?.fileName, actorUserId: actorId(req), actorName: req.user?.name || req.user?.email || "import",
+    });
+    res.json(out);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error("[crm-customers] POST /import/apply:", e.message);
+    res.status(500).json({ error: "The import failed" });
   }
 });
 
