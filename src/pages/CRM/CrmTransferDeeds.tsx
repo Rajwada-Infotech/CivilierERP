@@ -50,7 +50,7 @@ const CrmTransferDeeds: React.FC = () => {
 
   return (
     <CrmShell title="Transfer Deeds" subtitle="Deeds of assignment (resale) and cancellation deeds (buy-back)">
-      <Breadcrumbs items={["CRM", "Resale & Buy-back", "Transfer Deeds"]} />
+      <Breadcrumbs items={["CRM", "Resale", "Transfer Deeds"]} />
       <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="space-y-2">
           <div className="flex items-center gap-2">

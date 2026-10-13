@@ -122,7 +122,7 @@ router.get("/fee-gst", requirePageRight("crm-resales", "view"), async (req, res)
 // the rest of the property (a villa's land booking). Every case now opens
 // through POST /deal, which takes the whole property (movingBookings).
 router.post("/", requirePageRight("crm-resales", "create"), (_req, res) =>
-  res.status(410).json({ error: "Open a resale or buy-back from Resale & Buy-back → Cases (POST /api/crm/resales/deal)" }));
+  res.status(410).json({ error: "Open a resale or buy-back from Resale → Resale Cases (POST /api/crm/resales/deal)" }));
 
 // Completing a resale is what actually moves the plot: the outgoing booking
 // line becomes 'Transferred' and the incoming booking takes it over.
@@ -147,7 +147,7 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
     if (!resale) return res.status(404).json({ error: "Resale not found" });
     if (resale.Status === ResaleStatus.COMPLETED) return res.status(400).json({ error: "This resale is already completed" });
     if (resale.Status === ResaleStatus.CANCELLED) return res.status(400).json({ error: "This resale was cancelled" });
-    if (resale.BookingIds) return res.status(400).json({ error: "Complete this one from Resale & Buy-back — it passes the booking to the new buyer" });
+    if (resale.BookingIds) return res.status(400).json({ error: "Complete this one from Resale → Resale Cases — it passes the booking to the new buyer" });
 
     // The new buyer's ownership record. They paid the original buyer for the
     // land, not the developer, so it carries no value owed to the developer

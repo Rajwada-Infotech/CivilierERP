@@ -254,7 +254,7 @@ const CrmResaleCase: React.FC = () => {
 
   return (
     <CrmShell title={`${isResale ? "Resale" : "Buy-back"} · ${c.Property}`} subtitle={`Case #${c.Id} · Booking ${c.BookingNo}`}>
-      <Breadcrumbs items={["CRM", "Resale & Buy-back", `Case #${c.Id}`]} />
+      <Breadcrumbs items={["CRM", "Resale", `Case #${c.Id}`]} />
       <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
 
       {/* Who → who, and where it stands */}

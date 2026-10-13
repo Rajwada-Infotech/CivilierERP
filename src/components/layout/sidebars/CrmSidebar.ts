@@ -96,22 +96,6 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
-  // ── Resale & Buy-back ────────────────────────────────────────────────────────
-  // A sold property passing to a new buyer (seller clearance → NOC → buyer →
-  // approval → fee → registered deed of assignment → transfer) or bought back
-  // (→ cancellation deed → payout); after the sale deed, a new owner is only
-  // recorded (Ownership Changes). Each case links out to the existing pages
-  // that do their part (Applications, Received Payments, Approval Inbox).
-  {
-    label: "Resale & Buy-back",
-    icon: ArrowRightLeft,
-    children: [
-      { label: "Cases",            path: "/crm/resales",                      pageKey: "crm-resales"        },
-      { label: "Transfer Deeds",   path: "/crm/transfer-deeds",               pageKey: "crm-transfer-deeds" },
-      { label: "Ownership Changes", path: "/crm/ownership-changes",          pageKey: "crm-ownership-changes" },
-    ],
-  },
-
   // ── Finance ──────────────────────────────────────────────────────────────────
   {
     label: "Finance",
@@ -139,6 +123,22 @@ export const crmNavItems: NavItem[] = [
       { label: "Cancellations",      path: "/crm/cancellations",      pageKey: "crm-cancellations"      },
       { label: "Customer 360",       path: "/crm/customer-360",       pageKey: "crm-customer-360"       },
       { label: "Construction Updates", path: "/crm/construction-updates", pageKey: "crm-construction-updates" },
+    ],
+  },
+
+  // ── Resale ────────────────────────────────────────────────────────────────────
+  // A sold property passing to a new buyer (seller clearance → NOC → buyer →
+  // approval → fee → registered deed of assignment → transfer) or bought back
+  // (→ cancellation deed → payout); after the sale deed, a new owner is only
+  // recorded (Ownership Changes). Each case links out to the existing pages
+  // that do their part (Applications, Received Payments, Approval Inbox).
+  {
+    label: "Resale",
+    icon: ArrowRightLeft,
+    children: [
+      { label: "Resale Cases",     path: "/crm/resales",                      pageKey: "crm-resales"        },
+      { label: "Transfer Deeds",   path: "/crm/transfer-deeds",               pageKey: "crm-transfer-deeds" },
+      { label: "Ownership Changes", path: "/crm/ownership-changes",          pageKey: "crm-ownership-changes" },
     ],
   },
 ];

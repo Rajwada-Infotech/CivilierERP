@@ -195,8 +195,8 @@ const CrmResales: React.FC = () => {
   ];
 
   return (
-    <CrmShell title="Resale & Buy-back" subtitle="A sold property passing to a new buyer, or bought back by us">
-      <Breadcrumbs items={["CRM", "Resale & Buy-back"]} />
+    <CrmShell title="Resale Cases" subtitle="A sold property passing to a new buyer, or bought back by us">
+      <Breadcrumbs items={["CRM", "Resale", "Resale Cases"]} />
 
       <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2 mb-3">
         <Info size={13} className="text-muted-foreground mt-0.5 shrink-0" />

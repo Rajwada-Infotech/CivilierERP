@@ -65,7 +65,7 @@ function NewDialog({ open, onClose, onCreated }: { open: boolean; onClose: () =>
         <DialogHeader><DialogTitle>Record a new owner</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <p className="text-xs text-muted-foreground flex gap-2"><Info size={14} className="shrink-0 mt-0.5" />
-            Only properties whose sale deed is registered are listed. Before that, a change of owner is a resale — open a case in Resale &amp; Buy-back → Cases.</p>
+            Only properties whose sale deed is registered are listed. Before that, a change of owner is a resale — open a case in Resale → Resale Cases.</p>
           <div>
             <label className={label}>Property</label>
             <SearchableSelect value={bookingId} onChange={setBookingId} placeholder="Choose the property" searchPlaceholder="Search booking, unit or owner…"
@@ -284,7 +284,7 @@ const CrmOwnershipChanges: React.FC = () => {
 
   return (
     <CrmShell title="Ownership Changes" subtitle="A new owner after the sale deed is registered, recorded from their own registered sale deed">
-      <Breadcrumbs items={["CRM", "Resale & Buy-back", "Ownership Changes"]} />
+      <Breadcrumbs items={["CRM", "Resale", "Ownership Changes"]} />
       <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="space-y-2">
           <div className="flex items-center gap-2">

@@ -130,7 +130,7 @@ async function create(db, body, actorUserId, projectScope = null) {
     FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
     WHERE b.Id = @b AND ${LIVE_BOOKING}${scope}`)).recordset[0];
   if (!b) throw new OwnershipError("Booking not found", 404);
-  if (!b.Conveyed) throw new OwnershipError(`${b.BookingNo}'s sale deed isn't registered yet — until then a change of owner is a resale (Resale & Buy-back → Cases)`, 409);
+  if (!b.Conveyed) throw new OwnershipError(`${b.BookingNo}'s sale deed isn't registered yet — until then a change of owner is a resale (Resale → Resale Cases)`, 409);
   const open = (await db.request().input("b", sql.Int, bookingId)
     .query("SELECT TOP 1 ChangeNo FROM dbo.CrmOwnershipChange WHERE BookingId = @b AND IsActive = 1 AND Status IN (N'Draft', N'Pending', N'Rejected')")).recordset[0];
   if (open) throw new OwnershipError(`${open.ChangeNo} is already open on this property — finish or cancel it first`, 409);
