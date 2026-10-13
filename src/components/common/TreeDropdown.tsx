@@ -9,6 +9,7 @@ import {
   Search,
 } from "lucide-react";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useInSheet } from "@/components/sheet/useInSheet";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,6 +69,7 @@ function TreeNodeRow({
   selectedId,
   onSelect,
   invalidParents,
+  sheet,
 }: {
   node: TreeNode;
   depth: number;
@@ -76,6 +78,7 @@ function TreeNodeRow({
   selectedId: string;
   onSelect: (id: string) => void;
   invalidParents: Set<string>;
+  sheet: boolean;
 }) {
   const hasChildren = node.children.length > 0;
   const isOpen = openNodes.has(node._id);
@@ -85,12 +88,12 @@ function TreeNodeRow({
   return (
     <>
       <div
-        className={`flex items-center select-none transition-colors rounded-md ${
+        className={`flex items-center select-none transition-colors ${sheet ? "" : "rounded-md"} ${
           isDisabled
             ? "opacity-40 cursor-not-allowed"
             : isSelected
-              ? "bg-primary/10 text-primary"
-              : "hover:bg-muted/60 text-foreground"
+              ? sheet ? "bg-foreground text-card" : "bg-primary/10 text-primary"
+              : sheet ? "hover:bg-primary/10 text-foreground" : "hover:bg-muted/60 text-foreground"
         }`}
         style={{ paddingLeft: `${depth * 16}px` }}
       >
@@ -98,8 +101,8 @@ function TreeNodeRow({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); if (hasChildren) onToggleNode(node._id); }}
-          className={`w-8 h-8 flex items-center justify-center shrink-0 rounded transition-colors hover:bg-muted/80 ${
-            hasChildren ? "text-muted-foreground cursor-pointer" : "opacity-0 pointer-events-none"
+          className={`w-8 h-8 flex items-center justify-center shrink-0 transition-colors ${sheet ? "" : "rounded hover:bg-muted/80"} ${
+            hasChildren ? (sheet ? "cursor-pointer" : "text-muted-foreground cursor-pointer") : "opacity-0 pointer-events-none"
           }`}
         >
           {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -110,7 +113,7 @@ function TreeNodeRow({
           className={`flex items-center gap-2 flex-1 py-1.5 pr-2 min-w-0 ${isDisabled ? "cursor-not-allowed" : "cursor-pointer"}`}
           onClick={() => { if (!isDisabled) { onSelect(node._id); if (hasChildren && !isOpen) onToggleNode(node._id); } }}
         >
-          {hasChildren ? (
+          {sheet ? null : hasChildren ? (
             <FolderOpen size={13} className="text-amber-500 shrink-0" />
           ) : depth === 0 ? (
             <Layers size={13} className="text-primary/60 shrink-0" />
@@ -125,7 +128,7 @@ function TreeNodeRow({
           >
             {node.name}
           </span>
-          <span className="font-mono text-[0.625rem] text-muted-foreground shrink-0 ml-1">
+          <span className={`${sheet ? "font-heading tabular-nums opacity-70" : "font-mono text-muted-foreground"} text-[0.625rem] shrink-0 ml-1`}>
             {node.code}
           </span>
         </div>
@@ -144,6 +147,7 @@ function TreeNodeRow({
               selectedId={selectedId}
               onSelect={onSelect}
               invalidParents={invalidParents}
+              sheet={sheet}
             />
           ))}
         </div>
@@ -193,6 +197,8 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
+  // On a drawing-sheet page the control is squared and inked to match; elsewhere it is drawn as before.
+  const sheet = useInSheet(containerRef);
 
   // Fresh search on every open — a stale filter from last time shouldn't
   // silently hide options the next time this dropdown is opened.
@@ -311,12 +317,18 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${
-          error ? "border-red-400" : "border-border"
-        }`}
+        className={
+          sheet
+            ? `w-full flex items-center gap-2.5 px-3 py-2.5 text-sm border bg-card text-foreground focus:outline-none text-left ${
+                error ? "border-destructive" : open ? "border-foreground" : "border-foreground/40 focus:border-foreground"
+              }`
+            : `w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition text-left ${
+                error ? "border-red-400" : "border-border"
+              }`
+        }
       >
         {/* Tree variant: icon based on selection type */}
-        {variant === "tree" &&
+        {variant === "tree" && !sheet &&
           (selectedGroup ? (
             hasChildren ? (
               <FolderOpen size={14} className="text-amber-500 shrink-0" />
@@ -373,15 +385,24 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
       {open && createPortal(
         <div
           ref={panelRef}
-          style={{
-            ...panelStyle,
-            background: isDark ? "rgba(30,32,48,0.98)" : "rgba(255,255,255,0.98)",
-            border: isDark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(15,17,26,0.10)",
-            boxShadow: isDark
-              ? "0 12px 32px rgba(0,0,0,0.5)"
-              : "0 12px 32px rgba(15,17,26,0.16)",
-          }}
-          className="rounded-lg overflow-hidden flex flex-col"
+          style={
+            sheet
+              ? {
+                  ...panelStyle,
+                  background: "hsl(var(--card))",
+                  border: "1px solid hsl(var(--foreground))",
+                  boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)",
+                }
+              : {
+                  ...panelStyle,
+                  background: isDark ? "rgba(30,32,48,0.98)" : "rgba(255,255,255,0.98)",
+                  border: isDark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(15,17,26,0.10)",
+                  boxShadow: isDark
+                    ? "0 12px 32px rgba(0,0,0,0.5)"
+                    : "0 12px 32px rgba(15,17,26,0.16)",
+                }
+          }
+          className={`${sheet ? "" : "rounded-lg"} overflow-hidden flex flex-col`}
         >
           {variant === "tree" ? (
             /* ── Tree panel ── */
@@ -390,18 +411,18 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
               <div
                 className={`shrink-0 flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors text-sm font-medium ${
                   !value
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-muted/60"
+                    ? sheet ? "bg-foreground text-card" : "bg-primary/10 text-primary"
+                    : sheet ? "text-muted-foreground hover:bg-primary/10" : "text-muted-foreground hover:bg-muted/60"
                 }`}
                 onClick={() => {
                   onChange("");
                   setOpen(false);
                 }}
               >
-                <Layers size={13} className="shrink-0" />
+                {!sheet && <Layers size={13} className="shrink-0" />}
                 <span>{placeholder}</span>
               </div>
-              <div className="shrink-0 border-t border-border/60" />
+              <div className={`shrink-0 border-t ${sheet ? "border-foreground" : "border-border/60"}`} />
 
               {/* Tree nodes — flex-1 (not a fixed max-h) so this fills
                   exactly the height the outer panel already computed,
@@ -421,6 +442,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
                       setOpen(false);
                     }}
                     invalidParents={invalidParents}
+                    sheet={sheet}
                   />
                 ))}
               </div>
@@ -430,7 +452,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
                 region, together consuming the whole outer box (see
                 tree-panel comment above). ── */
             <>
-              <div className="shrink-0 relative px-2 pt-2 pb-1.5 border-b border-border/40">
+              <div className={`shrink-0 relative px-2 pt-2 ${sheet ? "pb-2 border-b border-foreground" : "pb-1.5 border-b border-border/40"}`}>
                 <Search size={12} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                 <input
                   ref={searchInputRef}
@@ -439,7 +461,9 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
                   onClick={(e) => e.stopPropagation()}
                   onKeyDown={(e) => e.stopPropagation()}
                   placeholder="Search…"
-                  className="w-full text-sm rounded-md border border-border pl-7 pr-2 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                  className={sheet
+                    ? "w-full text-sm border border-foreground/40 focus:border-foreground pl-7 pr-2 py-1.5 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+                    : "w-full text-sm rounded-md border border-border pl-7 pr-2 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"}
                 />
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto py-1 thin-scroll">
@@ -451,8 +475,8 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
                     <div
                       className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
                         !value
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted/60"
+                          ? sheet ? "bg-foreground text-card font-medium" : "bg-primary/10 text-primary font-medium"
+                          : sheet ? "text-muted-foreground hover:bg-primary/10" : "text-muted-foreground hover:bg-muted/60"
                       }`}
                       onClick={() => {
                         onChange("");
@@ -476,8 +500,8 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
                       key={o.value}
                       className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
                         value === o.value
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-foreground hover:bg-muted/60"
+                          ? sheet ? "bg-foreground text-card font-medium" : "bg-primary/10 text-primary font-medium"
+                          : sheet ? "text-foreground hover:bg-primary/10" : "text-foreground hover:bg-muted/60"
                       }`}
                       onClick={() => {
                         onChange(o.value);

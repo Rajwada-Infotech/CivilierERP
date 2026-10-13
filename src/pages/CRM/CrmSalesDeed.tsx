@@ -8,6 +8,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useAuth } from "@/contexts/AuthContext";
 import { translateError } from "@/lib/translateError";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -1509,7 +1510,7 @@ const CrmSalesDeed: React.FC = () => {
                       <div className="w-[3px] shrink-0 self-stretch" style={{ background: railColor }} />
                       <div className="flex-1 min-w-0 p-3 space-y-1.5">
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-sm font-semibold leading-tight truncate">{d.ApplicantName}</span>
+                          <span className="text-sm font-semibold leading-tight truncate"><ApplicantNames name={d.ApplicantName} bookingId={d.BookingId} applicationId={d.ApplicationId} /></span>
                           <StatusBadge status={d.Status} />
                         </div>
                         {d.BookingStatus === 'Cancelled' && (
@@ -1655,7 +1656,7 @@ const CrmSalesDeed: React.FC = () => {
                           : "text-primary"} />
                       </div>
                       <div className="min-w-0">
-                        <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate">{detail.ApplicantName}</h2>
+                        <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></h2>
                         <p className="text-[0.6875rem] font-mono text-muted-foreground mt-0.5">
                           {detail.DeedNo}
                           {detail.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{detail.VersionNo}</span>}
@@ -2958,7 +2959,7 @@ const CrmSalesDeed: React.FC = () => {
                   : !context ? <div className="text-xs text-muted-foreground">Couldn't load booking details.</div>
                   : (
                     <>
-                      <p className="text-sm font-semibold">{context.booking?.ApplicantName}</p>
+                      <p className="text-sm font-semibold"><ApplicantNames name={context.booking?.ApplicantName} bookingId={context.booking?.Id} applicationId={context.booking?.ApplicationId} /></p>
                       <p className="text-xs text-muted-foreground">{context.booking?.BookingNo} · {context.booking?.UnitNo} · {formatINR(context.booking?.GrandTotal)}</p>
                       <div className={cn("flex items-center gap-1.5 text-xs pt-1", agreementRegistered ? "text-emerald-700" : "text-rose-600")}>
                         {agreementRegistered ? <CheckCircle2 size={12} /> : <XCircle size={12} />}

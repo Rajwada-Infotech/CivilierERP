@@ -19,12 +19,14 @@ import {
 } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const BKG_API = "/api/crm/bookings";
 const WC_API  = "/api/crm/welcome-calls";
 
 // ── Status meta ───────────────────────────────────────────────────────────────
-type LoanStatus = "NotApplied" | "Applied" | "Sanctioned" | "Disbursed" | "Rejected";
+// "Closed" is set by the system only — a previous owner's loan after a resale.
+type LoanStatus = "NotApplied" | "Applied" | "Sanctioned" | "Disbursed" | "Rejected" | "Closed";
 
 const STATUS_ORDER: LoanStatus[] = ["NotApplied", "Applied", "Sanctioned", "Disbursed"];
 
@@ -34,6 +36,7 @@ const STATUS_META: Record<string, { label: string; pill: string; icon: React.Ele
   Sanctioned: { label: "Sanctioned",  pill: "text-emerald-700 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700", icon: BadgeCheck },
   Disbursed:  { label: "Disbursed",   pill: "text-purple-700 bg-purple-50 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-700", icon: CheckCircle2 },
   Rejected:   { label: "Rejected",    pill: "text-red-600 bg-red-50 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800", icon: XCircle },
+  Closed:     { label: "Closed (previous owner)", pill: "text-muted-foreground bg-muted border-border", icon: XCircle },
 };
 
 const SANCTION_STATUSES: LoanStatus[] = ["NotApplied", "Applied", "Sanctioned", "Disbursed", "Rejected"];
@@ -249,7 +252,7 @@ const CrmLoanTracking: React.FC = () => {
       accessorKey: "ApplicantName", header: "Customer", size: 180,
       cell: (i) => (
         <div>
-          <div className="font-medium text-sm">{i.row.original.ApplicantName}</div>
+          <div className="font-medium text-sm"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.UnitNo} · {i.row.original.Mobile}</div>
         </div>
       ),
@@ -383,7 +386,7 @@ const CrmLoanTracking: React.FC = () => {
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-semibold text-sm flex items-center gap-1.5">
                     <User size={13} className="text-muted-foreground" />
-                    {editingRow.ApplicantName}
+                    <ApplicantNames name={editingRow.ApplicantName} bookingId={editingRow.BookingId} applicationId={editingRow.ApplicationId} />
                   </div>
                   <StatusPill status={editingRow.SanctionStatus} />
                 </div>

@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useRef, useCallback } from "react";
-import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -26,22 +25,17 @@ import {
   Check,
   Plus,
   Search,
-  AlertCircle,
   Eye,
-  XCircle,
   User,
-  Building2,
   Phone,
   Mail,
   MapPin,
-  FileText,
   Printer,
   RotateCcw,
   Download,
   Upload,
   Loader2,
   Copy,
-  Landmark,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
 import {
@@ -308,6 +302,11 @@ const WA_SVG = (
   </svg>
 );
 
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+
 function buildSupplierColumns(
   _editingId: number | null,
   deleteConfirm: number | null,
@@ -325,29 +324,25 @@ function buildSupplierColumns(
     {
       accessorKey: "LHeadName",
       header: "Vendor Name",
-      cell: ({ getValue }) => (
-        <span className="font-medium text-foreground">
-          {getValue() as string}
-        </span>
-      ),
+      cell: ({ getValue, row }) => {
+        const type = vendorTypeFromCategory(row.original.supplierCategory || "");
+        return (
+          <div className="min-w-0">
+            <p className="font-medium text-foreground">{getValue() as string}</p>
+            {type && <p className={`${LBL} mt-1`}>{type}{type === "Supplier" && row.original.supplierCategory !== "Supplier" ? ` · ${row.original.supplierCategory}` : ""}</p>}
+          </div>
+        );
+      },
     },
     {
       accessorKey: "LHeadContactPerson",
       header: "Contact Person",
-      cell: ({ getValue }) => (
-        <span className="text-sm text-muted-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="text-sm text-muted-foreground">{(getValue() as string) || "—"}</span>,
     },
     {
       accessorKey: "LHeadPhone",
       header: "Phone",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs text-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="font-heading text-xs tabular-nums text-foreground">{(getValue() as string) || "—"}</span>,
     },
     {
       accessorKey: "LGST",
@@ -355,24 +350,11 @@ function buildSupplierColumns(
       cell: ({ getValue, row }) => {
         const gst = getValue() as string | null;
         const gstType = (row.original as any).LGSTType as string | null;
-        const badgeCls = gstType === "Registered"
-          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-          : gstType === "Unregistered"
-            ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20"
-            : "bg-muted text-muted-foreground border-border";
-        const badgeLabel = gstType === "Registered"
-          ? "GST"
-          : gstType === "Unregistered"
-            ? "Non-GST"
-            : "Unknown";
+        const label = gstType === "Registered" ? "Registered" : gstType === "Unregistered" ? "Unregistered" : "Not stated";
         return (
-          <div className="flex flex-col gap-0.5">
-            <span className="font-mono text-xs font-semibold text-primary">
-              {gst || "—"}
-            </span>
-            <span className={`inline-flex w-fit items-center text-[0.5625rem] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>
-              {badgeLabel}
-            </span>
+          <div className="flex flex-col gap-1">
+            <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{gst || "—"}</span>
+            <span className={LBL}>{label}</span>
           </div>
         );
       },
@@ -382,28 +364,14 @@ function buildSupplierColumns(
       header: "Status",
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
-        return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
-            {active ? "Active" : "Inactive"}
-          </span>
-        );
+        return <SheetMark text={active ? "Active" : "Inactive"} tone={active ? "done" : "none"} />;
       },
     },
     {
       accessorKey: "IsTdsApplicable",
       header: "TDS",
-      cell: ({ getValue }) => {
-        const tds = getValue() as boolean;
-        return tds ? (
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[#ffe2021a] text-amber-600">
-            TDS
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        );
-      },
+      cell: ({ getValue }) =>
+        (getValue() as boolean) ? <SheetMark text="TDS" tone="waiting" /> : <span className="text-xs text-muted-foreground/50">—</span>,
     },
     {
       id: "actions",
@@ -415,67 +383,51 @@ function buildSupplierColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-start">
-              <span className="text-[0.6875rem] text-muted-foreground mr-1">
-                Delete?
-              </span>
               <button
                 onClick={() => deleteMut.mutate(id)}
-                className="p-1 rounded text-destructive hover:bg-destructive/10"
+                className="h-7 px-2 flex items-center gap-1 border border-destructive bg-destructive text-destructive-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]"
+                title="Confirm delete"
               >
-                <Check size={12} />
+                <Check size={12} /> Delete
               </button>
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="p-1 rounded text-muted-foreground hover:bg-muted"
-              >
-                <X size={12} />
+              <button onClick={() => setDeleteConfirm(null)} className={ACT} title="Keep" aria-label="Keep">
+                <X size={13} />
               </button>
             </div>
           );
         }
         const hasPhone = !!(row.original.LHeadPhone?.replace(/\D/g, ""));
         return (
-          <div className="flex items-center justify-start gap-2 w-full min-w-[120px]">
-            <button data-row-view
-              onClick={() => onView(row.original)}
-              className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
-              title="View details"
-            >
-              <Eye size={15} />
+          <div className="flex items-center justify-start gap-1 w-full min-w-[150px]">
+            <button data-row-view onClick={() => onView(row.original)} className={ACT} title="View details" aria-label="View details">
+              <Eye size={13} />
             </button>
             {canPrint && (
-              <button
-                onClick={() => onPrint(row.original)}
-                className="p-1 rounded text-amber-500 hover:bg-[#ffe2021a] transition-colors"
-                title="Print"
-              >
-                <Printer size={15} />
+              <button onClick={() => onPrint(row.original)} className={ACT} title="Print" aria-label="Print">
+                <Printer size={13} />
               </button>
             )}
             <button
               onClick={() => onWhatsApp(row.original)}
               disabled={!hasPhone}
-              className={`p-1 rounded transition-colors ${hasPhone ? "text-[#25D366] hover:bg-[#25D366]/10" : "text-muted-foreground/30 cursor-not-allowed"}`}
+              className={hasPhone ? ACT : "w-7 h-7 flex items-center justify-center text-muted-foreground/30 cursor-not-allowed"}
               title={hasPhone ? "Send portal link via WhatsApp" : "Add phone number to enable WhatsApp"}
             >
               {WA_SVG}
             </button>
             {canEdit && (
-              <button
-                onClick={() => startEdit(row.original)}
-                className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
-                title="Edit"
-              >
-                <Pencil size={15} />
+              <button onClick={() => startEdit(row.original)} className={ACT} title="Edit" aria-label="Edit">
+                <Pencil size={13} />
               </button>
             )}
             {canDelete && (
               <button
                 onClick={() => setDeleteConfirm(id)}
-                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
                 title="Delete"
+                aria-label="Delete"
               >
-                <Trash2 size={15} />
+                <Trash2 size={13} />
               </button>
             )}
           </div>
@@ -488,8 +440,6 @@ function buildSupplierColumns(
 // ─── Component ────────────────────────────────────────────────────────────────
 const SupplierMaster: React.FC = () => {
   const qc = useQueryClient();
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
   const rights = usePageRights("supplier-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -1068,28 +1018,19 @@ const SupplierMaster: React.FC = () => {
 
   // ── Shared field class ─────────────────────────────────────────────────────
   const inputCls =
-    "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
+    "w-full text-sm border border-foreground/40 focus:border-foreground px-3 py-2.5 bg-card text-foreground placeholder:text-muted-foreground/50 focus:outline-none";
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
       <Breadcrumbs items={["Masters", "Vendor Master"]} />
 
-      <FinanceShell
-        title="Vendor Master"
-        subtitle="Manage vendor accounts with contact, GST and category details"
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Vendors"
+        subtitle="Suppliers, vendors and landlords the business pays: their contact, tax and bank particulars."
         action={
-          <div className="flex items-center gap-2">
-            <span
-              className="text-xs font-heading px-3 py-1.5 rounded-lg"
-              style={{
-                background: "rgba(99,102,241,0.12)",
-                border: "1px solid rgba(99,102,241,0.25)",
-                color: "#818cf8",
-              }}
-            >
-              {suppliers.length} Vendors
-            </span>
+          <div className="flex items-center gap-2 flex-wrap">
             <input
               ref={importFileInputRef}
               type="file"
@@ -1100,85 +1041,62 @@ const SupplierMaster: React.FC = () => {
             <button
               onClick={handleDownloadTemplate}
               title="Download a blank CSV with all vendor fields"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              className={`${KEY} px-3 py-2 border border-foreground text-foreground hover:bg-primary/10`}
             >
               <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
+              <span className="hidden sm:inline">Template</span>
             </button>
             <button
               onClick={handleImportClick}
               disabled={importing}
               title="Import vendors from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className={`${KEY} px-3 py-2 border border-foreground bg-foreground text-card`}
             >
-              {importing ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
-              </span>
+              {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              <span className="hidden sm:inline">{importing ? "Importing…" : "Import CSV"}</span>
             </button>
           </div>
         }
       >
-        {/* ── Form Card ── */}
-        <div
-          className="rounded-xl overflow-visible"
-          onKeyDown={preventEnterSubmit}
-          style={{
-            background: isDark
-              ? "rgba(12,14,22,0.55)"
-              : "rgba(255,255,255,0.82)",
-            border: isDark
-              ? "1px solid rgba(99,102,241,0.20)"
-              : "1px solid rgba(99,102,241,0.16)",
-            backdropFilter: "blur(18px) saturate(150%)",
-            WebkitBackdropFilter: "blur(18px) saturate(150%)",
-            boxShadow: isDark
-              ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
-              : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
-          }}
-        >
-          {/* Card header — title only */}
-          <div
-            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden rounded-t-xl"
-            style={{
-              background: isDark
-                ? "rgba(99,102,241,0.09)"
-                : "rgba(99,102,241,0.05)",
-              borderBottom: isDark
-                ? "1px solid rgba(99,102,241,0.18)"
-                : "1px solid rgba(99,102,241,0.13)",
-            }}
-          >
-            <div>
-              <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? `Edit ${vendorType || "Vendor"}` : `Add ${vendorType || "Vendor"}`}
-              </h2>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                Fields marked <span className="text-destructive">*</span> are
-                required
-              </p>
-            </div>
+        {/* ── Figures ── */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Vendors", value: suppliers.length, note: "in all" },
+              { label: "Active", value: suppliers.filter((s) => s.LHeadStatus).length, note: "open for booking" },
+              { label: "GST registered", value: suppliers.filter((s) => s.LGSTType === "Registered").length, note: "raise GST bills" },
+              { label: "TDS applicable", value: suppliers.filter((s) => s.IsTdsApplicable).length, note: "tax deducted at source" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Form ── */}
+        <div className="bg-card relative" onKeyDown={preventEnterSubmit} style={{ border: RULE, zIndex: 10 }}>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+            <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
+              {editingId ? `Edit ${(vendorType || "Vendor").toLowerCase()}` : `Add ${(vendorType || "Vendor").toLowerCase()}`}
+            </h2>
+            <p className="text-[0.6875rem] text-muted-foreground">
+              Fields marked <span className="text-destructive">*</span> are required
+            </p>
           </div>
 
-          <div className="px-5 sm:px-6 py-6 space-y-7">
+          <div className="px-4 py-5 space-y-7">
             {/* ── Section: Basic Info ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <Building2 size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Basic Information
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Basic Information
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
                 {/* Vendor Name */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     Vendor Name <span className="text-destructive">*</span>
                   </label>
                   <input
@@ -1188,18 +1106,17 @@ const SupplierMaster: React.FC = () => {
                       setErrors((p) => ({ ...p, LHeadName: false }));
                     }}
                     placeholder="e.g. Acme Supplies Ltd."
-                    className={`${inputCls} ${errors.LHeadName ? "border-red-400" : ""}`}
+                    className={`${inputCls} ${errors.LHeadName ? "border-destructive" : ""}`}
                   />
                   {errors.LHeadName && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> Required
+                    <p className="text-xs text-destructive mt-1">Required
                     </p>
                   )}
                 </div>
 
                 {/* Contact Person */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Contact Person
                   </label>
                   <div className="relative">
@@ -1216,7 +1133,7 @@ const SupplierMaster: React.FC = () => {
                         }))
                       }
                       placeholder="e.g. Rahul Sharma"
-                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                      className="w-full text-sm border border-foreground/40 focus:border-foreground pl-8 pr-3 py-2.5 bg-card text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -1225,7 +1142,7 @@ const SupplierMaster: React.FC = () => {
                     "Supplier" activates the Category field below;
                     "Vendor"/"Landlord" have no sub-category. */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Type
                   </label>
                   <TreeDropdown
@@ -1244,9 +1161,7 @@ const SupplierMaster: React.FC = () => {
                 {/* Supplier Category — active only when Type = "Supplier" */}
                 <div className="space-y-1.5">
                   <label
-                    className={`text-xs font-heading font-medium uppercase tracking-wider block ${
-                      vendorType === "Supplier" ? "text-muted-foreground" : "text-muted-foreground/40"
-                    }`}
+                    className={`${LBL} block ${vendorType === "Supplier" ? "" : "opacity-40"}`}
                   >
                     Supplier Category
                   </label>
@@ -1287,10 +1202,10 @@ const SupplierMaster: React.FC = () => {
                     getSundryCreditorsGroupId, applied server-side on every
                     create/update regardless of what's sent here). */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Account Group
                   </label>
-                  <div className="h-9 px-3 flex items-center rounded-lg border border-border/60 bg-muted/30 text-sm text-muted-foreground">
+                  <div className="h-[42px] px-3 flex items-center border border-dashed border-foreground/40 text-sm text-muted-foreground">
                     Sundry Creditors
                   </div>
                 </div>
@@ -1299,18 +1214,13 @@ const SupplierMaster: React.FC = () => {
 
             {/* ── Section: Contact Details ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <Phone size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Contact Details
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Contact Details
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
                 {/* Phone */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Phone Number
                   </label>
                   <div className="relative">
@@ -1328,14 +1238,14 @@ const SupplierMaster: React.FC = () => {
                       }
                       placeholder="e.g. +91 98765 43210"
                       maxLength={15}
-                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                      className="w-full text-sm border border-foreground/40 focus:border-foreground pl-8 pr-3 py-2.5 bg-card text-foreground font-heading tabular-nums placeholder:text-muted-foreground/50 focus:outline-none"
                     />
                   </div>
                 </div>
 
                 {/* Email */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Email Address
                   </label>
                   <div className="relative">
@@ -1352,14 +1262,14 @@ const SupplierMaster: React.FC = () => {
                         }))
                       }
                       placeholder="e.g. contact@acme.com"
-                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                      className="w-full text-sm border border-foreground/40 focus:border-foreground pl-8 pr-3 py-2.5 bg-card text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
                     />
                   </div>
                 </div>
 
                 {/* Address */}
                 <div className="space-y-1.5 sm:col-span-3">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Address
                   </label>
                   <div className="relative">
@@ -1377,7 +1287,7 @@ const SupplierMaster: React.FC = () => {
                       }
                       placeholder="Full address…"
                       rows={2}
-                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition resize-none"
+                      className="w-full text-sm border border-foreground/40 focus:border-foreground pl-8 pr-3 py-2.5 bg-card text-foreground placeholder:text-muted-foreground/50 focus:outline-none resize-none"
                     />
                   </div>
                 </div>
@@ -1386,18 +1296,13 @@ const SupplierMaster: React.FC = () => {
 
             {/* ── Section: GST & Tax ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <FileText size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  GST &amp; Tax Details
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                GST &amp; Tax Details
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
                 {/* PAN */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     PAN <span className="text-destructive">*</span>
                   </label>
                   <input
@@ -1412,7 +1317,7 @@ const SupplierMaster: React.FC = () => {
                     }}
                     placeholder="e.g. AAPFU0939F"
                     maxLength={10}
-                    className={`${inputCls} font-mono ${errors.LHeadPan ? "border-red-400" : ""} ${form.LHeadPan === "PANNOTAVBL" ? "opacity-40 cursor-not-allowed" : ""}`}
+                    className={`${inputCls} font-heading tabular-nums ${errors.LHeadPan ? "border-destructive" : ""} ${form.LHeadPan === "PANNOTAVBL" ? "opacity-40 cursor-not-allowed" : ""}`}
                   />
                   <label className="flex items-center gap-1.5 cursor-pointer select-none mt-1">
                     <input
@@ -1422,20 +1327,19 @@ const SupplierMaster: React.FC = () => {
                         setForm((p) => ({ ...p, LHeadPan: e.target.checked ? "PANNOTAVBL" : "" }));
                         setErrors((p) => ({ ...p, LHeadPan: false }));
                       }}
-                      className="h-3 w-3 rounded accent-primary"
+                      className="h-3 w-3 accent-foreground"
                     />
                     <span className="text-[0.6875rem] text-muted-foreground">PAN not available</span>
                   </label>
                   {errors.LHeadPan && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> Required
+                    <p className="text-xs text-destructive mt-1">Required
                     </p>
                   )}
                 </div>
 
                 {/* GST Type */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     GST Type <span className="text-destructive">*</span>
                   </label>
                   <select
@@ -1449,7 +1353,7 @@ const SupplierMaster: React.FC = () => {
                       }));
                       setErrors((p) => ({ ...p, LGST: false }));
                     }}
-                    className={`${inputCls} appearance-none ${errors.LGSTType ? "border-red-400" : ""}`}
+                    className={`${inputCls} appearance-none ${errors.LGSTType ? "border-destructive" : ""}`}
                   >
                     <option value="" disabled>Select…</option>
                     {GST_TYPES.map((t) => (
@@ -1457,8 +1361,7 @@ const SupplierMaster: React.FC = () => {
                     ))}
                   </select>
                   {errors.LGSTType && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> Required — determines GST Bill vs Non-GST Bill on invoices
+                    <p className="text-xs text-destructive mt-1">Required — determines GST Bill vs Non-GST Bill on invoices
                     </p>
                   )}
                 </div>
@@ -1466,7 +1369,7 @@ const SupplierMaster: React.FC = () => {
                 {/* GSTIN (GST Identification Number) — only when Registered */}
                 {form.LGSTType === "Registered" && (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <label className={`${LBL} flex items-center gap-1`}>
                       GSTIN (GST Identification Number) <span className="text-destructive">*</span>
                     </label>
                     <input
@@ -1480,11 +1383,10 @@ const SupplierMaster: React.FC = () => {
                       }}
                       placeholder="e.g. 27AAPFU0939F1ZV"
                       maxLength={15}
-                      className={`${inputCls} font-mono ${errors.LGST ? "border-red-400" : ""}`}
+                      className={`${inputCls} font-heading tabular-nums ${errors.LGST ? "border-destructive" : ""}`}
                     />
                     {errors.LGST && (
-                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                        <AlertCircle size={11} /> Required
+                      <p className="text-xs text-destructive mt-1">Required
                       </p>
                     )}
                   </div>
@@ -1492,7 +1394,7 @@ const SupplierMaster: React.FC = () => {
 
                 {/* GST State */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     GST State
                   </label>
                   <TreeDropdown
@@ -1508,17 +1410,12 @@ const SupplierMaster: React.FC = () => {
 
             {/* ── Section: Bank Details — all fields optional ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <Landmark size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Bank Details
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Bank Details
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Bank Account Number
                   </label>
                   <input
@@ -1527,11 +1424,11 @@ const SupplierMaster: React.FC = () => {
                       setForm((p) => ({ ...p, bankAccountNo: e.target.value }))
                     }
                     placeholder="e.g. 123456789012"
-                    className={`${inputCls} font-mono`}
+                    className={`${inputCls} font-heading tabular-nums`}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Bank Name
                   </label>
                   <input
@@ -1544,7 +1441,7 @@ const SupplierMaster: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Bank Branch Location
                   </label>
                   <input
@@ -1553,11 +1450,11 @@ const SupplierMaster: React.FC = () => {
                       setForm((p) => ({ ...p, bankBranchCode: e.target.value }))
                     }
                     placeholder="e.g. Mumbai Main Branch"
-                    className={`${inputCls} font-mono`}
+                    className={`${inputCls} font-heading tabular-nums`}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     IFSC Code
                   </label>
                   <input
@@ -1570,7 +1467,7 @@ const SupplierMaster: React.FC = () => {
                     }
                     placeholder="e.g. SBIN0001234"
                     maxLength={11}
-                    className={`${inputCls} font-mono`}
+                    className={`${inputCls} font-heading tabular-nums`}
                   />
                 </div>
               </div>
@@ -1582,18 +1479,13 @@ const SupplierMaster: React.FC = () => {
                 them, rather than being shown disabled/empty. ── */}
             {vendorType === "Supplier" && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <User size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Supplier Portal Login
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Supplier Portal Login
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
                 {/* Login email — auto-generated, read-only, only shown once it exists */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Login Email
                   </label>
                   <input
@@ -1605,13 +1497,13 @@ const SupplierMaster: React.FC = () => {
                     }
                     readOnly
                     disabled
-                    className={`${inputCls} bg-muted/40 text-muted-foreground cursor-not-allowed`}
+                    className={`${inputCls} border-dashed text-muted-foreground cursor-not-allowed`}
                   />
                 </div>
 
                 {/* Password */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     Password
                   </label>
                   <input
@@ -1629,11 +1521,10 @@ const SupplierMaster: React.FC = () => {
                         ? "Leave blank to keep current password"
                         : "Leave blank to default to 123456"
                     }
-                    className={`${inputCls} ${errors.SupplierPassword ? "border-red-400" : ""}`}
+                    className={`${inputCls} ${errors.SupplierPassword ? "border-destructive" : ""}`}
                   />
                   {errors.SupplierPassword && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> Required, min 6 characters
+                    <p className="text-xs text-destructive mt-1">Required, min 6 characters
                     </p>
                   )}
                 </div>
@@ -1643,13 +1534,13 @@ const SupplierMaster: React.FC = () => {
             {(() => {
               const loginUrl = `${window.location.origin}/supplier-login`;
               return (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-muted/40">
-                  <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 shrink-0">Portal</span>
-                  <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-0">{loginUrl}</span>
+                <div className="flex items-center gap-3 px-3 py-2 border border-foreground/40">
+                  <span className={`${LBL} shrink-0`}>Portal</span>
+                  <span className="font-heading tabular-nums text-xs text-muted-foreground truncate flex-1 min-w-0">{loginUrl}</span>
                   <button
                     type="button"
                     onClick={() => { navigator.clipboard.writeText(loginUrl); toast.success("Link copied"); }}
-                    className="flex items-center gap-1 px-2 py-1 text-[0.6875rem] font-medium rounded border border-border bg-background hover:bg-muted transition-colors shrink-0 text-muted-foreground hover:text-foreground"
+                    className={`${KEY} px-2.5 py-1.5 border border-foreground text-foreground hover:bg-primary/10 shrink-0`}
                     title="Copy portal link"
                   >
                     <Copy size={11} />
@@ -1671,19 +1562,15 @@ const SupplierMaster: React.FC = () => {
                   onClick={() =>
                     setForm((p) => ({ ...p, LHeadStatus: !p.LHeadStatus }))
                   }
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form.LHeadStatus ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${form.LHeadStatus ? "bg-foreground" : "bg-muted-foreground/30"}`}
                 >
                   <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.LHeadStatus ? "translate-x-4" : "translate-x-0.5"}`}
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${form.LHeadStatus ? "translate-x-4" : "translate-x-0.5"}`}
                   />
                 </button>
-                <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                <span className={LBL}>
                   Status —{" "}
-                  <span
-                    className={
-                      form.LHeadStatus ? "text-emerald-600" : "text-foreground"
-                    }
-                  >
+                  <span className="text-foreground">
                     {form.LHeadStatus ? "Active" : "Inactive"}
                   </span>
                 </span>
@@ -1696,19 +1583,15 @@ const SupplierMaster: React.FC = () => {
                   onClick={() =>
                     setForm((p) => ({ ...p, isTdsApplicable: !p.isTdsApplicable }))
                   }
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${form.isTdsApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${form.isTdsApplicable ? "bg-foreground" : "bg-muted-foreground/30"}`}
                 >
                   <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.isTdsApplicable ? "translate-x-4" : "translate-x-0.5"}`}
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${form.isTdsApplicable ? "translate-x-4" : "translate-x-0.5"}`}
                   />
                 </button>
-                <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                <span className={LBL}>
                   TDS Applicable —{" "}
-                  <span
-                    className={
-                      form.isTdsApplicable ? "text-amber-600" : "text-foreground"
-                    }
-                  >
+                  <span className="text-foreground">
                     {form.isTdsApplicable ? "Yes" : "No"}
                   </span>
                 </span>
@@ -1725,19 +1608,15 @@ const SupplierMaster: React.FC = () => {
                     onClick={() =>
                       setForm((p) => ({ ...p, tdsLimitApplicable: !p.tdsLimitApplicable }))
                     }
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/30 ${form.tdsLimitApplicable ? "bg-amber-500" : "bg-muted-foreground/30"}`}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${form.tdsLimitApplicable ? "bg-foreground" : "bg-muted-foreground/30"}`}
                   >
                     <span
-                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.tdsLimitApplicable ? "translate-x-4" : "translate-x-0.5"}`}
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${form.tdsLimitApplicable ? "translate-x-4" : "translate-x-0.5"}`}
                     />
                   </button>
-                  <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                  <span className={LBL}>
                     TDS Limit (₹30k / ₹1L threshold) —{" "}
-                    <span
-                      className={
-                        form.tdsLimitApplicable ? "text-amber-600" : "text-foreground"
-                      }
-                    >
+                    <span className="text-foreground">
                       {form.tdsLimitApplicable ? "Applied" : "Deduct on every bill"}
                     </span>
                   </span>
@@ -1746,22 +1625,15 @@ const SupplierMaster: React.FC = () => {
             </div>
           </div>
 
-          {/* Card footer — actions */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl">
-            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
-              {canSave ? (
-                <span className="text-emerald-500 font-medium">
-                  Ready to save
-                </span>
-              ) : (
-                "Fill in the required fields to save"
-              )}
-            </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3" style={{ borderTop: RULE }}>
+            <div className="hidden sm:block">
+              {canSave ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-[0.6875rem] text-muted-foreground">Fill in the required fields to save</span>}
+            </div>
             <div className="flex items-center gap-2 sm:ml-auto">
               <button
                 onClick={resetForm}
                 disabled={!isDirty && !editingId}
-                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                className={`${KEY} flex-1 sm:flex-none h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}
               >
                 <RotateCcw size={12} />
                 {editingId ? "Cancel" : "Reset"}
@@ -1769,29 +1641,29 @@ const SupplierMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || !canSave}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                className={`${KEY} flex-1 sm:flex-none h-9 px-5 bg-foreground text-card border border-foreground whitespace-nowrap`}
               >
                 {saving ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span className="w-3.5 h-3.5 border-2 border-card/30 border-t-card rounded-full animate-spin" />
                 ) : editingId ? (
-                  <Check size={14} />
+                  <Check size={13} />
                 ) : (
-                  <Plus size={14} />
+                  <Plus size={13} />
                 )}
                 {saving
                   ? "Saving…"
                   : editingId
-                    ? `Update ${vendorType || "Vendor"}`
-                    : `Save ${vendorType || "Vendor"}`}
+                    ? `Update ${(vendorType || "Vendor").toLowerCase()}`
+                    : `Save ${(vendorType || "Vendor").toLowerCase()}`}
               </button>
             </div>
           </div>
         </div>
 
         {/* ── Table Section ── */}
-        <div>
+        <div className="bg-card" style={{ border: RULE }}>
           {/* Toolbar */}
-          <div className="mb-3 flex items-center gap-3 flex-wrap">
+          <div className="px-4 py-3 flex items-center gap-3 flex-wrap" style={{ borderBottom: RULE }}>
             <div className="relative flex-1 sm:flex-none">
               <Search
                 size={13}
@@ -1801,7 +1673,7 @@ const SupplierMaster: React.FC = () => {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name, phone, GST…"
-                className="w-full sm:w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                className="w-full sm:w-56 h-9 text-sm border border-foreground/40 focus:border-foreground pl-9 pr-3 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
               />
             </div>
 
@@ -1831,7 +1703,7 @@ const SupplierMaster: React.FC = () => {
                   setFilterCategory("");
                   setFilterStatus("");
                 }}
-                className="text-xs font-heading text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
+                className={`${KEY} h-9 px-3 border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground`}
               >
                 <X size={11} /> Clear
               </button>
@@ -1839,7 +1711,7 @@ const SupplierMaster: React.FC = () => {
           </div>
 
           {/* Table */}
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden [&_th:last-child]:text-left [&_td:last-child]:text-left">
+          <div className="[&_th:last-child]:text-left [&_td:last-child]:text-left">
             <DataTable
               key={`${search}|${filterCategory}|${filterStatus}`}
               data={filtered}
@@ -1860,81 +1732,49 @@ const SupplierMaster: React.FC = () => {
                 columns: EXPORT_COLUMNS,
               }}
               rowClassName={(row) =>
-                row.original.LHeadId === editingId ? "bg-primary/5" : ""
+                row.original.LHeadId === editingId ? "shadow-[inset_3px_0_0_hsl(var(--primary))]" : ""
               }
             />
           </div>
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {/* Import Results Modal */}
       <Dialog
         open={!!importResults}
         onOpenChange={(open) => !open && setImportResults(null)}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle className="font-heading text-base">
-              Import Results
-            </DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Vendors · CSV import</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Import results</DialogTitle>
+            </div>
           </DialogHeader>
           {importResults && (
             <div className="space-y-3 pt-1">
-              <div className="flex items-center gap-3 text-sm">
-                <span className="flex items-center gap-1.5 text-green-600">
-                  <Check size={14} />
-                  {
-                    importResults.filter((r) => r.status === "success").length
-                  }{" "}
-                  succeeded
-                </span>
+              <div className="flex items-center gap-4 flex-wrap">
+                <SheetMark text={`${importResults.filter((r) => r.status === "success").length} imported`} tone="done" />
                 {importResults.some((r) => r.status === "error") && (
-                  <span className="flex items-center gap-1.5 text-destructive">
-                    <X size={14} />
-                    {
-                      importResults.filter((r) => r.status === "error").length
-                    }{" "}
-                    failed
-                  </span>
+                  <SheetMark text={`${importResults.filter((r) => r.status === "error").length} failed`} tone="stopped" />
                 )}
               </div>
-              <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+              <div className="max-h-72 overflow-y-auto" style={{ border: RULE }}>
                 {importResults.map((r, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-start gap-2 px-3 py-2 text-sm ${
-                      r.status === "error" ? "bg-destructive/5" : ""
-                    }`}
-                  >
-                    {r.status === "success" ? (
-                      <Check
-                        size={14}
-                        className="text-green-600 shrink-0 mt-0.5"
-                      />
-                    ) : (
-                      <X
-                        size={14}
-                        className="text-destructive shrink-0 mt-0.5"
-                      />
-                    )}
-                    <div className="min-w-0">
-                      <p className="font-medium truncate">
-                        Row {r.row} — {r.name}
-                      </p>
-                      {r.message && (
-                        <p className="text-xs text-destructive">{r.message}</p>
-                      )}
+                  <div key={i} className="flex items-start gap-3 px-3 py-2 text-sm" style={i ? { borderTop: "1px solid hsl(var(--border) / 0.7)" } : undefined}>
+                    <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0 mt-1 w-12">Row {r.row}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium truncate text-foreground">{r.name}</p>
+                      {r.message && <p className="text-xs text-destructive mt-0.5">{r.message}</p>}
                     </div>
+                    {r.status === "success" ? <Check size={14} className="text-foreground shrink-0 mt-0.5" /> : <X size={14} className="text-destructive shrink-0 mt-0.5" />}
                   </div>
                 ))}
               </div>
             </div>
           )}
-          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
-            <button
-              onClick={() => setImportResults(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
-            >
+          <div className="flex justify-end gap-2 pt-3 mt-2" style={{ borderTop: RULE }}>
+            <button onClick={() => setImportResults(null)} className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}>
               Close
             </button>
           </div>
@@ -1948,24 +1788,21 @@ const SupplierMaster: React.FC = () => {
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
           />
-          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-2">
-                <Building2 size={15} className="text-primary" />
-                <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Vendor Details
-                </h3>
+          <div
+            className="sheet-frame relative w-full max-w-sm bg-card flex flex-col animate-in slide-in-from-right duration-200"
+            style={{ margin: 0, borderLeft: RULE }}
+          >
+            <div className="flex items-end justify-between gap-3 px-5 py-4" style={{ borderBottom: RULE }}>
+              <div className="min-w-0">
+                <p className={LBL}>{vendorTypeFromCategory(viewRecord.supplierCategory || "") || "Vendor"}</p>
+                <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{viewRecord.LHeadName}</h3>
               </div>
-              <button
-                onClick={() => setViewRecord(null)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
-              >
-                <XCircle size={15} />
+              <button onClick={() => setViewRecord(null)} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors" aria-label="Close">
+                <X size={16} />
               </button>
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               {[
-                { label: "Vendor Name", value: viewRecord.LHeadName },
                 {
                   label: "Contact Person",
                   value: viewRecord.LHeadContactPerson || "—",
@@ -2008,49 +1845,37 @@ const SupplierMaster: React.FC = () => {
                 { label: "IFSC Code", value: viewRecord.bankIfscCode || "—", mono: true },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    {label}
-                  </p>
-                  <p
-                    className={`text-sm text-foreground ${mono ? "font-mono font-semibold text-primary" : ""}`}
-                  >
+                  <p className={`${LBL} mb-1`}>{label}</p>
+                  <p className={`text-sm text-foreground break-words ${mono ? "font-heading tabular-nums font-semibold" : ""}`}>
                     {value}
                   </p>
                 </div>
               ))}
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Status
-                </p>
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.LHeadStatus ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-                >
-                  {viewRecord.LHeadStatus ? "Active" : "Inactive"}
-                </span>
+                <p className={`${LBL} mb-1.5`}>Status</p>
+                <SheetMark text={viewRecord.LHeadStatus ? "Active" : "Inactive"} tone={viewRecord.LHeadStatus ? "done" : "none"} />
               </div>
             </div>
-            <div className="px-5 py-3 border-t border-border flex justify-end gap-2 bg-muted/20">
-              <button
-                onClick={() => handlePrint(viewRecord)}
-                className="px-3 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-              >
-                <Printer size={13} /> Print
-              </button>
-              <button
-                onClick={() => setViewRecord(null)}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
+            <div className="px-5 py-3 flex justify-end gap-2 flex-wrap" style={{ borderTop: RULE }}>
+              {rights.canPrint && (
+                <button onClick={() => handlePrint(viewRecord)} className={`${KEY} h-9 px-3 border border-foreground text-foreground hover:bg-primary/10`}>
+                  <Printer size={12} /> Print
+                </button>
+              )}
+              <button onClick={() => setViewRecord(null)} className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}>
                 Close
               </button>
-              <button
-                onClick={() => {
-                  startEdit(viewRecord);
-                  setViewRecord(null);
-                }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white shadow-sm flex items-center gap-1.5"
-              >
-                <Pencil size={13} /> Edit Vendor
-              </button>
+              {rights.canEdit && (
+                <button
+                  onClick={() => {
+                    startEdit(viewRecord);
+                    setViewRecord(null);
+                  }}
+                  className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}
+                >
+                  <Pencil size={12} /> Edit
+                </button>
+              )}
             </div>
           </div>
         </div></BodyPortal>

@@ -828,11 +828,11 @@ router.post("/bills", requirePageRight(MAIN_PAGE, "create"), async (req, res) =>
       .input("CreatedBy", sql.NVarChar(150), actorOf(req))
       .query(`
         INSERT INTO dbo.ElectricityBill
-          (MeterId, BookingId, BillingPeriodFrom, BillingPeriodTo, PreviousReadingId, CurrentReadingId, HandoverReadingId,
+          (MeterId, BookingId, BillToApplicationId, BillingPeriodFrom, BillingPeriodTo, PreviousReadingId, CurrentReadingId, HandoverReadingId,
            TotalUnits, HandoverDate, HandoverReading, RajwadaUnits, PostHandoverUnits, TariffId,
            EnergyCharge, FixedCharge, OtherCharge, TotalAmount, BillStatus, CreatedBy)
         OUTPUT INSERTED.Id
-        VALUES (@MeterId, @BookingId, @From, @To, @PreviousReadingId, @CurrentReadingId, @HandoverReadingId,
+        VALUES (@MeterId, @BookingId, (SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @BookingId), @From, @To, @PreviousReadingId, @CurrentReadingId, @HandoverReadingId,
                 @TotalUnits, @HandoverDate, @HandoverReading, @RajwadaUnits, @PostHandoverUnits, @TariffId,
                 @EnergyCharge, @FixedCharge, @OtherCharge, @TotalAmount, 'PendingVerification', @CreatedBy)
       `);
@@ -854,7 +854,8 @@ const BILL_SELECT = `
   JOIN dbo.MeterReadingMaster m ON m.Id = b.MeterId
   JOIN dbo.ElectricityProvider prov ON prov.Id = m.ProviderId
   JOIN dbo.CrmBooking cb ON cb.Id = b.BookingId
-  JOIN dbo.CrmApplication capp ON capp.Id = cb.ApplicationId
+  -- Who it was billed to (migration 563); NULL = the booking's current owner.
+  JOIN dbo.CrmApplication capp ON capp.Id = COALESCE(b.BillToApplicationId, cb.ApplicationId)
   LEFT JOIN dbo.UnitMaster um    ON um.Id  = cb.UnitId
   LEFT JOIN dbo.BlockMaster blk  ON blk.Id = um.BlockId
   LEFT JOIN dbo.enterprise  proj ON proj.id = cb.ProjectId AND proj.business_type = 'P'

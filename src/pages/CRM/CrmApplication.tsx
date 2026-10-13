@@ -29,6 +29,7 @@ import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/applications";
 const CUSTOMER_API = "/api/crm/customers";
@@ -367,6 +368,7 @@ const CoApplicantStep: React.FC<{
       AnnualIncome: co.AnnualIncome != null ? String(co.AnnualIncome) : "",
       Address: co.Address || "", City: co.City || "", State: co.State || "",
       Pincode: co.Pincode || "", Notes: co.Notes || "",
+      CustomerId: co.CustomerId ?? null,
     });
     setEditingId(co.Id);
     setSameAsApplicant(
@@ -377,6 +379,20 @@ const CoApplicantStep: React.FC<{
     );
   };
   const cancelEdit = () => { setEditingId(null); setDraft(emptyCoApplicant()); setSameAsApplicant(false); };
+  // An existing customer can be picked as a co-applicant: their details are
+  // filled in and they are linked, never duplicated (the server also refuses
+  // the main applicant or someone already on this application).
+  const { data: customerPool = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000, enabled: editingId !== null });
+  const pickCustomer = (id: string) => {
+    const c = (customerPool as any[]).find((x: any) => String(x.Id) === id);
+    if (!c) { setDraft((d: any) => ({ ...d, CustomerId: null })); return; }
+    setDraft((d: any) => ({
+      ...d, CustomerId: c.Id, Name: c.CustomerName || "", Mobile: c.Mobile || "", Email: c.Email || "",
+      PanNo: c.PanNo || "", AadhaarNo: c.AadhaarNo || "", Occupation: c.Occupation || d.Occupation,
+      DateOfBirth: c.DateOfBirth ? String(c.DateOfBirth).slice(0, 10) : d.DateOfBirth,
+      Address: c.Address || d.Address, City: c.City || d.City, State: c.State || d.State, Pincode: c.Pincode || d.Pincode,
+    }));
+  };
 
   // While the checkbox is on, keep the draft's address fields in step if
   // the applicant's own address changes mid-edit.
@@ -432,6 +448,7 @@ const CoApplicantStep: React.FC<{
     <div className="space-y-4">
       <div className="rounded-lg border border-border p-3 space-y-2">
         <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Users2 size={13} /> Co-Applicants</label>
+        <p className="text-[0.6875rem] text-muted-foreground">The main applicant is Applicant 1. Each co-applicant is Applicant 2, 3 … and is added to the customer pool (an existing customer with the same mobile, PAN or email is linked, not duplicated).</p>
         {(coApplicants as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(coApplicants as any[]).map((co: any) => (
@@ -439,9 +456,11 @@ const CoApplicantStep: React.FC<{
                 onClick={() => setViewingCoApplicant(co)}
                 className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50">
                 <span className="flex items-center gap-1.5">
+                  {co.ApplicantNo && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-primary">Applicant {co.ApplicantNo}</span>}
                   <span className="font-medium text-foreground">{co.Name}</span>
                   {co.Relation && <span className="text-muted-foreground">({co.Relation})</span>}
                   {co.Mobile && <span className="text-muted-foreground">— {co.Mobile}</span>}
+                  {co.CustomerNo && <span className="text-muted-foreground">· customer {co.CustomerNo}</span>}
                 </span>
                 <span className="flex items-center gap-2">
                   <button onClick={(e) => { e.stopPropagation(); startEdit(co); }} className="text-primary hover:underline">Edit</button>
@@ -463,6 +482,16 @@ const CoApplicantStep: React.FC<{
 
       {editingId !== null && (
         <div className="rounded-lg border border-border p-3 space-y-3">
+          <div>
+            <label className={labelCls}>Existing customer (optional)</label>
+            <SearchableSelect
+              value={draft.CustomerId != null ? String(draft.CustomerId) : ""}
+              onChange={pickCustomer}
+              placeholder="Pick an existing customer, or fill in a new person below"
+              searchPlaceholder="Search name, mobile or customer no..."
+              options={(customerPool as any[]).map((c: any) => ({ value: String(c.Id), label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · ") }))}
+            />
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Name *</label>
@@ -1679,7 +1708,7 @@ const CrmApplication: React.FC = () => {
       accessorKey: "ApplicantName", header: "Applicant", size: 210,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
+          <div className="font-medium text-foreground"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
             {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
@@ -1758,7 +1787,7 @@ const CrmApplication: React.FC = () => {
       accessorKey: "ApplicantName", header: "Applicant", size: 220,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground">{i.row.original.ApplicantName}</div>
+          <div className="font-medium text-foreground"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
             {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
@@ -2876,7 +2905,7 @@ const CrmApplication: React.FC = () => {
               {viewingAppDetail ? (
                 <>
                   <span className="font-mono text-primary">{viewingAppDetail.application.ApplicationNo}</span>
-                  <span>— {viewingAppDetail.application.ApplicantName}</span>
+                  <span>— <ApplicantNames name={viewingAppDetail.application.ApplicantName} bookingId={viewingAppDetail.application.BookingId} applicationId={viewingAppDetail.application.ApplicationId} /></span>
                   <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[viewingAppDetail.application.Status] || ""}`}>
                     {viewingAppDetail.bookings && viewingAppDetail.bookings.length > 0 ? "Submitted" : viewingAppDetail.application.Status}
                   </span>
@@ -3250,7 +3279,7 @@ const CrmApplication: React.FC = () => {
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 <span className="font-mono text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
-                <span className="font-medium text-foreground">{cancellingApp?.ApplicantName}</span> will be moved to Cancelled.
+                <span className="font-medium text-foreground"><ApplicantNames name={cancellingApp?.ApplicantName} bookingId={cancellingApp?.BookingId} applicationId={cancellingApp?.ApplicationId} /></span> will be moved to Cancelled.
                 {(cancellingApp?.PreferredUnitName || cancellingApp?.InterestedUnit) && (
                   " Any hold on the picked unit — and any parking slot tied to it — is released immediately, so it's available for another application right away."
                 )}

@@ -16,6 +16,7 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API        = "/api/crm/handover";
 const SA_LEADS_API = "/api/sa/leads";
@@ -378,7 +379,7 @@ const CrmHandover: React.FC = () => {
             <button key={h.Id} onClick={() => setSelectedId(h.Id)}
               className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedId === h.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"}`}>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium truncate">{h.ApplicantName}</span>
+                <span className="text-sm font-medium truncate"><ApplicantNames name={h.ApplicantName} bookingId={h.BookingId} applicationId={h.ApplicationId} /></span>
                 <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${statusColor[h.Status] || ""}`}>{h.Status}</span>
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">{h.BookingNo} · {h.UnitNo}</div>
@@ -405,7 +406,7 @@ const CrmHandover: React.FC = () => {
               <div className="rounded-xl border border-border p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <h2 className="font-bold">{detail.handover.ApplicantName}</h2>
+                    <h2 className="font-bold"><ApplicantNames name={detail.handover.ApplicantName} bookingId={detail.handover.BookingId} applicationId={detail.handover.ApplicationId} /></h2>
                     <p className="text-xs text-muted-foreground">{detail.handover.BookingNo} · {detail.handover.UnitNo}</p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[detail.handover.Status] || ""}`}>

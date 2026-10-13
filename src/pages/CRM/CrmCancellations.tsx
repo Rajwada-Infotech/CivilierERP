@@ -16,6 +16,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/cancellations";
 const BKG_API = "/api/crm/bookings";
@@ -126,6 +127,7 @@ const CrmCancellations: React.FC = () => {
 
   const handleRequest = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
+    if (!form.Reason.trim()) { toast.error("Give the reason for the cancellation"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -141,7 +143,7 @@ const CrmCancellations: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error);
-      toast.success(`Cancellation requested — refund amount: ${fmt(data.refundAmt)}`);
+      toast.success(`Cancellation requested — ${fmt(data.refundAmt)} will be held as credit (deduction only if refunded)`);
       setDialogOpen(false);
       setForm({ BookingId: "", Reason: "", DeductionPercent: "" });
       setPolicy(null);
@@ -162,14 +164,19 @@ const CrmCancellations: React.FC = () => {
     { accessorKey: "ApplicantName", header: "Customer", size: 150,
       cell: (i) => (
         <div>
-          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
     { accessorKey: "AmountPaidTillDate", header: "Paid Till Date", size: 110, cell: (i) => <span>{fmt(i.row.original.AmountPaidTillDate)}</span> },
     { id: "deduction", header: "Deduction", size: 130, enableSorting: false,
-      cell: (i) => <span className="text-xs">{i.row.original.DeductionPercent}% ({fmt(i.row.original.DeductionAmount)})</span> },
-    { accessorKey: "RefundAmount", header: "Refund Amount", size: 120, cell: (i) => <span className="font-semibold text-green-600">{fmt(i.row.original.RefundAmount)}</span> },
+      // The % is kept aside here and taken only if the customer chooses a
+      // refund (a re-booking keeps the full credit) — show what a refund nets.
+      cell: (i) => { const r = i.row.original; const d = Math.round(Number(r.AmountPaidTillDate || 0) * Number(r.DeductionPercent || 0)) / 100;
+        return <span className="text-xs" title="Deducted only if the customer takes a refund; a re-booking keeps the full amount">{Number(r.DeductionPercent)}% ({fmt(d)}) <span className="text-muted-foreground">if refunded</span></span>; } },
+    { accessorKey: "RefundAmount", header: "Refund if taken", size: 120, cell: (i) => { const r = i.row.original;
+        const net = Math.max(0, Number(r.AmountPaidTillDate || 0) - Math.round(Number(r.AmountPaidTillDate || 0) * Number(r.DeductionPercent || 0)) / 100);
+        return <span className="font-semibold text-green-600" title={`The full ${fmt(r.AmountPaidTillDate)} is held as credit; a re-booking uses all of it`}>{fmt(net)}</span>; } },
     { accessorKey: "Status", header: "Status", size: 100,
       cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
     { accessorKey: "RequestedDate", header: "Requested", size: 100,
@@ -314,7 +321,7 @@ const CrmCancellations: React.FC = () => {
                 }`} />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Reason</label>
+              <label className="text-xs text-muted-foreground block mb-1">Reason <span className="text-destructive">*</span></label>
               <textarea value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))}
                 rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
             </div>

@@ -24,7 +24,6 @@ export function ActivityChainPreview({ rungs, onRungClick }: Props) {
     <div className="flex flex-wrap items-center gap-1.5 py-1">
       {rungs.map((rung, i) => {
         const isInternal = rung.workType === "INTERNAL";
-        const accent = isInternal ? "#0891b2" : "#8b5cf6";
         const clickable = !!onRungClick && rung.rungId != null;
         const Chip = clickable ? "button" : "div";
         return (
@@ -32,22 +31,20 @@ export function ActivityChainPreview({ rungs, onRungClick }: Props) {
             <Chip
               type={clickable ? "button" : undefined}
               onClick={clickable ? () => onRungClick!(rung) : undefined}
-              className={`flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 ${
-                clickable ? "cursor-pointer hover:brightness-110 transition-all" : ""
+              className={`flex items-center gap-2 border pl-1 pr-2.5 py-1 bg-card ${isInternal ? "border-foreground" : "border-dashed border-foreground"} ${
+                clickable ? "cursor-pointer hover:bg-primary/10 transition-colors" : ""
               }`}
-              style={{ borderColor: `${accent}40`, background: `${accent}0d` }}
-              title={clickable ? "Assign engineer & material" : undefined}
+              title={clickable ? "Assign engineer & material" : isInternal ? "Internal work" : "External work"}
             >
               <span
-                className="w-4 h-4 rounded-full text-white text-[0.5625rem] font-heading font-bold flex items-center justify-center shrink-0"
-                style={{ background: accent }}
+                className="min-w-[1.125rem] h-[1.125rem] px-0.5 bg-foreground text-card text-[0.5625rem] font-heading font-bold tabular-nums flex items-center justify-center shrink-0"
               >
                 {rung.sequenceNo}
               </span>
               <span className="text-xs font-medium text-foreground whitespace-nowrap">{rung.activityName}</span>
             </Chip>
             {i < rungs.length - 1 && (
-              <ChevronRight size={12} className="text-muted-foreground/40 shrink-0" />
+              <ChevronRight size={12} className="text-muted-foreground shrink-0" />
             )}
           </div>
         );

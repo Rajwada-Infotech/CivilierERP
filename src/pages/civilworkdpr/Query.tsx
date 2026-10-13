@@ -1,6 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Search } from "lucide-react";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { QueryReportTable } from "@/pages/Reports";
@@ -13,8 +12,13 @@ export default function Query() {
   usePageRights("civilworkdpr-query");
   const navigate = useNavigate();
   return (
-    <CivilWorkDprShell title="Query" subtitle="User-Wise Daily Work Report — click a row to open the activity in Reporting" icon={Search}>
+    <>
       <Breadcrumbs items={[{ label: "Civil Work DPR", path: "/civilworkdpr" }, { label: "Query" }]} />
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Daily work report"
+        subtitle="What each person reported on each day, across the last thirty days. Press a row to open that activity in Reporting."
+      >
       <QueryReportTable
         reportId="cwd-user-daily-work"
         onRowOpen={(row) => {
@@ -27,6 +31,7 @@ export default function Query() {
         }}
         onClose={() => navigate("/civilworkdpr")}
       />
-    </CivilWorkDprShell>
+      </SheetShell>
+    </>
   );
 }

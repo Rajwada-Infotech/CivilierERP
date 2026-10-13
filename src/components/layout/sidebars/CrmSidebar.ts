@@ -1,4 +1,4 @@
-import { ClipboardList, FileText, IndianRupee, Wrench, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2 } from "lucide-react";
+import { ClipboardList, FileText, IndianRupee, Wrench, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2, ArrowRightLeft } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Sidebar groups follow the real legal workflow sequence per Transfer of
@@ -107,6 +107,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Money Receipts",     path: "/crm/money-receipts",  pageKey: "crm-money-receipts"  },
       { label: "On Account",         path: "/crm/on-account",      pageKey: "crm-payments"        },
       { label: "Refunds",            path: "/crm/refunds",         pageKey: "crm-refunds"         },
+      { label: "Credit Notes",       path: "/crm/credit-notes",    pageKey: "crm-refunds"         },
       { label: "Invoices",           path: "/crm/invoices",        pageKey: "crm-invoices"        },
       { label: "Parking Booking",    path: "/crm/parking-booking", pageKey: "crm-parking-booking" },
       { label: "Brokerage",          path: "/crm/brokerage",       pageKey: "crm-brokerage"       },
@@ -121,9 +122,24 @@ export const crmNavItems: NavItem[] = [
     children: [
       { label: "Service Tickets",    path: "/crm/service-tickets",    pageKey: "crm-service-tickets"    },
       { label: "Cancellations",      path: "/crm/cancellations",      pageKey: "crm-cancellations"      },
-      { label: "Resale & Buy-back", path: "/crm/resales",            pageKey: "crm-resales"            },
       { label: "Customer 360",       path: "/crm/customer-360",       pageKey: "crm-customer-360"       },
       { label: "Construction Updates", path: "/crm/construction-updates", pageKey: "crm-construction-updates" },
+    ],
+  },
+
+  // ── Resale ────────────────────────────────────────────────────────────────────
+  // A sold property passing to a new buyer (seller clearance → NOC → buyer →
+  // approval → fee → registered deed of assignment → transfer) or bought back
+  // (→ cancellation deed → payout); after the sale deed, a new owner is only
+  // recorded (Ownership Changes). Each case links out to the existing pages
+  // that do their part (Applications, Received Payments, Approval Inbox).
+  {
+    label: "Resale",
+    icon: ArrowRightLeft,
+    children: [
+      { label: "Resale Cases",     path: "/crm/resales",                      pageKey: "crm-resales"        },
+      { label: "Transfer Deeds",   path: "/crm/transfer-deeds",               pageKey: "crm-transfer-deeds" },
+      { label: "Ownership Changes", path: "/crm/ownership-changes",          pageKey: "crm-ownership-changes" },
     ],
   },
 ];

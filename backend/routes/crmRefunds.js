@@ -4,6 +4,8 @@ const router = express.Router();
 // Project access: a refund's own project, else its booking's.
 const { projectParamGuard, projectPredicate } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT COALESCE(r.ProjectId, b.ProjectId) AS ProjectId FROM dbo.CrmRefund r LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId WHERE r.Id = @id"));
+// A refund's GST document (credit note / refund voucher, migration 565): its own project.
+router.param("noteId", projectParamGuard("SELECT n.ProjectId FROM dbo.CrmGstNote n WHERE n.Id = @id"));
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -30,6 +32,11 @@ const FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super
 // only ever a same-day mode preference, not a dated instrument. Optional
 // everywhere it's used — never required to raise or approve a refund.
 const ALLOWED_REFUND_MODES = new Set(["Cheque", "NEFT", "RTGS", "IMPS", "UPI"]);
+// Like a money receipt, the payment mode decides what a payout needs: a
+// transfer needs the customer's account; a cheque is written to their name
+// and needs none. No mode yet = Finance chooses it on the voucher.
+const TRANSFER_REFUND_MODES = new Set(["NEFT", "RTGS", "IMPS", "UPI"]);
+const needsCustomerAccount = (mode) => TRANSFER_REFUND_MODES.has(String(mode || "").trim());
 function validatePaymentMode(raw) {
   if (raw != null && raw !== "" && !ALLOWED_REFUND_MODES.has(raw)) {
     throw new Error(`PaymentMode must be one of: ${[...ALLOWED_REFUND_MODES].join(", ")}`);
@@ -289,6 +296,140 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
 });
 
 // ── GET /:id ─────────────────────────────────────────────────────────────
+// ── GST documents for money given back (services/crmGstNotes.js) ─────────────
+// Register: every credit note and refund voucher, for the GST return.
+router.get("/gst-notes", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  try {
+    const gst = require("../services/crmGstNotes");
+    const { applyPagination } = require("../services/crmListPagination");
+    const pag = req.query.page ? applyPagination(req, 20, 200) : null;
+    const result = await gst.list(getPool(), {
+      from: req.query.from || null,
+      to: req.query.to || null,
+      type: req.query.type || null,
+      status: req.query.status || null,
+      search: req.query.search || null,
+      companyId: req.query.companyId ? parseInt(req.query.companyId, 10) : null,
+      projectId: req.query.projectId ? parseInt(req.query.projectId, 10) : null,
+      projectScope: req.projectScope,
+      page: pag?.page,
+      pageSize: pag?.pageSize,
+      offset: pag?.offset,
+    });
+    res.json(result);
+  } catch (e) {
+    console.error("[crm-refunds] GET /gst-notes:", e.message);
+    res.status(500).json({ error: "Couldn't load the credit notes" });
+  }
+});
+const gstFail = (res, e, where) => {
+  if (e.status) return res.status(e.status).json({ error: e.message });
+  console.error(`[crm-refunds] ${where}:`, e.message);
+  res.status(500).json({ error: "Something went wrong with the credit note — please try again" });
+};
+const gstUser = (req) => ({ email: req.user?.email || req.user?.name || String(actorId(req)), role: req.user?.role, userId: req.user?.userId ?? actorId(req) });
+const gstNote = (req) => req.body?.note ?? req.body?.remarks ?? req.body?.reason ?? null;
+const withNote = (fn, where) => async (req, res) => {
+  const id = parseId(req.params.noteId);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try { res.json(await fn(require("../services/crmGstNotes"), getPool(), id, req)); } catch (e) { gstFail(res, e, where); }
+};
+// Invoices that can still take a credit note (not void, value left, before the deadline).
+router.get("/gst-notes/creditable-invoices", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  try { res.json(await require("../services/crmGstNotes").creditableInvoices(getPool(), { search: req.query.search || "", projectScope: req.projectScope })); }
+  catch (e) { gstFail(res, e, "GET creditable invoices"); }
+});
+router.post("/gst-notes", requirePageRight("crm-refunds", "create"), async (req, res) => {
+  try {
+    const gst = require("../services/crmGstNotes");
+    const inv = await gst.invoiceCreditable(getPool(), parseInt(req.body?.InvoiceId, 10));
+    if (req.projectScope && !req.projectScope.map(Number).includes(Number(inv.ProjectId))) return res.status(403).json({ error: "You don't have access to this project" });
+    res.status(201).json(await gst.createAdjustment(getPool(), req.body || {}, gstUser(req)));
+  } catch (e) { gstFail(res, e, "POST credit note"); }
+});
+// Paid refunds that carried GST but have no live credit note yet.
+router.get("/gst-notes/pending", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  try { res.json(await require("../services/crmGstNotes").pending(getPool(), { projectScope: req.projectScope })); }
+  catch (e) { gstFail(res, e, "GET /gst-notes/pending"); }
+});
+router.get("/gst-notes/:noteId", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  const id = parseId(req.params.noteId);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const gst = require("../services/crmGstNotes");
+    const n = await gst.load(getPool(), id);
+    if (!n) return res.status(404).json({ error: "Credit note not found" });
+    const { CompanyLogo, ...rest } = n;
+    // The other documents of the same refund (a split into voucher + credit notes).
+    const siblings = (await gst.list(getPool(), { refundId: n.RefundId })).filter((x) => x.Id !== id)
+      .map((x) => ({ Id: x.Id, DocNo: x.DocNo, DocType: x.DocType, Status: x.Status, TotalAmount: x.TotalAmount, AgainstRef: x.AgainstRef }));
+    res.json({ ...rest, siblings });
+  } catch (e) { gstFail(res, e, "GET /gst-notes/:noteId"); }
+});
+// Cancelling: a request a second person approves (workflow crm-credit-note-cancel).
+router.put("/gst-notes/:noteId/cancel", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.requestCancel(db, id, req.body?.reason, gstUser(req)), "request cancel"));
+router.put("/gst-notes/cancel-requests/:noteId/approve", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.decideCancel(db, id, true, gstNote(req), gstUser(req)), "approve cancel"));
+router.put("/gst-notes/cancel-requests/:noteId/reject", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.decideCancel(db, id, false, gstNote(req), gstUser(req)), "reject cancel"));
+// Credit note without a refund: an invoice reduced (workflow crm-credit-notes).
+router.put("/gst-notes/:noteId", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.updateAdjustment(db, id, req.body || {}, gstUser(req)), "update credit note"));
+router.put("/gst-notes/:noteId/submit", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.submitAdjustment(db, id, gstUser(req)), "submit credit note"));
+router.put("/gst-notes/:noteId/approve", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.decideAdjustment(db, id, true, gstNote(req), gstUser(req)), "approve credit note"));
+router.put("/gst-notes/:noteId/reject", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.decideAdjustment(db, id, false, gstNote(req), gstUser(req)), "reject credit note"));
+router.get("/gst-notes/:noteId/pdf", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  const id = parseId(req.params.noteId);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const gst = require("../services/crmGstNotes");
+    const n = await gst.load(getPool(), id);
+    if (!n) return res.status(404).json({ error: "Document not found" });
+    const buf = await gst.renderPdf(n);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${n.DocNo || `GST-certificate-${n.RefundNo}`}.pdf"`);
+    res.send(buf);
+  } catch (e) {
+    console.error("[crm-refunds] GET gst-note pdf:", e.message);
+    res.status(500).json({ error: "Couldn't make the PDF" });
+  }
+});
+router.get("/:id/gst-notes", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try { res.json(await require("../services/crmGstNotes").list(getPool(), { refundId: id })); }
+  catch (e) { console.error("[crm-refunds] GET /:id/gst-notes:", e.message); res.status(500).json({ error: "Couldn't load the credit notes" }); }
+});
+// A refund paid before these documents existed: Finance issues its set on request.
+router.post("/:id/gst-notes", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const gst = require("../services/crmGstNotes");
+    const out = await gst.issueForRefund(getPool(), id, req.user?.email || null);
+    if (out.none && out.none !== "already issued") return res.status(409).json({ error: `No credit note needed: ${out.none}` });
+    res.json(await gst.list(getPool(), { refundId: id }));
+  } catch (e) {
+    console.error("[crm-refunds] POST /:id/gst-notes:", e.message);
+    res.status(500).json({ error: "Couldn't issue the credit note" });
+  }
+});
+
+// A fresh credit note for a refund whose documents were all cancelled.
+router.post("/:id/gst-notes/reissue", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const gst = require("../services/crmGstNotes");
+    await gst.reissue(getPool(), id, req.user?.email || null);
+    res.json(await gst.list(getPool(), { refundId: id, includeCancelled: false }));
+  } catch (e) { gstFail(res, e, "POST reissue credit note"); }
+});
+
 router.get("/:id", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -500,15 +641,17 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
     // Finance -> Payments, where Finance approves it once. So everything the
     // voucher needs is checked BEFORE the approval is recorded.
     const pre = (await pool.request().input("id", sql.Int, id).query(`
-      SELECT r.Status, r.RefundBankLHeadId, r.CustomerBankName, r.CustomerAccountNo, r.NetAmount, r.ProjectId,
+      SELECT r.Status, r.RefundBankLHeadId, r.CustomerBankName, r.CustomerAccountNo, r.NetAmount, r.ProjectId, r.PreferredPaymentMode,
              (SELECT COUNT(*) FROM dbo.CrmProjectBank pb WHERE pb.ProjectId = r.ProjectId) AS ProjectBanks,
              (SELECT MIN(pb.BankLHeadId) FROM dbo.CrmProjectBank pb WHERE pb.ProjectId = r.ProjectId) AS OnlyProjectBank
       FROM dbo.CrmRefund r WHERE r.Id = @id`)).recordset[0];
     if (!pre) return res.status(404).json({ error: "Refund not found" });
     const bankId = pre.RefundBankLHeadId ?? (pre.ProjectBanks === 1 ? pre.OnlyProjectBank : null);
     if (pre.Status === "Pending") {
-      if (bankId == null) return res.status(400).json({ error: pre.ProjectBanks > 1 ? "Choose which company bank pays this refund (edit the refund) — the project has several." : "No company bank to pay from — add the project's bank in Project Banks, or set one on the refund." });
-      if (!pre.CustomerBankName && !pre.CustomerAccountNo) return res.status(400).json({ error: "Add the customer's bank details to the refund before approving it." });
+      // The company bank is Finance's call, as for every payout (brokerage
+      // etc.): when neither the refund nor the project names one, Finance
+      // picks it on the voucher in Payments before approving it there.
+      if (needsCustomerAccount(pre.PreferredPaymentMode) && !pre.CustomerAccountNo) return res.status(400).json({ error: `A ${pre.PreferredPaymentMode} refund needs the customer's bank account — add it to the refund, or choose Cheque.` });
       if (!(Number(pre.NetAmount) > 0)) return res.status(400).json({ error: "The refund's net amount must be more than zero." });
     }
     const result = await approvalTransition("crm-refunds", id, "Approved", userEmail, req.user?.role, null, req.user?.userId ?? null);
@@ -533,7 +676,7 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
         .query(`
           UPDATE dbo.CrmRefund SET
             Status = 'FinanceApproved', ApprovedBy = @ab, ApprovedAt = SYSDATETIME(),
-            FinanceNewPaymentId = @np, RefundBankLHeadId = @bank, UpdatedAt = SYSDATETIME()
+            FinanceNewPaymentId = @np, RefundBankLHeadId = COALESCE(@bank, RefundBankLHeadId), UpdatedAt = SYSDATETIME()
           WHERE Id = @id`);
       await tx.commit();
       await Promise.all([bumpCacheVersion("crm-refunds"), bumpCacheVersion("new-payment")]);
@@ -589,8 +732,6 @@ async function raisePayoutVoucher(tx, rf, opts) {
       }
     }
     const bankId = opts.bankId != null ? opts.bankId : rf.RefundBankLHeadId;
-    if (bankId == null) { throw new RefundPayoutError("A company bank account (RefundBankLHeadId) is required to disburse this refund", 400); }
-    if (!rf.CustomerBankName && !rf.CustomerAccountNo) { throw new RefundPayoutError("Customer bank details are missing — add them to the refund before disbursing", 400); }
     const net = Number(rf.NetAmount) || 0;
     if (net <= 0) { throw new RefundPayoutError("Net refund amount must be greater than 0", 400); }
 
@@ -601,13 +742,15 @@ async function raisePayoutVoucher(tx, rf, opts) {
     let paymentMode;
     try { paymentMode = validatePaymentMode(opts.paymentMode ?? rf.PreferredPaymentMode); }
     catch (e) { throw new RefundPayoutError(e.message, 400); }
+    if (needsCustomerAccount(paymentMode) && !rf.CustomerAccountNo) {
+      throw new RefundPayoutError(`A ${paymentMode} refund needs the customer's bank account — add it to the refund, or choose Cheque`, 400);
+    }
 
     // Bank name is known the moment bankId is — resolving and storing it
     // now (instead of leaving PBankName blank for Finance to fill in later)
     // is what the whole Payment.tsx NOT-NULL crash chain traced back to.
-    const bankRow = await tx.request().input("bid", sql.Int, bankId)
-      .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid");
-    const bankName = bankRow.recordset[0]?.LHeadName || "";
+    const bankName = bankId == null ? "" : ((await tx.request().input("bid", sql.Int, bankId)
+      .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid")).recordset[0]?.LHeadName || "");
 
     const actorEmail = opts.actorEmail;
     const customerHeadId = await ensureCrmCustomerLedgerHead(tx, rf.CustomerId, actorEmail);
@@ -623,7 +766,7 @@ async function raisePayoutVoucher(tx, rf, opts) {
 
     const npIns = await tx.request()
       .input("name", sql.VarChar, "CRM Refund")
-      .input("remarks", sql.NVarChar(1000), `${rf.RefundNo} — customer refund ₹${net.toLocaleString("en-IN")} to ${rf.CustomerBankName || "customer bank"} ${rf.CustomerAccountNo || ""}${paymentMode ? "" : " — finance to complete payment details"}`)
+      .input("remarks", sql.NVarChar(1000), `${rf.RefundNo} — customer refund ₹${net.toLocaleString("en-IN")} to ${rf.CustomerBankName || "customer bank"} ${rf.CustomerAccountNo || ""}${paymentMode && bankId != null ? "" : " — finance to complete payment details"}`)
       .input("mode", sql.VarChar(50), paymentMode)
       .input("bankName", sql.VarChar(200), bankName)
       .input("amt", sql.Decimal(18, 2), net)
@@ -810,18 +953,20 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
         UPDATE dbo.CrmRefund SET
           Status = 'Paid', PaidAt = SYSDATETIME(),
           FinanceNewPaymentId = ISNULL(FinanceNewPaymentId, @np),
+          -- the bank Finance actually paid from, when it was picked on the voucher
+          RefundBankLHeadId = COALESCE((SELECT TRY_CAST(np.PBankID AS INT) FROM dbo.NewPayment np WHERE np.PPaymentID = ISNULL(@np, FinanceNewPaymentId)), RefundBankLHeadId),
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
     // Consume the source held / on-account credit by the gross amount.
     if (rf.SourceOnAccountId) {
-      await tx.request().input("oid", sql.Int, rf.SourceOnAccountId).input("g", sql.Decimal(18, 2), Number(rf.GrossAmount) || 0)
+      await tx.request().input("oid", sql.Int, rf.SourceOnAccountId).input("rid", sql.Int, refundId).input("g", sql.Decimal(18, 2), Number(rf.GrossAmount) || 0)
         .query(`
           UPDATE dbo.CrmOnAccountPayment SET
             AppliedAmount = AppliedAmount + @g,
             Status = CASE WHEN AppliedAmount + @g >= Amount - 0.01 THEN 'Applied'
                           WHEN ISNULL(Status,'') = 'Held' THEN 'Held' ELSE 'PartiallyApplied' END,
-            Notes = ISNULL(Notes,'') + char(10) + 'Refunded via CrmRefund #' + CAST(@oid AS NVARCHAR(20))
+            Notes = ISNULL(Notes,'') + char(10) + 'Refunded via CrmRefund #' + CAST(@rid AS NVARCHAR(20))
           WHERE Id = @oid
         `);
     }
@@ -848,6 +993,10 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
   } catch (glErr) {
     await recordGLPosting("crm-refund", refundId, { failed: true, reason: glErr.message }, userEmail);
   }
+  // Its GST documents: refund voucher for money never invoiced, credit notes
+  // against invoices (services/crmGstNotes.js). Never fatal to the payout.
+  try { await require("../services/crmGstNotes").issueForRefund(pool, refundId, userEmail); }
+  catch (e) { console.error(`[crm-refunds] GST documents for refund ${refundId}:`, e.message); }
   return { ok: true };
 }
 
@@ -1003,7 +1152,7 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     `);
     const to = toRes.recordset[0];
     if (!to) return res.status(404).json({ error: "Target booking not found" });
-    if (!to.IsActive || ["Cancelled", "Rejected"].includes(to.Status)) {
+    if (!to.IsActive || require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(to.Status)) {
       return res.status(400).json({ error: "Target booking is not active" });
     }
     if (Number(to.ToCustomerId) !== Number(held.FromCustomerId)) {

@@ -1644,13 +1644,13 @@ router.put("/:id/approve", async (req, res) => {
 
     const pool = getPool();
     const brokerageGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
-      SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmBrokerageId,
+      SELECT np.PPaymentID, np.PAmount, ISNULL(np.TDSAmount, 0) AS TDSAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmBrokerageId,
              br.ComputedAmount,
              ISNULL(br.NetPayable, br.ComputedAmount) AS NetPayable,
              (SELECT ISNULL(SUM(Amount),0)
               FROM dbo.CrmBrokerPayment
               WHERE BrokerageId = np.SourceCrmBrokerageId) AS TotalPaid,
-             (SELECT ISNULL(SUM(PAmount),0)
+             (SELECT ISNULL(SUM(PAmount - ISNULL(TDSAmount, 0)),0)
               FROM dbo.NewPayment np2
               WHERE np2.SourceCrmBrokerageId = np.SourceCrmBrokerageId
                 AND np2.PPaymentID <> np.PPaymentID
@@ -1671,7 +1671,8 @@ router.put("/:id/approve", async (req, res) => {
       // prevent the record from ever flipping to Paid when TDS is deducted.
       const netPayable = Number(gateRow.NetPayable || gateRow.ComputedAmount || 0);
       const remaining = netPayable - Number(gateRow.TotalPaid || 0) - Number(gateRow.OtherSubmitted || 0);
-      if (Number(gateRow.PAmount || 0) > remaining + 0.01) {
+      // The voucher is gross with its TDS; what reaches the broker is the net.
+      if (Number(gateRow.PAmount || 0) - Number(gateRow.TDSAmount || 0) > remaining + 0.01) {
         return res.status(400).json({
           error: `Brokerage payment exceeds the remaining net payable balance of ₹${remaining.toLocaleString("en-IN")}`,
         });
@@ -1689,7 +1690,7 @@ router.put("/:id/approve", async (req, res) => {
     // refund's NetAmount.
     const refundGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
       SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmRefundId,
-             r.NetAmount
+             r.NetAmount, r.RefundNo, r.CustomerAccountNo
       FROM dbo.NewPayment np
       LEFT JOIN dbo.CrmRefund r ON r.Id = np.SourceCrmRefundId
       WHERE np.PPaymentID = @PPaymentID
@@ -1711,6 +1712,12 @@ router.put("/:id/approve", async (req, res) => {
       if (!refundRow.PDate || !String(refundRow.PMode || "").trim() || !normalizeBankId(refundRow.PBankID)) {
         return res.status(400).json({
           error: "Complete refund payment date, payment mode, and bank before approval.",
+        });
+      }
+      // A transfer pays into the customer's account — it must be on the refund.
+      if (["NEFT", "RTGS", "IMPS", "UPI"].includes(String(refundRow.PMode).trim()) && !String(refundRow.CustomerAccountNo || "").trim()) {
+        return res.status(400).json({
+          error: `A ${refundRow.PMode} refund needs the customer's bank account — add it on refund ${refundRow.RefundNo}, or pay by Cheque.`,
         });
       }
       const netAmount = Number(refundRow.NetAmount) || 0;
@@ -1808,10 +1815,15 @@ router.put("/:id/approve", async (req, res) => {
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, TDSAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
+      // The money has moved only when the LAST level approves. Before that
+      // (a 2-level Payments workflow) nothing downstream may act on it — a
+      // buy-back must not close the booking, a refund or brokerage must not
+      // read Paid, on-account must not be credited.
+      const isFinalApproval = result?.newStatus === "Approved";
       const effectiveRef = approvedRef && /-EMI-\d+$/.test(approvedRef)
         ? approvedRef.replace(/-EMI-\d+$/, "")
         : approvedRef;
@@ -1820,7 +1832,7 @@ router.put("/:id/approve", async (req, res) => {
         await _syncBillStatus(pool, effectiveRef);
       }
 
-      if (approvedRow?.SourceCrmBrokerageId) {
+      if (isFinalApproval && approvedRow?.SourceCrmBrokerageId) {
         try {
           const existingBrokerPay = await pool.request()
             .input("pid", sql.Int, id)
@@ -1828,7 +1840,8 @@ router.put("/:id/approve", async (req, res) => {
           if (!existingBrokerPay.recordset.length) {
             await pool.request()
               .input("bid", sql.Int, approvedRow.SourceCrmBrokerageId)
-              .input("amt", sql.Decimal(18,2), Number(approvedRow.PAmount || 0))
+              // Net paid to the broker (the voucher is gross with its TDS).
+              .input("amt", sql.Decimal(18,2), Number(approvedRow.PAmount || 0) - Number(approvedRow.TDSAmount || 0))
               .input("dt", sql.Date, approvedRow.PDate ? new Date(approvedRow.PDate) : new Date())
               .input("mode", sql.NVarChar(50), approvedRow.PMode || null)
               .input("ref", sql.NVarChar(200), paymentReferenceForBrokerage(approvedRow))
@@ -1867,7 +1880,7 @@ router.put("/:id/approve", async (req, res) => {
       // CRM Refund payout: this NewPayment IS the customer refund disbursement.
       // Approving it means the cash has moved — mark the CrmRefund Paid, consume
       // its held/on-account source, and post the forfeiture GL leg. Non-fatal.
-      if (approvedRow?.SourceCrmRefundId) {
+      if (isFinalApproval && approvedRow?.SourceCrmRefundId) {
         try {
           const { markCrmRefundPaid } = require("./crmRefunds");
           await markCrmRefundPaid(
@@ -1884,7 +1897,7 @@ router.put("/:id/approve", async (req, res) => {
 
       // Buy-back payout: this NewPayment pays the seller — approving it brings
       // the property back to stock (services/crmResaleTransfer.js). Non-fatal.
-      if (approvedRow?.SourceCrmResaleId) {
+      if (isFinalApproval && approvedRow?.SourceCrmResaleId) {
         try {
           const { completeBuyBack } = require("../services/crmResaleTransfer");
           await completeBuyBack(pool, approvedRow.SourceCrmResaleId, id, req.user?.userId ?? null, req.user?.email || req.user?.name || null);
@@ -1895,7 +1908,7 @@ router.put("/:id/approve", async (req, res) => {
       }
 
       // ── On Account hooks: fire on APPROVE (funds have actually moved) ──────
-      if (approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
+      if (isFinalApproval && approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
         try {
           const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
           const partyTypeLabel = { S: "Supplier", V: "Vendor", C: "Contractor", A: "Customer" };

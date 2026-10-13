@@ -24,6 +24,7 @@ import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolb
 import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
 import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/pre-possession";
 
@@ -320,7 +321,7 @@ function CreateDialog({ onClose, onCreated, onViewGateway, prefillBookingId }: C
                 <option value="">Select booking</option>
                 {(eligible as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>
-                    {b.BookingNo} — {b.ApplicantName} ({b.UnitNo})
+                    {b.BookingNo} — <ApplicantNames name={b.ApplicantName} bookingId={b.BookingId} applicationId={b.ApplicationId} /> ({b.UnitNo})
                   </option>
                 ))}
               </SearchableNativeSelect>
@@ -426,7 +427,7 @@ const CrmPrePossession: React.FC = () => {
   ];
   const checkColumns: CrmColumn<any>[] = [
     { key: "applicant", header: "Applicant", sortKey: "ApplicantName", cell: (c) => (
-      <span className="font-medium block truncate max-w-[220px]" title={c.ApplicantName}>{c.ApplicantName}</span>
+      <span className="font-medium block truncate max-w-[220px]" title={c.ApplicantName}><ApplicantNames name={c.ApplicantName} bookingId={c.BookingId} applicationId={c.ApplicationId} /></span>
     ) },
     { key: "booking", header: "Booking", sortKey: "BookingNo", className: "hidden md:table-cell",
       cell: (c) => <span className="text-xs text-muted-foreground whitespace-nowrap">{c.BookingNo}</span> },
@@ -465,7 +466,7 @@ const CrmPrePossession: React.FC = () => {
   const gwColumns: CrmColumn<any>[] = [
     { key: "booking", header: "Booking", sortKey: "BookingNo", cell: (g) => <span className="font-medium whitespace-nowrap">{g.BookingNo}</span> },
     { key: "applicant", header: "Applicant", sortKey: "ApplicantName", cell: (g) => (
-      <span className="block truncate max-w-[220px]" title={g.ApplicantName}>{g.ApplicantName}</span>
+      <span className="block truncate max-w-[220px]" title={g.ApplicantName}><ApplicantNames name={g.ApplicantName} bookingId={g.BookingId} applicationId={g.ApplicationId} /></span>
     ) },
     { key: "unit", header: "Unit", sortKey: "UnitNo", className: "hidden md:table-cell",
       cell: (g) => <span className="text-xs whitespace-nowrap">{g.UnitNo}</span> },

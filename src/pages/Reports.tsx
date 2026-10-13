@@ -1,6 +1,7 @@
 import { bankReportChequeNo } from "@/lib/bankReportCheque";
 import { chainLinksForRow } from "@/lib/civilWorkDprLinks";
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useInSheet } from "@/components/sheet/useInSheet";
 import { fmtIstIso } from "@/lib/istTime";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -3252,6 +3253,10 @@ const ReportTable: React.FC<{
   const serverPaged = !!report.serverPaged;
   const [serverTotal, setServerTotal] = useState(0);
   const pageCache = useRef(new Map<number, Record<string, unknown>[]>());
+  // The same table is shown on the Reports page and, for one report, on a drawing-sheet page (Civil Work DPR > Query).
+  // On the sheet it drops its colour accents and takes the sheet's ink rules; on Reports it is unchanged.
+  const tableRootRef = useRef<HTMLDivElement>(null);
+  const onSheet = useInSheet(tableRootRef);
   const fetchServerPage = useCallback(async (pg: number, withTotal: boolean) => {
     const cached = pageCache.current.get(pg);
     if (cached && !withTotal) return { rows: cached, total: null as number | null };
@@ -3354,11 +3359,15 @@ const ReportTable: React.FC<{
   return (
     <>
     <div
-      className="rounded-xl border border-border bg-card overflow-hidden"
-      style={{ borderTopWidth: 2, borderTopColor: report.color }}
+      ref={tableRootRef}
+      className={onSheet ? "bg-card overflow-hidden" : "rounded-xl border border-border bg-card overflow-hidden"}
+      style={onSheet ? { border: "1px solid hsl(var(--foreground))" } : { borderTopWidth: 2, borderTopColor: report.color }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-y-2 px-4 py-3 border-b border-border bg-muted/10">
+      <div
+        className={onSheet ? "flex items-center justify-between flex-wrap gap-y-2 px-4 py-3" : "flex items-center justify-between flex-wrap gap-y-2 px-4 py-3 border-b border-border bg-muted/10"}
+        style={onSheet ? { borderBottom: "1px solid hsl(var(--foreground))" } : undefined}
+      >
         <div className="flex items-center gap-2.5 flex-wrap gap-y-2">
           <button
             onClick={onClose}
@@ -3367,17 +3376,19 @@ const ReportTable: React.FC<{
             <ChevronLeft size={13} /> Back
           </button>
           <span className="text-border">|</span>
+          {!onSheet && (
           <div
             className="p-1.5 rounded-md"
             style={{ background: `${report.color}18` }}
           >
             <report.icon size={13} style={{ color: report.color }} />
           </div>
-          <span className="text-sm font-heading font-semibold text-foreground">
+          )}
+          <span className={onSheet ? "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground" : "text-sm font-heading font-semibold text-foreground"}>
             {report.label}
           </span>
           {!loading && !error && !isVendorLedger && (
-            <span className="text-[0.625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
+            <span className={onSheet ? "font-heading text-[0.6875rem] tabular-nums text-muted-foreground" : "text-[0.625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full"}>
               {recordCount.toLocaleString("en-IN")} records
             </span>
           )}
@@ -3770,12 +3781,14 @@ const ReportTable: React.FC<{
 
     {/* ── Row detail card ── */}
     <Dialog open={!!selectedRow} onOpenChange={(o) => { if (!o) setSelectedRow(null); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className={onSheet ? "sheet-frame max-w-lg" : "max-w-lg"} style={onSheet ? { margin: 0 } : undefined}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2.5">
+          <DialogTitle className={onSheet ? "font-heading text-lg font-bold tracking-tight pb-3 border-b border-foreground" : "flex items-center gap-2.5"}>
+            {!onSheet && (
             <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${report.color}18` }}>
               <report.icon size={14} style={{ color: report.color }} />
             </div>
+            )}
             {report.label}
           </DialogTitle>
         </DialogHeader>

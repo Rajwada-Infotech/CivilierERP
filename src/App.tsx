@@ -232,6 +232,9 @@ const CancelTemplateMaster = lazy(
   () => import("./pages/admin/masters/CancelTemplateMaster"),
 );
 const CrmResales = lazy(() => import("./pages/CRM/CrmResales"));
+const CrmResaleCase = lazy(() => import("./pages/CRM/CrmResaleCase"));
+const CrmTransferDeeds = lazy(() => import("./pages/CRM/CrmTransferDeeds"));
+const CrmOwnershipChanges = lazy(() => import("./pages/CRM/CrmOwnershipChanges"));
 const ProjectTypeMaster = lazy(
   () => import("./pages/admin/masters/ProjectTypeMaster"),
 );
@@ -468,6 +471,7 @@ const CrmHandover          = lazy(() => import("./pages/CRM/CrmHandover"));
 const CrmServiceTickets    = lazy(() => import("./pages/CRM/CrmServiceTickets"));
 const CrmCancellations     = lazy(() => import("./pages/CRM/CrmCancellations"));
 const CrmRefunds           = lazy(() => import("./pages/CRM/CrmRefunds"));
+const CrmCreditNotes       = lazy(() => import("./pages/CRM/CrmCreditNotes"));
 const CrmCustomer360       = lazy(() => import("./pages/CRM/CrmCustomer360"));
 const CrmLoanTracking      = lazy(() => import("./pages/CRM/CrmLoanTracking"));
 const CrmLegalMilestones   = lazy(() => import("./pages/CRM/CrmLegalMilestones"));
@@ -502,6 +506,7 @@ const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
+const PortalTransferDeed   = lazy(() => import("./pages/CrmCustomerPortal/PortalTransferDeed"));
 const Issues = lazy(() => import("./pages/material/Issues"));
 const IssueReturn = lazy(() => import("./pages/material/IssueReturn"));
 const MaterialRequestPage = lazy(
@@ -735,6 +740,7 @@ function AppRoutes() {
         <Route path="tickets" element={<PortalTickets />} />
         <Route path="activity" element={<PortalActivity />} />
         <Route path="profile" element={<PortalProfile />} />
+        <Route path="transfer-deed" element={<PortalTransferDeed />} />
       </Route>
 
       {/* Public — reachable without logging in, so the QR/link can be shared freely */}
@@ -2606,6 +2612,7 @@ function AppRoutes() {
       <Route path="/crm/service-tickets"  element={<ProtectedRoute pageKey="crm-service-tickets"><CrmServiceTickets /></ProtectedRoute>} />
       <Route path="/crm/cancellations"    element={<ProtectedRoute pageKey="crm-cancellations"><CrmCancellations /></ProtectedRoute>} />
       <Route path="/crm/refunds"          element={<ProtectedRoute pageKey="crm-refunds"><CrmRefunds /></ProtectedRoute>} />
+      <Route path="/crm/credit-notes"     element={<ProtectedRoute pageKey="crm-refunds"><CrmCreditNotes /></ProtectedRoute>} />
       <Route path="/crm/customer-360"     element={<ProtectedRoute pageKey="crm-customer-360"><CrmCustomer360 /></ProtectedRoute>} />
       <Route path="/crm/loan-details"     element={<ProtectedRoute pageKey="crm-loan-details"><CrmLoanTracking /></ProtectedRoute>} />
       <Route path="/crm/dashboard"             element={<ProtectedRoute pageKey="crm-dashboard"><CrmDashboard /></ProtectedRoute>} />
@@ -2647,6 +2654,9 @@ function AppRoutes() {
       <Route path="/crm/setup/parking-slot-master" element={<ProtectedRoute pageKey="followup-parking-slot-master"><ParkingSlotMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/extra-charge-master" element={<ProtectedRoute pageKey="followup-extra-charge-master"><ExtraChargeMaster /></ProtectedRoute>} />
       <Route path="/crm/resales" element={<ProtectedRoute pageKey="crm-resales"><CrmResales /></ProtectedRoute>} />
+      <Route path="/crm/resales/:id" element={<ProtectedRoute pageKey="crm-resales"><CrmResaleCase /></ProtectedRoute>} />
+      <Route path="/crm/transfer-deeds" element={<ProtectedRoute pageKey="crm-transfer-deeds"><CrmTransferDeeds /></ProtectedRoute>} />
+      <Route path="/crm/ownership-changes" element={<ProtectedRoute pageKey="crm-ownership-changes"><CrmOwnershipChanges /></ProtectedRoute>} />
       <Route path="/masters/project-type-master" element={<ProtectedRoute pageKey="project-type-master"><ProjectTypeMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/department-master" element={<ProtectedRoute pageKey="followup-department-master"><DepartmentMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/tag-master" element={<ProtectedRoute pageKey="followup-tag-master"><TagMaster /></ProtectedRoute>} />

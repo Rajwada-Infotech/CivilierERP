@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { useModule } from "@/contexts/ModuleContext";
 import {
   MasterPage,
@@ -10,21 +10,15 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Activity,
-  Layers,
-  Tag,
   ChevronDown,
   ChevronRight,
   Search,
   Download,
-  Hash,
   Eye,
   XCircle,
   Plus,
-  Package,
   Trash2,
   Pencil,
-  Flag,
 } from "lucide-react";
 import {
   getActivities,
@@ -61,20 +55,8 @@ import { BodyPortal } from "@/components/ui/body-portal";
 import { TagCombobox } from "@/components/civilworkdpr/TagCombobox";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
-const StatusBadge = ({ active }: { active: boolean }) => (
-  <span
-    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${
-      active
-        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-        : "bg-red-500/10 border-red-500/20 text-red-400"
-    }`}
-  >
-    <span
-      className={`w-1.5 h-1.5 rounded-full ${active ? "bg-emerald-400" : "bg-red-400"}`}
-    />
-    {active ? "Active" : "Inactive"}
-  </span>
-);
+const StatusBadge = ({ active }: { active: boolean }) =>
+  active ? <SheetMark text="Active" tone="done" /> : <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Inactive</span>;
 
 // ─── Collapsible Group Row ────────────────────────────────────────────────────
 const GroupRow = ({
@@ -112,23 +94,22 @@ const GroupRow = ({
     return null;
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden">
+    <div className="overflow-hidden bg-card border border-foreground/40">
       {/* Group header */}
       <div
-        className="flex items-center gap-3 px-4 py-3 bg-muted/40 cursor-pointer select-none hover:bg-muted/60 transition-colors"
+        className="flex items-center gap-3 px-4 py-2.5 cursor-pointer select-none hover:bg-primary/10 transition-colors"
         onClick={() => setOpen((p) => !p)}
       >
-        <span className="text-muted-foreground shrink-0">
+        <span className="text-foreground shrink-0">
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </span>
-        <Layers size={14} className="text-violet-400 shrink-0" />
-        <span className="font-semibold text-sm text-foreground flex-1">
+        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-foreground flex-1 min-w-0 truncate">
           {group.activity_name}
         </span>
-        <span className="px-2 py-0.5 rounded-md text-[0.625rem] bg-violet-500/10 text-violet-400 font-mono mr-2">
+        <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground mr-2 whitespace-nowrap">
           {filtered.length} {filtered.length === 1 ? "activity" : "activities"}
         </span>
-        <span className="hidden sm:block text-xs text-muted-foreground font-mono mr-3 truncate max-w-[220px]">
+        <span className="hidden sm:block text-xs text-muted-foreground mr-3 truncate max-w-[220px]">
           {group.short_description}
         </span>
         <StatusBadge active={group.is_active} />
@@ -137,7 +118,7 @@ const GroupRow = ({
             e.stopPropagation();
             onView(group);
           }}
-          className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0"
+          className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors shrink-0"
           title="View details"
         >
           <Eye size={13} />
@@ -148,7 +129,7 @@ const GroupRow = ({
               e.stopPropagation();
               onEdit(group);
             }}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0"
+            className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors shrink-0"
             title="Edit"
           >
             <Pencil size={13} />
@@ -160,7 +141,7 @@ const GroupRow = ({
               e.stopPropagation();
               onDelete(group);
             }}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+            className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors shrink-0"
             title="Delete"
           >
             <Trash2 size={13} />
@@ -170,36 +151,28 @@ const GroupRow = ({
 
       {/* Activities */}
       {open && (
-        <div className="divide-y divide-border/40">
+        <div className="divide-y divide-border/70 border-t border-foreground/40">
           {filtered.length === 0 ? (
-            <div className="px-10 py-2.5 text-xs text-muted-foreground italic flex items-center gap-2">
-              <Tag size={11} className="opacity-50" /> No activities in this
-              group
-            </div>
+            <div className="px-10 py-2.5 text-xs text-muted-foreground">No activities in this group</div>
           ) : (
             filtered.map((activity) => (
               <div
                 key={activity.id}
-                className="flex items-center gap-3 px-4 py-2.5 pl-10 hover:bg-muted/20 transition-colors group/row"
+                className="flex items-center gap-3 px-4 py-2 pl-10 hover:bg-primary/10 transition-colors"
               >
-                <div className="w-3 h-px bg-border/60 shrink-0" />
-                <Tag size={12} className="text-teal-400 shrink-0" />
                 <span className="text-sm text-foreground flex-1 truncate">
                   {activity.activity_name}
                 </span>
-                <span className="hidden md:block text-xs text-muted-foreground font-mono truncate max-w-[260px]">
+                <span className="hidden md:block text-xs text-muted-foreground truncate max-w-[260px]">
                   {activity.short_description}
                 </span>
                 {activity.hsn_code && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
-                    <Hash size={9} />
-                    {activity.hsn_code}
-                  </span>
+                  <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0" title="SAC code">SAC {activity.hsn_code}</span>
                 )}
                 <StatusBadge active={activity.is_active} />
                 <button data-row-view
                   onClick={() => onView(activity)}
-                  className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                  className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors shrink-0"
                   title="View details"
                 >
                   <Eye size={13} />
@@ -207,7 +180,7 @@ const GroupRow = ({
                 {canEdit && (
                   <button
                     onClick={() => onEdit(activity)}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                    className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors shrink-0"
                     title="Edit"
                   >
                     <Pencil size={13} />
@@ -216,7 +189,7 @@ const GroupRow = ({
                 {canDelete && (
                   <button
                     onClick={() => onDelete(activity)}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                    className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors shrink-0"
                     title="Delete"
                   >
                     <Trash2 size={13} />
@@ -521,16 +494,31 @@ const ActivityMaster: React.FC = () => {
   if (isLoading)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
   if (error)
-    return <div className="p-6 text-red-500">Failed to load activities.</div>;
+    return <div className="p-6 text-destructive">Failed to load activities.</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", moduleBreadcrumb, "Activity Master"]} />
-      <CivilWorkDprShell
-        title="Activity Master"
-        subtitle="Manage Civil Work DPR's activity groups and their individual activities"
-        icon={Activity}
+      <SheetShell
+        eyebrow={`CivilierERP · ${moduleBreadcrumb}`}
+        title="Activity master"
+        subtitle="The groups of work and the activities under each, with the SAC code, ledger, days, tag, items and checkpoints an activity carries."
       >
+        <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Groups", value: groups.length, note: "headings of work" },
+              { label: "Activities", value: activityItems.length, note: "tasks that can be assigned" },
+              { label: "Ungrouped", value: ungrouped.length, note: ungrouped.length ? "activities with no group" : "every activity has a group" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
 
       {/* ── Form only (table hidden via hideTable prop) ── */}
       <div>
@@ -576,12 +564,7 @@ const ActivityMaster: React.FC = () => {
                       value={(value as string) ?? ""}
                       disabled={!isActivity}
                       onChange={(e) => onChange(e.target.value)}
-                      className={`w-full text-sm rounded-lg border px-3 py-2.5 transition focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none
-                        ${
-                          !isActivity
-                            ? "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60"
-                            : "border-border bg-background text-foreground"
-                        }`}
+                      className={`w-full text-sm border px-3 py-2.5 bg-card focus:outline-none appearance-none ${!isActivity ? "border-dashed border-foreground/30 text-muted-foreground cursor-not-allowed" : "border-foreground/40 focus:border-foreground text-foreground"}`}
                     >
                       <option value="">
                         {!isActivity
@@ -597,9 +580,7 @@ const ActivityMaster: React.FC = () => {
                         ))}
                     </select>
                     {!isActivity && (
-                      <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
-                        <Hash size={10} />
-                        SAC can only be linked to an Activity, not a Group
+                      <p className="text-[0.6875rem] text-muted-foreground">SAC can only be linked to an Activity, not a Group
                       </p>
                     )}
                   </div>
@@ -618,12 +599,7 @@ const ActivityMaster: React.FC = () => {
                       value={(value as string) ?? ""}
                       disabled={!isActivity}
                       onChange={(e) => onChange(e.target.value)}
-                      className={`w-full text-sm rounded-lg border px-3 py-2.5 transition focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none
-                        ${
-                          !isActivity
-                            ? "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60"
-                            : "border-border bg-background text-foreground"
-                        }`}
+                      className={`w-full text-sm border px-3 py-2.5 bg-card focus:outline-none appearance-none ${!isActivity ? "border-dashed border-foreground/30 text-muted-foreground cursor-not-allowed" : "border-foreground/40 focus:border-foreground text-foreground"}`}
                     >
                       <option value="">
                         {!isActivity
@@ -638,9 +614,7 @@ const ActivityMaster: React.FC = () => {
                         ))}
                     </select>
                     {!isActivity && (
-                      <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
-                        <Hash size={10} />
-                        GL Head can only be linked to an Activity, not a Group
+                      <p className="text-[0.6875rem] text-muted-foreground">GL Head can only be linked to an Activity, not a Group
                       </p>
                     )}
                   </div>
@@ -667,17 +641,10 @@ const ActivityMaster: React.FC = () => {
                           ? "N/A — only for Activity type"
                           : "Days needed to complete, e.g. 7"
                       }
-                      className={`w-full text-sm rounded-lg border px-3 py-2.5 transition focus:outline-none focus:ring-2 focus:ring-primary/30
-                        ${
-                          !isActivity
-                            ? "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60"
-                            : "border-border bg-background text-foreground"
-                        }`}
+                      className={`w-full text-sm border px-3 py-2.5 bg-card focus:outline-none ${!isActivity ? "border-dashed border-foreground/30 text-muted-foreground cursor-not-allowed" : "border-foreground/40 focus:border-foreground text-foreground"}`}
                     />
                     {!isActivity && (
-                      <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
-                        <Hash size={10} />
-                        Days of completion can only be set on an Activity, not a Group
+                      <p className="text-[0.6875rem] text-muted-foreground">Days of completion can only be set on an Activity, not a Group
                       </p>
                     )}
                   </div>
@@ -693,9 +660,7 @@ const ActivityMaster: React.FC = () => {
                 return (
                   <div className="flex flex-col gap-1">
                     <TagCombobox value={isActivity ? String(value ?? "") : ""} onChange={onChange} disabled={!isActivity} />
-                    <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
-                      <Hash size={10} />
-                      {isActivity
+                    <p className="text-[0.6875rem] text-muted-foreground">{isActivity
                         ? "Pick an existing tag or type a new one — it is saved to the DPR Tag Master"
                         : "Tags can only be set on an Activity, not a Group"}
                     </p>
@@ -729,25 +694,19 @@ const ActivityMaster: React.FC = () => {
       </div>
 
       {/* ── Grouped Tree View ── */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Layers size={15} className="text-violet-400" />
-            <h2 className="text-base font-semibold text-foreground">
-              Activities by Group
-            </h2>
-            <span className="px-2 py-0.5 rounded-md text-[0.625rem] bg-muted text-muted-foreground font-mono">
+      <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <p className="flex items-baseline gap-2.5 flex-wrap">
+            <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Activities by group</span>
+            <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">
               {groups.length} groups · {activityItems.length} activities
             </span>
-          </div>
+          </p>
 
           <div className="flex items-center gap-2">
             {/* Export Button */}
             {rights.canExport && (
-            <button
-              onClick={() => exportToCSV(dbItems, groups)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted transition-colors text-foreground"
-            >
+            <button onClick={() => exportToCSV(dbItems, groups)} className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-3 border border-foreground text-foreground hover:bg-primary/10">
               <Download size={12} />
               Export
             </button>
@@ -755,32 +714,19 @@ const ActivityMaster: React.FC = () => {
 
             {/* Search */}
             <div className="relative">
-              <Search
-                size={12}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
                 value={treeSearch}
                 onChange={(e) => setTreeSearch(e.target.value)}
                 placeholder="Filter…"
-                className="pl-7 pr-3 py-1.5 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 w-36"
+                className="pl-7 pr-3 h-9 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none w-44"
               />
             </div>
           </div>
         </div>
 
-        {/* Legend */}
-        <div className="flex items-center gap-4 mb-3 px-1">
-          <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
-            <Layers size={11} className="text-violet-400" /> Group
-          </div>
-          <div className="flex items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
-            <Tag size={11} className="text-teal-400" /> Activity (nested under
-            its group)
-          </div>
-        </div>
-
+        <div className="p-2 sm:p-4">
         <div className="space-y-3">
           {groups.map((group) => (
             <GroupRow
@@ -797,33 +743,29 @@ const ActivityMaster: React.FC = () => {
           ))}
 
           {ungrouped.length > 0 && (
-            <div className="rounded-xl border border-dashed border-border overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-3 bg-muted/20">
-                <Tag size={13} className="text-muted-foreground" />
-                <span className="text-sm font-medium text-muted-foreground">
-                  Ungrouped Activities
+            <div className="overflow-hidden bg-card" style={{ border: "1px dashed hsl(var(--foreground) / 0.5)" }}>
+              <div className="flex items-baseline gap-2.5 px-4 py-2.5">
+                <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-foreground">
+                  Ungrouped activities
                 </span>
-                <span className="px-1.5 py-0.5 rounded text-[0.625rem] bg-muted text-muted-foreground font-mono">
-                  {ungrouped.length}
-                </span>
+                <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground">{ungrouped.length}</span>
               </div>
-              <div className="divide-y divide-border/50">
+              <div className="divide-y divide-border/70 border-t border-foreground/40">
                 {ungrouped.map((a) => (
                   <div
                     key={a.id}
-                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 group/row"
+                    className="flex items-center gap-3 px-4 py-2 pl-10 hover:bg-primary/10 transition-colors"
                   >
-                    <Tag size={12} className="text-muted-foreground shrink-0" />
                     <span className="text-sm text-foreground flex-1 truncate">
                       {a.activity_name}
                     </span>
-                    <span className="text-xs text-muted-foreground font-mono hidden md:block truncate max-w-[240px]">
+                    <span className="text-xs text-muted-foreground hidden md:block truncate max-w-[240px]">
                       {a.short_description}
                     </span>
                     <StatusBadge active={a.is_active} />
                     <button data-row-view
                       onClick={() => setViewRecord(a)}
-                      className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                      className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors shrink-0"
                       title="View details"
                     >
                       <Eye size={13} />
@@ -831,7 +773,7 @@ const ActivityMaster: React.FC = () => {
                     {rights.canEdit && (
                       <button
                         onClick={() => handleEditRequest(a)}
-                        className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                        className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors shrink-0"
                         title="Edit"
                       >
                         <Pencil size={13} />
@@ -840,7 +782,7 @@ const ActivityMaster: React.FC = () => {
                     {rights.canDelete && (
                       <button
                         onClick={() => handleDeleteRequest(a)}
-                        className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                        className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors shrink-0"
                         title="Delete"
                       >
                         <Trash2 size={13} />
@@ -854,13 +796,13 @@ const ActivityMaster: React.FC = () => {
 
           {groups.length === 0 && ungrouped.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
-              <Activity size={28} className="opacity-30" />
-              <p className="text-sm">No groups or activities yet.</p>
+              <p className="text-sm">No groups or activities yet. Add a group with the form above.</p>
             </div>
           )}
         </div>
+        </div>
       </div>
-      </CivilWorkDprShell>
+      </SheetShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
@@ -869,80 +811,41 @@ const ActivityMaster: React.FC = () => {
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
           />
-          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-2">
-                {viewRecord.activity_type === 0 ? (
-                  <Layers size={15} className="text-violet-400" />
-                ) : (
-                  <Tag size={15} className="text-teal-400" />
-                )}
-                <h3 className="font-heading font-semibold text-sm text-foreground">
-                  {viewRecord.activity_type === 0
-                    ? "Group Details"
-                    : "Activity Details"}
-                </h3>
+          <div
+            className="sheet-frame relative w-full max-w-sm bg-card flex flex-col animate-in slide-in-from-right duration-200"
+            style={{ margin: 0, borderLeft: "1px solid hsl(var(--foreground))" }}
+          >
+            <div className="flex items-end justify-between gap-3 px-5 py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <div className="min-w-0">
+                <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{viewRecord.activity_type === 0 ? "Group" : "Activity"}</p>
+                <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{viewRecord.activity_name}</h3>
               </div>
-              <button
-                onClick={() => setViewRecord(null)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
-              >
-                <XCircle size={15} />
+              <button onClick={() => setViewRecord(null)} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors" aria-label="Close">
+                <XCircle size={16} />
               </button>
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  {viewRecord.activity_type === 0
-                    ? "Group Name"
-                    : "Activity Name"}
-                </p>
-                <p className="text-sm font-medium text-foreground">
-                  {viewRecord.activity_name}
-                </p>
-              </div>
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">
                   Short Description
                 </p>
                 <p className="text-sm text-foreground">
                   {viewRecord.short_description || (
-                    <span className="text-muted-foreground italic">
+                    <span className="text-muted-foreground">
                       No description
                     </span>
                   )}
                 </p>
               </div>
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Type
-                </p>
-                <span
-                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.activity_type === 0 ? "bg-violet-500/10 text-violet-400" : "bg-teal-500/10 text-teal-400"}`}
-                >
-                  {viewRecord.activity_type === 0 ? (
-                    <>
-                      <Layers size={10} /> Group
-                    </>
-                  ) : (
-                    <>
-                      <Tag size={10} /> Activity
-                    </>
-                  )}
-                </span>
-              </div>
               {viewRecord.activity_type === 1 && (
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">
                     SAC Code
                   </p>
                   {viewRecord.hsn_code ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                      <Hash size={10} />
-                      {viewRecord.hsn_code}
-                    </span>
+                    <span className="font-heading text-sm font-semibold tabular-nums text-foreground">{viewRecord.hsn_code}</span>
                   ) : (
-                    <span className="text-muted-foreground italic text-sm">
+                    <span className="text-muted-foreground text-sm">
                       Not assigned
                     </span>
                   )}
@@ -950,7 +853,7 @@ const ActivityMaster: React.FC = () => {
               )}
               {viewRecord.activity_type === 1 && (
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">
                     GL Head
                   </p>
                   {viewRecord.gl_head_name ? (
@@ -958,7 +861,7 @@ const ActivityMaster: React.FC = () => {
                       {viewRecord.gl_head_name}
                     </span>
                   ) : (
-                    <span className="text-muted-foreground italic text-sm">
+                    <span className="text-muted-foreground text-sm">
                       Not assigned
                     </span>
                   )}
@@ -966,7 +869,7 @@ const ActivityMaster: React.FC = () => {
               )}
               {viewRecord.activity_type === 1 && (
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">
                     Days of Completion
                   </p>
                   {viewRecord.days_of_completion ? (
@@ -975,7 +878,7 @@ const ActivityMaster: React.FC = () => {
                       {viewRecord.days_of_completion === 1 ? "day" : "days"}
                     </span>
                   ) : (
-                    <span className="text-muted-foreground italic text-sm">
+                    <span className="text-muted-foreground text-sm">
                       Not set
                     </span>
                   )}
@@ -984,20 +887,20 @@ const ActivityMaster: React.FC = () => {
               {viewRecord.activity_type === 1 && (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
+                    <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                       Items
                     </p>
                     {rights.canEdit && (
                       <button
                         onClick={() => setAddItemOpen(true)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.6875rem] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
+                        className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 border border-foreground text-foreground hover:bg-primary/10"
                       >
                         <Plus size={11} /> Add Item
                       </button>
                     )}
                   </div>
                   {linkedItems.length === 0 ? (
-                    <p className="text-muted-foreground italic text-sm">
+                    <p className="text-muted-foreground text-sm">
                       No items linked yet
                     </p>
                   ) : (
@@ -1005,21 +908,20 @@ const ActivityMaster: React.FC = () => {
                       {linkedItems.map((li) => (
                         <div
                           key={li.id}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
+                          className="flex items-center gap-2 px-2.5 py-1.5 border border-foreground/30"
                         >
-                          <Package size={11} className="text-teal-400 shrink-0" />
                           <span className="text-sm text-foreground flex-1 truncate">
                             {li.itemName}
                           </span>
                           {li.uom && (
-                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0">
                               {li.uom}
                             </span>
                           )}
                           {rights.canEdit && (
                             <button
                               onClick={() => handleRemoveItem(li.id)}
-                              className="p-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                              className="p-0.5 text-muted-foreground hover:text-destructive transition-colors shrink-0"
                               title="Unlink item"
                             >
                               <Trash2 size={12} />
@@ -1034,20 +936,20 @@ const ActivityMaster: React.FC = () => {
               {viewRecord.activity_type === 1 && (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
+                    <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                       Checkpoints
                     </p>
                     {rights.canEdit && (
                       <button
                         onClick={() => setAddCheckpointOpen(true)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.6875rem] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
+                        className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1 border border-foreground text-foreground hover:bg-primary/10"
                       >
                         <Plus size={11} /> Add Checkpoint
                       </button>
                     )}
                   </div>
                   {checkpointTemplate.length === 0 ? (
-                    <p className="text-muted-foreground italic text-sm">
+                    <p className="text-muted-foreground text-sm">
                       No checkpoints tagged yet — every rung assigned this activity in Work
                       Allocation will start with an empty checklist.
                     </p>
@@ -1056,26 +958,25 @@ const ActivityMaster: React.FC = () => {
                       {checkpointTemplate.map((cp) => (
                         <div
                           key={cp.linkId}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
+                          className="flex items-center gap-2 px-2.5 py-1.5 border border-foreground/30"
                         >
-                          <Flag size={11} className="text-amber-400 shrink-0" />
                           <span className="text-sm text-foreground flex-1 truncate">
                             {cp.fieldName}
                           </span>
                           {cp.minWaitDays != null && (
-                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0">
                               {cp.minWaitDays}d wait
                             </span>
                           )}
                           {cp.isDaily && (
-                            <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                            <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0">
                               Daily
                             </span>
                           )}
                           {rights.canEdit && (
                             <button
                               onClick={() => handleDetachCheckpoint(cp.linkId)}
-                              className="p-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+                              className="p-0.5 text-muted-foreground hover:text-destructive transition-colors shrink-0"
                               title="Remove checkpoint"
                             >
                               <Trash2 size={12} />
@@ -1088,7 +989,7 @@ const ActivityMaster: React.FC = () => {
                 </div>
               )}
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">
                   Status
                 </p>
                 <StatusBadge active={viewRecord.is_active} />
@@ -1109,11 +1010,10 @@ const ActivityMaster: React.FC = () => {
           }
         }}
       >
-        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+        <DialogContent className="sheet-frame max-w-md p-0 gap-0 overflow-hidden" style={{ margin: 0 }}>
           <DialogHeader className="px-5 pt-5 pb-3">
-            <DialogTitle className="font-heading text-base">
-              Link Items to {viewRecord?.activity_name}
-            </DialogTitle>
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Link items to</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight">{viewRecord?.activity_name}</DialogTitle>
           </DialogHeader>
 
           <div className="px-5 pb-3">
@@ -1128,7 +1028,7 @@ const ActivityMaster: React.FC = () => {
                 value={itemSearch}
                 onChange={(e) => setItemSearch(e.target.value)}
                 placeholder="Search items…"
-                className="w-full pl-8 pr-3 py-2 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full h-9 pl-8 pr-3 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
               />
             </div>
           </div>
@@ -1142,11 +1042,11 @@ const ActivityMaster: React.FC = () => {
             return (
               <div className="max-h-72 overflow-y-auto px-5 pb-5 space-y-1">
                 {unlinkedItems.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic text-center py-6">
+                  <p className="text-xs text-muted-foreground text-center py-6">
                     All items are already linked to this activity.
                   </p>
                 ) : filteredItems.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic text-center py-6">
+                  <p className="text-xs text-muted-foreground text-center py-6">
                     No items match "{itemSearch}".
                   </p>
                 ) : (
@@ -1161,17 +1061,16 @@ const ActivityMaster: React.FC = () => {
                         key={i.M_Id}
                         type="button"
                         onClick={toggle}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors border ${
                           selected
-                            ? "bg-primary/10 border border-primary/40 text-foreground"
-                            : "border border-transparent hover:bg-muted text-foreground"
+                            ? "bg-primary/10 border-foreground text-foreground font-medium"
+                            : "border-transparent hover:bg-primary/10 text-foreground"
                         }`}
                       >
                         <Checkbox checked={selected} onCheckedChange={toggle} className="shrink-0" />
-                        <Package size={13} className="text-teal-400 shrink-0" />
                         <span className="flex-1 truncate">{i.M_Name}</span>
                         {i.M_UOM && (
-                          <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                          <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0">
                             {i.M_UOM}
                           </span>
                         )}
@@ -1183,21 +1082,21 @@ const ActivityMaster: React.FC = () => {
             );
           })()}
 
-          <DialogFooter className="px-5 py-4 border-t border-border">
+          <DialogFooter className="px-5 py-3 border-t border-foreground">
             <button
               onClick={() => {
                 setAddItemOpen(false);
                 setPickedItemIds([]);
                 setItemSearch("");
               }}
-              className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted"
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 border border-foreground text-foreground hover:bg-primary/10"
             >
               Cancel
             </button>
             <button
               onClick={handleAddItem}
               disabled={pickedItemIds.length === 0}
-              className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-engineering text-white disabled:opacity-40 transition-all"
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-5 bg-foreground text-card border border-foreground"
             >
               {pickedItemIds.length > 0 ? `Add ${pickedItemIds.length}` : "Add"}
             </button>
@@ -1216,11 +1115,10 @@ const ActivityMaster: React.FC = () => {
           }
         }}
       >
-        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+        <DialogContent className="sheet-frame max-w-md p-0 gap-0 overflow-hidden" style={{ margin: 0 }}>
           <DialogHeader className="px-5 pt-5 pb-3">
-            <DialogTitle className="font-heading text-base">
-              Tag Checkpoints to {viewRecord?.activity_name}
-            </DialogTitle>
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Tag checkpoints to</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight">{viewRecord?.activity_name}</DialogTitle>
           </DialogHeader>
 
           <div className="px-5 pb-3">
@@ -1235,7 +1133,7 @@ const ActivityMaster: React.FC = () => {
                 value={checkpointSearch}
                 onChange={(e) => setCheckpointSearch(e.target.value)}
                 placeholder="Search checkpoints…"
-                className="w-full pl-8 pr-3 py-2 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full h-9 pl-8 pr-3 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
               />
             </div>
           </div>
@@ -1249,11 +1147,11 @@ const ActivityMaster: React.FC = () => {
             return (
               <div className="max-h-72 overflow-y-auto px-5 pb-5 space-y-1">
                 {unattachedCheckpoints.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic text-center py-6">
+                  <p className="text-xs text-muted-foreground text-center py-6">
                     Every checkpoint in Work Checkpoint Master is already tagged to this activity.
                   </p>
                 ) : filteredCheckpoints.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic text-center py-6">
+                  <p className="text-xs text-muted-foreground text-center py-6">
                     No checkpoint matches "{checkpointSearch}".
                   </p>
                 ) : (
@@ -1268,17 +1166,16 @@ const ActivityMaster: React.FC = () => {
                         key={c.id}
                         type="button"
                         onClick={toggle}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors border ${
                           selected
-                            ? "bg-primary/10 border border-primary/40 text-foreground"
-                            : "border border-transparent hover:bg-muted text-foreground"
+                            ? "bg-primary/10 border-foreground text-foreground font-medium"
+                            : "border-transparent hover:bg-primary/10 text-foreground"
                         }`}
                       >
                         <Checkbox checked={selected} onCheckedChange={toggle} className="shrink-0" />
-                        <Flag size={13} className="text-amber-400 shrink-0" />
                         <span className="flex-1 truncate">{c.fieldName}</span>
                         {c.minWaitDays != null && (
-                          <span className="text-[0.625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                          <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0">
                             {c.minWaitDays}d wait
                           </span>
                         )}
@@ -1290,21 +1187,21 @@ const ActivityMaster: React.FC = () => {
             );
           })()}
 
-          <DialogFooter className="px-5 py-4 border-t border-border">
+          <DialogFooter className="px-5 py-3 border-t border-foreground">
             <button
               onClick={() => {
                 setAddCheckpointOpen(false);
                 setPickedCheckpointIds([]);
                 setCheckpointSearch("");
               }}
-              className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted"
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 border border-foreground text-foreground hover:bg-primary/10"
             >
               Cancel
             </button>
             <button
               onClick={handleAttachCheckpoint}
               disabled={pickedCheckpointIds.length === 0}
-              className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-engineering text-white disabled:opacity-40 transition-all"
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-5 bg-foreground text-card border border-foreground"
             >
               {pickedCheckpointIds.length > 0 ? `Add ${pickedCheckpointIds.length}` : "Add"}
             </button>

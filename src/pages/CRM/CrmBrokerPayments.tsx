@@ -9,6 +9,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/brokerage";
 
@@ -76,7 +77,7 @@ const CrmBrokerPayments: React.FC = () => {
       cell: (i) => (
         <div>
           <div className="font-mono text-xs font-semibold">{i.row.original.BookingNo}</div>
-          <div className="text-xs text-muted-foreground truncate max-w-[110px]">{i.row.original.ApplicantName}</div>
+          <div className="text-xs text-muted-foreground truncate max-w-[110px]"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
         </div>
       ),
     },

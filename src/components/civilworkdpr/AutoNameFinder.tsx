@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link2, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import type { DependencyMasterListRow, LadderActivity } from "@/api/dependencyMasterApi";
 import { dependencyAutoName, matchesAutoNameSearch } from "@/lib/dependencyAutoName";
 
@@ -55,10 +55,10 @@ export function AutoNameResults({ chains, query, onPick }: Props & { query: stri
             {results.length} activit{results.length === 1 ? "y" : "ies"} match
             {results.length > MAX_RESULTS ? ` — showing the first ${MAX_RESULTS}, type more to narrow it down` : ""}
           </p>
-          <ul className="divide-y divide-border/60 rounded-lg border border-border max-h-72 overflow-y-auto bg-card">
+          <ul className="divide-y divide-border/70 border border-foreground max-h-72 overflow-y-auto bg-card">
             {results.slice(0, MAX_RESULTS).map((e) => (
               <li key={e.rung.rungId}>
-                <button onClick={() => onPick(e.rung, e.chain)} className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors">
+                <button onClick={() => onPick(e.rung, e.chain)} className="w-full text-left px-3 py-2 hover:bg-primary/10 transition-colors">
                   <p className="text-sm font-medium text-foreground">{e.autoName}</p>
                   <p className="text-[0.6875rem] text-muted-foreground">{e.chain.projectName ? `${e.chain.projectName} > ` : ""}{e.chain.scopePath}</p>
                 </button>
@@ -74,20 +74,19 @@ export function AutoNameResults({ chains, query, onPick }: Props & { query: stri
 export function AutoNameFinder({ chains, onPick }: Props) {
   const [query, setQuery] = useState("");
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden mb-4">
-      <div className="flex items-center gap-2 px-5 py-3 border-b border-border bg-muted/30">
-        <Link2 size={14} className="text-cyan-600 dark:text-cyan-400" />
-        <span className="text-sm font-heading font-semibold text-foreground">Find by Auto Name</span>
+    <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Find by auto name</span>
         <span className="text-[0.6875rem] text-muted-foreground">flat, room and activity in any order</span>
       </div>
-      <div className="p-3.5 sm:p-5">
+      <div className="px-4 py-4">
         <div className="relative">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="e.g. NS/n1/101, Hall Room and 2.1 Column and Beam…"
-            className="w-full pl-8 pr-8 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+            className="w-full h-10 pl-8 pr-8 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
           />
           {query && (
             <button onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear">

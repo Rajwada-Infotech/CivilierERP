@@ -1,4 +1,4 @@
-import { GripVertical, Trash2, ArrowDown } from "lucide-react";
+import { GripVertical, Trash2 } from "lucide-react";
 import type { LadderActivity } from "@/api/dependencyMasterApi";
 
 interface Props {
@@ -36,12 +36,12 @@ export function ActivityRung({
   return (
     <div className="relative pl-9">
       {/* Rail node */}
-      <div className="absolute left-0 top-3 w-7 h-7 rounded-full bg-primary text-white text-[0.6875rem] font-heading font-bold flex items-center justify-center shadow-sm z-10">
+      <div className="absolute left-0 top-2.5 w-7 h-7 bg-foreground text-card text-[0.6875rem] font-heading font-bold tabular-nums flex items-center justify-center z-10">
         {rung.sequenceNo}
       </div>
       {/* Rail line down to the next node */}
       {index < total - 1 && (
-        <div className="absolute left-[13px] top-10 bottom-[-14px] w-px bg-border" />
+        <div className="absolute left-[13px] top-10 bottom-[-14px] w-px bg-foreground/50" />
       )}
 
       <div
@@ -67,30 +67,25 @@ export function ActivityRung({
           if (readOnly) return;
           onDragEnd?.();
         }}
-        className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 bg-card transition-all ${
+        className={`flex items-center gap-2.5 border px-3.5 py-2.5 bg-card transition-colors ${
           isDragging ? "opacity-40" : ""
-        } ${isDropTarget ? "border-primary ring-2 ring-primary/20" : "border-border"}`}
+        } ${isDropTarget ? "border-foreground border-dashed bg-primary/10" : "border-foreground/40"}`}
       >
         {!readOnly && (
-          <GripVertical size={14} className="text-muted-foreground/50 cursor-grab shrink-0" />
+          <GripVertical size={14} className="text-muted-foreground cursor-grab shrink-0" />
         )}
         <span className="text-sm font-medium text-foreground flex-1 truncate">
           {rung.activityName}
         </span>
-        <span
-          className={`text-[0.5625rem] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 ${
-            rung.workType === "INTERNAL"
-              ? "bg-cyan-600/10 text-cyan-600"
-              : "bg-violet-500/10 text-violet-500"
-          }`}
-        >
+        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground shrink-0">
           {rung.workType === "INTERNAL" ? "Internal" : "External"}
         </span>
         {!readOnly && (
           <button
             type="button"
             onClick={onRemove}
-            className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+            className="p-1 text-muted-foreground hover:text-destructive transition-colors shrink-0"
+            aria-label="Remove"
             title="Remove"
           >
             <Trash2 size={13} />
@@ -99,9 +94,7 @@ export function ActivityRung({
       </div>
 
       {index < total - 1 && (
-        <div className="flex items-center justify-center py-1 text-muted-foreground/40">
-          <ArrowDown size={13} />
-        </div>
+        <div className="h-3" />
       )}
     </div>
   );

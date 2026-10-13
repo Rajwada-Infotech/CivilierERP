@@ -12,7 +12,7 @@ import {
 // visible, not just from Reporting, so this always invalidates both pages'
 // query keys regardless of which one it was clicked from.
 // An In Progress activity that was put back after a hold reads "Resumed" (still In Progress underneath).
-const RESUMED_META = { label: "Resumed", className: "bg-teal-500/10 text-teal-600 dark:text-teal-400" };
+const RESUMED_META = { label: "Resumed", className: "!rounded-none border border-foreground text-foreground" };
 
 export function AssignmentStatusSelect({
   rungId,
@@ -48,7 +48,7 @@ export function AssignmentStatusSelect({
   if (options.length <= 1) {
     return (
       <span
-        className={`text-[0.6875rem] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${meta.className}`}
+        className={`inline-block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 whitespace-nowrap ${meta.className}`}
       >
         {meta.label}
       </span>
@@ -60,7 +60,7 @@ export function AssignmentStatusSelect({
       value={status}
       disabled={mutation.isPending}
       onChange={(e) => mutation.mutate(e.target.value as AssignmentStatus)}
-      className={`text-[0.6875rem] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 ${meta.className}`}
+      className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 bg-card cursor-pointer focus:outline-none disabled:opacity-50 ${meta.className}`}
     >
       {options.map((s) => (
         <option key={s} value={s}>

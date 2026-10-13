@@ -429,7 +429,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                     </div>
                     {!hasBanks && picked?.BookingId != null && (
                       <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400">
-                        ⚠ No bank details on file for this customer — enter them here before raising the refund.
+                        No bank details on file for this customer — needed only for an NEFT / RTGS / IMPS / UPI refund; a Cheque refund needs none.
                       </p>
                     )}
                   </div>
@@ -462,8 +462,9 @@ const CrmRefunds: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp] = useSearchParams();
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  // ?search= (e.g. from a credit note) opens the list filtered to that refund.
+  const [searchInput, setSearchInput] = useState(() => sp.get("search") || "");
+  const [search, setSearch] = useState(() => sp.get("search") || "");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [status, setStatus] = useState<string>("All");
   const [page, setPage] = useState(1);
@@ -543,6 +544,7 @@ const CrmRefunds: React.FC = () => {
               className="text-xs text-primary hover:underline flex items-center gap-1">{r.Status === "Paid" ? "Payment" : "Open in Payments"} <ExternalLink size={11} /></button>
           )}
           {r.Status === "Paid" && <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Paid</span>}
+          {r.Status === "Paid" && <button onClick={() => navigate(`/crm/credit-notes?refundId=${r.Id}`)} className="text-xs text-primary hover:underline" title="Credit note for this refund">Credit note</button>}
         </div>
       );
     } },
@@ -557,6 +559,7 @@ const CrmRefunds: React.FC = () => {
         action={
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+            <button onClick={() => navigate("/crm/credit-notes")} className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted" title="Every credit note, for the GST return">Credit notes</button>
             {rights.canCreate && (
               <button onClick={() => setShowNew(true)}
                 className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-4 py-1.5 rounded-lg btn-module hover:shadow-lg transition-all">

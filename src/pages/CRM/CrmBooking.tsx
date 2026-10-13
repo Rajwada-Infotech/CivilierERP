@@ -34,6 +34,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { DateInput } from "@/components/ui/date-input";
 
 const API     = "/api/crm/bookings";
@@ -175,7 +176,7 @@ const fmt = (n: number | null | undefined) =>
 
 const normalizeRole = (role?: string) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 
-// The real workflow gate: Welcome Call -> Bank Details -> Agreement (both
+// The real workflow gate: Welcome Call -> Agreement (both
 // approvals) -> Payments. Only ever surface the ONE step the booking is
 // actually sitting at right now — never let staff jump ahead to a later
 // step a record hasn't reached yet.
@@ -186,7 +187,9 @@ function getNextStep(b: any): NextStep {
   // BOOKING_SELECT) -- a logged call with any other outcome must NOT satisfy
   // this, since that's not what unblocks Agreement auto-creation either.
   if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-sky-500 border-sky-200 bg-sky-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
-  if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
+  // Bank / KYC details are not a gate for the Agreement (business decision
+  // 2026-09-15, crmWorkflowGuards.js validateAgreementPreparationPrerequisites),
+  // so they are never shown as the step the booking is waiting on.
   // Milestone 1 (Booking Amount) must actually be Paid before Agreement prep
   // can succeed (validateAgreementPreparationPrerequisites in
   // crmWorkflowGuards.js hard-blocks on exactly this) — checked here too so
@@ -636,7 +639,7 @@ const CrmBooking: React.FC = () => {
     { accessorKey: "ApplicantName", header: "Customer", size: 160,
       cell: (i) => (
         <div onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.Id} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
         </div>
       ) },
@@ -925,7 +928,7 @@ const CrmBooking: React.FC = () => {
                 <SelectContent>
                   {(apps as any[]).map((a: any) => (
                     <SelectItem key={a.Id} value={String(a.Id)}>
-                      {a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})
+                      {a.ApplicationNo} — <ApplicantNames name={a.ApplicantName} applicationId={a.Id} /> ({a.Mobile})
                     </SelectItem>
                   ))}
                 </SelectContent>

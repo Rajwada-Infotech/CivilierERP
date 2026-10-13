@@ -302,6 +302,17 @@ router.get("/:id/posting", async (req, res) => {
 // below now just calls this and maps thrown errors to a response; behavior
 // is unchanged. Thrown errors carry a `.status` for the HTTP code to use.
 async function createReceivedPaymentInternal(pool, payload, createdBy) {
+    // A receipt created by CRM (money receipt approval, milestone receipt, on-account
+    // deposit) passes no document type, so it used to get no receipt number at
+    // all. It takes the active document type tagged for Received Payment — the
+    // same one the Received Payment screen resolves — so every receipt is numbered.
+    if (!payload.RPDocTypeId && (payload.CrmBookingId || payload.CrmMilestoneId || payload.CrmApplicationId)) {
+      const dt = await pool.request().query(`
+        SELECT TOP 1 TypeOfDocId FROM dbo.TypeOfDoc
+        WHERE IsActive = 1 AND links_to LIKE '%Received Payment%'
+        ORDER BY TypeOfDocId`);
+      if (dt.recordset[0]) payload = { ...payload, RPDocTypeId: dt.recordset[0].TypeOfDocId };
+    }
     const {
       RPCompanyName,
       RPCompanyId,

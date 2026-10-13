@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import TreeDropdown from "@/components/common/TreeDropdown";
 import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -18,22 +17,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
-import {
-  Pencil,
-  Trash2,
-  X,
-  Check,
-  Plus,
-  Search,
-  BookOpen,
-  Hash,
-  AlertCircle,
-  Eye,
-  XCircle,
-  RotateCcw,
-  ShieldCheck,
-  Lock,
-} from "lucide-react";
+import { Pencil, Trash2, X, Check, Plus, Search, BookOpen, Eye, RotateCcw, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { BodyPortal } from "@/components/ui/body-portal";
 
@@ -94,6 +78,11 @@ const EMPTY_FORM: LedgerForm = {
 };
 
 
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+
 // ─── Column builder ────────────────────────────────────────────────────────────
 function buildGLColumns(
   _editingId: number | null,
@@ -111,27 +100,18 @@ function buildGLColumns(
       accessorKey: "LHeadCode",
       header: "Code",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-semibold text-primary">
-          {(getValue() as string) || "—"}
-        </span>
+        <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{(getValue() as string) || "—"}</span>
       ),
     },
     {
       accessorKey: "LHeadName",
       header: "Account Name",
       cell: ({ row, getValue }) => (
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-foreground">
-            {getValue() as string}
-          </span>
+        <div className="flex items-baseline gap-2.5">
+          <span className="font-medium text-foreground">{getValue() as string}</span>
           {row.original.IsSystemGenerated && (
-            <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold"
-              style={{ background: "rgba(99,102,241,0.12)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.25)" }}
-              title="System-generated — protected"
-            >
-              <ShieldCheck size={9} />
-              System
+            <span className={`${LBL} inline-flex items-center gap-1`} title="System-generated: protected">
+              <Lock size={9} /> System
             </span>
           )}
         </div>
@@ -140,24 +120,14 @@ function buildGLColumns(
     {
       accessorKey: "GroupName",
       header: "Account Group",
-      cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span>,
     },
     {
       accessorKey: "LHeadStatus",
       header: "Status",
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
-        return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
-            {active ? "Active" : "Inactive"}
-          </span>
-        );
+        return <SheetMark text={active ? "Active" : "Inactive"} tone={active ? "done" : "none"} />;
       },
     },
     {
@@ -169,53 +139,40 @@ function buildGLColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[0.6875rem] text-muted-foreground mr-1">
-                Delete?
-              </span>
               <button
                 onClick={() => deleteMut.mutate(id)}
-                className="p-1 rounded text-destructive hover:bg-destructive/10"
+                className="h-7 px-2 flex items-center gap-1 border border-destructive bg-destructive text-destructive-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]"
+                title="Confirm delete"
               >
-                <Check size={12} />
+                <Check size={12} /> Delete
               </button>
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="p-1 rounded text-muted-foreground hover:bg-muted"
-              >
-                <X size={12} />
+              <button onClick={() => setDeleteConfirm(null)} className={ACT} title="Keep" aria-label="Keep">
+                <X size={13} />
               </button>
             </div>
           );
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button data-row-view
-              onClick={() => onView(row.original)}
-              className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10"
-              title="View details"
-            >
+            <button data-row-view onClick={() => onView(row.original)} className={ACT} title="View details" aria-label="View details">
               <Eye size={13} />
             </button>
             {canEdit && (
-              <button
-                onClick={() => startEdit(row.original)}
-                className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10"
-              >
+              <button onClick={() => startEdit(row.original)} className={ACT} title="Edit" aria-label="Edit">
                 <Pencil size={13} />
               </button>
             )}
             {canDelete && (
               row.original.IsSystemGenerated && !isSuperAdmin ? (
-                <span
-                  className="p-1.5 rounded-lg text-muted-foreground/40 cursor-not-allowed"
-                  title="System-generated — only Super Admin can delete"
-                >
+                <span className="w-7 h-7 flex items-center justify-center text-muted-foreground/40 cursor-not-allowed" title="System-generated: only Super Admin can delete">
                   <Lock size={13} />
                 </span>
               ) : (
                 <button
                   onClick={() => setDeleteConfirm(id)}
-                  className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
+                  className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
+                  title="Delete"
+                  aria-label="Delete"
                 >
                   <Trash2 size={13} />
                 </button>
@@ -234,8 +191,6 @@ const GeneralLedgerMaster: React.FC = () => {
   const rights = usePageRights("general-ledger");
   const { currentUser } = useAuth();
   const isSuperAdmin = currentUser?.role === "super_admin";
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useDraftForm<LedgerForm>("general-ledger-master", EMPTY_FORM, {
     skip: editingId !== null,
@@ -520,162 +475,97 @@ const GeneralLedgerMaster: React.FC = () => {
   }, [ledgers, search, filterGroup, sortField, sortAsc]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  const inputCls = (bad?: boolean) =>
+    `w-full h-10 text-sm px-3 bg-card text-foreground placeholder:text-muted-foreground/50 focus:outline-none border ${
+      bad ? "border-destructive" : "border-foreground/40 focus:border-foreground"
+    }`;
+  const activeCount = ledgers.filter((l) => l.LHeadStatus).length;
+  const systemCount = ledgers.filter((l) => l.IsSystemGenerated).length;
+
   return (
     <>
       <Breadcrumbs items={["Masters", "General Ledger"]} />
 
-      <FinanceShell
-        title="General Ledger Master"
-        subtitle="Define ledger accounts with a name, short code and account group"
-        action={
-          <span
-            className="text-xs font-heading px-3 py-1.5 rounded-lg"
-            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
-          >
-            {totalRecords} Accounts
-          </span>
-        }
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="General ledger"
+        subtitle="The ledger accounts money is posted to: each with a name, a short code and the account group it sits in."
       >
+        {/* ── Figures ── */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Accounts", value: totalRecords, note: search || filterGroup ? "matching the filter" : "in all" },
+              { label: "Active", value: activeCount, note: "open for posting" },
+              { label: "System", value: systemCount, note: "protected accounts" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
 
-        {/* ── Form Card ── */}
-        {rights.canCreate && (
-        <div
-          className="rounded-xl overflow-hidden"
-          onKeyDown={preventEnterSubmit}
-          style={{
-            background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
-            border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
-            backdropFilter: "blur(18px) saturate(150%)",
-            WebkitBackdropFilter: "blur(18px) saturate(150%)",
-            boxShadow: isDark
-              ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
-              : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
-          }}
-        >
-          {/* Card header — title only */}
-          <div
-            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
-            style={{
-              background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
-              borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
-            }}
-          >
-            <div>
-              <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? "Edit Ledger Account" : "Add Ledger Account"}
+        {/* ── Form ── */}
+        {(rights.canCreate || (rights.canEdit && editingId !== null)) && (
+          <div className="bg-card relative" onKeyDown={preventEnterSubmit} style={{ border: RULE, zIndex: 10 }}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+              <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
+                {editingId ? "Edit ledger account" : "Add ledger account"}
               </h2>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 Fields marked <span className="text-destructive">*</span> are required
               </p>
             </div>
-          </div>
 
-          <div className="px-5 sm:px-6 py-6 space-y-7">
-            <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <BookOpen size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Account Details
-                </p>
+            <div className="px-4 py-5 grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
+              {/* Account Name */}
+              <div>
+                <label className={`${LBL} block mb-1.5`}>
+                  Account name <span className="text-destructive">*</span>
+                </label>
+                <input
+                  value={form.LHeadName}
+                  onChange={(e) => {
+                    setForm((p) => ({ ...p, LHeadName: e.target.value }));
+                    setErrors((p) => ({ ...p, LHeadName: false }));
+                  }}
+                  placeholder="e.g. Cash in Hand"
+                  className={inputCls(errors.LHeadName)}
+                />
+                {errors.LHeadName && <p className="text-xs text-destructive mt-1">Required</p>}
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-                {/* Account Name */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Account Name <span className="text-destructive">*</span>
-                  </label>
-                  <input
-                    value={form.LHeadName}
-                    onChange={(e) => {
-                      setForm((p) => ({ ...p, LHeadName: e.target.value }));
-                      setErrors((p) => ({ ...p, LHeadName: false }));
-                    }}
-                    placeholder="e.g. Cash in Hand"
-                    className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                      errors.LHeadName ? "border-red-400" : "border-border"
-                    }`}
-                  />
-                  {errors.LHeadName && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> Required
-                    </p>
-                  )}
-                </div>
 
-                {/* Short Code */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Short Code
-                  </label>
-                  <div className="relative">
-                    <Hash
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    <input
-                      value={form.LHeadCode}
-                      onChange={(e) => {
-                        setForm((p) => ({
-                          ...p,
-                          LHeadCode: e.target.value.toUpperCase(),
-                        }));
-                        hasManuallyEditedCode.current = true;
-                      }}
-                      placeholder="e.g. CIH"
-                      maxLength={20}
-                      className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                    />
-                  </div>
-                  <p className="text-[0.6875rem] text-muted-foreground/70">
-                    Auto-generated from account name (you can override manually)
-                  </p>
-                </div>
+              {/* Short Code */}
+              <div>
+                <label className={`${LBL} block mb-1.5`}>Short code</label>
+                <input
+                  value={form.LHeadCode}
+                  onChange={(e) => {
+                    setForm((p) => ({
+                      ...p,
+                      LHeadCode: e.target.value.toUpperCase(),
+                    }));
+                    hasManuallyEditedCode.current = true;
+                  }}
+                  placeholder="e.g. CIH"
+                  maxLength={20}
+                  className={`${inputCls()} font-heading font-semibold tabular-nums tracking-wide`}
+                />
+                <p className="text-[0.6875rem] text-muted-foreground mt-1.5">Made from the account name; you can type your own.</p>
+              </div>
 
-                {/* System Generated — super_admin only */}
-                {isSuperAdmin && (
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                      <ShieldCheck size={11} className="text-indigo-400" />
-                      System Generated
-                    </label>
-                    <div className="flex items-center gap-3 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setForm((p) => ({ ...p, IsSystemGenerated: !p.IsSystemGenerated }))}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
-                          form.IsSystemGenerated
-                            ? "bg-indigo-500"
-                            : "bg-muted"
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                            form.IsSystemGenerated ? "translate-x-4" : "translate-x-0.5"
-                          }`}
-                        />
-                      </button>
-                      <span className="text-xs text-muted-foreground">
-                        {form.IsSystemGenerated
-                          ? "Protected — only Super Admin can delete"
-                          : "Not protected"}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Account Group */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Account Group <span className="text-destructive">*</span>
-                  </label>
-                  {groupsLoading ? (
-                    <div className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-muted/40 text-muted-foreground">
-                      Loading…
-                    </div>
-                  ) : (
-                    <>
+              {/* Account Group */}
+              <div>
+                <label className={`${LBL} block mb-1.5`}>
+                  Account group <span className="text-destructive">*</span>
+                </label>
+                {groupsLoading ? (
+                  <div className="w-full h-10 flex items-center text-sm border border-foreground/40 px-3 text-muted-foreground">Loading…</div>
+                ) : (
+                  <>
                     <GroupTreePicker
                       value={form.LBelongsTo}
                       onChange={(v) => {
@@ -686,67 +576,70 @@ const GeneralLedgerMaster: React.FC = () => {
                       allGroups={accountGroups}
                       error={errors.LBelongsTo}
                     />
-                    {errors.LBelongsTo && (
-                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                        <AlertCircle size={11} /> Please select an Account Group
-                      </p>
-                    )}
-                    </>
+                    {errors.LBelongsTo && <p className="text-xs text-destructive mt-1">Please select an account group</p>}
+                  </>
+                )}
+              </div>
+
+              {/* System Generated — super_admin only */}
+              {isSuperAdmin && (
+                <label className="sm:col-span-3 flex items-center gap-2.5 cursor-pointer select-none w-fit">
+                  <input
+                    type="checkbox"
+                    checked={form.IsSystemGenerated}
+                    onChange={() => setForm((p) => ({ ...p, IsSystemGenerated: !p.IsSystemGenerated }))}
+                    className="accent-foreground w-3.5 h-3.5"
+                  />
+                  <span className="text-xs text-foreground font-medium">System account</span>
+                  <span className="text-xs text-muted-foreground">
+                    {form.IsSystemGenerated ? "protected: only Super Admin can delete it" : "not protected"}
+                  </span>
+                </label>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3" style={{ borderTop: RULE }}>
+              <div className="hidden sm:block">
+                {canSave ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-[0.6875rem] text-muted-foreground">Fill in the required fields to save</span>}
+              </div>
+              <div className="flex items-center gap-2 sm:ml-auto">
+                <button
+                  onClick={resetForm}
+                  disabled={!isDirty && !editingId}
+                  className={`${KEY} flex-1 sm:flex-none h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}
+                >
+                  <RotateCcw size={12} />
+                  {editingId ? "Cancel" : "Reset"}
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !canSave}
+                  className={`${KEY} flex-1 sm:flex-none h-9 px-5 bg-foreground text-card border border-foreground whitespace-nowrap`}
+                >
+                  {saving ? (
+                    <span className="w-3.5 h-3.5 border-2 border-card/30 border-t-card rounded-full animate-spin" />
+                  ) : editingId ? (
+                    <Check size={13} />
+                  ) : (
+                    <Plus size={13} />
                   )}
-                </div>
+                  {saving ? "Saving…" : editingId ? "Update account" : "Save account"}
+                </button>
               </div>
             </div>
           </div>
-
-          {/* Card footer — actions */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
-              {canSave
-                ? <span className="text-emerald-500 font-medium">Ready to save</span>
-                : "Fill in the required fields to save"}
-            </p>
-            <div className="flex items-center gap-2 sm:ml-auto">
-              <button
-                onClick={resetForm}
-                disabled={!isDirty && !editingId}
-                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-              >
-                <RotateCcw size={12} />
-                {editingId ? "Cancel" : "Reset"}
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving || !canSave}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
-              >
-                {saving ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : editingId ? (
-                  <Check size={14} />
-                ) : (
-                  <Plus size={14} />
-                )}
-                {saving ? "Saving…" : editingId ? "Update Account" : "Save Account"}
-              </button>
-            </div>
-          </div>
-        </div>
         )}
 
-        {/* ── Table Section ── */}
-        <div>
-          {/* Toolbar */}
-          <div className="mb-3 flex items-center gap-3 flex-wrap">
+        {/* ── The accounts ── */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="px-4 py-3 flex items-center gap-3 flex-wrap" style={{ borderBottom: RULE }}>
             <div className="relative flex-1 sm:flex-none">
-              <Search
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name or code…"
-                className="w-full sm:w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                className="w-full sm:w-56 h-9 text-sm border border-foreground/40 focus:border-foreground pl-9 pr-3 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
               />
             </div>
 
@@ -765,24 +658,24 @@ const GeneralLedgerMaster: React.FC = () => {
                   setSearch("");
                   setFilterGroup("");
                 }}
-                className="text-xs font-heading text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
+                className={`${KEY} h-9 px-3 border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground`}
               >
                 <X size={11} /> Clear
               </button>
             )}
 
-            <ExportMenu
-              data={filtered as unknown as Record<string, unknown>[]}
-              fetchData={fetchAllLedgersForExport}
-              columns={ledgerExportColumns}
-              title="General Ledger Master"
-              filename="general-ledger-master"
-              disabled={!rights.canExport || (ledgersData?.total ?? 0) === 0}
-            />
+            <div className="ml-auto">
+              <ExportMenu
+                data={filtered as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllLedgersForExport}
+                columns={ledgerExportColumns}
+                title="General Ledger Master"
+                filename="general-ledger-master"
+                disabled={!rights.canExport || (ledgersData?.total ?? 0) === 0}
+              />
+            </div>
           </div>
 
-          {/* Table */}
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
           <DataTable
             data={filtered}
             columns={columns}
@@ -797,103 +690,66 @@ const GeneralLedgerMaster: React.FC = () => {
                 : "No results match your search."
             }
             rowClassName={(row) =>
-              row.original.LHeadId === editingId ? "bg-primary/5" : ""
+              row.original.LHeadId === editingId ? "shadow-[inset_3px_0_0_hsl(var(--primary))]" : ""
             }
           />
-          </div>
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
         <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setViewRecord(null)} />
           <div
-            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
-            onClick={() => setViewRecord(null)}
-          />
-          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-2">
-                <BookOpen size={15} className="text-primary" />
-                <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Ledger Details
-                </h3>
+            className="sheet-frame relative w-full max-w-sm bg-card flex flex-col animate-in slide-in-from-right duration-200"
+            style={{ margin: 0, borderLeft: RULE }}
+          >
+            <div className="flex items-end justify-between gap-3 px-5 py-4" style={{ borderBottom: RULE }}>
+              <div className="min-w-0">
+                <p className={LBL}>Ledger account</p>
+                <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{viewRecord.LHeadName}</h3>
               </div>
-              <button
-                onClick={() => setViewRecord(null)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
-              >
-                <XCircle size={15} />
+              <button onClick={() => setViewRecord(null)} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors" aria-label="Close">
+                <X size={16} />
               </button>
             </div>
-            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+            <div className="p-5 space-y-5 overflow-y-auto flex-1">
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Account Name
-                </p>
-                <p className="text-sm font-medium text-foreground">
-                  {viewRecord.LHeadName}
-                </p>
+                <p className={LBL}>Short code</p>
+                <p className="font-heading text-sm font-semibold tabular-nums text-foreground mt-1">{viewRecord.LHeadCode || "—"}</p>
               </div>
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Short Code
-                </p>
-                <p className="font-mono text-sm font-semibold text-primary">
-                  {viewRecord.LHeadCode || "—"}
-                </p>
+                <p className={LBL}>Account group</p>
+                <p className={`text-sm mt-1 ${viewRecord.GroupName ? "text-foreground" : "text-muted-foreground"}`}>{viewRecord.GroupName || "No group assigned"}</p>
               </div>
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Account Group
-                </p>
-                <p className="text-sm text-foreground">
-                  {viewRecord.GroupName || (
-                    <span className="text-muted-foreground italic">
-                      No group assigned
-                    </span>
-                  )}
-                </p>
-              </div>
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Status
-                </p>
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.LHeadStatus ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-                >
-                  {viewRecord.LHeadStatus ? "Active" : "Inactive"}
-                </span>
+                <p className={`${LBL} mb-1.5`}>Status</p>
+                <SheetMark text={viewRecord.LHeadStatus ? "Active" : "Inactive"} tone={viewRecord.LHeadStatus ? "done" : "none"} />
               </div>
               {viewRecord.IsSystemGenerated && (
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    Protection
+                  <p className={LBL}>Protection</p>
+                  <p className="text-sm text-foreground mt-1 flex items-center gap-1.5">
+                    <Lock size={12} /> System account: only Super Admin can delete it
                   </p>
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold"
-                    style={{ background: "rgba(99,102,241,0.12)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.25)" }}>
-                    <ShieldCheck size={11} />
-                    System-generated — Super Admin only
-                  </span>
                 </div>
               )}
             </div>
-            <div className="px-5 py-3 border-t border-border flex justify-end gap-2 bg-muted/20">
-              <button
-                onClick={() => setViewRecord(null)}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
+            <div className="px-5 py-3 flex justify-end gap-2" style={{ borderTop: RULE }}>
+              <button onClick={() => setViewRecord(null)} className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}>
                 Close
               </button>
-              <button
-                onClick={() => {
-                  startEdit(viewRecord);
-                  setViewRecord(null);
-                }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm flex items-center gap-1.5"
-              >
-                <Pencil size={13} /> Edit Account
-              </button>
+              {rights.canEdit && (
+                <button
+                  onClick={() => {
+                    startEdit(viewRecord);
+                    setViewRecord(null);
+                  }}
+                  className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}
+                >
+                  <Pencil size={12} /> Edit account
+                </button>
+              )}
             </div>
           </div>
         </div></BodyPortal>

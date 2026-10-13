@@ -1,6 +1,5 @@
 import React from "react";
-import { Calendar } from "lucide-react";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
@@ -87,31 +86,25 @@ const FinancialYearMaster: React.FC = () => {
     }
   };
 
+  const fmtDay = (value: unknown) => {
+    const d = value ? new Date(String(value)) : null;
+    return d && !Number.isNaN(d.getTime())
+      ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+      : "—";
+  };
   const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
-    status: (value) => (
-      <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value === "Active" ? "bg-green-500/10 border-green-500/20 text-green-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
-      >
-        <span
-          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value === "Active" ? "bg-green-500" : "bg-red-500"}`}
-        />
-        {String(value)}
-      </span>
-    ),
-    locked: (value) => (
-      <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value ? "bg-orange-500/10 border-orange-500/20 text-orange-600" : "bg-muted border-border text-muted-foreground"}`}
-      >
-        {value ? "🔒 Locked" : "Unlocked"}
-      </span>
-    ),
+    year: (value) => <span className="font-heading text-[0.75rem] font-semibold tabular-nums text-foreground">{String(value ?? "") || "—"}</span>,
+    startDate: (value) => <span className="tabular-nums text-foreground">{fmtDay(value)}</span>,
+    endDate: (value) => <span className="tabular-nums text-foreground">{fmtDay(value)}</span>,
+    status: (value) => <SheetMark text={String(value)} tone={value === "Active" ? "done" : "none"} />,
+    locked: (value) => <SheetMark text={value ? "Locked" : "Open"} tone={value ? "waiting" : "none"} />,
   };
 
   if (isLoading)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
   if (error)
     return (
-      <div className="p-6 text-red-500">Failed to load financial years.</div>
+      <div className="p-6 text-destructive">Failed to load financial years.</div>
     );
 
   return (
@@ -119,19 +112,27 @@ const FinancialYearMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Finance Module", "Financial Year Master"]}
       />
-      <FinanceShell
-        title="Financial Year Master"
-        subtitle="Manage financial years with start / end dates, status and lock controls"
-        icon={Calendar}
-        action={
-          <span
-            className="text-xs font-heading px-3 py-1.5 rounded-lg"
-            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
-          >
-            {dbItems.length} Years
-          </span>
-        }
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Financial years"
+        subtitle="Each year's start and end dates, whether it is active, and whether it is locked against further posting."
       >
+        <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Years", value: dbItems.length, note: "in all" },
+              { label: "Active", value: dbItems.filter((y) => y.FStatus).length, note: "open for entries" },
+              { label: "Locked", value: dbItems.filter((y) => y.FisLocked).length, note: "closed to posting" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <MasterPage
           title="Financial Year"
           fields={[
@@ -162,23 +163,17 @@ const FinancialYearMaster: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => onChange(isActive ? "Closed" : "Active")}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
-                        isActive ? "bg-emerald-500" : "bg-muted-foreground/30"
-                      }`}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${isActive ? "bg-foreground" : "bg-muted-foreground/30"}`}
                     >
                       <span
-                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${
                           isActive ? "translate-x-4" : "translate-x-0.5"
                         }`}
                       />
                     </button>
-                    <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                       Status —{" "}
-                      <span
-                        className={
-                          isActive ? "text-emerald-600" : "text-foreground"
-                        }
-                      >
+                      <span className="text-foreground">
                         {isActive ? "Active" : "Closed"}
                       </span>
                     </span>
@@ -199,23 +194,17 @@ const FinancialYearMaster: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => onChange(!isLocked)}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
-                        isLocked ? "bg-orange-500" : "bg-muted-foreground/30"
-                      }`}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${isLocked ? "bg-foreground" : "bg-muted-foreground/30"}`}
                     >
                       <span
-                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${
                           isLocked ? "translate-x-4" : "translate-x-0.5"
                         }`}
                       />
                     </button>
-                    <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                       Locked —{" "}
-                      <span
-                        className={
-                          isLocked ? "text-orange-500" : "text-foreground"
-                        }
-                      >
+                      <span className="text-foreground">
                         {isLocked ? "Locked" : "Unlocked"}
                       </span>
                     </span>
@@ -246,7 +235,7 @@ const FinancialYearMaster: React.FC = () => {
             ],
           }}
         />
-      </FinanceShell>
+      </SheetShell>
     </>
   );
 };

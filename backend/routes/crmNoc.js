@@ -148,6 +148,37 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), a
   }
 });
 
+// GET /by-booking — look up the NOC row for a specific booking (+ optional
+// nocType filter). Used exclusively by the frontend deep-link handler so it
+// can resolve a NOC regardless of which page of the paginated list it lives
+// on — scanning `nocs` (paginated first page) silently missed NOCs on page
+// 2+ and fell through to opening the Create dialog incorrectly.
+router.get("/by-booking", requirePageRight("crm-noc", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = req.query.bookingId ? parseInt(req.query.bookingId, 10) : null;
+    if (!bookingId || isNaN(bookingId)) return res.status(400).json({ error: "bookingId is required" });
+    const { nocType } = req.query;
+    const req0 = pool.request().input("bid", sql.Int, bookingId);
+    const conds = ["n.BookingId = @bid"];
+    if (nocType && ["Bank", "Organisation"].includes(nocType)) {
+      req0.input("nt", sql.NVarChar(30), nocType);
+      conds.push("n.NocType = @nt");
+    }
+    // Same project scope as the list — a user only finds NOCs of their projects.
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    const result = await req0.query(
+      `${NOC_SELECT} WHERE ${conds.join(" AND ")} ORDER BY n.CreatedAt DESC`
+    );
+    // Return the most-recent matching NOC (null if none exists — frontend
+    // treats null as "go ahead and open the create dialog").
+    res.json(result.recordset[0] || null);
+  } catch (e) {
+    console.error("[crm-noc] GET /by-booking error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /eligible-bookings — bookings eligible for a new NOC. NOC is a single
 // step per booking (never both Bank and Organisation — see resolveNocType in
 // crmWorkflowGuards.js), so this returns each candidate along with its
@@ -165,11 +196,11 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
              a.ApplicantName,
              CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
                SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
              ) THEN 'Bank' ELSE 'Organisation' END AS NocType,
              CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
                SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
              ) THEN 1 ELSE 0 END AS HasLoan
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
