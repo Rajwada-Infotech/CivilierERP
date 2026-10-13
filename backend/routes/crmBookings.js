@@ -70,7 +70,7 @@ const bookingDownstreamSql = `
     (SELECT COUNT(*) FROM dbo.CrmAgreement WHERE BookingId = @bid) AS Agreements,
     (SELECT COUNT(*) FROM dbo.CrmLegalMilestone WHERE BookingId = @bid) AS LegalMilestones,
     (SELECT COUNT(*) FROM dbo.CrmSalesDeed WHERE BookingId = @bid) AS SalesDeeds,
-    (SELECT COUNT(*) FROM dbo.CrmLoanDetail WHERE BookingId = @bid AND SanctionStatus NOT IN ('NotApplied', 'Rejected')) AS ActiveLoans,
+    (SELECT COUNT(*) FROM dbo.CrmLoanDetail WHERE BookingId = @bid AND SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')) AS ActiveLoans,
     (SELECT COUNT(*) FROM dbo.CrmNoc WHERE BookingId = @bid AND Status NOT IN ('Rejected')) AS Nocs,
     (SELECT COUNT(*) FROM dbo.CrmPrePossession WHERE BookingId = @bid) AS PrePossession,
     (SELECT COUNT(*) FROM dbo.CrmPossessionNotice WHERE BookingId = @bid) AS PossessionNotices,
@@ -277,7 +277,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
       req0.input("st", sql.NVarChar(30), status);
       conds.push("b.Status = @st");
     } else if (!includeCancelled) {
-      conds.push("b.Status NOT IN ('Cancelled', 'Rejected', 'Expired')");
+      conds.push(`b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`);
     }
     if (applicationId) { req0.input("appId", sql.Int, parseInt(applicationId)); conds.push("b.ApplicationId = @appId"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
@@ -622,6 +622,13 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         const effectiveTotal = total || oldRow.TotalValue;
         const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
         await generateMilestonesForBooking(tx, id, effectiveTotal, newPlanId, b.BookingDate || null, actor, effectiveBookingAmount);
+      } else if (totalChanged && !(await tx.request().input("bid", sql.Int, id)
+          .query("SELECT TOP 1 1 AS x FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid")).recordset.length) {
+        // No schedule at all (e.g. it was booked before it had a price) — the
+        // new price gets the schedule booking creation would have made.
+        const cur = (await tx.request().input("bid", sql.Int, id)
+          .query("SELECT PaymentPlanId, BookingAmount, BookingDate FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+        await generateMilestonesForBooking(tx, id, Number(total), cur.PaymentPlanId, cur.BookingDate, actor, Number(cur.BookingAmount || 0));
       } else if (total != null && total !== oldRow.TotalValue) {
         // TotalValue moved (rate correction) without a plan switch — the
         // existing schedule's ₹/% no longer add up to what's actually owed.
@@ -1015,6 +1022,12 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     if (readiness.missing.length) {
       return res.status(400).json({ error: `Cannot submit for approval — confirm ${readiness.missing.join(" and ")} first` });
     }
+    // A booking goes for approval only with a price and a payment schedule.
+    const sched = (await pool.request().input("id", sql.Int, id).query(`
+      SELECT b.TotalValue, (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id) AS Milestones
+      FROM dbo.CrmBooking b WHERE b.Id = @id`)).recordset[0];
+    if (!(Number(sched?.TotalValue) > 0)) return res.status(400).json({ error: "Cannot submit for approval — this booking has no price. Set the rate first." });
+    if (!sched.Milestones) return res.status(400).json({ error: "Cannot submit for approval — this booking has no payment schedule. Re-save its rate / payment plan to create one." });
 
     const actor = actorId(req);
     const userEmail = requireUserEmail(req, res);
@@ -1697,7 +1710,14 @@ async function requireInvoiceableCustomer(pool, bookingId) {
   // explicitly opted into Non-Invoice, it never invents a new restriction
   // for records this feature doesn't know about.
   if (mode === "NonInvoice") {
-    return "This customer is set to Non-Invoice — no invoice can be generated for this booking. Change it on the Customer's record (CRM → Customers) if this is incorrect.";
+    return "This customer is set to Non-Invoice — they get one final invoice for the grand total once everything is paid (Generate final invoice), not milestone invoices. Change it on the Customer's record (CRM → Customers) if this is incorrect.";
+  }
+  // A booking already invoiced in full (its final invoice, e.g. issued while
+  // the customer was Non-Invoice) can't be invoiced again milestone by milestone.
+  const fin = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 InvoiceNo FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Final' AND Status <> 'Void'");
+  if (fin.recordset.length) {
+    return `This booking already has its final invoice (${fin.recordset[0].InvoiceNo}) for the grand total — void it first if milestone invoices are needed instead.`;
   }
   return null;
 }
@@ -2061,6 +2081,87 @@ async function generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, 
   return { id: invoiceId, InvoiceNo: invoiceNo, MilestoneName: mRow.MilestoneName };
 }
 
+// ── Final invoice (Non-Invoice customers) ──────────────────────────────────
+// Two invoicing modes, set per customer (CrmCustomer.InvoiceMode):
+//   Invoice     one invoice per milestone (bulk-generate above)
+//   NonInvoice  no milestone invoices; ONE final invoice for the booking's
+//               grand total, generated only once everything is paid
+// One live Final invoice per booking (a voided one can be re-issued).
+async function invoiceModeOf(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT c.InvoiceMode FROM dbo.CrmBooking b
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+    WHERE b.Id = @bid`);
+  return r.recordset[0]?.InvoiceMode || null;
+}
+
+async function generateFinalInvoiceForBooking(pool, bookingId, actorUserId) {
+  const activeErr = await requireActiveBooking(pool, bookingId);
+  if (activeErr) { const e = new Error(activeErr); e.status = 400; throw e; }
+  if ((await invoiceModeOf(pool, bookingId)) !== "NonInvoice") {
+    const e = new Error("This customer is invoiced per milestone — generate the milestone invoices instead of a final invoice");
+    e.status = 400; throw e;
+  }
+  const bk = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT bk.BookingNo, bk.GrandTotal,
+           ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id), 0) AS TotalCleared,
+           (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id AND Status NOT IN ('Paid', 'Waived')) AS OpenMilestones
+    FROM dbo.CrmBooking bk WHERE bk.Id = @bid`)).recordset[0];
+  const grandTotal = Number(bk?.GrandTotal || 0);
+  if (!(grandTotal > 0)) { const e = new Error("This booking has no grand total to invoice"); e.status = 400; throw e; }
+  if (Number(bk.TotalCleared) < grandTotal || bk.OpenMilestones > 0) {
+    const shortfall = Math.max(grandTotal - Number(bk.TotalCleared), 0);
+    const e = new Error(`The final invoice is generated once everything is paid — ₹${shortfall.toLocaleString("en-IN")} still outstanding${bk.OpenMilestones ? ` (${bk.OpenMilestones} milestone(s) open)` : ""}.`);
+    e.status = 400; throw e;
+  }
+  const already = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 InvoiceNo FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType = 'Final' AND Status <> 'Void'");
+  if (already.recordset.length) { const e = new Error(`This booking already has its final invoice (${already.recordset[0].InvoiceNo})`); e.status = 409; throw e; }
+  // Milestone invoices already issued would be invoiced (and their income booked) twice.
+  const ms = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT COUNT(*) AS n FROM dbo.CrmInvoice WHERE BookingId = @bid AND InvoiceType IN ('Milestone', 'Booking') AND Status <> 'Void'");
+  if (ms.recordset[0].n > 0) {
+    const e = new Error(`${ms.recordset[0].n} milestone invoice(s) are already issued for this booking — void them before issuing one final invoice, so nothing is invoiced twice`);
+    e.status = 409; throw e;
+  }
+
+  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+  const result = await pool.request()
+    .input("no", sql.NVarChar(30), invoiceNo).input("bid", sql.Int, bookingId)
+    .input("amt", sql.Decimal(18, 2), grandTotal)
+    .input("desc", sql.NVarChar(500), `Final invoice — ${bk.BookingNo}, grand total`)
+    .input("cb", sql.Int, actorUserId)
+    .query(`INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt)
+            OUTPUT INSERTED.Id
+            VALUES (@no, @bid, N'Final', @amt, CAST(SYSDATETIME() AS DATE), @desc, @cb, SYSDATETIME())`);
+  const invoiceId = result.recordset[0].Id;
+  try { await generateInvoicePdf(pool, invoiceId); } catch (pdfErr) { console.error("[crm-bookings] final invoice PDF failed:", pdfErr.message); }
+  const emailRow = await pool.request().input("uid", sql.Int, actorUserId).query("SELECT email FROM dbo.users WHERE id = @uid");
+  const actorEmail = emailRow.recordset[0]?.email || "system";
+  try {
+    const outcome = await postCrmInvoiceToGL(pool, invoiceId, actorEmail);
+    await recordGLPosting("crm-invoice", invoiceId, outcome, actorEmail);
+  } catch (glErr) {
+    console.error("[crm-bookings] final invoice GL posting failed:", glErr.message);
+    await recordGLPosting("crm-invoice", invoiceId, { failed: true, reason: glErr.message }, actorEmail);
+  }
+  return { id: invoiceId, InvoiceNo: invoiceNo, Amount: grandTotal };
+}
+
+// POST /:id/invoices/final — the one final invoice of a Non-Invoice booking.
+router.post("/:id/invoices/final", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const out = await generateFinalInvoiceForBooking(getPool(), id, actorId(req));
+    res.status(201).json({ success: true, ...out, message: `Final invoice ${out.InvoiceNo} generated` });
+  } catch (e) {
+    if (e.number === 2601 || e.number === 2627) return res.status(409).json({ error: "This booking already has its final invoice" });
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Could not generate the final invoice" });
+  }
+});
+
 // POST /bookings/invoices/bulk-generate — generate invoices for several
 // ready milestones (possibly across different bookings) in one call, for
 // the Invoices page's bulk-select action. Each row is processed
@@ -2158,6 +2259,12 @@ router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "ed
     const row = cur.recordset[0];
     if (!row) return res.status(404).json({ error: "Invoice not found" });
     if (row.Status === "Void") return res.status(400).json({ error: `"${row.InvoiceNo}" is already void` });
+    // A credit note reduces this invoice: voiding it would leave the credit
+    // note pointing at nothing (and the GST return out of step).
+    const cn = (await pool.request().input("iid", sql.Int, invoiceId).query(`
+      SELECT TOP 1 ISNULL(DocNo, N'a credit note being approved') AS No FROM dbo.CrmGstNote
+      WHERE InvoiceId = @iid AND Status IN (N'Issued', N'TimeBarred', N'Draft', N'Pending', N'Rejected')`)).recordset[0];
+    if (cn) return res.status(409).json({ error: `"${row.InvoiceNo}" has ${cn.No} against it — cancel that first (Finance → Credit Notes)` });
 
     await pool.request()
       .input("iid", sql.Int, invoiceId)
@@ -2632,6 +2739,18 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
     // agRegistered is the strict gate Pre-Possession and Handover actually require.
     const agDone       = ag  && [CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(ag.Status);
     const agRegistered = ag  && ag.Status === CrmStatus.REGISTERED;
+    // An Executed agreement is not done until it is Registered: AFS stamp
+    // duty paid (AFS Query Payment Confirmed) -> Sub-Registrar visit
+    // (AFS Registry Completed) -> mark Registered. Say which one it waits on.
+    let agWaitingOn = null;
+    if (ag && ag.Status === CrmStatus.EXECUTED) {
+      const afs = (await pool.request().input("id", sql.Int, id).query(`
+        SELECT (SELECT TOP 1 Status FROM dbo.CrmAfsQueryPayment WHERE BookingId = @id ORDER BY CreatedAt DESC) AS QP,
+               (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = @id ORDER BY CreatedAt DESC) AS Reg`)).recordset[0] || {};
+      agWaitingOn = afs.QP !== "Confirmed" ? "Executed — next: AFS stamp duty payment (AFS Query Payment) to be confirmed"
+        : afs.Reg !== "Completed" ? "Executed — next: Sub-Registrar visit (AFS Registry) to be completed"
+        : "Executed — next: mark the Agreement Registered";
+    }
     // Sale Deed "done" = director approved (full approval chain completed).
     const sdDone  = sd  && sd.DirectorApprovalStatus === CrmStatus.APPROVED;
     const qpDone  = qp  && qp.Status === "Confirmed";
@@ -2689,16 +2808,19 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         // Legal Milestones pages — this chip shows only the headline status.
         key: "agreement",
         label: "Agreement",
-        status: agDone ? "done" : ag ? "active" : wc ? "active" : "locked",
-        date: agDone ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
+        status: agRegistered ? "done" : ag ? "active" : wc ? "active" : "locked",
+        date: agRegistered ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
         link: `/crm/agreements?bookingId=${id}`,
-        blockedBy: wc ? null : "Welcome Call must be completed first",
+        blockedBy: wc ? agWaitingOn : "Welcome Call must be completed first",
       },
       {
         key: "noc",
-        label: resolvedNocType === "Bank" ? "Bank NOC" : "NOC",
+        // Handover waits for an NOC only when one was requested, so a booking
+        // handed over with none never needed one — shown done, not open forever.
+        label: !activeNoc && possessionDone ? "NOC (not needed)" : resolvedNocType === "Bank" ? "Bank NOC" : "NOC",
         status: activeNoc && activeNoc.Status === "Issued" ? "done"
                : activeNoc ? "active"
+               : possessionDone ? "done"
                : agRegistered ? "active"
                : "locked",
         date: activeNoc ? d(activeNoc.CreatedAt) : null,
@@ -2719,7 +2841,14 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
              : pn ? d(pn.OfferedDate || pn.CreatedAt)
              : pp ? d(pp.CreatedAt) : null,
         link: "/crm/handover",
-        blockedBy: agRegistered ? null : "Agreement must be Registered first",
+        // Say which possession step the handover is waiting on.
+        blockedBy: !agRegistered ? "Agreement must be Registered first"
+          : possessionDone ? null
+          : !pp || pp.Status !== "Ready" ? "Next: pre-possession check to be Ready (documents, quality inspection, utilities, dues)"
+          : !pn ? "Next: send the possession notice"
+          : pn.Status !== "Acknowledged" ? `Next: the customer to acknowledge the possession notice (it is ${pn.Status})`
+          : !ho ? "Next: schedule the handover"
+          : `Next: complete the handover (it is ${ho.Status}) — snags resolved, keys handed, dues confirmed`,
       },
       {
         key: "sales_deed",

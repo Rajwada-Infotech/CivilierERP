@@ -53,6 +53,8 @@ const INVOICE_TYPE_LABEL = {
   Maintenance: "Maintenance Charges",
   Other: "Other Charges",
   OnAccount: "On-Account Payment",
+  Final: "Final Invoice (Grand Total)",
+  TransferFee: "Transfer Fee (Resale)",
 };
 
 // Data-URL ("data:image/png;base64,....") -> Buffer pdfkit can embed, or
@@ -73,7 +75,7 @@ function decodeLogo(dataUrl) {
 async function fetchInvoiceData(pool, invoiceId) {
   const result = await pool.request().input("id", sql.Int, invoiceId).query(`
     SELECT
-      inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.CreatedAt, inv.Status, inv.MilestoneId, inv.OnAccountPaymentId,
+      inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.CreatedAt, inv.Status, inv.MilestoneId, inv.OnAccountPaymentId, inv.ResaleId,
       b.Id AS BookingId, b.BookingNo, b.UnitNo, b.BlockName, b.ProjectName, b.AreaSqFt, b.RatePerSqFt, b.GrandTotal, b.HsnCode,
       b.TotalGstAmount, b.UnitParkingGstRate,
       a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email,
@@ -82,7 +84,7 @@ async function fetchInvoiceData(pool, invoiceId) {
       comp.gst_no AS CompanyGst, comp.pan_no AS CompanyPan, comp.phone AS CompanyPhone, comp.email AS CompanyEmail,
       comp.logo AS CompanyLogo,
       proj.name AS ProjectFullName, proj.rera_no AS ProjectRera,
-      c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode,
+      c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode, c.GstNo AS CustomerGst,
       m.MilestoneNo, m.MilestoneName, m.PaidDate AS MilestonePaidDate, m.PaymentMode AS MilestonePaymentMode,
       oa.ReceiptNo AS OnAccountReceiptNo, oa.ReceivedDate AS OnAccountReceivedDate, oa.PaymentMode AS OnAccountPaymentMode
     FROM dbo.CrmInvoice inv
@@ -105,6 +107,24 @@ async function fetchInvoiceData(pool, invoiceId) {
   // (dividing the raw GST amount by 1) for any booking with GrandTotal
   // left 0/NULL instead of falling back to "no split" like getGstSplit()
   // correctly does.
+  // A resale's transfer fee: billed to the NEW buyer (the booking is still
+  // the seller's when it is issued), with the fee's own GST / HSN — a
+  // service, not the property's rate.
+  if (row.ResaleId) {
+    const f = (await pool.request().input("rid", sql.Int, row.ResaleId).query(`
+      SELECT r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, r.DeveloperFeeHsnCode, r.DeveloperFeeGstRate,
+             c.CustomerName, c.Mobile, c.Email, c.Address, c.City, c.State, c.Pincode, c.GstNo
+      FROM dbo.CrmUnitResale r LEFT JOIN dbo.CrmCustomer c ON c.Id = r.ToCustomerId WHERE r.Id = @rid`)).recordset[0];
+    if (f) {
+      Object.assign(row, {
+        ApplicantName: f.CustomerName, Mobile: f.Mobile, Email: f.Email,
+        CustomerAddress: f.Address, CustomerCity: f.City, CustomerState: f.State, CustomerPincode: f.Pincode, CustomerGst: f.GstNo,
+        HsnCode: f.DeveloperFeeHsnCode, UnitParkingGstRate: f.DeveloperFeeGstRate,
+        InvBase: Number(f.DeveloperFeeAmount) || 0, InvGst: Number(f.DeveloperFeeGstAmount) || 0,
+      });
+      return row;
+    }
+  }
   const { gstAmount, baseAmount } = await getGstSplit(pool, row.BookingId, Number(row.Amount) || 0);
   row.InvGst = gstAmount;
   row.InvBase = baseAmount;
@@ -187,7 +207,9 @@ function renderInvoicePdfBuffer(d) {
       .text(d.ApplicantName || "-", left, blockTop + 14, { width: colW, continued: false })
       .text([d.CustomerAddress, d.CustomerCity, d.CustomerState, d.CustomerPincode].filter(Boolean).join(", ") || "-", { width: colW })
       .text(d.Mobile ? `Mobile: ${d.Mobile}` : "", { width: colW })
-      .text(d.Email ? `Email: ${d.Email}` : "", { width: colW });
+      .text(d.Email ? `Email: ${d.Email}` : "", { width: colW })
+      // A GST-registered buyer's GSTIN (migration 568) — needed for their input credit.
+      .text(d.CustomerGst ? `GSTIN: ${d.CustomerGst}` : "", { width: colW });
 
     const blockRightColX = left + colW + 20;
     doc.font(F.bold).fontSize(9).fillColor("#0f172a").text("BOOKING REFERENCE", blockRightColX, blockTop);

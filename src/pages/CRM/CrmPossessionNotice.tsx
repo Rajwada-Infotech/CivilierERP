@@ -25,6 +25,7 @@ import { CrmDataTable, CrmRowMenu, type CrmColumn, type RowMenuItem } from "@/co
 import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
 import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/possession-notice";
 const DELIVERY_MODES = ["Email", "Post", "Courier", "InPerson"];
@@ -169,7 +170,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
                 <option value="">Select booking…</option>
                 {(eligible as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>
-                    {b.BookingNo} — {b.ApplicantName} ({b.UnitNo})
+                    {b.BookingNo} — <ApplicantNames name={b.ApplicantName} bookingId={b.BookingId} applicationId={b.ApplicationId} /> ({b.UnitNo})
                   </option>
                 ))}
               </SearchableNativeSelect>
@@ -489,7 +490,7 @@ const CrmPossessionNotice: React.FC = () => {
       </span>
     ) },
     { key: "applicant", header: "Applicant", sortKey: "ApplicantName", cell: (n) => (
-      <span className="font-medium block truncate max-w-[220px]" title={n.ApplicantName}>{n.ApplicantName}</span>
+      <span className="font-medium block truncate max-w-[220px]" title={n.ApplicantName}><ApplicantNames name={n.ApplicantName} bookingId={n.BookingId} applicationId={n.ApplicationId} /></span>
     ) },
     { key: "booking", header: "Booking", sortKey: "BookingNo", className: "hidden md:table-cell",
       cell: (n) => <span className="text-xs text-muted-foreground whitespace-nowrap">{n.BookingNo}</span> },
@@ -628,7 +629,7 @@ const CrmPossessionNotice: React.FC = () => {
             </DialogHeader>
             {sentTarget && (
               <div className="rounded-lg bg-muted/30 border border-border px-3 py-2 text-xs text-muted-foreground">
-                {sentTarget.NoticeNo} · {sentTarget.ApplicantName}
+                {sentTarget.NoticeNo} · <ApplicantNames name={sentTarget.ApplicantName} bookingId={sentTarget.BookingId} applicationId={sentTarget.ApplicationId} />
               </div>
             )}
             <p className="text-sm text-muted-foreground">Confirm the channel used to dispatch this notice.</p>
@@ -721,7 +722,7 @@ const CrmPossessionNotice: React.FC = () => {
               </DialogTitle>
             </DialogHeader>
             <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
-              {deleteTarget?.NoticeNo} · {deleteTarget?.ApplicantName}
+              {deleteTarget?.NoticeNo} · <ApplicantNames name={deleteTarget?.ApplicantName} bookingId={deleteTarget?.BookingId} applicationId={deleteTarget?.ApplicationId} />
             </div>
             <p className="text-sm text-muted-foreground">
               This will permanently remove the notice and allow a new one to be issued for this booking. Only Draft notices can be deleted.

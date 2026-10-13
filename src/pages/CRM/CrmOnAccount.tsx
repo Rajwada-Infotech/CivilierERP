@@ -19,6 +19,7 @@ import {
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/payments";
 
@@ -195,7 +196,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
           {/* Booking context */}
           <div className="flex flex-wrap items-center gap-2 text-[0.6875rem] text-muted-foreground border border-border rounded-lg px-2.5 py-1.5 bg-muted/10">
             <Building2 size={11} />
-            <span className="font-medium text-foreground">{deposit.ApplicantName}</span>
+            <span className="font-medium text-foreground"><ApplicantNames name={deposit.ApplicantName} bookingId={deposit.BookingId} /></span>
             <span>·</span>
             <span className="font-mono">{deposit.BookingNo}</span>
             {deposit.ProjectName && <><span>·</span><span>{deposit.ProjectName}</span></>}
@@ -655,7 +656,7 @@ export default function CrmOnAccount() {
 
                         {/* Customer & Booking */}
                         <td className="px-2.5 py-2 max-w-[220px]">
-                          <div className="font-medium text-[0.8125rem] truncate">{d.ApplicantName}</div>
+                          <div className="font-medium text-[0.8125rem] truncate"><ApplicantNames name={d.ApplicantName} bookingId={d.BookingId} /></div>
                           <div className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">
                             <span className="font-mono">{d.BookingNo}</span>
                             {d.ProjectName && <> · {d.ProjectName}</>}

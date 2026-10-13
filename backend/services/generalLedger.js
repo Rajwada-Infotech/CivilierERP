@@ -1283,7 +1283,8 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
     .query(`
       SELECT RPPaymentID, RPAmount, RPDocDate, RPDepositBankId, RPCustomerName,
              RPReceivedFrom, RPCompanyId, RPProjectId, SourceSaleInvoiceId, DocNo,
-             ContractId, CrmMilestoneId, CrmBookingId, CrmApplicationId
+             ContractId, CrmMilestoneId, CrmBookingId, CrmApplicationId,
+             ${(await pool.request().query("SELECT COL_LENGTH('dbo.ReceivedPayment', 'SourceCrmResaleId') AS c")).recordset[0].c != null ? "SourceCrmResaleId" : "CAST(NULL AS INT) AS SourceCrmResaleId"}
       FROM dbo.ReceivedPayment
       WHERE RPPaymentID = @RPPaymentID
     `);
@@ -1367,10 +1368,16 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
   // narration with who it's actually from since the pooled head itself
   // carries no per-customer breakdown.
   const isStandaloneAdvance =
-    !rp.SourceSaleInvoiceId && !rp.ContractId && !rp.CrmMilestoneId && !rp.CrmBookingId && !rp.CrmApplicationId;
+    !rp.SourceSaleInvoiceId && !rp.ContractId && !rp.CrmMilestoneId && !rp.CrmBookingId && !rp.CrmApplicationId && !rp.SourceCrmResaleId;
 
   let customerHeadId = null;
-  if (isStandaloneAdvance) {
+  if (rp.SourceCrmResaleId) {
+    // A resale's transfer fee, paid by the NEW buyer: credits their own
+    // customer account (the fee invoice debited it), never a name lookup.
+    const buyer = (await pool.request().input("rid", sql.Int, rp.SourceCrmResaleId)
+      .query("SELECT ToCustomerId FROM dbo.CrmUnitResale WHERE Id = @rid")).recordset[0];
+    if (buyer?.ToCustomerId) customerHeadId = await require("./crmLedger").ensureCrmCustomerLedgerHead(pool, buyer.ToCustomerId, userEmail);
+  } else if (isStandaloneAdvance) {
     customerHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
   } else {
     if (rp.SourceSaleInvoiceId) {

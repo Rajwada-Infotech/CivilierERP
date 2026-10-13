@@ -344,12 +344,47 @@ export const MODULE_CONFIG: Record<
   // centralized inbox, only via CrmRefunds.tsx's own inline actions —
   // inconsistent with every sibling CRM module (cancellations, agreements,
   // brokerage, NOC, booking amendments), which all appear in both places.
+  "crm-transfer-deeds": {
+    icon: ClipboardList,
+    color: "text-teal-600 bg-teal-600/10",
+    navPath: "/crm/transfer-deeds",
+    apiEndpoint: "/api/crm/transfer-deeds",
+    label: "Transfer Deed (Legal Head)",
+  },
+  "crm-transfer-deed-date": {
+    icon: ClipboardList,
+    color: "text-teal-600 bg-teal-600/10",
+    navPath: "/crm/transfer-deeds",
+    apiEndpoint: "/api/crm/transfer-deeds",
+    label: "Transfer Deed (Date)",
+  },
   "crm-resales": {
     icon: Undo2,
     color: "text-teal-600 bg-teal-600/10",
     navPath: "/crm/resales",
     apiEndpoint: "/api/crm/resales",
     label: "Property Resale & Buy-back",
+  },
+  "crm-credit-notes": {
+    icon: Undo2,
+    color: "text-orange-600 bg-orange-600/10",
+    navPath: "/crm/credit-notes",
+    apiEndpoint: "/api/crm/refunds/gst-notes",
+    label: "Credit Note",
+  },
+  "crm-credit-note-cancel": {
+    icon: Undo2,
+    color: "text-red-600 bg-red-600/10",
+    navPath: "/crm/credit-notes",
+    apiEndpoint: "/api/crm/refunds/gst-notes/cancel-requests",
+    label: "Credit Note (cancel)",
+  },
+  "crm-ownership-changes": {
+    icon: Undo2,
+    color: "text-teal-600 bg-teal-600/10",
+    navPath: "/crm/ownership-changes",
+    apiEndpoint: "/api/crm/ownership-changes",
+    label: "Ownership Change",
   },
   "crm-refunds": {
     icon: Undo2,
@@ -442,7 +477,7 @@ const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "d
 // approvalService's MODULE_APPROVER_ROLE_OVERRIDES; this only controls
 // button visibility (and which /:id/<suffix>/approve path gets hit) here.
 export const DATE_APPROVER_ROLES = ["super_admin"];
-export const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director", "crm-refunds-finance": "finance" };
+export const SUB_GATE_SUFFIX: Record<string, string> = { "crm-transfer-deeds": "legal", "crm-transfer-deed-date": "date", "crm-agreement-date": "date", "crm-sales-deed-director": "director", "crm-refunds-finance": "finance" };
 export const REFUND_FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
 export const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 
@@ -518,6 +553,11 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "crm-booking-amendment": "sales",
   "crm-refunds": "sales",
   "crm-resales": "sales",
+  "crm-transfer-deeds": "sales",
+  "crm-transfer-deed-date": "sales",
+  "crm-ownership-changes": "sales",
+  "crm-credit-notes": "sales",
+  "crm-credit-note-cancel": "sales",
 };
 
 export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
@@ -585,6 +625,15 @@ export function openInModulePath(item: InboxItem, navPath: string): string {
   }
   // crm-agreements/crm-agreement-date use "?id=" (opens the read-only detail
   // dialog directly via CrmApplication.tsx-style searchParams.get("id") effects).
+  if (item.Module === "crm-transfer-deeds" || item.Module === "crm-transfer-deed-date") {
+    return hasValidId ? `${navPath}?id=${item.RecordId}&tab=${encodeURIComponent("Legal & Approval")}` : navPath;
+  }
+  if (item.Module === "crm-credit-notes" || item.Module === "crm-credit-note-cancel") {
+    return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
+  }
+  if (item.Module === "crm-ownership-changes") {
+    return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
+  }
   if (item.Module === "crm-agreements" || item.Module === "crm-agreement-date") {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }

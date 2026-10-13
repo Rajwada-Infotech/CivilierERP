@@ -342,14 +342,18 @@ async function recalculateBookingGst(pool, bookingId) {
   // grandTotal actually collects to the paisa.
   const parkingGstAmount = round2(parkingTotal - parkingBase);
   const unitParkingGstAmount = round2(unitGstAmount + parkingGstAmount);
-  const totalGstAmount = round2(unitParkingGstAmount + extraWorkGstAmount);
+  // What approved credit notes took off this booking (migration 567) stays
+  // off through any re-price — the reduced value is the agreed value now.
+  const cn = (await pool.request().input("bid", sql.Int, bookingId).query(
+    "SELECT ISNULL(CreditNoteTotal, 0) AS T, ISNULL(CreditNoteGst, 0) AS G FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0] || { T: 0, G: 0 };
+  const totalGstAmount = round2(unitParkingGstAmount + extraWorkGstAmount - Number(cn.G || 0));
 
   // GrandTotal = Unit (base + its GST) + Parking (base + its GST, already
   // inclusive in parkingTotal) + Extra Charges (base + its GST, already
   // inclusive in extraChargesTotal). Every rupee of tax shown anywhere on
   // this booking is now actually inside the amount the milestone schedule
   // collects.
-  const grandTotal = round2(totalValue + unitGstAmount + parkingTotal + extraChargesTotal);
+  const grandTotal = round2(totalValue + unitGstAmount + parkingTotal + extraChargesTotal - Number(cn.T || 0));
 
   await pool.request()
     .input("bid", sql.Int, bookingId)

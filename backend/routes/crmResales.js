@@ -86,7 +86,20 @@ router.get("/", requirePageRight("crm-resales", "view"), async (req, res) => {
       "COALESCE((SELECT ProjectId FROM dbo.PlotMaster WHERE Id = r.PlotId), (SELECT ProjectId FROM dbo.UnitMaster WHERE Id = r.UnitId), (SELECT ProjectId FROM dbo.CrmBooking WHERE Id = r.FromBookingId))", "").trim());
     if (req.query.status) { r0.input("st", sql.NVarChar(30), req.query.status); conds.push("r.Status = @st"); }
     const result = await r0.query(`${SELECT} WHERE ${conds.join(" AND ")} ORDER BY r.CreatedAt DESC`);
-    res.json(result.recordset);
+    // Where each open case stands (the same stage engine as the case page).
+    const rows = result.recordset;
+    for (const row of rows) {
+      if (!row.BookingIds || !["Pending", "Approved"].includes(row.Status)) continue;
+      try {
+        const st = await require("../services/crmResaleCase").caseState(pool, row.Id);
+        const cur = st.stages.find((s) => s.key === st.currentStage);
+        row.StageLabel = cur?.label || null;
+        row.StageNo = cur ? st.stages.indexOf(cur) + 1 : null;
+        row.StageCount = st.stages.length;
+        row.StageTodo = cur ? cur.checks.filter((c) => !c.ok).length : 0;
+      } catch { /* the list still loads */ }
+    }
+    res.json(rows);
   } catch (e) {
     console.error("[crm-resales] GET:", e.message);
     res.status(500).json({ error: "Failed to load resales" });
@@ -105,126 +118,11 @@ router.get("/fee-gst", requirePageRight("crm-resales", "view"), async (req, res)
   }
 });
 
-router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => {
-  const b = req.body || {};
-  const plotId = b.PlotId != null && b.PlotId !== "" ? parseInt(b.PlotId, 10) : null;
-  const unitId = b.UnitId != null && b.UnitId !== "" ? parseInt(b.UnitId, 10) : null;
-
-  // Mirrors CK_CrmUnitResale_OneTarget so the caller gets a readable message
-  // instead of a raw constraint violation.
-  if ((plotId == null) === (unitId == null))
-    return res.status(400).json({ error: "Name exactly one of PlotId or UnitId — a resale changes hands for one thing." });
-
-  try {
-    const pool = getPool();
-
-    // The outgoing side is derived from the live booking rather than trusted
-    // from the request: whoever currently holds the plot IS the seller, and
-    // letting a caller name someone else would silently reassign ownership.
-    let fromBookingId = null;
-    let fromCustomerId = null;
-    let originalValue = null;
-    if (plotId != null) {
-      const held = await pool.request().input("p", sql.Int, plotId).query(`
-        SELECT TOP 1 bp.BookingId, bp.AllocatedValue, a.CustomerId
-        FROM dbo.CrmBookingPlot bp
-        JOIN dbo.CrmBooking bk ON bk.Id = bp.BookingId
-        JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
-        WHERE bp.PlotId = @p AND bp.Status = N'${LineStatus.ACTIVE}'
-          AND bk.IsActive = 1 AND bk.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
-        ORDER BY bp.Id DESC
-      `);
-      const row = held.recordset[0];
-      if (!row)
-        return res.status(400).json({ error: "That plot is not currently held by anyone — there is nothing to resell." });
-      // Once the owner has bought the villa on this plot, the plot alone can't
-      // change hands: the villa contract would be left with the old owner on
-      // land they no longer hold. Moving a villa contract is a separate flow.
-      const villaBooked = await pool.request().input("p", sql.Int, plotId).query(`
-        SELECT TOP 1 vb.BookingNo
-        FROM dbo.PlotMaster p
-        JOIN dbo.CrmBooking vb ON vb.UnitId = p.ConvertedUnitId
-        WHERE p.Id = @p AND vb.IsActive = 1 AND vb.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')`);
-      if (villaBooked.recordset.length)
-        return res.status(409).json({ error: `The villa on this plot is already booked (${villaBooked.recordset[0].BookingNo}). A plot with a booked villa can't be resold as bare land.` });
-      // An open application or hold on the villa is a claim made under the
-      // current owner — it has to be closed before the land changes hands.
-      const villaClaim = (await pool.request().input("p", sql.Int, plotId).query(`
-        SELECT TOP 1 COALESCE(a.ApplicationNo, N'a hold') AS Ref
-        FROM dbo.PlotMaster p
-        LEFT JOIN dbo.CrmApplication a ON a.PreferredUnitId = p.ConvertedUnitId AND a.IsActive = 1
-          AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')
-        LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = N'Unit' AND h.EntityId = p.ConvertedUnitId
-          AND h.Status = N'Active' AND h.HoldUntil >= SYSDATETIME()
-        WHERE p.Id = @p AND p.ConvertedUnitId IS NOT NULL AND (a.Id IS NOT NULL OR h.Id IS NOT NULL)`)).recordset[0];
-      if (villaClaim)
-        return res.status(409).json({ error: `The villa on this plot has an open application or hold (${villaClaim.Ref}). Close it before reselling the plot.` });
-      fromBookingId = row.BookingId;
-      fromCustomerId = row.CustomerId;
-      // Snapshotted so a later rate change cannot restate an already-agreed gain.
-      originalValue = row.AllocatedValue;
-    } else {
-      // A unit resale is the villa built on a plot (see /complete) — never a
-      // flat or shop, which this flow can't transfer. The seller is whoever
-      // holds the villa now, read from the live booking like a plot's.
-      const held = await pool.request().input("u", sql.Int, unitId).query(`
-        SELECT TOP 1 bk.Id AS BookingId, bk.TotalValue, a.CustomerId
-        FROM dbo.CrmBooking bk
-        JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
-        WHERE bk.UnitId = @u AND bk.IsActive = 1 AND bk.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')
-        ORDER BY bk.Id DESC`);
-      const onPlot = (await pool.request().input("u", sql.Int, unitId)
-        .query("SELECT COUNT(*) AS n FROM dbo.PlotMaster WHERE ConvertedUnitId = @u")).recordset[0].n > 0;
-      if (!onPlot)
-        return res.status(400).json({ error: "Only a villa built on a plot can be resold here — this unit isn't one." });
-      const row = held.recordset[0];
-      if (!row)
-        return res.status(400).json({ error: "That villa is not currently held by anyone — there is nothing to resell." });
-      fromBookingId = row.BookingId;
-      fromCustomerId = row.CustomerId;
-      originalValue = row.TotalValue;
-    }
-
-    // The fee's GST comes from the masters, never from the request.
-    let feeGst;
-    try {
-      feeGst = await resolveResaleFeeGst(pool, num(b.DeveloperFeeAmount), { landSale: plotId != null });
-    } catch (e) {
-      if (e instanceof GstSetupError) return res.status(400).json({ error: e.message });
-      throw e;
-    }
-
-    const result = await pool.request()
-      .input("plot", sql.Int, plotId)
-      .input("unit", sql.Int, unitId)
-      .input("fb", sql.Int, fromBookingId)
-      .input("fc", sql.Int, fromCustomerId)
-      .input("tc", sql.Int, b.ToCustomerId != null && b.ToCustomerId !== "" ? parseInt(b.ToCustomerId, 10) : null)
-      .input("date", sql.Date, b.ResaleDate || null)
-      .input("agreed", sql.Decimal(18, 2), num(b.AgreedValue))
-      .input("orig", sql.Decimal(18, 2), originalValue != null ? originalValue : num(b.OriginalValue))
-      .input("fee", sql.Decimal(18, 2), num(b.DeveloperFeeAmount))
-      .input("feeGst", sql.Decimal(18, 2), feeGst.gstAmount)
-      .input("feeHsn", sql.VarChar(20), feeGst.hsnCode)
-      .input("feeRate", sql.Decimal(5, 2), feeGst.rate)
-      .input("notes", sql.NVarChar(1000), b.Notes || null)
-      .input("by", sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmUnitResale
-          (PlotId, UnitId, FromBookingId, FromCustomerId, ToCustomerId, ResaleDate,
-           AgreedValue, OriginalValue, DeveloperFeeAmount, DeveloperFeeGstAmount, DeveloperFeeHsnCode, DeveloperFeeGstRate,
-           Status, Notes, CreatedBy)
-        OUTPUT INSERTED.Id
-        VALUES (@plot, @unit, @fb, @fc, @tc, @date,
-                @agreed, @orig, @fee, @feeGst, @feeHsn, @feeRate,
-                N'${ResaleStatus.PENDING}', @notes, @by)
-      `);
-    res.status(201).json({ success: true, id: result.recordset[0].Id });
-  } catch (e) {
-    console.error("[crm-resales] POST:", e.message);
-    res.status(500).json({ error: "Failed to record the resale" });
-  }
-});
+// POST / was the first way to open a resale: it named one booking and missed
+// the rest of the property (a villa's land booking). Every case now opens
+// through POST /deal, which takes the whole property (movingBookings).
+router.post("/", requirePageRight("crm-resales", "create"), (_req, res) =>
+  res.status(410).json({ error: "Open a resale or buy-back from Resale → Resale Cases (POST /api/crm/resales/deal)" }));
 
 // Completing a resale is what actually moves the plot: the outgoing booking
 // line becomes 'Transferred' and the incoming booking takes it over.
@@ -249,7 +147,7 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
     if (!resale) return res.status(404).json({ error: "Resale not found" });
     if (resale.Status === ResaleStatus.COMPLETED) return res.status(400).json({ error: "This resale is already completed" });
     if (resale.Status === ResaleStatus.CANCELLED) return res.status(400).json({ error: "This resale was cancelled" });
-    if (resale.BookingIds) return res.status(400).json({ error: "Complete this one from Resale & Buy-back — it passes the booking to the new buyer" });
+    if (resale.BookingIds) return res.status(400).json({ error: "Complete this one from Resale → Resale Cases — it passes the booking to the new buyer" });
 
     // The new buyer's ownership record. They paid the original buyer for the
     // land, not the developer, so it carries no value owed to the developer
@@ -392,11 +290,25 @@ router.put("/:id/cancel", requirePageRight("crm-resales", "edit"), async (req, r
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    // Its transfer deed goes with it — unless the deed is already signed or
+    // registered: that is a legal instrument now, and is undone by a deed of
+    // its own, not by cancelling the case.
+    const deed = (await pool.request().input("id", sql.Int, id).query(
+      "SELECT TOP 1 Id, DeedNo, Status FROM dbo.CrmTransferDeed WHERE ResaleId = @id AND IsActive = 1 AND Status <> N'Cancelled'")).recordset[0];
+    if (deed && ["Executed", "Registered"].includes(deed.Status)) {
+      return res.status(409).json({ error: `${deed.DeedNo} is already ${deed.Status === "Registered" ? "registered" : "signed"} — the case can't be cancelled.` });
+    }
     const r = await pool.request().input("id", sql.Int, id).input("by", sql.Int, actorId(req))
       .query(`UPDATE dbo.CrmUnitResale SET Status = N'${ResaleStatus.CANCELLED}', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
               WHERE Id = @id AND IsActive = 1 AND Status <> N'${ResaleStatus.COMPLETED}'`);
     if (!r.rowsAffected[0])
       return res.status(400).json({ error: "Not found, or already completed — a completed resale has already moved the plot and cannot be cancelled here." });
+    if (deed) {
+      await pool.request().input("d", sql.Int, deed.Id).input("by", sql.Int, actorId(req))
+        .query("UPDATE dbo.CrmTransferDeed SET Status = N'Cancelled', UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @d");
+      await pool.request().input("d", sql.Int, deed.Id).input("u", sql.Int, actorId(req))
+        .query("INSERT INTO dbo.CrmTransferDeedLog (DeedId, Action, ActorType, ActorUserId, Remarks) VALUES (@d, N'Cancelled with its case', N'Staff', @u, NULL)");
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-resales] PUT /:id/cancel:", e.message);
@@ -476,7 +388,7 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
   const toCustomerId = b.ToCustomerId != null && b.ToCustomerId !== "" ? parseInt(b.ToCustomerId, 10) : null;
   if (kind === "Resale" && !Number.isInteger(toCustomerId)) return res.status(400).json({ error: "Choose the new buyer" });
   const agreed = num(b.AgreedValue);
-  if (kind === "BuyBack" && !(agreed > 0)) return res.status(400).json({ error: "Enter the agreed buy-back price" });
+  if (!(agreed > 0)) return res.status(400).json({ error: kind === "BuyBack" ? "Enter the agreed buy-back price" : "Enter the price the buyers agreed (it goes on the transfer and the GL)" });
   try {
     const pool = getPool();
     const { movingBookings, openResaleOn } = require("../services/crmResaleTransfer");
@@ -485,6 +397,9 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
     const seller = bookings[0].CustomerId;
     if (bookings.some((x) => x.CustomerId !== seller)) return res.status(409).json({ error: "The plot and villa are held by different customers — they can't change hands as one" });
     if (kind === "Resale" && toCustomerId === seller) return res.status(400).json({ error: "The new buyer is the same customer as the seller" });
+    const { conveyedReason } = require("../services/crmResaleTransfer");
+    const conveyed = await conveyedReason(pool, bookings.map((x) => x.Id));
+    if (conveyed) return res.status(409).json({ error: conveyed });
     const open = await openResaleOn(pool, bookings.map((x) => x.Id));
     if (open) return res.status(409).json({ error: `This property already has an open ${open.Kind === "BuyBack" ? "buy-back" : "resale"} (#${open.Id})` });
     // The row names one thing (PlotId or UnitId): the villa or unit, else the plot.
@@ -571,6 +486,12 @@ router.put("/:id/transfer", requirePageRight("crm-resales", "edit"), async (req,
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const pool = getPool();
+  // Every stage of the case first: seller clear, NOC, buyer, approval, fee
+  // paid, deed of assignment registered (services/crmResaleCase.js).
+  try {
+    const cur = (await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmUnitResale WHERE Id = @id")).recordset[0];
+    if (cur && cur.Status === "Approved") await caseSvc.assertReadyToFinish(pool, id);
+  } catch (e) { return caseErr(res, e, "PUT /:id/transfer (case check)"); }
   const tx = new sql.Transaction(pool);
   try {
     await tx.begin();
@@ -578,10 +499,23 @@ router.put("/:id/transfer", requirePageRight("crm-resales", "edit"), async (req,
       "SELECT * FROM dbo.CrmUnitResale WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id AND IsActive = 1")).recordset[0];
     if (!resale) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
     if (resale.Kind !== "Resale") { await tx.rollback(); return res.status(400).json({ error: "A buy-back completes when Finance pays it" }); }
-    if (resale.Status !== "Approved") { await tx.rollback(); return res.status(400).json({ error: `Approve it first (it is ${resale.Status})` }); }
+    if (resale.Status !== "Approved") { await tx.rollback(); return res.status(resale.Status === "Completed" ? 409 : 400).json({ error: resale.Status === "Completed" ? "Already done — this property has changed hands" : `Approve it first (it is ${resale.Status})` }); }
     const { endorseToBuyer } = require("../services/crmResaleTransfer");
     const done = await endorseToBuyer(tx, resale, actorId(req));
     await tx.commit();
+    // The new buyer: portal access to their property, and the booking's staff
+    // are asked to welcome them (their bank details / loan follow from there).
+    // Never fatal — the transfer itself is done.
+    try {
+      if (done.applicationIds?.[0]) await require("../services/crmPortalProvision").ensurePortalUser(pool, done.applicationIds[0]);
+    } catch (pe) { console.warn("[crm-resales] buyer portal provisioning failed:", pe.message); }
+    try {
+      const { emitNotification } = require("../services/notify");
+      const bk = (await pool.request().input("b", sql.Int, resale.FromBookingId).input("c", sql.Int, resale.ToCustomerId).query(
+        "SELECT b.BookingNo, b.AssignedTo, (SELECT CustomerName FROM dbo.CrmCustomer WHERE Id = @c) AS Buyer FROM dbo.CrmBooking b WHERE b.Id = @b")).recordset[0];
+      if (bk?.AssignedTo) await emitNotification(pool, bk.AssignedTo, "crm_resale_transferred", "New owner — welcome call due",
+        `${bk.BookingNo} now belongs to ${bk.Buyer} (resale case #${id}). Make the welcome call and collect their bank / loan details.`, id, "crm_resale");
+    } catch (ne) { console.warn("[crm-resales] new-owner notification failed:", ne.message); }
     const actor = req.user?.email || req.user?.name || String(actorId(req));
     const warnings = [];
     const { postCrmResaleTransferToGL, postCrmResaleFeeToGL } = require("../services/crmLedger");
@@ -610,6 +544,12 @@ router.put("/:id/transfer", requirePageRight("crm-resales", "edit"), async (req,
 router.put("/:id/send-to-finance", requirePageRight("crm-resales", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
+  // The buy-back's case first: seller clear (dues, loan NOC), approved, and
+  // its cancellation deed registered / signed letter verified.
+  try {
+    const cur = (await getPool().request().input("id", sql.Int, id).query("SELECT Status, Kind FROM dbo.CrmUnitResale WHERE Id = @id")).recordset[0];
+    if (cur && cur.Kind === "BuyBack" && cur.Status === "Approved") await caseSvc.assertReadyToFinish(getPool(), id);
+  } catch (e) { return caseErr(res, e, "PUT /:id/send-to-finance (case check)"); }
   const bankId = req.body?.BankLHeadId != null && req.body.BankLHeadId !== "" ? parseInt(req.body.BankLHeadId, 10) : null;
   const pool = getPool();
   const tx = new sql.Transaction(pool);
@@ -619,7 +559,7 @@ router.put("/:id/send-to-finance", requirePageRight("crm-resales", "edit"), asyn
       "SELECT * FROM dbo.CrmUnitResale WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id AND IsActive = 1")).recordset[0];
     if (!resale) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
     if (resale.Kind !== "BuyBack") { await tx.rollback(); return res.status(400).json({ error: "Only a buy-back is paid by Finance" }); }
-    if (resale.Status !== "Approved") { await tx.rollback(); return res.status(400).json({ error: `Approve it first (it is ${resale.Status})` }); }
+    if (resale.Status !== "Approved") { await tx.rollback(); return res.status(resale.Status === "Completed" ? 409 : 400).json({ error: resale.Status === "Completed" ? "Already done — this property has changed hands" : `Approve it first (it is ${resale.Status})` }); }
     if (resale.PayoutNewPaymentId) { await tx.rollback(); return res.status(409).json({ error: "Its payout voucher is already with Finance" }); }
     const { raiseBuyBackVoucher } = require("../services/crmResaleTransfer");
     const v = await raiseBuyBackVoucher(tx, resale, {
@@ -635,6 +575,56 @@ router.put("/:id/send-to-finance", requirePageRight("crm-resales", "edit"), asyn
     console.error("[crm-resales] PUT /:id/send-to-finance:", e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to send it to Finance" });
   }
+});
+
+// ── The case: stages, seller clearance, NOC, documents (services/crmResaleCase.js) ──
+const caseSvc = require("../services/crmResaleCase");
+const caseUpload = require("multer")({
+  storage: require("multer").memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => cb(null, ["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(file.mimetype)),
+});
+const caseErr = (res, e, where) => {
+  if (e.status) return res.status(e.status).json({ error: e.message });
+  console.error(`[crm-resales] ${where}:`, e.message);
+  res.status(500).json({ error: "Something went wrong — please try again" });
+};
+const withCase = (fn) => async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try { res.json(await fn(getPool(), id, req)); } catch (e) { caseErr(res, e, `${req.method} ${req.path}`); }
+};
+router.get("/:id/case", requirePageRight("crm-resales", "view"), withCase((db, id) => caseSvc.caseState(db, id)));
+router.put("/:id/case/clearance", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.confirmClearance(db, id, actorId(req))));
+router.put("/:id/case/seller-loan", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.setSellerLoan(db, id, req.body?.hasLoan === true, actorId(req))));
+router.put("/:id/case/noc", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.issueNoc(db, id, actorId(req))));
+router.put("/:id/case/buyer-application", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.openBuyerApplication(db, id, actorId(req))));
+router.put("/:id/case/fee-invoice", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.issueFeeInvoice(db, id, actorId(req), req.user?.email || req.user?.name)));
+router.put("/:id/case/fee-payment", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.recordFeePayment(db, id, req.body || {}, actorId(req), req.user?.email || req.user?.name)));
+router.post("/:id/documents", requirePageRight("crm-resales", "edit"), (req, res) => {
+  caseUpload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    const id = parseId(req.params.id);
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
+    if (!req.file) return res.status(400).json({ error: "Attach a PDF or image" });
+    try {
+      await caseSvc.addDocument(getPool(), id, String(req.body?.DocumentType || ""), req.file, req.body?.Remarks, actorId(req));
+      res.status(201).json(await caseSvc.caseState(getPool(), id));
+    } catch (e) { caseErr(res, e, "POST /:id/documents"); }
+  });
+});
+router.put("/:id/documents/:docId/review", requirePageRight("crm-resales", "edit"), withCase((db, id, req) =>
+  caseSvc.reviewDocument(db, id, parseInt(req.params.docId, 10), req.body?.decision, req.body?.remarks, actorId(req))));
+router.get("/:id/documents/:docId/file", requirePageRight("crm-resales", "view"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const f = await caseSvc.documentFile(getPool(), id, parseInt(req.params.docId, 10));
+    if (!f?.FileBase64) return res.status(404).json({ error: "File not found" });
+    res.setHeader("Content-Type", f.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(f.FileName || "document")}"`);
+    res.send(Buffer.from(f.FileBase64, "base64"));
+  } catch (e) { caseErr(res, e, "GET /:id/documents/:docId/file"); }
 });
 
 // GET /:id — one resale / buy-back, with the bookings moving (for the review panel).

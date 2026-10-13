@@ -3,7 +3,7 @@
 // templates: styled header rows, column widths, a frozen header, dropdown
 // (list) validation, and a reader that returns every sheet as rows of strings.
 
-export type XlsxStyle = "default" | "header" | "required" | "note" | "title" | "label";
+export type XlsxStyle = "default" | "header" | "required" | "note" | "title" | "label" | "text";
 export type XlsxCell = string | number | null | undefined | { v: string | number; s: XlsxStyle };
 
 export interface XlsxSheet {
@@ -11,6 +11,8 @@ export interface XlsxSheet {
   rows: XlsxCell[][];
   /** Column widths in characters. */
   widths?: number[];
+  /** Optional whole-column style, same 0-based order as widths. Useful for Text-formatted import columns. */
+  columnStyles?: (XlsxStyle | undefined)[];
   /** Freeze everything above this 1-based row (e.g. 2 keeps row 1 visible). */
   freezeBelowRow?: number;
   /** Dropdown validation: `sqref` e.g. "A2:A500", `formula` e.g. "Masters!$F$2:$F$40". */
@@ -24,6 +26,7 @@ const STYLE_ID: Record<XlsxStyle, number> = {
   note: 3,
   title: 4,
   label: 5,
+  text: 6,
 };
 
 const esc = (v: string) =>
@@ -66,13 +69,14 @@ const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   </fills>
   <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="6">
+  <cellXfs count="7">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
     <xf numFmtId="0" fontId="4" fillId="4" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
   </cellXfs>
 </styleSheet>`;
 
@@ -94,9 +98,15 @@ function sheetXml(sh: XlsxSheet): string {
     })
     .join("");
 
-  const cols = sh.widths?.length
-    ? `<cols>${sh.widths
-        .map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`)
+  const colCount = Math.max(sh.widths?.length || 0, sh.columnStyles?.length || 0);
+  const cols = colCount
+    ? `<cols>${Array.from({ length: colCount })
+        .map((_, i) => {
+          const w = sh.widths?.[i] || 12;
+          const style = sh.columnStyles?.[i] ? STYLE_ID[sh.columnStyles[i]!] : 0;
+          const styleAttr = style ? ` style="${style}"` : "";
+          return `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"${styleAttr}/>`;
+        })
         .join("")}</cols>`
     : "";
   const freeze =
@@ -118,7 +128,7 @@ function sheetXml(sh: XlsxSheet): string {
 export async function buildWorkbook(sheets: XlsxSheet[]): Promise<Blob> {
   const { zipSync, strToU8 } = await import("fflate");
   const wb = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="0"/></bookViews><sheets>${sheets
     .map((s, i) => `<sheet name="${esc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`)
     .join("")}</sheets></workbook>`;
   const wbRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

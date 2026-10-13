@@ -139,6 +139,9 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
         const idParams = bookingIds.map((id, i) => { invReq.input(`b${i}`, sql.Int, id); return `@b${i}`; }).join(",");
         const invResult = await invReq.query(`
           SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.Status, inv.VoidReason, inv.CreatedAt,
+                 (SELECT ISNULL(SUM(n.TotalAmount), 0) FROM dbo.CrmGstNote n WHERE n.InvoiceId = inv.Id AND n.Status IN (N'Issued', N'TimeBarred')) AS CreditedAmount,
+                 (SELECT TOP 1 n.Id FROM dbo.CrmGstNote n WHERE n.InvoiceId = inv.Id AND n.Status IN (N'Issued', N'TimeBarred') ORDER BY n.Id) AS CreditNoteId,
+                 STUFF((SELECT N', ' + n.DocNo FROM dbo.CrmGstNote n WHERE n.InvoiceId = inv.Id AND n.Status = N'Issued' AND n.DocNo IS NOT NULL FOR XML PATH('')), 1, 2, N'') AS CreditNoteNos,
                  inv.BookingId, inv.MilestoneId,
                  cu.name AS CreatedByName
           FROM dbo.CrmInvoice inv
@@ -195,6 +198,9 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
 
     const result = await req_.query(`
       SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.Status, inv.VoidReason, inv.CreatedAt,
+                 (SELECT ISNULL(SUM(n.TotalAmount), 0) FROM dbo.CrmGstNote n WHERE n.InvoiceId = inv.Id AND n.Status IN (N'Issued', N'TimeBarred')) AS CreditedAmount,
+                 (SELECT TOP 1 n.Id FROM dbo.CrmGstNote n WHERE n.InvoiceId = inv.Id AND n.Status IN (N'Issued', N'TimeBarred') ORDER BY n.Id) AS CreditNoteId,
+                 STUFF((SELECT N', ' + n.DocNo FROM dbo.CrmGstNote n WHERE n.InvoiceId = inv.Id AND n.Status = N'Issued' AND n.DocNo IS NOT NULL FOR XML PATH('')), 1, 2, N'') AS CreditNoteNos,
              b.Id AS BookingId, b.BookingNo,
              COALESCE(proj.name, b.ProjectName) AS ProjectName,
              COALESCE(um.UnitName, b.UnitNo) AS UnitNo,

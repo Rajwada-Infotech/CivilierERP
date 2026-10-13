@@ -34,7 +34,7 @@ router.use(apiRateLimit);
 const CUSTOMER_SELECT = `
   SELECT
     c.Id, c.CustomerNo, c.LeadId, c.CustomerName, c.Mobile, c.AltMobile, c.Email,
-    c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome,
+    c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome, c.GstNo,
     c.Address AS PermanentAddress, c.City AS PermanentCity, c.State AS PermanentState, c.Pincode AS PermanentPincode,
     c.CurrentAddress, c.CurrentCity, c.CurrentState, c.CurrentPincode, c.IsCurrentSameAsPermanent,
     c.DateOfBirth, c.InvoiceMode,
@@ -216,6 +216,46 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
   }
 });
 
+// ── Bulk import (CRM → Customers → Import) ───────────────────────────────────
+// Keep these explicit /import/* routes before /:id. Express route order matters:
+// otherwise "import" is treated as an id and the import UI cannot fetch its
+// field contract.
+router.get("/import/fields", requirePageRight("crm-customers", "create"), (req, res) => {
+  const { FIELDS, MAX_ROWS } = require("../services/crmCustomerImport");
+  res.json({ fields: FIELDS, maxRows: MAX_ROWS });
+});
+
+router.post("/import/preview", requirePageRight("crm-customers", "create"), async (req, res) => {
+  try {
+    const { analyze } = require("../services/crmCustomerImport");
+    res.json(await analyze(getPool(), req.body?.rows));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error("[crm-customers] POST /import/preview:", e.message);
+    res.status(500).json({ error: "Could not check the file" });
+  }
+});
+
+router.post("/import/apply", requirePageRight("crm-customers", "create"), async (req, res) => {
+  try {
+    const { apply } = require("../services/crmCustomerImport");
+    const existing = ["fill", "update"].includes(req.body?.existing) ? req.body.existing : "skip";
+    const out = await apply(getPool(), req.body?.rows, {
+      existing,
+      fileName: req.body?.fileName,
+      sourceTag: req.body?.sourceTag,
+      excludedRowNos: req.body?.excludedRowNos,
+      actorUserId: actorId(req),
+      actorName: req.user?.name || req.user?.email || "import",
+    });
+    res.json(out);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error("[crm-customers] POST /import/apply:", e.message);
+    res.status(500).json({ error: e.message || "The import failed" });
+  }
+});
+
 // GET /:id — single customer plus every application filed under them, so
 // staff can see their full history in one place (not just the latest one).
 // Also aggregates outstanding payment across EVERY booking this customer
@@ -342,53 +382,15 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
 
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email);
+    // A GST-registered buyer's GSTIN (migration 568): checked, PAN must match.
+    const gst = require("../services/gstin").checkGstin(b.GstNo, { pan: b.PanNo });
+    if (gst.error) return res.status(400).json({ error: gst.error });
 
-    // Invoice / Non-Invoice — defaults to NonInvoice (matches the column's
-    // own DB default) when omitted or an unrecognised value is sent, rather
-    // than trusting an arbitrary client string straight into a CHECK-
-    // constrained column.
-    const invoiceMode = b.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice";
-
-    const cur = resolveCurrentAddress(b);
-    const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
-    const result = await pool.request()
-      .input("no",       sql.NVarChar(30),  customerNo)
-      .input("lid",       sql.Int,           b.LeadId !== undefined && b.LeadId !== null && b.LeadId !== "" ? parseInt(b.LeadId) : null)
-      .input("name",      sql.NVarChar(200), b.CustomerName?.trim() || null)
-      .input("mob",       sql.NVarChar(20),  b.Mobile?.trim() || null)
-      .input("altmob",    sql.NVarChar(20),  b.AltMobile || null)
-      .input("email",     sql.NVarChar(200), email)
-      .input("pan",       sql.NVarChar(20),  b.PanNo?.trim() || null)
-      .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo || null)
-      .input("occ",       sql.NVarChar(100), b.Occupation || null)
-      .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
-      .input("addr",      sql.NVarChar(500), b.PermanentAddress?.trim() || null)
-      .input("city",      sql.NVarChar(100), b.PermanentCity || null)
-      .input("state",     sql.NVarChar(100), b.PermanentState || null)
-      .input("pin",       sql.NVarChar(10),  b.PermanentPincode || null)
-      .input("curaddr",   sql.NVarChar(500), cur.currentAddress)
-      .input("curcity",   sql.NVarChar(100), cur.currentCity)
-      .input("curstate",  sql.NVarChar(100), cur.currentState)
-      .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
-      .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
-      .input("dob",       sql.Date,          b.DateOfBirth || null)
-      .input("invmode",   sql.NVarChar(20),  invoiceMode)
-      .input("notes",     sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("cb",        sql.Int,           actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmCustomer
-          (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, PanNo, AadhaarNo, Occupation, AnnualIncome,
-           Address, City, State, Pincode,
-           CurrentAddress, CurrentCity, CurrentState, CurrentPincode, IsCurrentSameAsPermanent,
-           DateOfBirth, InvoiceMode, Notes,
-           CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @aadhaar, @occ, @income,
-                @addr, @city, @state, @pin,
-                @curaddr, @curcity, @curstate, @curpin, @cursame,
-                @dob, @invmode, @notes, @cb, SYSDATETIME())
-      `);
-    const newId = result.recordset[0].Id;
+    // The insert is shared with the bulk import (services/crmCustomerImport.js):
+    // InvoiceMode defaults to NonInvoice for anything but "Invoice" (CHECK-
+    // constrained column), current address follows IsCurrentSameAsPermanent.
+    const { insertCrmCustomer } = require("../services/crmCustomerImport");
+    const { id: newId, customerNo } = await insertCrmCustomer(pool, { ...b, Email: email, GstNo: gst.value }, actorId(req));
 
     // Eagerly create the "Customer Master" ledger head (dbo.AccountHeadMaster,
     // LHeadType='C') instead of waiting for the first GL-posting event —
@@ -423,6 +425,16 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     const b = req.body;
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email, id);
+    // GSTIN: changed only when the form sends it ("" clears it); checked
+    // against the PAN being saved (or the one on file).
+    const gstSent = Object.prototype.hasOwnProperty.call(b, "GstNo");
+    let gstValue = null;
+    if (gstSent) {
+      const onFile = b.PanNo ? null : (await pool.request().input("id", sql.Int, id).query("SELECT PanNo FROM dbo.CrmCustomer WHERE Id = @id")).recordset[0]?.PanNo;
+      const gst = require("../services/gstin").checkGstin(b.GstNo, { pan: b.PanNo || onFile });
+      if (gst.error) return res.status(400).json({ error: gst.error });
+      gstValue = gst.value;
+    }
     if (!email) {
       // The portal login is keyed on this email (CrmCustomerPortalUser.Email
       // is NOT NULL), so it can't be cleared while a login exists.
@@ -465,6 +477,8 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
         .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
         .input("dob",       sql.Date,          b.DateOfBirth || null)
         .input("invmode",   sql.NVarChar(20),  b.InvoiceMode === "Invoice" || b.InvoiceMode === "NonInvoice" ? b.InvoiceMode : null)
+        .input("gstset",    sql.Bit,           gstSent ? 1 : 0)
+        .input("gst",       sql.NVarChar(15),  gstValue)
         .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
         .input("ub",        sql.Int,           actorId(req))
         .query(`
@@ -477,6 +491,7 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
             IsCurrentSameAsPermanent = @cursame,
             DateOfBirth = ISNULL(@dob, DateOfBirth),
             InvoiceMode = ISNULL(@invmode, InvoiceMode),
+            GstNo = CASE WHEN @gstset = 1 THEN @gst ELSE GstNo END,
             Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);

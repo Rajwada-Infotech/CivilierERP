@@ -1,7 +1,7 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -380,6 +380,18 @@ const CrmCustomer360: React.FC = () => {
                                   <span className="font-semibold text-xs">{fmt(inv.Amount)}</span>
                                   <span className="text-xs text-muted-foreground">{inv.Status || "—"}</span>
                                   <span className="text-xs text-muted-foreground">{dt(inv.InvoiceDate)}{inv.CreatedByName ? ` · ${inv.CreatedByName}` : ""}</span>
+                                </Row>
+                              )}
+                            </LedgerSubSection>
+
+                            <LedgerSubSection icon={FileText} title="Credit Notes" rows={b.creditNotes || []} empty="No credit notes">
+                              {(n: any) => (
+                                <Row key={`cn-${n.Id}`}>
+                                  <Link to={`/crm/credit-notes?id=${n.Id}`} className="font-mono text-xs text-primary hover:underline">{n.DocNo || (["Draft", "Pending", "Rejected"].includes(n.Status) ? "Awaiting approval" : "Certificate")}</Link>
+                                  <span className="text-xs">{n.Source === "Adjustment" ? `Invoice reduced${n.ReasonType ? ` · ${n.ReasonType}` : ""}` : n.DocType === "CreditNote" ? "Refund · on invoice" : "Refund · on advance"}</span>
+                                  <span className="font-semibold text-xs">{fmt(n.TotalAmount)}</span>
+                                  <span className={`text-xs ${n.Status === "Cancelled" ? "line-through text-muted-foreground" : "text-muted-foreground"}`}>{n.Status}{n.AgainstRef ? ` · ${n.AgainstRef}` : ""}</span>
+                                  <span className="text-xs text-muted-foreground">{dt(n.DocDate)}</span>
                                 </Row>
                               )}
                             </LedgerSubSection>

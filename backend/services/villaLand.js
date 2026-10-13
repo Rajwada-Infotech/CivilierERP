@@ -150,7 +150,10 @@ async function copyLandCoOwners(poolOrTx, applicationId, unitIds, actorUserId = 
     WHERE c.rn = 1 AND NOT EXISTS (
       SELECT 1 FROM dbo.CrmCoApplicant x WHERE x.ApplicationId = @aid AND x.IsActive = 1
         AND x.Name = c.Name AND ISNULL(x.Mobile, N'') = ISNULL(c.Mobile, N''))`);
-  return r.rowsAffected?.[0] || 0;
+  const copied = r.rowsAffected?.[0] || 0;
+  // the plot's co-owners are customers too
+  if (copied) await require("./crmCoApplicantCustomer").linkCoApplicantsOf(poolOrTx, { applicationId }, actorUserId);
+  return copied;
 }
 
 /**

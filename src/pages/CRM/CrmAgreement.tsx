@@ -8,6 +8,7 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, Download, CheckCircle2, AlertCircle, Info, CalendarDays, BarChart3 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -715,44 +716,8 @@ const CrmAgreement: React.FC = () => {
 
   const filtered = agreements;
 
-  // ── Auto-select first agreement ─────────────────────────────────────────
-  // On first load (or after a filter change that leaves the current
-  // selection out of the visible list), open the first agreement in the
-  // list so the detail panel is never a dead "Select an agreement"
-  // placeholder when the user clearly has agreements to look at. Skips
-  // entirely when a specific ?id= or ?bookingId= deep-link is active.
-  // Uses a ref so a background React Query refetch never stomps on whatever
-  // the user had navigated to. All array access is guarded so a fresh
-  // fetch that returns an empty or malformed row can't crash the render.
-  const autoSelectedRef = useRef(false);
-  useEffect(() => {
-    if (isLoading) return;
-    if (idFilter || bkgFilter) return;
-    if (selectedId != null) return;
-    if (!Array.isArray(agreements) || agreements.length === 0) return;
-    if (autoSelectedRef.current) return;
-    const first = agreements[0];
-    if (!first || first.Id == null) return;
-    autoSelectedRef.current = true;
-    selectAgreement(first.Id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, agreements, idFilter, bkgFilter, selectedId]);
-
-  // If the currently-selected agreement is no longer in the (filtered)
-  // list, fall back to the first row. Does not fire while ?id= is set
-  // explicitly, and does not fire when the user clicked a different row
-  // (that already updates selectedId to something in the list).
-  useEffect(() => {
-    if (isLoading || idFilter || bkgFilter) return;
-    if (selectedId == null) return;
-    if (!Array.isArray(agreements) || agreements.length === 0) return;
-    const stillVisible = agreements.some((a: any) => a && a.Id === selectedId);
-    if (stillVisible) return;
-    const first = agreements[0];
-    if (!first || first.Id == null) return;
-    selectAgreement(first.Id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, agreements, idFilter, bkgFilter, selectedId]);
+  // Nothing opens by itself: the user picks an agreement, or arrives via an
+  // ?id= / ?bookingId= link. (It used to open the first row on load.)
 
   // ?bookingId= deep-link resolver — same as before.
   const handledBkgFilterRef = useRef<string | null>(null);
@@ -1243,7 +1208,7 @@ const CrmAgreement: React.FC = () => {
                   <div className="w-[3px] shrink-0 self-stretch" style={{ background: railColor }} />
                   <div className="flex-1 min-w-0 p-3 space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-semibold leading-tight truncate">{a.ApplicantName}</span>
+                      <span className="text-sm font-semibold leading-tight truncate"><ApplicantNames name={a.ApplicantName} bookingId={a.BookingId} applicationId={a.ApplicationId} /></span>
                       <span className={`shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${agrStatusColor[a.Status] || ""}`}>{a.Status}</span>
                     </div>
                     {isBookingCancelled(a) && (
@@ -1398,7 +1363,7 @@ const CrmAgreement: React.FC = () => {
                         : "text-primary"} />
                     </div>
                     <div className="min-w-0">
-                      <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate">{detail.agreement?.ApplicantName}</h2>
+                      <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate"><ApplicantNames name={detail.agreement?.ApplicantName} bookingId={detail.agreement?.BookingId} applicationId={detail.agreement?.ApplicationId} /></h2>
                       <p className="text-[0.6875rem] font-mono text-muted-foreground mt-0.5">
                         {detail.agreement?.AgreementNo}
                         {detail.agreement?.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{detail.agreement.VersionNo}</span>}

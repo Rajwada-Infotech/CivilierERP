@@ -1360,7 +1360,8 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT BookingId, Status, AgreementDate, SeniorApprovalStatus, CustomerApprovalStatus, LegalExecutiveId
+      SELECT BookingId, Status, AgreementDate, SeniorApprovalStatus, CustomerApprovalStatus, LegalExecutiveId,
+             ProposedDateStatus, DateApprovalStatus
       FROM dbo.CrmAgreement WHERE Id = @id
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
@@ -1373,6 +1374,10 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
       return res.status(400).json({ error: "Both senior and customer approval must be Approved before execution" });
     }
     if (!row.AgreementDate) {
+      // Say which step the date is actually waiting on.
+      if (row.ProposedDateStatus === "Matched" && row.DateApprovalStatus !== CrmStatus.APPROVED) {
+        return res.status(400).json({ error: "The agreement date is agreed with the customer and is waiting for Date Approval — approve it (Approval Inbox › Agreement Date) before marking executed" });
+      }
       return res.status(400).json({ error: "Both sides must agree on an agreement date first — propose a date and wait for the customer's matching response before marking executed" });
     }
     // A legally executed contract must have a named responsible party on
@@ -1746,7 +1751,32 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
       await tx.begin();
       const inserted = [];
       try {
-        for (const file of req.files) {
+        // A requested slot of this type still waiting for its file (e.g. the
+        // mandatory Sale Agreement) is filled by the first upload, the same
+        // way /attach fills it — a new row beside it would leave the slot
+        // empty and the agreement's mandatory paperwork never complete.
+        const open = (await tx.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), docType).query(`
+          SELECT TOP 1 Id FROM dbo.CrmAgreementDocument WITH (UPDLOCK, HOLDLOCK)
+          WHERE AgreementId = @agid AND DocumentType = @dtype AND Status IN ('Requested', 'Rejected')
+          ORDER BY IsMandatory DESC, Id`)).recordset[0];
+        const files = [...req.files];
+        if (open) {
+          const file = files.shift();
+          await tx.request()
+            .input("id",    sql.Int, open.Id)
+            .input("fname", sql.NVarChar(300), file.originalname)
+            .input("fb64",  sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
+            .input("fs",    sql.BigInt, file.size)
+            .input("mt",    sql.NVarChar(150), file.mimetype)
+            .input("iby",   sql.NVarChar(200), req.body?.IssuedBy || null)
+            .input("rem",   sql.NVarChar(sql.MAX), req.body?.Remarks || null)
+            .query(`
+              UPDATE dbo.CrmAgreementDocument SET FileName = @fname, FileBase64 = @fb64, FileSize = @fs, MimeType = @mt,
+                IssuedBy = ISNULL(@iby, IssuedBy), Remarks = ISNULL(@rem, Remarks), Status = 'Uploaded', UploadedAt = SYSDATETIME()
+              WHERE Id = @id`);
+          inserted.push(open.Id);
+        }
+        for (const file of files) {
           nextVersion += 1;
           const result = await tx.request()
             .input("agid",  sql.Int, agreementId)

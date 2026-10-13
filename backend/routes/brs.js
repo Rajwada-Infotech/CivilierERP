@@ -850,9 +850,23 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
       console.warn(`BRS bounce: ${sourceType} ${sourceId} — GL not reversed (${glReversal.reason})`);
     }
 
+    // A CRM customer's payment: the booking stops counting it (milestones
+    // reopen, the money goes back on account). Reported, never fatal.
+    let crm = null;
+    if (sourceType === "RECEIVED") {
+      try {
+        crm = await require("../services/crmBouncedPayment").unwindBouncedCrmPayment(pool, parseInt(sourceId), bounceReason, req.user?.userId ?? null);
+        if (crm?.crm) for (const k of ["crm-payments", "crm-bookings", "crm-money-receipts", "crm-on-account"]) await bumpCacheVersion(k);
+      } catch (crmErr) {
+        console.error(`BRS bounce: CRM unwind for receipt ${sourceId} failed:`, crmErr.message);
+        crm = { crm: true, error: crmErr.message };
+      }
+    }
+
     await bumpCacheVersion("brs");
     await bumpCacheVersion(sourceType === "PAYMENT" ? "new-payment" : "received-payment");
-    res.json({ message: "Marked as bounced", glReversed: glReversal.reversed });
+    res.json({ message: "Marked as bounced", glReversed: glReversal.reversed || !!crm?.glReversed,
+      ...(crm?.crm ? { crm: { bookingId: crm.bookingId, reversed: crm.reversed, invoicesToReview: crm.invoices || [], error: crm.error } } : {}) });
 
     // Fire-and-forget — bounced cheques must not count as paid, update after responding
     if (sourceType === "PAYMENT") {

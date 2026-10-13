@@ -26,6 +26,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/afs-registry";
 const BKG_API = "/api/crm/bookings";
@@ -338,7 +339,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
     { accessorKey: "ApplicantName", header: "Customer", size: 170,
       cell: (i) => (
         <div onClick={() => setDetailRow(i.row.original)} className="cursor-pointer">
-          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
         </div>
       ) },
@@ -762,7 +763,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                           <Copy size={11} />
                         </button>
                       </div>
-                      <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate">{detailRow.ApplicantName} · {detailRow.BookingNo} · {detailRow.UnitNo}</p>
+                      <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate"><ApplicantNames name={detailRow.ApplicantName} bookingId={detailRow.BookingId} applicationId={detailRow.ApplicationId} /> · {detailRow.BookingNo} · {detailRow.UnitNo}</p>
                     </div>
                     <DialogClose asChild>
                       <button className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">

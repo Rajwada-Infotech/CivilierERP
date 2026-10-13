@@ -1600,6 +1600,14 @@ router.patch(
       currentProgress = cur.recordset[0]?.ProgressPercent;
     }
 
+    // Work is reported by the engineer it was given to — a step nobody was
+    // assigned can't be started or progressed (cancelling it still can).
+    if ((hasProgress || (hasStatus && status !== "CANCELLED")) && assignmentId != null) {
+      const eng = (await pool.request().input("aid", sql.Int, assignmentId)
+        .query("SELECT COUNT(*) AS n FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @aid")).recordset[0].n;
+      if (!eng) return res.status(400).json({ error: "Assign an engineer to this step first — nobody has been given this work yet." });
+    }
+
     if (hasProgress) {
       if (current === "COMPLETED") {
         return res.status(400).json({ error: "Work Done is locked once an activity is Completed." });
@@ -1938,7 +1946,9 @@ router.get("/engineers", authMiddleware, async (req, res) => {
   try {
     const pool = await getPool();
     const r = await pool.request().query(`
-      SELECT id, name FROM dbo.users WHERE ISNULL(discontinue, 0) = 0 ORDER BY name ASC
+      -- Staff only: a login linked to a supplier / contractor / customer
+      -- account (LinkedLHeadId) is an external portal user, never site staff.
+      SELECT id, name FROM dbo.users WHERE ISNULL(discontinue, 0) = 0 AND LinkedLHeadId IS NULL ORDER BY name ASC
     `);
     res.json(r.recordset);
   } catch (err) {
@@ -2220,6 +2230,18 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
     return res.status(400).json({ error: "qcUserIds must be an array" });
   }
   if (!Array.isArray(materials)) return res.status(400).json({ error: "materials must be an array" });
+  // Engineers, QC checkers and approvers are staff — never an external portal
+  // login (a supplier / contractor / customer account user).
+  {
+    const picked = [...(engineerIds || []), ...(qcUserIds || []),
+      ...(Array.isArray(approvalLevels) ? approvalLevels.flatMap((l) => (Array.isArray(l?.userIds) ? l.userIds : [])) : [])]
+      .map(Number).filter(Number.isInteger);
+    if (picked.length) {
+      const ext = (await (await getPool()).request().query(
+        `SELECT name FROM dbo.users WHERE id IN (${[...new Set(picked)].join(",")}) AND (LinkedLHeadId IS NOT NULL OR ISNULL(discontinue, 0) = 1)`)).recordset;
+      if (ext.length) return res.status(400).json({ error: `${ext.map((u) => u.name).join(", ")} can't be put on site work — only active staff (not supplier / contractor / customer logins)` });
+    }
+  }
   if (checkpoints != null && !Array.isArray(checkpoints)) {
     return res.status(400).json({ error: "checkpoints must be an array" });
   }

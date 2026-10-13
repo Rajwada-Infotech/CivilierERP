@@ -377,7 +377,7 @@ router.get("/:id/pdf", requirePageRight("crm-applications", "view"), async (req,
     // Level 1 gate: a live booking must exist (Booking not Cancelled/Rejected),
     // which only happens after the Application is Approved.
     const hasLiveBooking = app.BookingId
-      && !["Cancelled", "Rejected"].includes(app.BookingStatus);
+      && !require("../constants/crmStatuses").DEAD_BOOKING_STATUSES.includes(app.BookingStatus);
     if (!hasLiveBooking) {
       return res.status(403).json({
         error: "Application Form PDF is only available after Level 1 verification (Application Approved). Please complete the review process first.",
@@ -746,6 +746,29 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
     const current = await getPool().request().input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id");
     const currentStatus = current.recordset[0]?.Status;
+    // A booking is never created at ₹0: the rate comes from the application,
+    // else the unit / plot's own rate. Checked before anything changes.
+    {
+      const pool0 = getPool();
+      const hasBooking = (await pool0.request().input("aid", sql.Int, id)
+        .query("SELECT TOP 1 1 AS x FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset.length > 0;
+      const ap = (await pool0.request().input("id", sql.Int, id)
+        .query("SELECT PreferredUnitId, RatePerSqFt FROM dbo.CrmApplication WHERE Id = @id")).recordset[0];
+      if (!hasBooking && ap) {
+        const plotIds0 = await getApplicationPlotIds(pool0, id);
+        const unitIds0 = plotIds0.length ? [] : await getApplicationUnitIds(pool0, id, ap.PreferredUnitId);
+        const ids0 = plotIds0.length ? plotIds0 : unitIds0;
+        if (ids0.length) {
+          const rows0 = (await pool0.request().input("r", sql.Decimal(18, 2), Number(ap.RatePerSqFt) || 0).query(plotIds0.length
+            ? `SELECT PlotName AS Name, COALESCE(NULLIF(@r, 0), RatePerSqFt, 0) * ISNULL(AreaSqFt, 0) AS Price FROM dbo.PlotMaster WHERE Id IN (${ids0.join(",")})`
+            : `SELECT UnitName AS Name, COALESCE(NULLIF(@r, 0), RatePerSqFt, 0) * ISNULL(AreaSqFt, 0) AS Price FROM dbo.UnitMaster WHERE Id IN (${ids0.join(",")})`)).recordset;
+          const unpriced = rows0.filter((r) => !(Number(r.Price) > 0)).map((r) => r.Name);
+          if (unpriced.length) {
+            return res.status(400).json({ error: `${unpriced.join(", ")} has no price — enter the rate per sq ft on the application (or set the rate and area on the ${plotIds0.length ? "plot" : "unit"}) before submitting` });
+          }
+        }
+      }
+    }
     const result = currentStatus === CrmStatus.PENDING
       ? { newStatus: CrmStatus.PENDING }
       : await approvalTransition("crm-applications", id, CrmStatus.PENDING, userEmail, req.user?.role);
@@ -826,7 +849,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
               UPDATE dbo.CrmBooking
               SET RatePerSqFt = @RatePerSqFt,
                   PaymentPlanId = @PaymentPlanId,
-                  BookingDate = @BookingDate,
+                  BookingDate = COALESCE(@BookingDate, BookingDate),
                   TokenType = @TokenType,
                   TokenValue = @TokenValue,
                   BookingAmount = @BookingAmount,
@@ -1104,7 +1127,7 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     // for the rare case of an Approved Application with an active Booking
     // where someone hits this endpoint directly.
     const activeBooking = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired')");
+      .query(`SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`);
     if (activeBooking.recordset.length) {
       const bk = activeBooking.recordset[0];
       return res.status(400).json({
@@ -1156,7 +1179,7 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     const activeBooking = await pool.request().input("id", sql.Int, id).query(`
       SELECT TOP 1 Id, BookingNo, Status
       FROM dbo.CrmBooking
-      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired')
+      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
     `);
     if (activeBooking.recordset.length) {
       const b = activeBooking.recordset[0];
