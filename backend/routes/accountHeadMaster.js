@@ -721,7 +721,7 @@ router.get("/options", async (req, res) => {
     // Partner Master's own listing, Trial Balance).
     let query = `SELECT LHeadId AS id,
                  CASE WHEN LHeadType = 'P' THEN LHeadName ELSE ISNULL(DisplayName, LHeadName) END AS label,
-                 LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type
+                 LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type, LHeadCategory AS category
                  FROM dbo.AccountHeadMaster
                  WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'
                    AND ISNULL(LHeadCode, '') NOT LIKE 'PRJ-%-SUPP'

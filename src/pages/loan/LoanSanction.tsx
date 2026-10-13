@@ -439,6 +439,17 @@ export default function LoanSanctionPage() {
     interestRate: "",
     tenureMonths: "",
     dueDate: "",
+    lenderCompanyId: "",
+    borrowerCompanyId: "",
+    paymentMode: "",
+    chequeLotId: "",
+    chequeLotNumber: "",
+    chequeNo: "",
+    chequeDate: "",
+    isPostDated: false,
+    digitalRefNumber: "",
+    demandDraftNo: "",
+    demandDraftDate: "",
   });
   const [savingDetails, setSavingDetails] = useState(false);
 
@@ -627,6 +638,17 @@ export default function LoanSanctionPage() {
       interestRate: loan.InterestRate != null ? String(loan.InterestRate) : "",
       tenureMonths: loan.TenureMonths != null ? String(loan.TenureMonths) : "",
       dueDate: "",
+      lenderCompanyId: loan.LenderCompanyId ? String(loan.LenderCompanyId) : "",
+      borrowerCompanyId: loan.BorrowerCompanyId ? String(loan.BorrowerCompanyId) : "",
+      paymentMode: loan.PaymentMode || "",
+      chequeLotId: loan.ChequeLotId ? String(loan.ChequeLotId) : "",
+      chequeLotNumber: loan.ChequeLotNumber || "",
+      chequeNo: loan.ChequeNo || "",
+      chequeDate: loan.ChequeDate ? loan.ChequeDate.slice(0, 10) : "",
+      isPostDated: !!loan.IsPostDated,
+      digitalRefNumber: loan.DigitalRefNumber || "",
+      demandDraftNo: loan.DemandDraftNo || "",
+      demandDraftDate: loan.DemandDraftDate ? loan.DemandDraftDate.slice(0, 10) : "",
     });
     setEditingDetails(true);
     // No-breakdown loans (Inter-Company simple transfer) keep their due
@@ -655,12 +677,21 @@ export default function LoanSanctionPage() {
         remarks: editForm.remarks || null,
         lenderBankAccountId: editForm.lenderBankAccountId || null,
         borrowerBankAccountId: editForm.borrowerBankAccountId || null,
-        // Financial-core fields are only sent when repayment hasn't started
-        // yet — the backend treats their mere presence in the body as "the
-        // caller wants to touch the financial core" and 409s once any EMI
-        // is paid, so admin-only edits after that point must omit them
-        // entirely rather than resend the unchanged (disabled) values.
-        ...(paidEmis === 0
+        paymentMode: editForm.paymentMode || null,
+        chequeLotId: editForm.chequeLotId || null,
+        chequeLotNumber: editForm.chequeLotNumber || null,
+        chequeNo: editForm.chequeNo || null,
+        chequeDate: editForm.chequeDate || null,
+        isPostDated: editForm.paymentMode === "Post-Dated Cheque",
+        digitalRefNumber: editForm.digitalRefNumber || null,
+        demandDraftNo: editForm.demandDraftNo || null,
+        demandDraftDate: editForm.demandDraftDate || null,
+        lenderCompanyId: editForm.lenderCompanyId || null,
+        borrowerCompanyId: editForm.borrowerCompanyId || null,
+        // The backend treats the mere presence of these as "re-run the
+        // schedule", and refuses it on a closed loan, so a closed loan
+        // only sends the administrative fields above.
+        ...(viewingLoan.Status !== "Closed"
           ? {
               loanDate: editForm.loanDate,
               amount: editForm.amount,
@@ -1402,9 +1433,14 @@ export default function LoanSanctionPage() {
                     {editingDetails && (
                       <div className="rounded-xl border border-primary/30 bg-primary/[0.03] p-4 space-y-4">
                         <SectionLabel icon={Pencil} label="Edit Loan Details" />
-                        {paidEmis > 0 && (
+                        {paidEmis > 0 && viewingLoan?.Status !== "Closed" && (
                           <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 flex items-center gap-1.5 -mt-2">
-                            <AlertTriangle size={11} /> This loan already has repayments recorded — amount, interest, tenure and dates are locked. Only Loan Doc No, Purpose, Remarks, and bank A/C tags can be edited.
+                            <AlertTriangle size={11} /> {paidEmis} installment{paidEmis === 1 ? " is" : "s are"} already paid and stay as they are. Changing the amount, interest or tenure rebuilds only the unpaid installments for the principal still outstanding.
+                          </p>
+                        )}
+                        {viewingLoan?.Status === "Closed" && (
+                          <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 flex items-center gap-1.5 -mt-2">
+                            <AlertTriangle size={11} /> This loan is closed: only Loan Doc No, Purpose, Remarks and bank A/C tags can be edited.
                           </p>
                         )}
                         <div className="grid grid-cols-2 gap-3">
@@ -1420,7 +1456,7 @@ export default function LoanSanctionPage() {
                             <label className={labelCls}>Loan Date</label>
                             <DateInput
                               className={inputCls}
-                              disabled={paidEmis > 0}
+                              disabled={viewingLoan?.Status === "Closed"}
                               value={editForm.loanDate}
                               onChange={(e) => setEditForm((f) => ({ ...f, loanDate: e.target.value }))}
                             />
@@ -1430,7 +1466,7 @@ export default function LoanSanctionPage() {
                             <input
                               type="number"
                               className={inputCls}
-                              disabled={paidEmis > 0}
+                              disabled={viewingLoan?.Status === "Closed"}
                               value={editForm.amount}
                               onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))}
                             />
@@ -1440,7 +1476,7 @@ export default function LoanSanctionPage() {
                             <input
                               type="number"
                               className={inputCls}
-                              disabled={paidEmis > 0}
+                              disabled={viewingLoan?.Status === "Closed"}
                               value={editForm.tenureMonths}
                               onChange={(e) => setEditForm((f) => ({ ...f, tenureMonths: e.target.value.replace(/[^0-9]/g, "") }))}
                             />
@@ -1449,7 +1485,7 @@ export default function LoanSanctionPage() {
                             <span className="text-sm font-medium text-foreground">Interest-bearing loan</span>
                             <button
                               type="button"
-                              disabled={paidEmis > 0}
+                              disabled={viewingLoan?.Status === "Closed"}
                               onClick={() => setEditForm((f) => ({ ...f, hasInterest: !f.hasInterest }))}
                               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
                                 editForm.hasInterest ? "bg-emerald-500" : "bg-muted"
@@ -1468,7 +1504,7 @@ export default function LoanSanctionPage() {
                               <input
                                 type="number"
                                 className={inputCls}
-                                disabled={paidEmis > 0}
+                                disabled={viewingLoan?.Status === "Closed"}
                                 value={editForm.interestRate}
                                 onChange={(e) => setEditForm((f) => ({ ...f, interestRate: e.target.value.replace(/[^0-9.]/g, "") }))}
                               />
@@ -1479,7 +1515,7 @@ export default function LoanSanctionPage() {
                               <label className={labelCls}>Repayment Due Date</label>
                               <DateInput
                                 className={inputCls}
-                                disabled={paidEmis > 0}
+                                disabled={viewingLoan?.Status === "Closed"}
                                 value={editForm.dueDate}
                                 min={editForm.loanDate || undefined}
                                 onChange={(e) => setEditForm((f) => ({ ...f, dueDate: e.target.value }))}
@@ -1521,6 +1557,102 @@ export default function LoanSanctionPage() {
                                 </div>
                               )}
                             </>
+                          )}
+                          {viewingLoan?.Status !== "Closed" && viewingLoan?.LenderCompanyId != null && (
+                            <div className="space-y-1.5">
+                              <label className={labelCls}>Lender Company</label>
+                              <select
+                                className={inputCls}
+                                value={editForm.lenderCompanyId}
+                                onChange={(e) => setEditForm((f) => ({ ...f, lenderCompanyId: e.target.value, lenderBankAccountId: "" }))}
+                              >
+                                {companies.map((c: CompanyOption) => (
+                                  <option key={c.id} value={c.id}>{c.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          {viewingLoan?.Status !== "Closed" && viewingLoan?.BorrowerCompanyId != null && (
+                            <div className="space-y-1.5">
+                              <label className={labelCls}>Borrower Company</label>
+                              <select
+                                className={inputCls}
+                                value={editForm.borrowerCompanyId}
+                                onChange={(e) => setEditForm((f) => ({ ...f, borrowerCompanyId: e.target.value, borrowerBankAccountId: "" }))}
+                              >
+                                {companies.map((c: CompanyOption) => (
+                                  <option key={c.id} value={c.id}>{c.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          <div className="space-y-1.5 col-span-2">
+                            <label className={labelCls}>Disbursed Via</label>
+                            <div className="flex flex-wrap gap-2">
+                              {((isBankLoan || (isCustomerLoanType && !!viewingLoan?.LenderCustomerId)) ? LOAN_BANK_PAYMENT_MODES : PAYMENT_MODES).map((m) => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() =>
+                                    setEditForm((f) => ({
+                                      ...f,
+                                      paymentMode: m,
+                                      isPostDated: m === "Post-Dated Cheque",
+                                      ...(m !== "Cheque" && m !== "Post-Dated Cheque" ? { chequeLotId: "", chequeLotNumber: "", chequeNo: "", chequeDate: "" } : {}),
+                                      ...(["Cash", "Cheque", "Post-Dated Cheque", "Demand Draft"].includes(m) ? { digitalRefNumber: "" } : {}),
+                                      ...(m !== "Demand Draft" ? { demandDraftNo: "", demandDraftDate: "" } : {}),
+                                    }))
+                                  }
+                                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                                    editForm.paymentMode === m ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/40"
+                                  }`}
+                                >
+                                  {m}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {(editForm.paymentMode === "Cheque" || editForm.paymentMode === "Post-Dated Cheque") &&
+                            (isBankLoan || (isCustomerLoanType && !!viewingLoan?.LenderCustomerId) ? (
+                              <>
+                                <div className="space-y-1.5">
+                                  <label className={labelCls}>Cheque Number</label>
+                                  <input className={inputCls} value={editForm.chequeNo} onChange={(e) => setEditForm((f) => ({ ...f, chequeNo: e.target.value }))} />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className={labelCls}>Cheque Date</label>
+                                  <DateInput className={inputCls} value={editForm.chequeDate} onChange={(e) => setEditForm((f) => ({ ...f, chequeDate: e.target.value }))} />
+                                </div>
+                              </>
+                            ) : (
+                              <LoanChequePicker
+                                bankId={editForm.lenderBankAccountId ? Number(editForm.lenderBankAccountId) : null}
+                                chequeLotId={editForm.chequeLotId}
+                                chequeNo={editForm.chequeNo}
+                                chequeDate={editForm.chequeDate}
+                                isPostDated={editForm.paymentMode === "Post-Dated Cheque"}
+                                onLotChange={(lot) => setEditForm((f) => ({ ...f, chequeLotId: String(lot.CId), chequeLotNumber: lot.ChequeLotNumber, chequeNo: "" }))}
+                                onChequeNoChange={(v) => setEditForm((f) => ({ ...f, chequeNo: v }))}
+                                onChequeDateChange={(v) => setEditForm((f) => ({ ...f, chequeDate: v }))}
+                              />
+                            ))}
+                          {editForm.paymentMode === "Demand Draft" && (
+                            <>
+                              <div className="space-y-1.5">
+                                <label className={labelCls}>DD Reference Number</label>
+                                <input className={inputCls} value={editForm.demandDraftNo} onChange={(e) => setEditForm((f) => ({ ...f, demandDraftNo: e.target.value }))} />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className={labelCls}>DD Date</label>
+                                <DateInput className={inputCls} value={editForm.demandDraftDate} onChange={(e) => setEditForm((f) => ({ ...f, demandDraftDate: e.target.value }))} />
+                              </div>
+                            </>
+                          )}
+                          {!!editForm.paymentMode && !["Cash", "Cheque", "Post-Dated Cheque", "Demand Draft"].includes(editForm.paymentMode) && (
+                            <div className="space-y-1.5">
+                              <label className={labelCls}>Reference Number</label>
+                              <input className={inputCls} placeholder="UTR / Ref No" value={editForm.digitalRefNumber} onChange={(e) => setEditForm((f) => ({ ...f, digitalRefNumber: e.target.value }))} />
+                            </div>
                           )}
                           <div className="space-y-1.5 col-span-2">
                             <label className={labelCls}>Purpose</label>

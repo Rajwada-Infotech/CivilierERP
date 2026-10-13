@@ -20,6 +20,7 @@ import {
   ZoomOut,
   Package,
   UserRound,
+  Link2,
   CalendarDays,
   RotateCcw,
   Users2,
@@ -37,6 +38,9 @@ import {
   MessageSquare,
   type LucideIcon,
 } from "lucide-react";
+import { dependencyAutoName } from "@/lib/dependencyAutoName";
+import { TagCombobox } from "@/components/civilworkdpr/TagCombobox";
+import { usePageRights } from "@/hooks/usePageRights";
 import {
   getActivityPhotos,
   carryForwardPhotos,
@@ -46,6 +50,7 @@ import {
   getBlueprintAnnotation,
   getBlueprintAnnotationHistory,
   updateAssignmentDetail,
+  setActivityTag,
   getRungAssignment,
   saveRungAssignment,
   getAssignmentAttempts,
@@ -834,6 +839,19 @@ function SourceValue({ source, name }: { source: string | null; name?: string | 
 
 function OverviewTab({ row }: { row: ReportedAssignment }) {
   const queryClient = useQueryClient();
+  const canTag = usePageRights("civilworkdpr-activity-reporting").canEdit;
+  // Tag: pick one from the DPR Tag Master or type a new one — a new tag is saved to the Master on Save.
+  const [tag, setTag] = useState(row.tagName ?? "");
+  useEffect(() => setTag(row.tagName ?? ""), [row.tagName, row.rungId]);
+  const tagMutation = useMutation({
+    mutationFn: (name: string) => setActivityTag(row.rungId, name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["dpr-tags"] });
+      toast.success(tag.trim() ? "Tag saved." : "Tag cleared.");
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to save the tag."),
+  });
   // Each remark is a new entry, so a second (third…) one the same day is just another "Add".
   const [remarks, setRemarks] = useState("");
   const { data: progressLog = [] } = useQuery({
@@ -856,6 +874,34 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
 
   return (
     <div className="flex flex-col gap-5">
+      {/* Auto Name — flat, room and activity, derived from the dependency; read-only */}
+      <div>
+        <p className="flex items-center gap-1.5 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">
+          <Link2 size={11} /> Auto Name
+        </p>
+        <p className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm text-foreground select-text">
+          {dependencyAutoName({ flatName: row.flatName, alias: row.alias, roomName: row.roomName, storey: row.storey, activityName: row.activityName }) || "—"}
+        </p>
+      </div>
+      {/* Tag */}
+      <div>
+        <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">Tag</p>
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <TagCombobox value={tag} onChange={setTag} disabled={!canTag} placeholder="Search or type a new tag…" />
+          </div>
+          {canTag && (
+            <button
+              type="button"
+              disabled={tagMutation.isPending || tag.trim() === (row.tagName ?? "")}
+              onClick={() => tagMutation.mutate(tag.trim())}
+              className="shrink-0 px-3 py-2.5 rounded-lg text-xs font-semibold btn-module text-white hover:opacity-90 disabled:opacity-40 transition-opacity"
+            >
+              {tagMutation.isPending ? "Saving…" : "Save tag"}
+            </button>
+          )}
+        </div>
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <Field label="Engineer">
           <span className="flex items-center gap-1.5">

@@ -72,3 +72,6 @@ backend/uploads/crm-invoices/
 # deploy-from-artifact.sh's post-deploy verification step. Never handwritten.
 public/version.json
 backend/build-info.json
+
+# Firebase client config (holds an API key) - supplied to EAS as the GOOGLE_SERVICES_JSON file secret
+google-services.json

@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { useQuery } from "@tanstack/react-query";
@@ -46,6 +46,7 @@ import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
 import ActivityDetailModal from "./ActivityDetailModal";
 import { dependencyAutoName } from "@/lib/dependencyAutoName";
 import { PriorityBadge } from "@/components/civilworkdpr/PriorityBadge";
+import { AssignmentPrioritySelect } from "@/components/civilworkdpr/AssignmentPrioritySelect";
 
 // Purely presentational — icon + accent color per status, same colors as
 // ASSIGNMENT_STATUS_META's Tailwind classes just as hex for GlassCard's
@@ -225,6 +226,7 @@ function ChainGroupList({
                           </span>
                           <div onClick={(e) => e.stopPropagation()} className="shrink-0 flex flex-col items-end gap-0.5">
                             <PriorityBadge priority={row.priority} />
+                            {row.tagName && <span className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400" title="Tag">{row.tagName}</span>}
                             <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
                             <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} />
                           </div>
@@ -298,6 +300,8 @@ function ChainGroupList({
                       <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
                         <th className="px-5 py-2">Activity</th>
                         <th className="px-3 py-2">Engineer</th>
+                        <th className="px-3 py-2">Tag</th>
+                        <th className="px-3 py-2">Priority</th>
                         <th className="px-3 py-2">Start Date</th>
                         <th className="px-3 py-2">Material</th>
                         <th className="px-3 py-2">Photos</th>
@@ -314,7 +318,6 @@ function ChainGroupList({
                           <td className="px-5 py-3">
                             <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
                               {row.sequenceNo}. {row.activityName}
-                              <PriorityBadge priority={row.priority} />
                               <QcBadge qcStatus={row.qcStatus} />
                               <AttemptBadge attemptNo={row.attemptNo} />
                             </span>
@@ -324,6 +327,16 @@ function ChainGroupList({
                               <UserRound size={11} className="text-muted-foreground shrink-0" />
                               {row.engineerNames || <span className="text-muted-foreground italic">Unassigned</span>}
                             </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            {row.tagName ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 whitespace-nowrap">{row.tagName}</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                            <AssignmentPrioritySelect rungId={row.rungId} priority={row.priority} />
                           </td>
                           <td className="px-3 py-3">
                             <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
@@ -568,7 +581,31 @@ export default function ActivityReporting() {
     setDetailTab(tab);
   };
 
-  // Opened from a report row (?rung=): open that activity's detail straight away, once.
+  // Opened from a report row (?rung=): open that activity's detail straight away, once. When the link says where
+  // it came from (router state `returnTo`, e.g. the Civil Work DPR Query page), closing the popup goes back there.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const returnToRef = useRef<string | null>((location.state as { returnTo?: string } | null)?.returnTo ?? null);
+  const openedFromLinkRef = useRef(false);
+  const closeDetail = () => {
+    setDetailRow(null);
+    if (openedFromLinkRef.current && returnToRef.current) {
+      openedFromLinkRef.current = false;
+      const target = returnToRef.current;
+      // The popup's own history entry (see useOverlayBackClose) is removed with an asynchronous history.back() when
+      // it closes — go back to the origin only after that has settled, or it would pop the page we just opened.
+      let done = false;
+      const go = () => {
+        if (done) return;
+        done = true;
+        window.removeEventListener("popstate", go);
+        clearTimeout(timer);
+        navigate(target);
+      };
+      const timer = setTimeout(go, 300);
+      window.addEventListener("popstate", go);
+    }
+  };
   const [searchParams, setSearchParams] = useSearchParams();
   const linkedRung = readChainLink(searchParams).rungId;
   useEffect(() => {
@@ -577,8 +614,10 @@ export default function ActivityReporting() {
     getReportedAssignments({ rungId: linkedRung })
       .then((rows) => {
         if (cancelled) return;
-        if (rows[0]) openDetail(rows[0]);
-        else toast.error("That activity is not in Activity Reporting (it may be outside your projects or its chain retired).");
+        if (rows[0]) {
+          openedFromLinkRef.current = true;
+          openDetail(rows[0]);
+        } else toast.error("That activity is not in Activity Reporting (it may be outside your projects or its chain retired).");
       })
       .catch((e) => {
         if (!cancelled) toast.error(e instanceof Error ? e.message : "Could not open that activity.");
@@ -764,7 +803,7 @@ export default function ActivityReporting() {
         )}
       </CivilWorkDprShell>
       {detailRow && (
-        <ActivityDetailModal row={detailRow} initialTab={detailTab} onClose={() => setDetailRow(null)} />
+        <ActivityDetailModal row={detailRow} initialTab={detailTab} onClose={closeDetail} />
       )}
     </>
   );

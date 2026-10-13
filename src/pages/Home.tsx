@@ -1562,6 +1562,7 @@ export default function HomePage() {
       "civilworkdpr-worker-attendance",
       "civilworkdpr-daily-labour",
       "civilworkdpr-amendment",
+      "civilworkdpr-query",
       "civilworkdpr-room-master",
     ],
     crm: [

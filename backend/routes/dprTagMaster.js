@@ -44,7 +44,7 @@ router.get("/", authMiddleware, async (req, res) => {
     const r = await pool.request().query(`
       SELECT t.Id AS id, t.TagName AS tagName, t.IsActive AS isActive,
              t.CreatedBy AS createdBy, t.CreatedAt AS createdAt, t.UpdatedBy AS updatedBy, t.UpdatedAt AS updatedAt,
-             (SELECT COUNT(*) FROM dbo.ActivityMaster am WHERE am.TagId = t.Id) AS activityCount
+             ((SELECT COUNT(*) FROM dbo.ActivityMaster am WHERE am.TagId = t.Id) + (SELECT COUNT(*) FROM dbo.DependencyMasterActivity d WHERE d.TagId = t.Id)) AS activityCount
       FROM dbo.DprTagMaster t
       ORDER BY t.TagName`);
     res.json(r.recordset);
@@ -104,7 +104,7 @@ router.delete("/:id", authMiddleware, requirePageRight("dpr-tag-master", "delete
   try {
     const pool = await getPool();
     const used = await pool.request().input("id", sql.Int, req.params.id)
-      .query("SELECT COUNT(*) AS n FROM dbo.ActivityMaster WHERE TagId = @id");
+      .query("SELECT (SELECT COUNT(*) FROM dbo.ActivityMaster WHERE TagId = @id) + (SELECT COUNT(*) FROM dbo.DependencyMasterActivity WHERE TagId = @id) AS n");
     const n = used.recordset[0].n;
     if (n > 0) {
       return res.status(409).json({ error: `This tag is used by ${n} activit${n === 1 ? "y" : "ies"} — change their tag first.` });

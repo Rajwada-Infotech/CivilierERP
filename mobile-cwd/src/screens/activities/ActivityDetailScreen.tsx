@@ -25,6 +25,7 @@ import { CheckpointsTab } from "./tabs/CheckpointsTab";
 import { DailyLogTab } from "./tabs/DailyLogTab";
 import { CommentsTab } from "./tabs/CommentsTab";
 import { HistoryTab } from "./tabs/HistoryTab";
+import { TagField } from "@/components/TagField";
 
 type Tab = "overview" | "photos" | "attendance" | "checkpoints" | "daily-log" | "comments" | "history";
 const TABS: { id: Tab; label: string }[] = [
@@ -156,6 +157,10 @@ export default function ActivityDetailScreen() {
 
       {tab === "overview" && (
         <>
+
+      <Section title="Tag">
+        <TagField rungId={rungId} current={row?.tagName} canEdit={editRights.canEdit} onSaved={refresh} />
+      </Section>
 
       <Section title="Allocation">
         <View style={{ ...card, gap: 8 }}>

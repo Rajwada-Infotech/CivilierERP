@@ -734,7 +734,7 @@ const Payment: React.FC = () => {
   );
 
   const { data: supplierOptions = [] } = useQuery<
-    { id: number; label: string; type?: string }[]
+    { id: number; label: string; type?: string; category?: string | null }[]
   >({
     queryKey: ["supplier-options-payment-filter"],
     queryFn: fetchSupplierOptions,
@@ -2649,11 +2649,12 @@ const Payment: React.FC = () => {
                             // to a single "Other" group for any row missing a recognised type.
                             const groups = new Map<string, typeof supplierOptions>();
                             supplierOptions.forEach((s) => {
-                              const key = PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
+                              // A landlord is saved as a supplier-type account whose category is "Landlord".
+                              const key = (s.category ?? "").trim() === "Landlord" ? "Landlords" : PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
                               if (!groups.has(key)) groups.set(key, []);
                               groups.get(key)!.push(s);
                             });
-                            const order = ["Vendors", "Suppliers", "Contractors", "Brokers", "Customers", "Partners", "Other"];
+                            const order = ["Vendors", "Suppliers", "Landlords", "Contractors", "Brokers", "Customers", "Partners", "Other"];
                             const sortedKeys = [...groups.keys()].sort(
                               (a, b) => order.indexOf(a) - order.indexOf(b),
                             );

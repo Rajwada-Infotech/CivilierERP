@@ -76,6 +76,7 @@ import {
   ShieldCheck,
   Camera,
   UserCog,
+  Search,
   Tag,
   CalendarDays,
 } from "lucide-react";
@@ -2927,11 +2928,27 @@ const ReportTable: React.FC<{
   companies: CompanyOption[];
   projects: { id: number; name: string }[];
   onClose: () => void;
-}> = ({ report, filters, companies, projects, onClose }) => {
+  /** When set, clicking a row calls this instead of opening the row-detail dialog (the Civil Work DPR Query page). */
+  onRowOpen?: (row: Record<string, unknown>) => void;
+  /** Start the inline Date field empty (the Query page shows the section bar's range instead of today only). */
+  startWithoutDate?: boolean;
+}> = ({ report, filters, companies, projects, onClose, onRowOpen, startWithoutDate }) => {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
+  // The Query page opens an activity in Reporting and comes back: keep its project / user / date / page choices
+  // for that round trip (this tab only).
+  const savedCtx = useMemo(() => {
+    if (!onRowOpen) return null;
+    try {
+      return JSON.parse(sessionStorage.getItem(`query-ctx:${report.id}`) || "null") as
+        { projectIds?: string[]; userIds?: string[]; userDate?: string; page?: number } | null;
+    } catch {
+      return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [page, setPage] = useState(savedCtx?.page ?? 1);
   const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
   // Civil Work DPR rows carry the activity / chain they are about: offer to open it in the pages that work on it.
   const reportNavigate = useNavigate();
@@ -3004,9 +3021,16 @@ const ReportTable: React.FC<{
       .then((list) => setTagOptions(list.map((t) => ({ id: String(t.id), label: t.tagName }))))
       .catch(() => {});
   }, [isTagWise]);
-  const [userIds, setUserIds] = useState<string[]>([]);
+  const [userIds, setUserIds] = useState<string[]>(savedCtx?.userIds ?? []);
+  // Auto Name search (User-Wise / Tag-Wise): words of "flat, room and activity" in any order, sent after a pause.
+  const [autoSearch, setAutoSearch] = useState("");
+  const [autoSearchTerm, setAutoSearchTerm] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setAutoSearchTerm(autoSearch.trim().length >= 2 ? autoSearch.trim() : ""), 400);
+    return () => clearTimeout(t);
+  }, [autoSearch]);
   // Its own Date field, right in the report's toolbar (starts on today): one day's records only.
-  const [userDate, setUserDate] = useState<string>(() => todayIstDate());
+  const [userDate, setUserDate] = useState<string>(() => savedCtx?.userDate ?? (startWithoutDate ? "" : todayIstDate()));
   const [userOptions, setUserOptions] = useState<MultiSelectOption[]>([]);
   useEffect(() => {
     if (!isUserWise) return;
@@ -3021,7 +3045,7 @@ const ReportTable: React.FC<{
   // dropdowns) — ReportTable remounts per report (key=report.id) so these
   // reset on their own when you switch reports.
   const [companyIds, setCompanyIds] = useState<string[]>([]);
-  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [projectIds, setProjectIds] = useState<string[]>(savedCtx?.projectIds ?? []);
   // Expense Register also gets its own inline Date Range filter — the
   // shared Day/Range toggle above (SectionFilters) already wires "from"/
   // "to" through buildParams() below, but it lives in the parent, a full
@@ -3031,6 +3055,12 @@ const ReportTable: React.FC<{
   // shared filter the same way those already do.
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  useEffect(() => {
+    if (!onRowOpen) return;
+    try {
+      sessionStorage.setItem(`query-ctx:${report.id}`, JSON.stringify({ projectIds, userIds, userDate, page }));
+    } catch { /* storage unavailable — just don't remember */ }
+  }, [onRowOpen, report.id, projectIds, userIds, userDate, page]);
   useEffect(() => {
     if (!isExpenseRegister) return;
     fetchWithAuth("/api/general-ledger/options")
@@ -3138,6 +3168,7 @@ const ReportTable: React.FC<{
     if (hasInlineProject && projectIds.length) f[fc.projectParam ?? "projectId"] = projectIds.join(",");
     if (isUserWise && userIds.length) f["userId"] = userIds.join(",");
     if (isTagWise && tagIds.length) f["tagId"] = tagIds.join(",");
+    if (isUserWise && autoSearchTerm) f["search"] = autoSearchTerm;
     // The inline Date supersedes the section bar's Day / Range, the way the Expense Register's does.
     if (isUserWise && userDate) {
       delete f["dateFrom"];
@@ -3211,7 +3242,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, tagIds, userDate, dateFrom, dateTo, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, userIds, tagIds, autoSearchTerm, userDate, dateFrom, dateTo, projects]);
 
   // ── Server-paged reports: fetch just the page on screen ──────────────────
   // Fetching every page up front (fetchAllRows) meant hundreds of sequential
@@ -3481,6 +3512,23 @@ const ReportTable: React.FC<{
             </div>
           )}
 
+          {isUserWise && (
+            <div className="relative w-64">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={autoSearch}
+                onChange={(e) => setAutoSearch(e.target.value)}
+                placeholder="Search Auto Name — flat, room or activity…"
+                className="w-full h-[30px] pl-7 pr-7 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              />
+              {autoSearch && (
+                <button type="button" onClick={() => setAutoSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear search">
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          )}
+
           {isTagWise && tagOptions.length > 0 && (
             <div className="w-52">
               <MultiSelectDropdown
@@ -3666,7 +3714,7 @@ const ReportTable: React.FC<{
                 {pageRows.map((row, i) => (
                   <tr
                     key={i}
-                    onClick={() => setSelectedRow(row)}
+                    onClick={() => (onRowOpen ? onRowOpen(row) : setSelectedRow(row))}
                     className="hover:bg-muted/20 transition-colors cursor-pointer"
                   >
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">
@@ -3828,6 +3876,40 @@ const ReportTile: React.FC<{
 // isMarketingHeadPage) — showing Finance/Material/Admin tiles they can't
 // actually open would just be a dead end (backend 403s on click).
 const MARKETING_HEAD_SECTION_IDS = new Set(["sales-automation", "crm"]);
+
+const daysAgoIst = (n: number) => {
+  const d = new Date(`${todayIstDate()}T00:00:00`);
+  d.setDate(d.getDate() - n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+/** One report shown on its own page (Civil Work DPR > Query) — the same definition and table as in Reports. */
+export const QueryReportTable: React.FC<{
+  reportId: string;
+  onClose: () => void;
+  onRowOpen: (row: Record<string, unknown>) => void;
+}> = ({ reportId, onClose, onRowOpen }) => {
+  const report = REPORT_MAP.get(reportId);
+  const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    fetchProjectOptions()
+      .then((l) => setProjects(Array.isArray(l) ? l : []))
+      .catch(() => setProjects([]));
+  }, []);
+  if (!report) return null;
+  return (
+    <ReportTable
+      report={report}
+      // Query shows the last 30 days (not just today) so records are there on opening; picking a date narrows to that day.
+      filters={{ companyId: "", projectId: "", finYearId: "", dateMode: "range", singleDate: "", rangeFrom: daysAgoIst(30), rangeTo: todayIstDate() }}
+      companies={[]}
+      projects={projects}
+      onClose={onClose}
+      onRowOpen={onRowOpen}
+      startWithoutDate
+    />
+  );
+};
 
 const Reports: React.FC = () => {
   usePageRights("reports");

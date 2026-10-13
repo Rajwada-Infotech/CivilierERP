@@ -102,7 +102,7 @@ export const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
   ticket:      ["ticket-dashboard", "tickets"],
   sales:       ["sale-order", "sale-invoice", "sales-payment"],
   // Every page of the module, so a user granted only e.g. Quality Check still sees (and can reach) it.
-  civilworkdpr: ["civilworkdpr-dashboard", "civilworkdpr-dependency", "civilworkdpr-work-done", "civilworkdpr-activity-reporting", "civilworkdpr-quality-check", "civilworkdpr-work-transfer", "civilworkdpr-worker-attendance", "civilworkdpr-daily-labour", "civilworkdpr-amendment", "civilworkdpr-room-master"],
+  civilworkdpr: ["civilworkdpr-dashboard", "civilworkdpr-dependency", "civilworkdpr-work-done", "civilworkdpr-activity-reporting", "civilworkdpr-quality-check", "civilworkdpr-work-transfer", "civilworkdpr-worker-attendance", "civilworkdpr-daily-labour", "civilworkdpr-amendment", "civilworkdpr-query", "civilworkdpr-room-master"],
   "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
   maintenance: ["maintenance-dashboard"],
   admin:       ADMIN_PAGE_KEYS,

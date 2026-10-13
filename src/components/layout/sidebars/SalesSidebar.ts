@@ -5,5 +5,5 @@ export const salesNavItems: NavItem[] = [
   { label: "Dashboard",    icon: Chart2,     path: "/sales",              pageKey: "sales-dashboard", isDashboard: true },
   { label: "Sale Order",   icon: ShoppingCart, path: "/sales/sale-order",   pageKey: "sale-order" },
   { label: "Sale Invoice", icon: Receipt21,      path: "/sales/sale-invoice", pageKey: "sale-invoice" },
-  { label: "Payment",      icon: Card,   path: "/sales/payment",      pageKey: "sales-payment" },
+  { label: "Received Payment", icon: Card,   path: "/sales/payment",      pageKey: "sales-payment" },
 ];

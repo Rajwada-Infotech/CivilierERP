@@ -172,6 +172,7 @@ const CivilWorkDprAmendment = lazy(
 const CivilWorkDprWorkTransfer = lazy(
   () => import("./pages/civilworkdpr/WorkTransfer"),
 );
+const CivilWorkDprQuery = lazy(() => import("./pages/civilworkdpr/Query"));
 const DprTagMaster = lazy(() => import("./pages/civilworkdpr/DprTagMaster"));
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
@@ -373,7 +374,7 @@ const PasswordResetPage = lazy(
   () => import("./pages/admin/security/PasswordReset"),
 );
 const ActivityBrowserPage = lazy(
-  () => import("./pages/admin/Activitybrowser/ActivityBrowser"),
+  () => import("./pages/admin/Activitybrowser/ActivityBrowserHome"),
 );
 
 // Admin Masters
@@ -1266,6 +1267,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-amendment">
             <CivilWorkDprAmendment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/query"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-query">
+            <CivilWorkDprQuery />
           </ProtectedRoute>
         }
       />
