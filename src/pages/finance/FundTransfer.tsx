@@ -65,34 +65,14 @@ const DIGITAL_REF_LABEL: Record<string, string> = {
   Card: "Card Reference / Auth Code",
 };
 
-const STATUS_CFG: Record<string, { text: string; bar: string }> = {
-  Draft:    { text: "text-muted-foreground", bar: "bg-border" },
-  Pending:  { text: "text-amber-700",  bar: "bg-amber-500" },
-  Approved: { text: "text-emerald-700", bar: "bg-emerald-500" },
-  Rejected: { text: "text-rose-700",   bar: "bg-rose-500" },
-};
-
 function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CFG[status] ?? STATUS_CFG.Draft;
-  return (
-    <span className={cn("inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[0.625rem] font-semibold uppercase tracking-wider", cfg.text)}>
-      <span className={cn("w-[3px] h-3 rounded-[1px]", cfg.bar)} />
-      {status}
-    </span>
-  );
+  return <SheetMark text={status || "—"} tone={statusTone(status || "")} />;
 }
 
 function TypeBadge({ type }: { type: FundTransferType }) {
-  const isInter = type === "Inter";
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-sm border font-mono text-[0.625rem] font-semibold uppercase tracking-wider",
-        isInter ? "border-foreground text-foreground bg-muted/60" : "border-border text-muted-foreground bg-card",
-      )}
-    >
-      <span className={cn("w-[3px] h-3 rounded-[1px]", isInter ? "bg-foreground" : "bg-border")} />
-      {isInter ? "Inter · Loan" : "Intra"}
+    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+      {type === "Inter" ? "Inter-company · loan" : "Intra-company"}
     </span>
   );
 }
@@ -121,7 +101,7 @@ function FlowConnector({
   const rail = type === "Inter" ? "border-foreground" : "border-border";
   const node = type === "Inter" ? "bg-foreground" : "bg-foreground/40";
   return (
-    <div className={cn("flex items-center gap-2 min-w-0 font-mono", amount && "mt-2")}>
+    <div className={cn("flex items-center gap-2 min-w-0 font-heading tabular-nums", amount && "mt-2")}>
       <div className="min-w-0 text-right shrink-0">
         <p className={cn("font-semibold text-foreground truncate", compact ? "text-[0.6875rem] max-w-[100px]" : "text-xs max-w-[140px]")}>{sourceLabel}</p>
         {sourceSub && !compact && <p className="text-[0.625rem] text-muted-foreground truncate max-w-[140px]">{sourceSub}</p>}
@@ -163,7 +143,7 @@ function LoanLink({ loanId, loanNo, status }: { loanId: number; loanNo: string |
   return (
     <button
       onClick={(e) => { e.stopPropagation(); navigate(`/loan/sanction?view=${loanId}`); }}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted/60 text-[0.625rem] font-mono text-foreground hover:bg-primary/10 transition-colors"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted/60 text-[0.625rem] font-heading tabular-nums text-foreground hover:bg-primary/10 transition-colors"
       title="Open in Loan Sanction"
     >
       <Landmark size={9} /> {loanNo || `LN-${loanId}`}{status ? ` · ${status}` : ""} <ExternalLink size={9} />
@@ -200,7 +180,7 @@ function DetailRow({ label, value, mono = false }: { label: string; value: React
   return (
     <div className="flex items-start justify-between gap-4 py-2 border-b border-border/60 last:border-0">
       <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">{label}</span>
-      <span className={cn("text-sm text-foreground text-right", mono && "font-mono")}>{value}</span>
+      <span className={cn("text-sm text-foreground text-right", mono && "font-heading tabular-nums")}>{value}</span>
     </div>
   );
 }
@@ -303,7 +283,7 @@ function TransferDetailDialog({
               <ArrowLeftRight size={15} className="text-primary" />
             </div>
             <div className="min-w-0">
-              <DialogTitle className="text-sm font-semibold font-heading font-mono">
+              <DialogTitle className="text-sm font-semibold font-heading font-heading tabular-nums">
                 {detail?.DocNo || `FT-${ftId}`}
               </DialogTitle>
               <DialogDescription className="text-[0.6875rem] mt-0.5">Fund Transfer details</DialogDescription>
@@ -372,30 +352,30 @@ function TransferDetailDialog({
                       {v.rows.map((row, ri) => (
                         <div key={ri} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-3 border-b border-border/50 last:border-0 items-center gap-2">
                           <div className="flex items-center gap-2 min-w-0">
-                            <span className={cn("inline-block w-1.5 h-1.5 rounded-full flex-shrink-0", row.side === "debit" ? "bg-emerald-500" : "bg-rose-500")} />
+                            <span className={cn("inline-block w-1.5 h-1.5 rounded-full flex-shrink-0", row.side === "debit" ? "bg-foreground" : "bg-destructive")} />
                             <span className="text-xs text-foreground truncate">{row.label}</span>
                           </div>
-                          <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                          <span className="text-xs text-right font-heading tabular-nums text-foreground">
                             {row.side === "debit" ? formatINR(row.amount) : ""}
                           </span>
-                          <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                          <span className="text-xs text-right font-heading tabular-nums text-destructive">
                             {row.side === "credit" ? formatINR(row.amount) : ""}
                           </span>
                         </div>
                       ))}
                       <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-2">
                         <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
-                        <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{formatINR(totalDebit)}</span>
-                        <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{formatINR(totalCredit)}</span>
+                        <span className="text-right text-foreground font-heading tabular-nums">{formatINR(totalDebit)}</span>
+                        <span className="text-right text-destructive font-heading tabular-nums">{formatINR(totalCredit)}</span>
                       </div>
                     </div>
                   );
                 })}
 
                 {posting.isPosted ? (
-                  <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-                    <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
-                    <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                  <div className="flex items-center gap-2.5 rounded-xl border border-foreground/40 bg-primary/10 px-4 py-3">
+                    <CheckCircle2 size={13} className="text-foreground flex-shrink-0" />
+                    <p className="text-xs text-foreground">
                       Posted to General Ledger. Entries are visible in the Trial Balance.
                     </p>
                   </div>
@@ -434,7 +414,7 @@ function TransferDetailDialog({
             <div>
               <DetailRow label="Transfer Date" value={fmtDate(detail.TransferDate)} />
               <DetailRow label="Created By" value={detail.CreatedByName || detail.CreatedBy || "—"} />
-              <DetailRow label="Amount" value={<span className="font-mono font-semibold">{formatINR(detail.Amount || 0)}</span>} />
+              <DetailRow label="Amount" value={<span className="font-heading tabular-nums font-semibold">{formatINR(detail.Amount || 0)}</span>} />
               <DetailRow label="Source Company" value={detail.SourceCompanyName || "—"} />
               <DetailRow label="Source Bank" value={detail.SourceBankName || "—"} />
               <DetailRow label="Destination Company" value={detail.DestinationCompanyName || "—"} />
@@ -502,7 +482,7 @@ function TransferDetailDialog({
                 label="GL Posting"
                 value={
                   detail.Status === "Approved" ? (
-                    <span className={cn("inline-flex items-center gap-1", detail.PostedToGL ? "text-emerald-700" : "text-rose-700")}>
+                    <span className={cn("inline-flex items-center gap-1", detail.PostedToGL ? "text-foreground" : "text-destructive")}>
                       <ShieldCheck size={13} /> {detail.PostedToGL ? "Posted" : "Not posted"}
                     </span>
                   ) : (
@@ -550,17 +530,11 @@ function ModeChip({
 }) {
   if (!mode) return <span className="text-muted-foreground text-xs">—</span>;
   const isCheque = mode === "Cheque" || mode === "Post-Dated Cheque";
+  const ref = isCheque ? (chequeNo ? `Chq #${chequeNo}` : "") : digitalRefNumber || "";
   return (
-    <span className="inline-flex items-center gap-1 text-xs">
-      <span className="font-medium text-foreground">{mode}</span>
-      {isCheque && chequeNo && (
-        <span className="text-muted-foreground font-mono">· #{chequeNo}</span>
-      )}
-      {!isCheque && digitalRefNumber && (
-        <span className="text-muted-foreground font-mono truncate max-w-[100px]" title={digitalRefNumber}>
-          · {digitalRefNumber}
-        </span>
-      )}
+    <span className="inline-flex items-baseline gap-2">
+      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{mode}</span>
+      {ref && <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground truncate max-w-[130px]" title={ref}>{ref}</span>}
     </span>
   );
 }
@@ -975,7 +949,7 @@ export default function FundTransfer() {
       <SheetShell
         eyebrow="CivilierERP · Finance"
         title="Fund transfers"
-        subtitle="Move cash between bank accounts — intra-company, or inter-company as a loan"
+        subtitle="Move money between bank accounts, within one company or between two companies as a loan."
         action={
           <div className="flex items-center gap-2">
             {rights.canCreate && (
@@ -1046,12 +1020,12 @@ export default function FundTransfer() {
           <div className="flex items-center gap-1.5">
             <span className="label">Filtered by</span>
             {statusFilter && (
-              <button onClick={() => setStatusFilter(null)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-border bg-muted text-[0.6875rem] font-medium text-foreground hover:bg-muted/60">
+              <button onClick={() => setStatusFilter(null)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-none border border-border bg-muted text-[0.6875rem] font-medium text-foreground hover:bg-muted/60">
                 {statusFilter} <X size={10} />
               </button>
             )}
             {typeFilter && (
-              <button onClick={() => setTypeFilter(null)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-border bg-muted/60 text-[0.6875rem] font-medium text-foreground hover:bg-primary/10">
+              <button onClick={() => setTypeFilter(null)} className="inline-flex items-center gap-1 px-2 py-1 border border-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10">
                 {typeFilter === "Inter" ? "Inter-Company" : "Intra-Company"} <X size={10} />
               </button>
             )}
@@ -1083,12 +1057,12 @@ export default function FundTransfer() {
                 >
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
+                      <span className="font-heading tabular-nums text-xs bg-muted px-2 py-1 rounded text-foreground">
                         {t.DocNo || `FT-${t.FTId}`}
                       </span>
                       <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtDate(t.TransferDate)}</span>
                     </div>
-                    <span className="font-mono text-sm font-semibold text-foreground tabular-nums shrink-0">
+                    <span className="font-heading tabular-nums text-sm font-semibold text-foreground tabular-nums shrink-0">
                       {formatINR(t.Amount || 0)}
                     </span>
                   </div>
@@ -1419,7 +1393,7 @@ export default function FundTransfer() {
                         <select
                           value={chequeLotId ? String(chequeLotId) : ""}
                           onChange={(e) => handleLotSelect(e.target.value)}
-                          className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+                          className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary font-heading tabular-nums"
                         >
                           <option value="">— Select lot —</option>
                           {chequeLots.map((lot) => (
@@ -1450,7 +1424,7 @@ export default function FundTransfer() {
                             value={chequeNo}
                             onChange={(e) => handleChequeSelect(e.target.value)}
                             disabled={loadingCheques || validatingCheque}
-                            className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 font-mono"
+                            className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 font-heading tabular-nums"
                           >
                             <option value="">— Select cheque number —</option>
                             {availableCheques.map((c) => (
@@ -1496,7 +1470,7 @@ export default function FundTransfer() {
                     validUntil.setMonth(validUntil.getMonth() + 3);
                     const isExpired = validUntil < new Date();
                     return isExpired ? (
-                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/8 border border-red-500/30 text-xs text-red-600 dark:text-red-400">
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-destructive/10 border border-destructive/40 text-xs text-destructive">
                         <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                         <span>Cheque dated {fmt(chequeD)} expired on <strong>{fmt(validUntil)}</strong>. Please obtain a new cheque.</span>
                       </div>
@@ -1540,8 +1514,8 @@ export default function FundTransfer() {
               <div className="space-y-1.5">
                 <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount *</label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-mono pointer-events-none">₹</span>
-                  <Input type="number" min={0} step="0.01" className="h-9 font-mono pl-7" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-heading tabular-nums pointer-events-none">₹</span>
+                  <Input type="number" min={0} step="0.01" className="h-9 font-heading tabular-nums pl-7" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
                 </div>
               </div>
             </div>
@@ -1552,7 +1526,7 @@ export default function FundTransfer() {
             </div>
 
             {transferType === "Inter" && (
-              <div className="flex items-start gap-2.5 pl-3.5 sm:pl-4 pr-3.5 sm:pr-4 py-2.5 rounded-lg border border-border bg-muted/20 text-xs text-muted-foreground border-l-[3px] border-l-violet-500">
+              <div className="flex items-start gap-2.5 pl-3.5 sm:pl-4 pr-3.5 sm:pr-4 py-2.5 rounded-lg border border-border bg-muted/20 text-xs text-muted-foreground border-l-[3px] border-l-foreground/40">
                 <Landmark size={14} className="shrink-0 mt-0.5 text-foreground" />
                 <span>
                   <span className="font-semibold text-foreground">Creates a Loan Sanction record on approval.</span> The
