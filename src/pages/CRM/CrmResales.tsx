@@ -8,7 +8,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { ArrowRightLeft, Building2, Info, Plus, Undo2 } from "lucide-react";
+import { ArrowRightLeft, Building2, CheckCircle2, Info, Plus, Undo2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { DateInput } from "@/components/ui/date-input";
@@ -79,9 +79,27 @@ const CrmResales: React.FC = () => {
     enabled: !!paying?.ProjectId,
   });
 
+  type ResaleTab = "all" | "progress" | "resale" | "buyback" | "completed" | "cancelled";
+  const [tab, setTab] = useState<ResaleTab>("all");
+
   const { data: deals = [], isLoading, dataUpdatedAt, isFetching } = useQuery<Deal[]>({ queryKey: ["crm-resales"], queryFn: () => getJson(API) });
   const { data: holdings = [] } = useQuery<Holding[]>({ queryKey: ["crm-resale-holdings"], queryFn: () => getJson(`${API}/holdings`), enabled: open });
   const { data: customers = [] } = useQuery<any[]>({ queryKey: ["crm-customers-dropdown"], queryFn: () => getJson("/api/crm/customers"), enabled: open, staleTime: 60_000 });
+
+  const activeCases = useMemo(() => deals.filter((d) => !["Completed", "Cancelled", "Rejected"].includes(d.Status)), [deals]);
+  const completedCases = useMemo(() => deals.filter((d) => d.Status === "Completed"), [deals]);
+  const buybackCases = useMemo(() => deals.filter((d) => d.Kind === "BuyBack"), [deals]);
+  const resaleCases = useMemo(() => deals.filter((d) => d.Kind === "Resale"), [deals]);
+  const cancelledCases = useMemo(() => deals.filter((d) => ["Cancelled", "Rejected"].includes(d.Status)), [deals]);
+
+  const filteredDeals = useMemo(() => {
+    if (tab === "progress") return activeCases;
+    if (tab === "resale") return resaleCases;
+    if (tab === "buyback") return buybackCases;
+    if (tab === "completed") return completedCases;
+    if (tab === "cancelled") return cancelledCases;
+    return deals;
+  }, [deals, tab, activeCases, resaleCases, buybackCases, completedCases, cancelledCases]);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["crm-resales"] });
@@ -206,17 +224,79 @@ const CrmResales: React.FC = () => {
         </p>
       </div>
 
-      <div className="flex items-center justify-between gap-2 mb-3">
-        <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refresh} />
-        {rights.canCreate && (
-          <button onClick={() => { setForm({ ...EMPTY }); setOpen(true); }}
-            className="inline-flex items-center gap-1.5 px-3 h-9 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
-            <Plus size={14} /> New resale or buy-back
-          </button>
-        )}
+      {/* KPI Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <button
+          onClick={() => setTab("progress")}
+          className={`text-left rounded-xl border p-3 transition-colors ${tab === "progress" ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40"}`}
+        >
+          <div className="text-xs text-muted-foreground flex items-center gap-1.5"><ArrowRightLeft size={13} className="text-primary" /> Active Cases</div>
+          <div className="text-xl font-bold tabular-nums mt-1">{activeCases.length}</div>
+          <div className="text-[0.6875rem] text-muted-foreground">In progress</div>
+        </button>
+        <button
+          onClick={() => setTab("resale")}
+          className={`text-left rounded-xl border p-3 transition-colors ${tab === "resale" ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40"}`}
+        >
+          <div className="text-xs text-muted-foreground flex items-center gap-1.5"><ArrowRightLeft size={13} className="text-sky-600" /> Resale to Buyer</div>
+          <div className="text-xl font-bold tabular-nums mt-1">{resaleCases.length}</div>
+          <div className="text-[0.6875rem] text-muted-foreground">Tripartite transfer</div>
+        </button>
+        <button
+          onClick={() => setTab("buyback")}
+          className={`text-left rounded-xl border p-3 transition-colors ${tab === "buyback" ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40"}`}
+        >
+          <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Undo2 size={13} className="text-violet-600" /> Buy-Back</div>
+          <div className="text-xl font-bold tabular-nums mt-1">{buybackCases.length}</div>
+          <div className="text-[0.6875rem] text-muted-foreground">Developer repurchase</div>
+        </button>
+        <button
+          onClick={() => setTab("completed")}
+          className={`text-left rounded-xl border p-3 transition-colors ${tab === "completed" ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40"}`}
+        >
+          <div className="text-xs text-muted-foreground flex items-center gap-1.5"><CheckCircle2 size={13} className="text-emerald-600" /> Completed</div>
+          <div className="text-xl font-bold tabular-nums mt-1">{completedCases.length}</div>
+          <div className="text-[0.6875rem] text-muted-foreground">Transferred / settled</div>
+        </button>
       </div>
 
-      <DataTable columns={columns} data={deals} loading={isLoading}
+      {/* Filter Tabs & Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="flex flex-wrap gap-1.5">
+          {([
+            { id: "all", label: "All Cases", count: deals.length },
+            { id: "progress", label: "In Progress", count: activeCases.length },
+            { id: "resale", label: "Resales", count: resaleCases.length },
+            { id: "buyback", label: "Buy-Backs", count: buybackCases.length },
+            { id: "completed", label: "Completed", count: completedCases.length },
+            { id: "cancelled", label: "Cancelled", count: cancelledCases.length },
+          ] as const).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                tab === t.id
+                  ? "bg-primary text-primary-foreground border-transparent shadow-xs"
+                  : "bg-background border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              {t.label} <span className="opacity-70 tabular-nums">({t.count})</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refresh} />
+          {rights.canCreate && (
+            <button onClick={() => { setForm({ ...EMPTY }); setOpen(true); }}
+              className="inline-flex items-center gap-1.5 px-3 h-9 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
+              <Plus size={14} /> New resale or buy-back
+            </button>
+          )}
+        </div>
+      </div>
+
+      <DataTable columns={columns} data={filteredDeals} loading={isLoading}
+        emptyMessage="No resale or buy-back cases match the selected filter."
         onRowClick={(r) => { if (r.original.BookingIds) nav(`/crm/resales/${r.original.Id}`); }}
         rowClassName={(r) => (r.original.BookingIds ? "cursor-pointer" : "")} />
 
