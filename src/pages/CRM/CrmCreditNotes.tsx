@@ -40,7 +40,7 @@ import {
 // Raised without a refund too: an invoice reduced (discount, area change, price
 // correction) and the money kept — approved, it lowers the booking and moves
 // anything already paid above the new amount to the customer's account.
-// Cancelling needs a second person; the number is kept. "To issue" lists paid
+// Cancelling goes through its own approval; the number is kept. "To issue" lists paid
 // refunds that carried GST but have none yet.
 
 const API = "/api/crm/refunds";
@@ -559,7 +559,7 @@ function RequestPanel({ n, canEdit, refresh }: { n: any; canEdit: boolean; refre
       {canEdit && n.Status === "Pending" && (
         <div className="space-y-2 border-t border-border pt-3">
           <p className="text-xs text-muted-foreground">
-            Approvers: approve here or in the Approval Inbox. Whoever raised it can't approve it.
+            Approvers: approve here or in the Approval Inbox.
           </p>
           <textarea
             value={note}
@@ -993,7 +993,7 @@ function DetailDialog({
                 {n.RefundNo
                   ? `Every credit note of refund ${n.RefundNo} is cancelled together; you can re-issue afterwards.`
                   : "The booking value, milestone, and customer's account go back as they were."}{" "}
-                A second person must approve the cancellation.
+                The cancellation goes for approval.
               </p>
               <textarea
                 value={reason}

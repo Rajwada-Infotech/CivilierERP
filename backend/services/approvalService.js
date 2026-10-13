@@ -42,10 +42,9 @@ const MAKER_COLUMNS = {
   "crm-transfer-deeds": "CreatedBy",
   // Whoever recorded a new owner can't approve the record too.
   "crm-ownership-changes": "CreatedBy",
-  // A credit note reduces what a customer owes and our GST: whoever raised it
-  // (or asked to cancel one) can't approve it too.
-  "crm-credit-notes": "RequestedById",
-  "crm-credit-note-cancel": "CancelRequestedById",
+  // Credit notes (crm-credit-notes / crm-credit-note-cancel) deliberately have
+  // no maker-checker: by the business's choice whoever raises one may approve
+  // it, within the levels set in Approval Setup.
 };
 
 // Map module slug → { table, pkCol, statusCol }
