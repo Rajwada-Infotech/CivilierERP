@@ -4,7 +4,7 @@ const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmBrokerageMaster")); }
-const rateLimit = require("../middleware/rateLimiter");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -20,7 +20,7 @@ const { bumpCacheVersion } = require("../redis");
 const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 const { calculateTds } = require("../services/tds");
 

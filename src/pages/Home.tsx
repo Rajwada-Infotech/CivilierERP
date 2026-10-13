@@ -1,61 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { AnimatePresence, LayoutGroup, MotionConfig, motion, useInView } from "framer-motion";
+import { motion, useInView } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  HardHat,
-  Building2,
-  Layers,
-  ClipboardList,
   Hammer,
-  ArrowRight,
   ShieldCheck,
-  BarChart3,
-  RefreshCw,
-  AlertCircle,
   IndianRupee,
   Package,
   FileCheck,
-  Users,
-  Database,
   Ticket,
   TriangleAlert,
-  CheckCircle2,
-  TrendingUp,
-  Warehouse,
-  FileText,
-  CreditCard,
   Wrench,
-  LineChart,
   ShoppingCart,
   Pickaxe,
-  Receipt,
   HeartHandshake,
   Table,
   Activity,
-  Bell,
   Cpu,
-  ArrowUpRight,
 } from "lucide-react";
 import {
   fetchHomeDashboard,
   type HomeDashboardData,
-  type RecentPayment,
-  type RecentGRN,
-  type RecentExpense,
   type ApprovalInboxItem,
-  type TaskSummary,
-  type SalesSummaryData,
 } from "@/api/homeDashboardApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { LazyWhenVisible } from "@/components/LazyWhenVisible";
+import { SHEET_CSS, Detail, Dimension, Skel } from "@/components/sheet/Sheet";
 import { getModuleRanking } from "@/api/homeWidgetsApi";
 import { moduleOfPath } from "@/lib/moduleOfPath";
 import { getFixedAssets } from "@/api/fixedAssetApi";
 import {
   HOME_TILES,
-  MODULE_COLORS,
   MODULE_LABELS,
   orderTiles,
   pickHeroTiles,
@@ -63,19 +39,6 @@ import {
   type HomeModuleId,
   type HomeTileData,
 } from "@/pages/home/homeTiles";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Cell,
-  LabelList,
-} from "recharts";
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
 // These mirror the logic in TopNavbar / auth.utils so the home page
@@ -131,22 +94,6 @@ const compactINR = (n: number) =>
   : n >= 1e3 ? `₹${(n / 1e3).toFixed(1)}K`
   : `₹${Math.round(n)}`;
 
-// Recharts' default auto-tick algorithm, fed a small/skewed dataset (mostly
-// zero with one or two real spikes — exactly what a 7-day activity window
-// often looks like), can produce ticks that round to the same displayed
-// label once passed through a formatter (e.g. two different raw values
-// both showing "30.0L"). Generating clean, evenly-spaced round-number
-// ticks ourselves guarantees every label is genuinely distinct.
-function niceTicks(max: number, count = 4): number[] {
-  if (!(max > 0)) return [0];
-  const rawStep = max / count;
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
-  const residual = rawStep / magnitude;
-  const step = (residual > 5 ? 10 : residual > 2 ? 5 : residual > 1 ? 2 : 1) * magnitude;
-  const ticks: number[] = [];
-  for (let v = 0; v <= max + step * 0.5; v += step) ticks.push(Math.round(v));
-  return ticks;
-}
 
 
 // ─── Animated Counter ─────────────────────────────────────────────────────────
@@ -186,57 +133,6 @@ function AnimatedCounter({
   );
 }
 
-// ─── Bento primitives ─────────────────────────────────────────────────────────
-function Bento({
-  children, className = "", title, subtitle, icon: Icon, accent = "#6366f1", action, delay = 0,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  title?: string;
-  subtitle?: string;
-  icon?: React.ElementType;
-  accent?: string;
-  action?: React.ReactNode;
-  delay?: number;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 18 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] }}
-      className={`relative rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm overflow-hidden flex flex-col ${className}`}
-    >
-      <div
-        className="absolute inset-x-0 top-0 h-px opacity-60"
-        style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }}
-      />
-      {title && (
-        <div className="flex items-start gap-2 px-4 pt-3.5 pb-2.5">
-          {Icon && (
-            <span
-              className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
-              style={{ background: `${accent}18`, border: `1px solid ${accent}30` }}
-            >
-              <Icon size={12} style={{ color: accent }} />
-            </span>
-          )}
-          <div className="min-w-0">
-            <span className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.16em] text-muted-foreground block">
-              {title}
-            </span>
-            {subtitle && (
-              <span className="text-[0.625rem] text-muted-foreground/45 block mt-0.5 normal-case tracking-normal font-normal">
-                {subtitle}
-              </span>
-            )}
-          </div>
-          {action && <span className="ml-auto shrink-0">{action}</span>}
-        </div>
-      )}
-      <div className="flex-1 min-h-0">{children}</div>
-    </motion.div>
-  );
-}
 
 interface Attention {
   severity: "high" | "med" | "low";
@@ -246,213 +142,11 @@ interface Attention {
   href: string;
   icon: React.ElementType;
 }
-const SEV_COLOR: Record<Attention["severity"], string> = {
-  high: "#ef4444",
-  med: "#f59e0b",
-  low: "#3b82f6",
-};
 
-function AttentionRow({ a, i, onGo }: { a: Attention; i: number; onGo: (h: string) => void }) {
-  const c = SEV_COLOR[a.severity];
-  return (
-    <motion.button
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.4, delay: 0.05 + i * 0.05 }}
-      onClick={() => onGo(a.href)}
-      className="group w-full flex items-center gap-3 px-4 py-2.5 border-b border-border/25 last:border-0 hover:bg-muted/30 transition-colors text-left"
-    >
-      <span className="relative flex h-2 w-2 shrink-0">
-        {a.severity === "high" && (
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: c }} />
-        )}
-        <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: c }} />
-      </span>
-      <span
-        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-        style={{ background: `${c}14` }}
-      >
-        <a.icon size={13} style={{ color: c }} />
-      </span>
-      <div className="flex-1 min-w-0">
-        <p className="text-[0.8125rem] font-semibold text-foreground leading-tight truncate">{a.label}</p>
-        <p className="text-[0.625rem] text-muted-foreground/55 mt-0.5 truncate">{a.hint}</p>
-      </div>
-      <span className="font-heading font-bold text-lg tabular-nums shrink-0" style={{ color: c }}>
-        {a.count.toLocaleString("en-IN")}
-      </span>
-      <ArrowUpRight size={13} className="text-muted-foreground/20 group-hover:text-muted-foreground/60 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all shrink-0" />
-    </motion.button>
-  );
-}
 
-function KpiPill({
-  label, value, prefix = "", suffix = "", color, icon: Icon, i,
-}: {
-  label: string;
-  value: number | string | null;
-  prefix?: string;
-  suffix?: string;
-  color: string;
-  icon: React.ElementType;
-  i: number;
-}) {
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.94 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      transition={{
-        duration: 0.4,
-        delay: 0.1 + i * 0.04,
-        layout: { type: "spring", stiffness: 280, damping: 30 },
-      }}
-      className="rounded-xl border border-border/45 bg-card/50 backdrop-blur-sm px-3.5 py-3 flex flex-col gap-1"
-    >
-      <div className="flex items-center gap-1.5">
-        <Icon size={11} style={{ color }} />
-        <span className="text-[0.5938rem] font-medium uppercase tracking-wide text-muted-foreground/55 truncate">{label}</span>
-      </div>
-      <span className="font-heading font-bold text-[1.35rem] leading-none tabular-nums" style={{ color }}>
-        {value == null ? (
-          <span className="animate-pulse inline-block h-5 w-14 bg-muted rounded" />
-        ) : typeof value === "number" ? (
-          <AnimatedCounter target={value} prefix={prefix} suffix={suffix} duration={1.1} />
-        ) : (
-          `${prefix}${value}${suffix}`
-        )}
-      </span>
-    </motion.div>
-  );
-}
 
-function LiveRow({ item, onGo }: { item: LiveActivityItem; onGo: (h: string) => void }) {
-  const m = moduleMeta(item.Module);
-  const t = relTime(item.At);
-  return (
-    <button
-      onClick={() => onGo(item.Href)}
-      className="group w-full flex items-start gap-2.5 px-4 py-2.5 border-b border-border/20 last:border-0 hover:bg-muted/25 transition-colors text-left"
-    >
-      <span className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style={{ background: `${m.color}16` }}>
-        <m.icon size={11} style={{ color: m.color }} />
-      </span>
-      <div className="flex-1 min-w-0">
-        <p className="text-[0.7188rem] font-semibold text-foreground leading-snug truncate">{item.Title}</p>
-        <p className="text-[0.625rem] text-muted-foreground/50 mt-0.5 truncate">
-          <span style={{ color: m.color }}>{m.label}</span>
-          {item.Subtitle ? ` · ${item.Subtitle}` : ""}
-          {item.Actor ? ` · ${item.Actor}` : ""}
-        </p>
-      </div>
-      <div className="flex flex-col items-end shrink-0 gap-0.5">
-        {item.Amount != null && item.Amount > 0 && (
-          <span className="text-[0.6562rem] font-heading font-bold tabular-nums" style={{ color: m.color }}>
-            {compactINR(item.Amount)}
-          </span>
-        )}
-        {t && <span className="text-[0.5938rem] text-muted-foreground/35 font-mono tabular-nums">{t}</span>}
-      </div>
-    </button>
-  );
-}
 
-// ─── Stat card — hero KPI tile with a small trend sparkline ─────────────────
-function StatCard({
-  icon: Icon, label, value, prefix = "", suffix = "", color, sparkline, i,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: number | string | null;
-  prefix?: string;
-  suffix?: string;
-  color: string;
-  sparkline: number[];
-  i: number;
-}) {
-  const max = Math.max(...sparkline, 1);
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.94 }}
-      transition={{
-        duration: 0.45,
-        delay: 0.06 * i,
-        ease: [0.16, 1, 0.3, 1],
-        layout: { type: "spring", stiffness: 280, damping: 30 },
-      }}
-      className="relative rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm p-4 flex flex-col gap-4 overflow-hidden"
-    >
-      <div
-        className="absolute inset-x-0 top-0 h-px opacity-60"
-        style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }}
-      />
-      <div className="flex items-center justify-between">
-        <span
-          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-          style={{ background: `${color}18`, border: `1px solid ${color}30` }}
-        >
-          <Icon size={16} style={{ color }} />
-        </span>
-        {/* 7-day trend — same activity series the charts below plot */}
-        <div className="flex items-end gap-[3px] h-7">
-          {sparkline.map((v, idx) => (
-            <div
-              key={idx}
-              className="w-1.5 rounded-full transition-all"
-              style={{
-                height: `${Math.max(12, (v / max) * 100)}%`,
-                background: idx >= sparkline.length - 2 ? color : `${color}35`,
-              }}
-            />
-          ))}
-        </div>
-      </div>
-      <div>
-        <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground/55 mb-1 truncate">
-          {label}
-        </p>
-        <p className="font-heading font-bold text-[1.65rem] leading-none tabular-nums" style={{ color }}>
-          {value == null ? (
-            <span className="animate-pulse inline-block h-7 w-20 bg-muted rounded" />
-          ) : typeof value === "number" ? (
-            <AnimatedCounter target={value} prefix={prefix} suffix={suffix} duration={1.2} />
-          ) : (
-            `${prefix}${value}${suffix}`
-          )}
-        </p>
-      </div>
-    </motion.div>
-  );
-}
 
-// ─── Circular gauge — the one genuinely percentage-shaped hero metric ───────
-function CircularGauge({ pct, size = 128, color = "#7c3aed" }: { pct: number; size?: number; color?: string }) {
-  const stroke = 10;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="hsl(var(--muted))" strokeWidth={stroke} />
-      <motion.circle
-        cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
-        strokeLinecap="round" strokeDasharray={c} transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        initial={{ strokeDashoffset: c }}
-        animate={{ strokeDashoffset: c * (1 - pct / 100) }}
-        transition={{ duration: 1.3, delay: 0.3, ease: "easeOut" }}
-      />
-      <text x="50%" y="47%" textAnchor="middle" dominantBaseline="middle" className="fill-foreground font-heading font-bold" style={{ fontSize: size * 0.22 }}>
-        {pct}%
-      </text>
-      <text x="50%" y="66%" textAnchor="middle" dominantBaseline="middle" className="fill-muted-foreground" style={{ fontSize: size * 0.075, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-        Completed
-      </text>
-    </svg>
-  );
-}
 
 // ─── Project Network ──────────────────────────────────────────────────────────
 // A force-directed map of the real company → project structure.
@@ -489,10 +183,10 @@ type ProjectNode = {
 // light and a dark card surface (the panel is theme-aware; only these accents
 // are fixed).
 const NET = {
-  active: "#2DD4BF",
-  idle: "#7C8598",
-  jv: "#C9AE4E",
-  company: "#5B8DB8",
+  active: "hsl(var(--primary))",
+  idle: "hsl(var(--muted-foreground) / 0.55)",
+  jv: "hsl(var(--primary) / 0.5)",
+  company: "hsl(var(--foreground))",
 };
 
 type NetNode = {
@@ -876,54 +570,25 @@ function ProjectNetworkMap({
         }
       `}</style>
 
-      {/* ── Lens pills + zoom ─────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 flex-wrap px-3 pb-2.5">
-        <div className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-muted/30 p-0.5">
+      {/* ── Lens + zoom ───────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingBottom: 12 }}>
+        <div className="seg">
           {(["all", "active", "idle"] as const).map((k) => (
-            <button
-              key={k}
-              onClick={() => setLens(k)}
-              className={`px-2.5 py-1 rounded-[7px] text-[0.625rem] font-heading font-semibold uppercase tracking-wider transition-colors ${
-                lens === k
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground/60 hover:text-muted-foreground"
-              }`}
-            >
+            <button key={k} onClick={() => setLens(k)} className={lens === k ? "on" : undefined}>
               {k === "idle" ? "Dormant" : k}
             </button>
           ))}
         </div>
-
-        <div className="ml-auto flex items-center gap-1">
-          {[
-            { label: "−", fn: () => setZoom((z) => Math.max(0.7, z - 0.2)) },
-            { label: "+", fn: () => setZoom((z) => Math.min(2, z + 0.2)) },
-          ].map((b) => (
-            <button
-              key={b.label}
-              onClick={b.fn}
-              className="w-6 h-6 rounded-full border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground hover:border-border transition-colors text-xs leading-none flex items-center justify-center"
-            >
-              {b.label}
-            </button>
-          ))}
-          <button
-            onClick={() => {
-              setZoom(1);
-              setSelected(null);
-            }}
-            className="px-2 h-6 rounded-full border border-border/60 bg-muted/30 text-[0.5625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors"
-          >
-            Reset
-          </button>
+        <div className="seg" style={{ marginLeft: "auto" }}>
+          <button onClick={() => setZoom((z) => Math.max(0.7, z - 0.2))} aria-label="Zoom out">−</button>
+          <button onClick={() => setZoom((z) => Math.min(2, z + 0.2))} aria-label="Zoom in">+</button>
+          <button onClick={() => { setZoom(1); setSelected(null); }}>Reset</button>
         </div>
       </div>
 
-      <div className="flex border-t border-border/40 min-h-0">
+      <div className="flex min-h-0" style={{ border: "1px solid var(--ink)" }}>
         {/* ── Map ─────────────────────────────────────────────────────────── */}
         <div ref={canvasRef} className="relative flex-1 min-w-0">
-          {/* Depth wash — subtle, token-driven so it reads in both themes. */}
-          <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_50%_40%,hsl(var(--primary)/0.07),transparent_70%)]" />
 
           <svg
             viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
@@ -1101,27 +766,15 @@ function ProjectNetworkMap({
           </svg>
 
           {/* Legend */}
-          <div className="absolute left-3 bottom-2 flex items-center gap-3 pointer-events-none">
-            {[
-              { c: NET.company, t: "Company" },
-              { c: NET.active, t: "Active" },
-              { c: NET.jv, t: "Co-owned" },
-            ].map((l) => (
-              <span key={l.t} className="flex items-center gap-1.5">
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ background: l.c }}
-                />
-                <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50">
-                  {l.t}
-                </span>
-              </span>
-            ))}
+          <div className="label" style={{ position: "absolute", left: 12, bottom: 8, display: "flex", gap: 14, pointerEvents: "none" }}>
+            <span><i style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", border: "1.5px solid var(--ink)", marginRight: 5 }} />Company</span>
+            <span><i style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: "var(--blue)", marginRight: 5 }} />Active</span>
+            <span><i style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: "var(--blue-mid)", marginRight: 5 }} />Co-owned</span>
           </div>
 
           {/* Mobile context chip — the rail is desktop-only */}
           {sel && (
-            <div className="md:hidden absolute right-2 bottom-2 max-w-[62%] rounded-lg border border-border/60 bg-card/95 backdrop-blur px-2.5 py-1.5">
+            <div className="md:hidden absolute right-2 bottom-2 max-w-[62%] px-2.5 py-1.5" style={{ border: "1px solid var(--ink)", background: "var(--sheet)" }}>
               <p className="font-heading text-[0.6875rem] font-semibold text-foreground truncate">
                 {sel.label}
               </p>
@@ -1135,372 +788,121 @@ function ProjectNetworkMap({
         </div>
 
         {/* ── Context rail ────────────────────────────────────────────────── */}
-        <aside className="hidden md:flex w-[172px] shrink-0 flex-col border-l border-border/40">
+        <aside className="hidden md:flex w-[190px] shrink-0 flex-col" style={{ borderLeft: "1px solid var(--ink)", padding: "12px 14px" }}>
           {sel ? (
-            <motion.div
-              key={sel.key}
-              initial={{ opacity: 0, x: 8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              className="p-3 flex flex-col gap-2.5"
-            >
-              <div className="flex items-start gap-1.5">
-                <span
-                  className="h-1.5 w-1.5 rounded-full mt-1 shrink-0"
-                  style={{ background: nodeFill(sel) }}
-                />
-                <div className="min-w-0">
-                  <p className="font-heading text-[0.6875rem] font-bold text-foreground leading-tight break-words">
-                    {sel.label}
-                  </p>
-                  <p className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50 mt-0.5">
-                    {sel.kind === "company" ? "Company" : sel.project?.type || "Project"}
-                  </p>
+            <div key={sel.key}>
+              <p className="label">{sel.kind === "company" ? "Company" : sel.project?.type || "Project"}</p>
+              <p style={{ fontFamily: "Sora, sans-serif", fontWeight: 600, fontSize: 14, margin: "6px 0 10px", lineHeight: 1.25, overflowWrap: "anywhere" }}>{sel.label}</p>
+              {(sel.kind === "company"
+                ? [{ l: "Projects", v: String(sel.count) }, { l: "Active", v: String(sel.activeCount) }]
+                : [
+                    { l: "Company", v: sel.project?.company || "Unassigned" },
+                    { l: "Team", v: String(sel.project?.teamSize || "—") },
+                    { l: "Status", v: sel.active ? "Active" : "Dormant" },
+                    ...(sel.jv ? [{ l: "Co-owned by", v: `${(sel.project?.coCompanyIds?.length ?? 0) + 1} companies` }] : []),
+                  ]
+              ).map((row) => (
+                <div key={row.l} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "7px 0", borderTop: "1px solid var(--rule-soft)" }}>
+                  <span className="label">{row.l}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, textAlign: "right", overflowWrap: "anywhere" }}>{row.v}</span>
                 </div>
-              </div>
-
-              <div className="h-px bg-border/50" />
-
-              {sel.kind === "company" ? (
-                <div className="flex flex-col gap-2">
-                  {[
-                    { l: "Projects", v: String(sel.count) },
-                    { l: "Active", v: String(sel.activeCount) },
-                  ].map((row) => (
-                    <div key={row.l} className="flex items-baseline justify-between">
-                      <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50">
-                        {row.l}
-                      </span>
-                      <span className="font-heading text-sm font-bold text-foreground tabular-nums">
-                        {row.v}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <div>
-                    <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50 block">
-                      Company
-                    </span>
-                    <span className="text-[0.625rem] text-foreground break-words">
-                      {sel.project?.company || "Unassigned"}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50">
-                      Team
-                    </span>
-                    <span className="font-heading text-sm font-bold text-foreground tabular-nums">
-                      {sel.project?.teamSize || "—"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[0.5625rem] uppercase tracking-wider text-muted-foreground/50">
-                      Status
-                    </span>
-                    <span
-                      className="px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold"
-                      style={{
-                        background: `${sel.active ? NET.active : NET.idle}1f`,
-                        color: sel.active ? NET.active : NET.idle,
-                      }}
-                    >
-                      {sel.active ? "Active" : "Dormant"}
-                    </span>
-                  </div>
-                  {sel.jv && (
-                    <div className="rounded-md border border-border/60 px-2 py-1.5">
-                      <span
-                        className="text-[0.5625rem] uppercase tracking-wider font-semibold"
-                        style={{ color: NET.jv }}
-                      >
-                        Co-owned
-                      </span>
-                      <p className="text-[0.5625rem] text-muted-foreground/70 leading-snug mt-0.5">
-                        Shared across {(sel.project?.coCompanyIds?.length ?? 0) + 1} companies
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </motion.div>
-          ) : (
-            // Idle state doubles as a ranking — the reference's "influence
-            // ranking", here the hubs carrying the most projects.
-            <div className="p-3 flex flex-col gap-2.5">
-              <p className="text-[0.5625rem] uppercase tracking-[0.14em] text-muted-foreground/50 font-heading font-bold">
-                Busiest hubs
-              </p>
-              <div className="flex flex-col gap-2">
-                {hubs.map((h) => (
-                  <button
-                    key={h.key}
-                    onClick={() => setSelected(h.key)}
-                    onMouseEnter={() => setHovered(h.key)}
-                    onMouseLeave={() => setHovered(null)}
-                    className="text-left group"
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-[0.625rem] text-muted-foreground group-hover:text-foreground transition-colors truncate">
-                        {netShort(h.label, 14)}
-                      </span>
-                      <span className="font-heading text-[0.6875rem] font-bold text-foreground tabular-nums shrink-0">
-                        {h.count}
-                      </span>
-                    </div>
-                    <div className="h-[3px] rounded-full bg-muted mt-1 overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${(h.count / hubMax) * 100}%` }}
-                        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                        className="h-full rounded-full"
-                        style={{ background: NET.company }}
-                      />
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <p className="text-[0.5625rem] text-muted-foreground/40 leading-snug mt-auto">
-                Select a node to inspect it.
-              </p>
+              ))}
             </div>
+          ) : (
+            <>
+              <p className="label" style={{ marginBottom: 8 }}>Busiest hubs</p>
+              {hubs.map((h) => (
+                <button
+                  key={h.key}
+                  onClick={() => setSelected(h.key)}
+                  onMouseEnter={() => setHovered(h.key)}
+                  onMouseLeave={() => setHovered(null)}
+                  style={{ display: "block", width: "100%", padding: "6px 0" }}
+                >
+                  <span style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                    <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.label}</span>
+                    <span className="figure" style={{ fontSize: 14 }}>{h.count}</span>
+                  </span>
+                  <span style={{ display: "block", height: 3, marginTop: 5, background: "var(--rule-soft)" }}>
+                    <span className="grow" style={{ display: "block", height: 3, width: `${(h.count / hubMax) * 100}%`, background: "var(--blue)" }} />
+                  </span>
+                </button>
+              ))}
+              <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: "auto", paddingTop: 10 }}>Select a node to inspect it.</p>
+            </>
           )}
         </aside>
       </div>
 
-      {/* ── Footer ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-4 px-4 py-2.5 border-t border-border/40 shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="relative flex h-2 w-2 shrink-0">
-            <span
-              className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-50"
-              style={{ background: NET.active }}
-            />
-            <span
-              className="relative inline-flex rounded-full h-2 w-2"
-              style={{ background: NET.active }}
-            />
-          </span>
-          <p className="font-heading font-bold text-lg text-foreground leading-none tabular-nums">
-            <AnimatedCounter target={activeCount} />
-          </p>
-          <p className="text-[0.625rem] text-muted-foreground/60 uppercase tracking-widest">
-            Active
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span
-            className="h-2 w-2 rounded-full shrink-0 border"
-            style={{ borderColor: NET.company }}
-          />
-          <p className="font-heading font-bold text-lg text-muted-foreground/80 leading-none tabular-nums">
-            <AnimatedCounter target={companyCount} />
-          </p>
-          <p className="text-[0.625rem] text-muted-foreground/60 uppercase tracking-widest">
-            Companies
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full shrink-0 border border-border" />
-          <p className="font-heading font-bold text-lg text-muted-foreground/70 leading-none tabular-nums">
-            <AnimatedCounter target={total} />
-          </p>
-          <p className="text-[0.625rem] text-muted-foreground/60 uppercase tracking-widest">
-            Total
-          </p>
-        </div>
+      {/* ── Totals ─────────────────────────────────────────────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", marginTop: 14 }}>
+        {[
+          { l: "Active projects", v: activeCount },
+          { l: "Companies", v: companyCount },
+          { l: "Projects in all", v: total },
+        ].map((x, i) => (
+          <div key={x.l} style={{ paddingLeft: i ? 16 : 0, borderLeft: i ? "1px solid var(--rule)" : 0 }}>
+            <span className="figure" style={{ fontSize: 26 }}><AnimatedCounter target={x.v} /></span>
+            <span className="label" style={{ display: "block", marginTop: 6 }}>{x.l}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-// ─── Blueprint BG ─────────────────────────────────────────────────────────────
-function BgGrid() {
-  return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden">
-      <svg
-        className="absolute inset-0 w-full h-full opacity-[0.02]"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <defs>
-          <pattern id="g1" width="48" height="48" patternUnits="userSpaceOnUse">
-            <path
-              d="M 48 0 L 0 0 0 48"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="0.5"
-            />
-          </pattern>
-          <pattern
-            id="g2"
-            width="240"
-            height="240"
-            patternUnits="userSpaceOnUse"
-          >
-            <path
-              d="M 240 0 L 0 0 0 240"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1"
-            />
-          </pattern>
-        </defs>
-        <rect
-          width="100%"
-          height="100%"
-          fill="url(#g1)"
-          className="text-primary"
-        />
-        <rect
-          width="100%"
-          height="100%"
-          fill="url(#g2)"
-          className="text-primary"
-        />
-      </svg>
-      <div className="absolute -top-32 -left-24 w-[50%] h-[50%] bg-primary/6 blur-[180px] rounded-full" />
-      <div className="absolute bottom-0 right-0 w-[35%] h-[40%] bg-violet-500/5 blur-[150px] rounded-full" />
-
-      {/* ── Drafting compass — far bottom-right corner, out of content flow ── */}
-      <motion.svg
-        className="absolute opacity-[0.07] hidden xl:block"
-        style={{ bottom: "4%", right: "3%" }}
-        width="110"
-        height="110"
-        viewBox="0 0 90 90"
-        fill="none"
-        animate={{ rotate: 360 }}
-        transition={{ duration: 70, repeat: Infinity, ease: "linear" }}
-      >
-        <circle
-          cx="45"
-          cy="45"
-          r="3"
-          fill="currentColor"
-          className="text-primary"
-        />
-        <line
-          x1="45"
-          y1="45"
-          x2="78"
-          y2="20"
-          stroke="currentColor"
-          className="text-primary"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-        <line
-          x1="45"
-          y1="45"
-          x2="20"
-          y2="80"
-          stroke="currentColor"
-          className="text-primary"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-        <circle
-          cx="20"
-          cy="80"
-          r="2"
-          fill="currentColor"
-          className="text-primary"
-        />
-      </motion.svg>
-
-      {/* ── Small crane silhouette — far bottom-left corner ── */}
-      <div
-        className="absolute opacity-[0.07] hidden xl:block"
-        style={{ bottom: "2%", left: "2%", width: 170, height: 110 }}
-      >
-        <svg width="170" height="110" viewBox="0 0 170 110" fill="none">
-          <line
-            x1="20"
-            y1="8"
-            x2="20"
-            y2="105"
-            stroke="currentColor"
-            className="text-primary"
-            strokeWidth="2"
-          />
-          <line
-            x1="20"
-            y1="12"
-            x2="160"
-            y2="12"
-            stroke="currentColor"
-            className="text-primary"
-            strokeWidth="2"
-          />
-          <line
-            x1="20"
-            y1="12"
-            x2="4"
-            y2="20"
-            stroke="currentColor"
-            className="text-primary"
-            strokeWidth="2"
-          />
-          <line
-            x1="20"
-            y1="30"
-            x2="120"
-            y2="12"
-            stroke="currentColor"
-            className="text-primary"
-            strokeWidth="1"
-          />
-          <motion.g
-            initial={{ x: 145 }}
-            animate={{ x: [145, 75, 145] }}
-            transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
-          >
-            <line
-              x1="0"
-              y1="12"
-              x2="0"
-              y2="58"
-              stroke="currentColor"
-              className="text-primary"
-              strokeWidth="1.5"
-            />
-            <motion.rect
-              x="-8"
-              y="58"
-              width="16"
-              height="16"
-              rx="3"
-              fill="currentColor"
-              className="text-primary"
-              animate={{ y: [58, 64, 58] }}
-              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-            />
-          </motion.g>
-        </svg>
-      </div>
-
-      {/* ── Subtle blueprint scan line, full width, slow ── */}
-      <motion.div
-        className="absolute left-0 right-0 h-48"
-        style={{
-          background:
-            "linear-gradient(to bottom, transparent, hsl(var(--primary) / 0.025), transparent)",
-        }}
-        initial={{ top: "-20%" }}
-        animate={{ top: "120%" }}
-        transition={{
-          duration: 18,
-          repeat: Infinity,
-          ease: "linear",
-          repeatDelay: 6,
-        }}
-      />
-    </div>
-  );
-}
 
 // ─── HomePage ─────────────────────────────────────────────────────────────────
+// Seven days: bars for how many documents were made, a line for their rupee value.
+function WeekPlot({ rows }: { rows: Array<{ day: string; count: number; amount: number }> }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 760, H = 220, pad = 8, top = 22, base = 178;
+  const n = Math.max(1, rows.length);
+  const slot = (W - pad * 2) / n;
+  const maxCount = Math.max(1, ...rows.map((r) => r.count));
+  const maxAmount = Math.max(1, ...rows.map((r) => r.amount));
+  const y = (v: number, max: number) => base - (v / max) * (base - top);
+  const cx = (i: number) => pad + slot * i + slot / 2;
+  const line = rows.map((r, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${y(r.amount, maxAmount).toFixed(1)}`).join(" ");
+  const active = hover != null ? rows[hover] : null;
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "baseline", minHeight: 22, marginBottom: 6 }}>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 10, height: 10, background: "var(--blue)", display: "inline-block" }} /> Documents</span>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 14, height: 2, background: "var(--ink)", display: "inline-block" }} /> Value</span>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-2)" }}>
+          {active ? `${active.day} · ${active.count.toLocaleString("en-IN")} document${active.count === 1 ? "" : "s"} · ${compactINR(active.amount)}` : "Hover a day for its figures"}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Documents created and their value, last seven days" onMouseLeave={() => setHover(null)}>
+        <line x1={pad} x2={W - pad} y1={base} y2={base} stroke="var(--rule)" />
+        <line x1={pad} x2={W - pad} y1={top} y2={top} stroke="var(--rule)" strokeDasharray="2 5" />
+        <text x={pad + 2} y={top - 6} fontFamily="DM Sans, sans-serif" fontSize="10" fill="var(--graphite)">{maxCount.toLocaleString("en-IN")} documents · {compactINR(maxAmount)}</text>
+        {rows.map((r, i) => {
+          const h = base - y(r.count, maxCount);
+          const w = Math.min(46, slot * 0.5);
+          return (
+            <g key={i} onMouseEnter={() => setHover(i)}>
+              <rect x={pad + slot * i} y={0} width={slot} height={H} fill={hover === i ? "var(--blue-wash)" : "transparent"} />
+              <rect x={cx(i) - w / 2} y={base - h} width={w} height={Math.max(0, h)} fill="var(--blue)" fillOpacity={hover == null || hover === i ? 0.9 : 0.4} />
+              {r.count > 0 && <text x={cx(i)} y={base - h - 6} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="11" fill="var(--ink)">{r.count}</text>}
+              <text x={cx(i)} y={base + 20} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="10" letterSpacing="1" fill={hover === i ? "var(--ink)" : "var(--graphite)"}>{r.day.toUpperCase()}</text>
+            </g>
+          );
+        })}
+        {rows.length > 1 && (
+          <>
+            <path className="draw" d={line} fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round" pointerEvents="none" />
+            {rows.map((r, i) => (
+              <circle key={i} cx={cx(i)} cy={y(r.amount, maxAmount)} r={hover === i ? 4.5 : 3} fill="var(--sheet)" stroke="var(--ink)" strokeWidth="1.6" pointerEvents="none" />
+            ))}
+          </>
+        )}
+      </svg>
+    </div>
+  );
+}
+
 export default function HomePage() {
   const { currentUser, canAccessPage } = useAuth();
   const navigate = useNavigate();
@@ -1562,6 +964,7 @@ export default function HomePage() {
       "civilworkdpr-worker-attendance",
       "civilworkdpr-daily-labour",
       "civilworkdpr-amendment",
+      "civilworkdpr-query",
       "civilworkdpr-room-master",
     ],
     crm: [
@@ -1810,10 +1213,7 @@ export default function HomePage() {
   const crmBookings     = (crmData?.bookings     ?? []) as { Status: string; Count: number; TotalValue: number }[];
   const crmApps         = (crmData?.applications ?? []) as { Status: string; Count: number }[];
   const crmTickets      = (crmData?.serviceTickets ?? []) as { Status: string; Count: number }[];
-  const crmConfirmed    = crmBookings.find(b => b.Status === "Confirmed")?.Count ?? 0;
-  const crmTotalBookings = crmBookings.reduce((s, b) => s + b.Count, 0);
   const crmPendingApps  = crmApps.find(a => a.Status === "Pending")?.Count ?? 0;
-  const crmOpenTickets  = crmTickets.filter(t => t.Status !== "Closed" && t.Status !== "Resolved").reduce((s, t) => s + t.Count, 0);
   const crmOverdue      = crmData?.payments?.OverdueCount ?? 0;
 
   const lastUpdated = dataUpdatedAt
@@ -1915,488 +1315,235 @@ export default function HomePage() {
   // Always show at least something
   const hasAnyAccess = Object.values(access).some(Boolean);
 
-  const chartTooltipStyle = {
-    background: "hsl(var(--card))",
-    border: "1px solid hsl(var(--border))",
-    borderRadius: 10,
-    fontSize: 11,
-    padding: "8px 10px",
-  } as const;
 
   // Explicit, clean ticks for both charts — see niceTicks' comment.
-  const countTicks = niceTicks(Math.max(...activitySeries.map((d) => d.count), 1), 4);
-  const amountTicks = niceTicks(Math.max(...activitySeries.map((d) => d.amount), 1), 4);
+
+  const kpiText = (k: { value: number | string | null; prefix?: string; suffix?: string }) =>
+    k.value == null ? null : `${k.prefix ?? ""}${typeof k.value === "number" ? k.value.toLocaleString("en-IN") : k.value}${k.suffix ?? ""}`;
+  const attnMax = Math.max(1, ...attention.map((x) => x.count));
+  const woDonePct = woTotal > 0 ? ((woTotal - woOpen) / woTotal) * 100 : 0;
+  const today = new Date();
 
   return (
-    <MotionConfig reducedMotion="user">
-    <div className="relative min-h-[calc(100vh-3.5rem)] bg-background overflow-hidden font-body">
-      <BgGrid />
-
-      <div className="relative z-10 w-full px-4 sm:px-6 md:px-8 lg:px-10 xl:px-14 2xl:px-20 py-5 sm:py-6">
-        {/* ── Header — full-width, no side rail. A small utility strip
-            (brand/live/refresh) on top, the greeting back at its original
-            large size on its own line below it. ── */}
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45 }}
-          className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-2"
-        >
-          <HardHat size={14} className="text-primary/70 shrink-0" />
-          <span className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.24em] text-primary/55 shrink-0">
-            CivilierERP
-          </span>
-          <span className="relative flex h-1.5 w-1.5 shrink-0">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-          </span>
-
-          <div className="ml-auto flex items-center gap-2 shrink-0">
-            {lastUpdated && (
-              <span className="text-[0.625rem] text-muted-foreground/35 font-mono tabular-nums hidden sm:inline">
-                Updated {lastUpdated}
-              </span>
+    <div className="font-body flex flex-col" /* the layout gives Home no page padding, so the sheet's border runs right round the screen */ style={{ minHeight: "calc(100vh - 3.5rem)" }}>
+      <style>{SHEET_CSS}</style>
+      <div className="crm-sheet sheet-in" style={{ flex: 1, margin: 6 }}>
+        {/* Title block */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
+          <div style={{ flex: "1 1 320px", padding: "28px 22px 26px", minWidth: 0 }}>
+            <p className="label">CivilierERP · {role.replace(/_/g, " ") || "user"}</p>
+            <h1 className="title" style={{ fontSize: "clamp(34px, 5vw, 76px)", margin: "10px 0 0", lineHeight: 1, overflowWrap: "anywhere" }}>
+              {greeting}, <span style={{ color: "var(--blue)" }}>{firstName}.</span>
+            </h1>
+            {spotlightModules.length > 0 && (
+              <p style={{ margin: "12px 0 0", fontSize: 13, color: "var(--ink-2)" }}>
+                <span className="label" style={{ marginRight: 8 }}>You work most in</span>
+                {spotlightModules.map((m, i) => (
+                  <span key={m}>
+                    {i > 0 && " · "}
+                    <b style={{ color: "var(--ink)" }}>{MODULE_LABELS[m]}</b>
+                    {moduleSharePct(m) && <span style={{ color: "var(--graphite)" }}> {moduleSharePct(m)}</span>}
+                  </span>
+                ))}
+              </p>
             )}
-            <button
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="group p-1.5 rounded-lg hover:bg-muted/50 transition-all duration-200 active:scale-90 disabled:opacity-40"
-              title="Refresh"
-            >
-              <RefreshCw
-                size={13}
-                className={`text-muted-foreground/40 transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`}
-              />
-            </button>
           </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-          className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-10 sm:mb-12"
-        >
-          <h1 className="font-heading font-bold text-4xl sm:text-5xl md:text-[4rem] 2xl:text-[4.5rem] tracking-tight leading-[1.06] text-foreground break-words">
-            {greeting}, <span className="bg-gradient-to-r from-primary via-violet-400 to-cyan-400 bg-clip-text text-transparent">{firstName}.</span>
-          </h1>
-          <span
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.625rem] font-heading font-semibold uppercase tracking-wider border shrink-0"
-            style={{
-              background: privileged ? "hsl(var(--primary)/0.08)" : "hsl(var(--muted)/0.5)",
-              borderColor: privileged ? "hsl(var(--primary)/0.25)" : "hsl(var(--border))",
-              color: privileged ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
-            }}
-          >
-            {privileged ? <ShieldCheck size={10} /> : <Users size={10} />}
-            {role.replace(/_/g, " ")}
-          </span>
-        </motion.div>
+          <div className="mono titleblock" style={{ flex: "1 1 280px", maxWidth: 380, minWidth: 240, display: "grid", gridTemplateColumns: "1fr 1fr", borderLeft: "1px solid var(--ink)", fontSize: 13 }}>
+            <div style={{ gridColumn: "1 / -1", padding: "10px 14px", borderBottom: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Day</span>
+              {today.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+            </div>
+            <div style={{ padding: "10px 14px", borderRight: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Read at</span>
+              {lastUpdated ?? "—"}
+            </div>
+            <div style={{ padding: "10px 14px", display: "flex", alignItems: "flex-end" }}>
+              <button onClick={() => refetch()} disabled={isFetching} className="label link" style={{ color: "var(--blue)" }}>
+                {isFetching ? "Reading…" : "Re-read"}
+              </button>
+            </div>
+          </div>
+        </div>
 
         {isError && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-5 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive max-w-sm"
-          >
-            <AlertCircle size={13} className="shrink-0" />
-            <span className="text-xs">Could not reach the server — showing cached data.</span>
-          </motion.div>
+          <div className="cell" style={{ color: "var(--red)", fontSize: 13 }}>Could not reach the server — showing the last figures read.</div>
         )}
 
         {!hasAnyAccess ? (
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="rounded-2xl border border-border/40 bg-card/40 p-10 text-center max-w-lg mx-auto"
-          >
-            <ShieldCheck size={28} className="text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-sm font-medium text-muted-foreground/60">No module access assigned.</p>
-            <p className="text-xs text-muted-foreground/40 mt-1">Contact your administrator to get module permissions.</p>
-          </motion.div>
+          <div className="cell" style={{ textAlign: "center", padding: "48px 22px" }}>
+            <p style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>No module access assigned.</p>
+            <p style={{ fontSize: 13, color: "var(--graphite)", margin: "6px 0 0" }}>Contact your administrator to get module permissions.</p>
+          </div>
         ) : (
-          // key tied to dataUpdatedAt so the whole subtree remounts on every
-          // reload (initial load, manual refresh, or the 5-minute
-          // auto-refetch) — every tile's entrance animation (Bento's own
-          // fade+rise, StatCard's sparkline/counter) replays each time,
-          // not just once on first mount.
-          <div key={dataUpdatedAt || "initial"} className="space-y-4">
-            {/* ── Who this page is tuned to — the modules this user works in
-                most and most recently lead the tiles below ── */}
-            {spotlightModules.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="flex flex-wrap items-center gap-2"
-              >
-                <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground/55">
-                  Your top worked modules
-                </span>
-                <LayoutGroup>
-                  {spotlightModules.map((m, idx) => (
-                    <motion.span
-                      layout
-                      key={m}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ type: "spring", stiffness: 320, damping: 28, delay: idx * 0.06 }}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-medium border"
-                      style={{ color: MODULE_COLORS[m], background: `${MODULE_COLORS[m]}12`, borderColor: `${MODULE_COLORS[m]}30` }}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: MODULE_COLORS[m] }} />
-                      {MODULE_LABELS[m]}
-                      {moduleSharePct(m) && <span className="font-semibold tabular-nums opacity-80">{moduleSharePct(m)}</span>}
-                    </motion.span>
-                  ))}
-                </LayoutGroup>
-              </motion.div>
-            )}
-
-            {/* ── Hero stat cards ── */}
+          <>
+            {/* A: key numbers */}
             {heroKpis.length > 0 && (
-              <LayoutGroup id="home-hero">
-              <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-                <AnimatePresence>
-                {heroKpis.map((k, i) => (
-                  <StatCard
-                    key={k.id}
-                    icon={k.icon}
-                    label={k.label}
-                    value={k.value}
-                    prefix={k.prefix}
-                    suffix={k.suffix}
-                    color={k.color}
-                    sparkline={activitySeries.map((d) => d.count)}
-                    i={i}
-                  />
-                ))}
-                </AnimatePresence>
-              </div>
-              </LayoutGroup>
+              <Detail tag="A" title="Key numbers" note="From the modules you use most">
+                <div className="grid4" style={{ gap: "18px 0" }}>
+                  {heroKpis.map((k, i) => (
+                    <div key={k.id} style={{ padding: "0 18px", borderLeft: i % 4 ? "1px solid var(--rule)" : 0, minWidth: 0 }}>
+                      <div className="label" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.label}</div>
+                      <div className="figure" style={{ fontSize: "clamp(26px, 3vw, 42px)", marginTop: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {typeof k.value === "number" ? <AnimatedCounter target={k.value} prefix={k.prefix} suffix={k.suffix} duration={1.2} /> : kpiText(k) ?? <span className="skel" style={{ display: "inline-block", height: 30, width: 90 }} />}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 8 }}>{MODULE_LABELS[k.module as HomeModuleId] ?? k.module}</div>
+                    </div>
+                  ))}
+                </div>
+              </Detail>
             )}
 
-            {/* ── Charts row: activity volume, activity value, WO completion gauge ── */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-              <Bento
-                title="Actions This Week"
-                subtitle="Documents & transactions created, per day, across every module"
-                icon={BarChart3}
-                accent="#7c3aed"
-                className="xl:col-span-1 min-h-[240px]"
-                delay={0.15}
-              >
-                <div className="p-3 h-[210px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={activitySeries} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="homeActionsFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#a78bfa" />
-                          <stop offset="100%" stopColor="#6d28d9" />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
-                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} dy={6} />
-                      <YAxis
-                        domain={[0, countTicks[countTicks.length - 1]]}
-                        ticks={countTicks}
-                        tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-                        axisLine={false}
-                        tickLine={false}
-                        allowDecimals={false}
-                        width={30}
-                      />
-                      <Tooltip
-                        contentStyle={chartTooltipStyle}
-                        cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
-                        labelStyle={{ color: "hsl(var(--foreground))" }}
-                        formatter={(v: number) => [`${v} action${v === 1 ? "" : "s"}`, "Logged"]}
-                      />
-                      <Bar dataKey="count" name="Actions" radius={[6, 6, 2, 2]} fill="url(#homeActionsFill)" maxBarSize={28}>
-                        {activitySeries.map((d, i) => (
-                          <Cell key={i} opacity={d.count > 0 ? 1 : 0.25} />
-                        ))}
-                        <LabelList
-                          dataKey="count"
-                          position="top"
-                          formatter={(v: number) => (v > 0 ? v : "")}
-                          style={{ fontSize: 10, fill: "hsl(var(--muted-foreground))", fontWeight: 600 }}
-                        />
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </Bento>
+            {/* B + C */}
+            <div className="grid2">
+              <Detail tag="B" title="Seven days of work" note="Documents on the bars, their value on the line">
+                <WeekPlot rows={activitySeries} />
+              </Detail>
 
-              <Bento
-                title="Transaction Value This Week"
-                subtitle="Rupee value behind those same actions, per day"
-                icon={LineChart}
-                accent="#06b6d4"
-                className="xl:col-span-1 min-h-[240px]"
-                delay={0.2}
-              >
-                <div className="p-3 h-[210px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={activitySeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="homeValueFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.35} />
-                          <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
-                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} dy={6} />
-                      <YAxis
-                        domain={[0, amountTicks[amountTicks.length - 1]]}
-                        ticks={amountTicks}
-                        tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
-                        axisLine={false}
-                        tickLine={false}
-                        tickFormatter={(v) => compactINR(v)}
-                        width={52}
-                      />
-                      <Tooltip contentStyle={chartTooltipStyle} formatter={(v: number) => [compactINR(v), "Value"]} labelStyle={{ color: "hsl(var(--foreground))" }} />
-                      <Area type="monotone" dataKey="amount" name="Value" stroke="#06b6d4" strokeWidth={2} fill="url(#homeValueFill)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
+              <Detail tag="C" title="Work orders" note="Completed against open">
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                  <span className="figure" style={{ fontSize: "clamp(40px, 5vw, 64px)" }}>{woCompletionPct}<span style={{ fontSize: "0.4em", fontWeight: 500, marginLeft: 3 }}>%</span></span>
+                  <span style={{ paddingBottom: 6, fontSize: 13.5, color: "var(--ink-2)" }}>
+                    <b style={{ color: "var(--ink)" }}>{(woTotal - woOpen).toLocaleString("en-IN")}</b> of {woTotal.toLocaleString("en-IN")} completed
+                  </span>
                 </div>
-              </Bento>
-
-              <Bento title="Work Order Completion" icon={Hammer} accent="#7c3aed" className="xl:col-span-1 min-h-[240px]" delay={0.25}>
-                <div className="flex flex-col items-center justify-center gap-4 p-4 h-[210px]">
-                  <CircularGauge pct={woCompletionPct} />
-                  <div className="w-full space-y-2">
-                    <div className="flex items-center justify-between text-[0.6875rem]">
-                      <span className="text-muted-foreground">Completed</span>
-                      <span className="font-heading font-semibold tabular-nums text-foreground">{(woTotal - woOpen).toLocaleString("en-IN")}</span>
-                    </div>
-                    <div className="h-1 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full rounded-full bg-primary" style={{ width: `${woCompletionPct}%` }} />
-                    </div>
-                    <div className="flex items-center justify-between text-[0.6875rem]">
-                      <span className="text-muted-foreground">Open</span>
-                      <span className="font-heading font-semibold tabular-nums text-foreground">{woOpen.toLocaleString("en-IN")}</span>
-                    </div>
+                <div style={{ marginTop: 18 }}>
+                  <div style={{ display: "flex", height: 26, border: "1.5px solid var(--ink)", background: "var(--sheet)" }}>
+                    <div className="grow" style={{ width: `${woDonePct}%`, background: "var(--blue)" }} />
+                    <div className="hatch" style={{ flex: 1 }} />
+                  </div>
+                  <div style={{ display: "flex" }}>
+                    <div style={{ width: `${Math.min(Math.max(woDonePct, 22), 78)}%`, minWidth: 0 }}><Dimension from={0} to={100} text={`${(woTotal - woOpen).toLocaleString("en-IN")} done`} color="var(--blue)" /></div>
+                    <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}><Dimension from={0} to={100} text={`${woOpen.toLocaleString("en-IN")} open`} /></div>
                   </div>
                 </div>
-              </Bento>
+                <button onClick={() => navigate("/engineering")} className="label link" style={{ marginTop: 18, display: "inline-block" }}>Open Engineering</button>
+              </Detail>
             </div>
 
-            {/* ── Project Network (map-style panel) + remaining key numbers ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-              <Bento title="Project Network" icon={Building2} accent="#7c3aed" className="lg:col-span-2" delay={0.3}>
-                {/* Below the first screen and the heaviest panel on the page (force layout + ~50 animated lines):
-                    built only when it is about to be scrolled to, so it no longer competes with the first paint. */}
-                <LazyWhenVisible minHeight={400}>
-                  <ProjectNetworkMap projects={projectList} total={eng?.projects?.total ?? projectList.length} />
-                </LazyWhenVisible>
-              </Bento>
+            {/* D + E */}
+            <div className="grid2">
+              <Detail tag="D" title="Waiting on you" note={attention.length ? `${attention.length} open` : "All clear"}>
+                {isLoading ? (<><Skel h={30} /><Skel h={30} /><Skel h={30} /></>) : attention.length === 0 ? (
+                  <p style={{ fontSize: 14, color: "var(--ink-2)", margin: 0 }}>Nothing needs your action right now.</p>
+                ) : attention.slice(0, 10).map((x, i) => {
+                  const hot = x.severity === "high";
+                  return (
+                    <button key={x.label} onClick={() => navigate(x.href)} className={`row${hot ? " hot" : ""}`}>
+                      <span style={{ fontSize: 10, color: hot ? "var(--red)" : "var(--graphite)" }}>{String(i + 1).padStart(2, "0")}</span>
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, color: hot ? "var(--red)" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.label}</span>
+                        <span style={{ display: "block", height: 3, marginTop: 6, background: "var(--rule-soft)" }}>
+                          <span className="grow" style={{ display: "block", height: 3, width: `${(x.count / attnMax) * 100}%`, background: hot ? "var(--red)" : "var(--blue)" }} />
+                        </span>
+                        <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.hint}</span>
+                      </span>
+                      <span className="figure" style={{ fontSize: 22, textAlign: "right", color: hot ? "var(--red)" : "var(--ink)" }}>{x.count.toLocaleString("en-IN")}</span>
+                    </button>
+                  );
+                })}
+              </Detail>
 
-              <Bento title="More key numbers" icon={Database} accent="#6366f1" delay={0.35}>
+              <Detail tag="E" title="More numbers">
                 {restKpis.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-xs text-muted-foreground/40">Nothing else to show.</div>
+                  <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>Nothing else to show.</p>
                 ) : (
-                  <LayoutGroup id="home-rest">
-                    <div className="grid grid-cols-2 gap-2.5 p-3 max-h-[420px] overflow-y-auto">
-                      <AnimatePresence>
-                        {restKpis.map((k, i) => (
-                          <KpiPill key={k.id} label={k.label} value={k.value} prefix={k.prefix} suffix={k.suffix} color={k.color} icon={k.icon} i={i} />
-                        ))}
-                      </AnimatePresence>
-                    </div>
-                  </LayoutGroup>
-                )}
-              </Bento>
-            </div>
-
-            {/* ── Needs attention — full width ── */}
-            <div>
-              <Bento
-                title={`Needs your attention${attention.length ? ` · ${attention.length}` : ""}`}
-                icon={Bell}
-                accent="#ef4444"
-                delay={0.4}
-              >
-                {isLoading ? (
-                  <div className="px-4 py-6 space-y-3">
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <div key={i} className="flex items-center gap-3 animate-pulse">
-                        <div className="w-7 h-7 rounded-lg bg-muted shrink-0" />
-                        <div className="flex-1 space-y-1.5"><div className="h-3 bg-muted rounded w-2/3" /><div className="h-2 bg-muted rounded w-1/3" /></div>
+                  <div className="noscroll" style={{ maxHeight: 420, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", columnGap: 22 }}>
+                    {restKpis.map((k) => (
+                      <div key={k.id} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "9px 0", borderBottom: "1px solid var(--rule-soft)", minWidth: 0 }}>
+                        <span style={{ fontSize: 12, color: "var(--ink-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.label}</span>
+                        <span className="figure" style={{ fontSize: 15, whiteSpace: "nowrap" }}>{kpiText(k) ?? "…"}</span>
                       </div>
                     ))}
                   </div>
-                ) : attention.length === 0 ? (
-                  <div className="px-4 py-10 flex flex-col items-center gap-2 text-center">
-                    <div className="w-10 h-10 rounded-full bg-emerald-500/12 flex items-center justify-center">
-                      <CheckCircle2 size={18} className="text-emerald-500" />
-                    </div>
-                    <p className="text-sm font-semibold text-foreground">All clear</p>
-                    <p className="text-[0.6875rem] text-muted-foreground/50">Nothing needs your action right now.</p>
-                  </div>
-                ) : (
-                  <div className="max-h-[280px] overflow-y-auto">
-                    {attention.slice(0, 10).map((a, i) => (
-                      <AttentionRow key={a.label} a={a} i={i} onGo={navigate} />
-                    ))}
-                  </div>
                 )}
-              </Bento>
+              </Detail>
             </div>
 
-            {/* ── Recent Activity — full-width table, universal feed ── */}
-            <Bento
-              title="Recent Activity"
-              icon={Activity}
-              accent="#7c3aed"
-              delay={0.45}
-              action={
-                <div className="flex items-center gap-1.5">
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-                  </span>
-                  <button onClick={() => refetch()} disabled={isFetching} className="p-1 rounded hover:bg-muted/50 disabled:opacity-40">
-                    <RefreshCw size={11} className={`text-muted-foreground/40 ${isFetching ? "animate-spin" : ""}`} />
-                  </button>
-                </div>
-              }
-            >
+            {/* F: project network (kept as it was) */}
+            <Detail tag="F" title="Project network" note="Companies and the projects they hold">
+              <LazyWhenVisible minHeight={400}>
+                <ProjectNetworkMap projects={projectList} total={eng?.projects?.total ?? projectList.length} />
+              </LazyWhenVisible>
+            </Detail>
+
+            {/* G: recent activity */}
+            <Detail tag="G" title="Recent activity" note="Latest across every module you can open">
               {feedItems.length === 0 ? (
-                <div className="px-4 py-12 text-center text-xs text-muted-foreground/40">
-                  {isLoading ? "Loading activity…" : "No recent activity."}
-                </div>
+                <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>{isLoading ? "Reading…" : "No recent activity."}</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs min-w-[640px]">
-                    <thead>
-                      <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[0.625rem] font-heading">
-                        <th className="text-left px-4 py-2.5 font-semibold">Module</th>
-                        <th className="text-left px-3 py-2.5 font-semibold">Item</th>
-                        <th className="text-left px-3 py-2.5 font-semibold">By</th>
-                        <th className="text-right px-3 py-2.5 font-semibold">Amount</th>
-                        <th className="text-right px-4 py-2.5 font-semibold">When</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/25">
-                      {feedItems.slice(0, 8).map((it, i) => {
-                        const m = moduleMeta(it.Module);
-                        return (
-                          <tr
-                            key={`${it.Kind}-${it.DocNo ?? i}-${it.At}`}
-                            onClick={() => navigate(it.Href)}
-                            className="cursor-pointer hover:bg-muted/25 transition-colors"
-                          >
-                            <td className="px-4 py-2.5 whitespace-nowrap">
-                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-medium" style={{ background: `${m.color}16`, color: m.color }}>
-                                <m.icon size={10} /> {m.label}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2.5 max-w-[280px]">
-                              <p className="font-semibold text-foreground truncate">{it.Title}</p>
-                              {it.Subtitle && <p className="text-[0.625rem] text-muted-foreground/50 truncate">{it.Subtitle}</p>}
-                            </td>
-                            <td className="px-3 py-2.5 text-muted-foreground truncate max-w-[140px]">{it.Actor ?? "—"}</td>
-                            <td className="px-3 py-2.5 text-right tabular-nums font-heading font-semibold" style={{ color: it.Amount ? m.color : undefined }}>
-                              {it.Amount != null && it.Amount > 0 ? compactINR(it.Amount) : "—"}
-                            </td>
-                            <td className="px-4 py-2.5 text-right text-muted-foreground/50 font-mono tabular-nums whitespace-nowrap">{relTime(it.At)}</td>
-                          </tr>
-                        );
-                      })}
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ minWidth: 620 }}>
+                    <thead><tr><th>Module</th><th>Item</th><th>By</th><th className="num">Amount</th><th className="num">When</th></tr></thead>
+                    <tbody>
+                      {feedItems.slice(0, 8).map((it, i) => (
+                        <tr key={`${it.Kind}-${it.DocNo ?? i}-${it.At}`} className="go" onClick={() => navigate(it.Href)}>
+                          <td className="label" style={{ whiteSpace: "nowrap", color: "var(--ink-2)" }}>{moduleMeta(it.Module).label}</td>
+                          <td style={{ maxWidth: 320 }}>
+                            <span style={{ display: "block", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.Title}</span>
+                            {it.Subtitle && <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.Subtitle}</span>}
+                          </td>
+                          <td style={{ color: "var(--ink-2)", whiteSpace: "nowrap" }}>{it.Actor ?? "—"}</td>
+                          <td className="num figure" style={{ fontSize: 13 }}>{it.Amount != null && it.Amount > 0 ? compactINR(it.Amount) : "—"}</td>
+                          <td className="num" style={{ color: "var(--graphite)" }}>{relTime(it.At)}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
               )}
-            </Bento>
+            </Detail>
 
-            {/* ── Approval Inbox (privileged) or My Tasks — full-width table ── */}
+            {/* H: approvals, or the user's own tasks */}
             {access.approvals ? (
-              <Bento title="Approval Inbox" icon={FileCheck} accent="#f59e0b" delay={0.5}>
+              <Detail tag="H" title="Approval inbox" note={pendingApprovals.length ? `${pendingApprovals.length} waiting` : undefined}>
                 {pendingApprovals.length === 0 ? (
-                  <div className="px-4 py-12 text-center text-xs text-muted-foreground/40">
-                    {isLoading ? "Loading…" : "Nothing waiting on approval."}
-                  </div>
+                  <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>{isLoading ? "Reading…" : "Nothing waiting on approval."}</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs min-w-[640px]">
-                      <thead>
-                        <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[0.625rem] font-heading">
-                          <th className="text-left px-4 py-2.5 font-semibold">Module</th>
-                          <th className="text-left px-3 py-2.5 font-semibold">Reference</th>
-                          <th className="text-left px-3 py-2.5 font-semibold">Date</th>
-                          <th className="text-left px-3 py-2.5 font-semibold">Status</th>
-                          <th className="text-right px-4 py-2.5 font-semibold">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/25">
-                        {pendingApprovals.slice(0, 8).map((a, i) => (
-                          <tr key={`${a.Module}-${a.RecordId}-${i}`} onClick={() => navigate("/admin/approval/inbox")} className="cursor-pointer hover:bg-muted/25 transition-colors">
-                            <td className="px-4 py-2.5 whitespace-nowrap text-foreground font-medium">{a.ModuleLabel}</td>
-                            <td className="px-3 py-2.5 font-mono text-muted-foreground">{a.Reference}</td>
-                            <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">{a.RecordDate ? new Date(a.RecordDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
-                            <td className="px-3 py-2.5">
-                              <span className="inline-flex px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-amber-500/12 text-amber-600">{a.Status}</span>
-                            </td>
-                            <td className="px-4 py-2.5 text-right tabular-nums font-heading font-semibold text-foreground">
-                              {a.Amount != null ? compactINR(a.Amount) : "—"}
-                            </td>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ minWidth: 620 }}>
+                      <thead><tr><th>Module</th><th>Reference</th><th>Date</th><th>Status</th><th className="num">Amount</th></tr></thead>
+                      <tbody>
+                        {pendingApprovals.slice(0, 8).map((x, i) => (
+                          <tr key={`${x.Module}-${x.RecordId}-${i}`} className="go" onClick={() => navigate("/admin/approval/inbox")}>
+                            <td style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{x.ModuleLabel}</td>
+                            <td style={{ color: "var(--ink-2)" }}>{x.Reference}</td>
+                            <td style={{ color: "var(--ink-2)", whiteSpace: "nowrap" }}>{x.RecordDate ? new Date(x.RecordDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
+                            <td className="label">{x.Status}</td>
+                            <td className="num figure" style={{ fontSize: 13 }}>{x.Amount != null ? compactINR(x.Amount) : "—"}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
-              </Bento>
+              </Detail>
             ) : data?.recentTasks && data.recentTasks.length > 0 ? (
-              <Bento title="My Tasks" icon={ClipboardList} accent="#f59e0b" delay={0.5}>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs min-w-[560px]">
-                    <thead>
-                      <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[0.625rem] font-heading">
-                        <th className="text-left px-4 py-2.5 font-semibold">Task</th>
-                        <th className="text-left px-3 py-2.5 font-semibold">Priority</th>
-                        <th className="text-left px-3 py-2.5 font-semibold">Status</th>
-                        <th className="text-right px-4 py-2.5 font-semibold">Due</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/25">
-                      {data.recentTasks.slice(0, 8).map((t) => (
-                        <tr key={t.id} className="hover:bg-muted/25 transition-colors">
-                          <td className="px-4 py-2.5 text-foreground font-medium max-w-[280px] truncate">{t.title}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{t.priority}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">{t.status}</td>
-                          <td className="px-4 py-2.5 text-right text-muted-foreground whitespace-nowrap">{t.dueDate ? new Date(t.dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
+              <Detail tag="H" title="My tasks">
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ minWidth: 540 }}>
+                    <thead><tr><th>Task</th><th>Priority</th><th>Status</th><th className="num">Due</th></tr></thead>
+                    <tbody>
+                      {data.recentTasks.slice(0, 8).map((task) => (
+                        <tr key={task.id}>
+                          <td style={{ fontWeight: 600 }}>{task.title}</td>
+                          <td style={{ color: "var(--ink-2)" }}>{task.priority}</td>
+                          <td className="label">{task.status}</td>
+                          <td className="num" style={{ color: "var(--ink-2)" }}>{task.dueDate ? new Date(task.dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              </Bento>
+              </Detail>
             ) : null}
-          </div>
+          </>
         )}
 
-        {/* Footer */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1.2 }}
-          className="mt-8 flex flex-col items-center gap-1.5"
-        >
-          <div className="flex items-center gap-3 text-muted-foreground/25 text-[0.625rem] font-heading tracking-widest uppercase">
-            <div className="w-10 h-px bg-border/40" />
-            <span>Civilier ERP · {new Date().getFullYear()}</span>
-            <div className="w-10 h-px bg-border/40" />
-          </div>
-          <span className="text-[0.5625rem] font-heading tracking-[0.2em] uppercase text-muted-foreground/20">
-            crafted by Rajwada Infotech
-          </span>
-        </motion.div>
+        <div className="cell label" style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "12px 22px" }}>
+          <span>Civilier ERP · {today.getFullYear()}</span>
+          <span>Crafted by Rajwada Infotech</span>
+        </div>
       </div>
     </div>
-    </MotionConfig>
   );
 }

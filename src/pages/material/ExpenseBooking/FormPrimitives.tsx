@@ -14,7 +14,7 @@ export function FormSection({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground border-b border-border/60 pb-1.5">
+      <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-foreground border-b border-border pb-1.5">
         {label}
       </p>
       {children}
@@ -39,7 +39,7 @@ export function Field({
 }) {
   return (
     <div className={`space-y-1.5${className ? ` ${className}` : ""}`}>
-      <Label className="text-xs">
+      <Label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
         {label}
         {required && <span className="text-destructive ml-0.5">*</span>}
       </Label>
@@ -65,9 +65,9 @@ export function ReadonlyField({
       <Label className="text-xs text-muted-foreground">{label}</Label>
       <div
         className={
-          "rounded-lg border px-3 py-2 text-sm font-mono min-h-[38px] flex items-center " +
+          "rounded-lg border px-3 py-2 text-sm font-heading tabular-nums min-h-[38px] flex items-center " +
           (highlight
-            ? "border-emerald-500/30 bg-emerald-500/[0.05] text-foreground font-semibold"
+            ? "border-foreground/40 bg-primary/10 text-foreground font-semibold"
             : "border-border/60 bg-muted/30 text-foreground")
         }
       >
@@ -102,31 +102,32 @@ export function BreakdownRow({
   value: string;
   variant: BRVariant;
 }) {
+  // A computation set out on paper: plain rows, an ink rule above each sub-total and the total, figures in one face.
   const rowStyles: Record<BRVariant, string> = {
-    neutral: "bg-card",
-    debit: "bg-card",
-    addition: "bg-card",
-    tax: "bg-muted/30",
-    subtotal: "bg-muted/50",
-    total: "bg-muted/60",
+    neutral: "",
+    debit: "",
+    addition: "",
+    tax: "",
+    subtotal: "border-t border-foreground",
+    total: "border-t-2 border-foreground",
   };
 
   const labelStyles: Record<BRVariant, string> = {
     neutral: "text-foreground text-xs",
     debit: "text-foreground text-xs",
     addition: "text-foreground text-xs",
-    tax: "text-foreground text-xs",
-    subtotal: "text-foreground text-xs font-semibold font-heading",
-    total: "text-foreground text-xs font-semibold font-heading",
+    tax: "text-muted-foreground text-xs",
+    subtotal: "text-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em]",
+    total: "text-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em]",
   };
 
   const valueStyles: Record<BRVariant, string> = {
-    neutral: "text-foreground text-xs font-mono",
-    debit: "text-destructive text-xs font-mono",
-    addition: "text-green-500 text-xs font-mono",
-    tax: "text-emerald-600 dark:text-emerald-400 text-xs font-mono",
-    subtotal: "text-foreground text-xs font-mono font-semibold",
-    total: "text-foreground text-sm font-mono font-bold",
+    neutral: "text-foreground text-xs font-heading tabular-nums",
+    debit: "text-destructive text-xs font-heading tabular-nums",
+    addition: "text-foreground text-xs font-heading tabular-nums",
+    tax: "text-foreground text-xs font-heading tabular-nums",
+    subtotal: "text-foreground text-xs font-heading tabular-nums font-semibold",
+    total: "text-foreground text-base font-heading tabular-nums font-bold",
   };
 
   return (
@@ -183,7 +184,7 @@ export function PriceBreakdownPanel({
   }
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50">
+    <div className="border border-foreground overflow-hidden divide-y divide-border/60 bg-card">
       {/* Basic Amount */}
       <BreakdownRow
         label="Basic Amount"

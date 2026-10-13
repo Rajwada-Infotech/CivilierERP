@@ -192,7 +192,7 @@ export const PARTY_TYPE_LABELS: Record<string, string> = {
 };
 
 export const fetchSupplierOptions = async (): Promise<
-  { id: number; label: string; type?: string }[]
+  { id: number; label: string; type?: string; category?: string | null }[]
 > => {
   // Suppliers + Contractors + Brokers + Customers + Partners — the
   // Payee/Party field also has to resolve a Contract's ContactPartyId,

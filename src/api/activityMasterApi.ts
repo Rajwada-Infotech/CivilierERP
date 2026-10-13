@@ -22,6 +22,8 @@ export interface DbActivity {
   gl_head_id: number | null; // FK â†’ AccountHeadMaster.LHeadId, only for Activities
   gl_head_name: string | null;
   days_of_completion: number | null; // whole days to finish, only for Activities
+  tag_id: number | null; // DPR tag (dbo.DprTagMaster), only for Activities
+  tag_name: string | null;
 }
 
 export interface ActivityPayload {
@@ -34,6 +36,7 @@ export interface ActivityPayload {
   hsn_code: string | null; // nvarchar(50) â€” NULL for Groups, optional for Activities
   gl_head_id: number | null; // NULL for Groups, optional for Activities
   days_of_completion: number | null; // NULL for Groups, optional for Activities
+  tag_name: string | null; // NULL for Groups; a new name is added to the DPR Tag Master on save
 }
 
 export interface ApiResponse {
@@ -67,6 +70,7 @@ export const toPayload = (
     gl_head_id: isGroup ? null : r.glHeadId ? Number(r.glHeadId) : null,
     // Blank = not set; Groups never carry one.
     days_of_completion: isGroup || r.daysOfCompletion === "" || r.daysOfCompletion == null ? null : Number(r.daysOfCompletion),
+    tag_name: isGroup ? null : ((r.tagName as string) || "").trim() || null,
   };
 };
 

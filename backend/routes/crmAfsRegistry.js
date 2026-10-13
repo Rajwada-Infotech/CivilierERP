@@ -3,7 +3,7 @@ const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmAfsRegistry")); }
-const rateLimit = require("../middleware/rateLimiter");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -13,7 +13,7 @@ const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // AFS Registry tracks the act of registering the Agreement for Sale at the
 // Sub-Registrar Office (Visit 1). It mirrors CrmRegistry (Visit 2 / Sale

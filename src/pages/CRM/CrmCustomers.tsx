@@ -270,7 +270,7 @@ function EditCustomerDialog({ customer, canDelete = false, startEditing = false,
                 { key: "Mobile", label: "Mobile", type: "text" },
                 { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                 { key: "Email", label: "Email", type: "email" },
-                { key: "PanNo", label: "PAN Number", type: "text" },
+                { key: "PanNo", label: "PAN (Permanent Account Number)", type: "text" },
                 { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                 { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                 { key: "Occupation", label: "Occupation", type: "text" },
@@ -603,7 +603,7 @@ const CrmCustomers: React.FC = () => {
           {i.getValue() as string}
         </div>
       ) },
-    { accessorKey: "PanNo", header: "PAN", size: 100,
+    { accessorKey: "PanNo", header: "PAN (Permanent Account Number)", size: 100,
       cell: (i) => (
         <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer font-mono text-xs">
           {(i.getValue() as string) || "—"}
@@ -678,7 +678,7 @@ const CrmCustomers: React.FC = () => {
     { header: "Customer No", accessor: "CustomerNo" },
     { header: "Name", accessor: "CustomerName" },
     { header: "Mobile", accessor: "Mobile" },
-    { header: "PAN", accessor: "PanNo" },
+    { header: "PAN (Permanent Account Number)", accessor: "PanNo" },
     { header: "Address", accessor: (r) => [r.PermanentCity, r.PermanentState].filter(Boolean).join(", ") },
     { header: "Co-Applicant", accessor: "CoApplicantName" },
     { header: "Applications", accessor: "ApplicationCount" },
@@ -779,7 +779,7 @@ const CrmCustomers: React.FC = () => {
                   { key: "Mobile", label: "Mobile", type: "text" },
                   { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                   { key: "Email", label: "Email", type: "email" },
-                  { key: "PanNo", label: "PAN Number", type: "text" },
+                  { key: "PanNo", label: "PAN (Permanent Account Number)", type: "text" },
                   { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                   { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                   { key: "Occupation", label: "Occupation", type: "text" },

@@ -58,6 +58,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { TagCombobox } from "@/components/civilworkdpr/TagCombobox";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ active }: { active: boolean }) => (
@@ -464,6 +465,7 @@ const ActivityMaster: React.FC = () => {
       glHeadId: item.gl_head_id ?? "",
       glHeadName: item.gl_head_name ?? "",
       daysOfCompletion: item.days_of_completion ?? "",
+      tagName: item.tag_name ?? "",
     };
   });
 
@@ -683,6 +685,25 @@ const ActivityMaster: React.FC = () => {
               },
             },
             {
+              name: "tagName",
+              label: "Tag",
+              type: "custom",
+              render: ({ value, onChange, formData }) => {
+                const isActivity = formData?.activityType === "Activity";
+                return (
+                  <div className="flex flex-col gap-1">
+                    <TagCombobox value={isActivity ? String(value ?? "") : ""} onChange={onChange} disabled={!isActivity} />
+                    <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1">
+                      <Hash size={10} />
+                      {isActivity
+                        ? "Pick an existing tag or type a new one — it is saved to the DPR Tag Master"
+                        : "Tags can only be set on an Activity, not a Group"}
+                    </p>
+                  </div>
+                );
+              },
+            },
+            {
               name: "status",
               label: "Status",
               type: "toggle",
@@ -697,6 +718,7 @@ const ActivityMaster: React.FC = () => {
             { key: "hsnCode", label: "SAC", hideOnMobile: true },
             { key: "glHeadName", label: "GL Head", hideOnMobile: true },
             { key: "daysOfCompletion", label: "Days", hideOnMobile: true },
+            { key: "tagName", label: "Tag", hideOnMobile: true },
             { key: "status", label: "Status" },
           ]}
           initialData={mappedData}

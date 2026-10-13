@@ -664,10 +664,10 @@ export default function Payment() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Sales Module", "Payment"]} />
+      <Breadcrumbs items={["Dashboard", "Sales Module", "Received Payment"]} />
 
       <SalesShell
-        title="Payment"
+        title="Received Payment"
         subtitle="Record payment against a sale order — posts directly to bank ledger in Trial Balance"
         icon={CreditCard}
       >

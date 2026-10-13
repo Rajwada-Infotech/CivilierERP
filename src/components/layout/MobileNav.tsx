@@ -762,8 +762,6 @@ export const MobileNav: React.FC = () => {
   const themeCheck: Record<Theme, string> = {
     dark: "#818cf8",
     light: "#7c3aed",
-    midnight: "#2dd4bf",
-    root: "#f59e0b",
     glass: "#fb7185",
     bw: "#111111",
     sage: "#6b8f71",
@@ -1373,13 +1371,9 @@ export const MobileNav: React.FC = () => {
                                 ? "Deep indigo dark"
                                 : t === "light"
                                   ? "Clean bright"
-                                  : t === "midnight"
-                                    ? "Teal-accented slate"
-                                    : t === "root"
-                                      ? "Warm amber tone"
-                                      : t === "sage"
-                                        ? "Calm sage green"
-                                        : "Soft glass tone"}
+                                  : t === "sage"
+                                    ? "Calm sage green"
+                                    : "Soft glass tone"}
                             </p>
                           </div>
                           {isSelected && (

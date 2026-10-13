@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
 import { Toaster } from "sonner";
 import { SystemUpdateBanner } from "./components/SystemUpdateBanner";
+import { NewBuildWatcher } from "./components/NewBuildWatcher";
 import { MaintenanceWatcher } from "./components/MaintenanceWatcher";
 import {
   BrowserRouter as Router,
@@ -171,6 +172,8 @@ const CivilWorkDprAmendment = lazy(
 const CivilWorkDprWorkTransfer = lazy(
   () => import("./pages/civilworkdpr/WorkTransfer"),
 );
+const CivilWorkDprQuery = lazy(() => import("./pages/civilworkdpr/Query"));
+const DprTagMaster = lazy(() => import("./pages/civilworkdpr/DprTagMaster"));
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
 );
@@ -368,7 +371,7 @@ const PasswordResetPage = lazy(
   () => import("./pages/admin/security/PasswordReset"),
 );
 const ActivityBrowserPage = lazy(
-  () => import("./pages/admin/Activitybrowser/ActivityBrowser"),
+  () => import("./pages/admin/Activitybrowser/ActivityBrowserHome"),
 );
 
 // Admin Masters
@@ -1259,6 +1262,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-amendment">
             <CivilWorkDprAmendment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/query"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-query">
+            <CivilWorkDprQuery />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/dpr-tag-master"
+        element={
+          <ProtectedRoute pageKey="dpr-tag-master">
+            <DprTagMaster />
           </ProtectedRoute>
         }
       />
@@ -2659,6 +2678,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" closeButton />
       <SystemUpdateBanner />
+      <NewBuildWatcher />
       {/* ActivityBrowserProvider is always mounted so AuthSessionBridge is always inside it.
           The initialLoading gate moved inside the tree to avoid provider context being missing
           during hot-module-reload or React strict-mode double-renders. */}

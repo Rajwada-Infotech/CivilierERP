@@ -1,383 +1,187 @@
-import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Skeleton } from "@/components/ui/skeleton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
-import { CrmShell, CrmSection, CrmGlassCard } from "@/components/crm/CrmShell";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  ClipboardList, BookOpen, IndianRupee, Wrench, XCircle, Key,
-  LayoutDashboard, TrendingUp, BarChart3, AlertTriangle, CheckCircle2,
-  Phone, FileText, Scale, RefreshCw, ChevronRight, Building2,
-  Calendar, Clock, ArrowUpRight, BadgeAlert, PieChart as PieIcon,
-} from "lucide-react";
-import {
-  ResponsiveContainer, LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
-  PieChart, Pie, AreaChart, Area,
-} from "recharts";
+import { SHEET_CSS, Detail, Dimension, Skel } from "@/components/sheet/Sheet";
+
+// CRM Dashboard, drawn as an architect's sheet.
+//
+// The module sells buildings, so the page borrows the drawing office's own language instead of generic dashboard
+// cards: one bordered sheet with a title block, lettered details (A-H), dimension lines for anything that is a span
+// (collected against demanded), hatching for what is not yet built (money not yet received), and a red pencil used for
+// one thing only - items that need someone's attention. Colours and fonts come from the app theme (card, foreground,
+// border, primary, destructive; Sora and DM Sans), so the sheet follows whichever theme is selected.
 
 const API = "/api/crm/dashboard";
 
-// --- Helpers ------------------------------------------------------------------
-const fmtINR = (n: number) =>
-  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
-
-const fmtCr = (n: number) => {
-  if (n >= 1_00_00_000) return `₹${(n / 1_00_00_000).toFixed(2)} Cr`;
-  if (n >= 1_00_000)    return `₹${(n / 1_00_000).toFixed(1)} L`;
-  if (n >= 1_000)       return `₹${(n / 1_000).toFixed(0)}K`;
-  return fmtINR(n);
+// ── Number formatting ───────────────────────────────────────────────────────
+const n0 = (v: unknown) => Number(v) || 0;
+const fmtInt = (v: unknown) => n0(v).toLocaleString("en-IN");
+const fmtMoney = (v: unknown) => {
+  const n = n0(v);
+  if (n >= 1_00_00_000) return { num: (n / 1_00_00_000).toFixed(2), unit: "Cr" };
+  if (n >= 1_00_000) return { num: (n / 1_00_000).toFixed(1), unit: "L" };
+  if (n >= 1_000) return { num: (n / 1_000).toFixed(0), unit: "K" };
+  return { num: n.toFixed(0), unit: "" };
 };
-
-const pct = (paid: number, due: number) =>
-  due > 0 ? Math.min(100, Math.round((paid / due) * 100)) : 0;
-
-const sumCount = (rows: any[] = []) => rows.reduce((s, r) => s + (r.Count || 0), 0);
-
-const PROJECT_COLORS = ["#0ea5e9","#0284c7","#b45309","#eab308","#38bdf8","#fb923c","#f97316","#ea580c"];
-const STATUS_PIE_COLORS: Record<string, string> = {
-  Approved:  "#22c55e",
-  Pending:   "#f59e0b",
-  Cancelled: "#ef4444",
-  Rejected:  "#dc2626",
-  Draft:     "#94a3b8",
-  Confirmed: "#3b82f6",
-  Completed: "#10b981",
-  Scheduled: "#6366f1",
-  Resolved:  "#06b6d4",
-  Closed:    "#64748b",
-  Open:      "#f97316",
+const money = (v: unknown) => {
+  const m = fmtMoney(v);
+  return `₹${m.num}${m.unit ? ` ${m.unit}` : ""}`;
 };
+const share = (part: unknown, whole: unknown) => (n0(whole) > 0 ? Math.min(100, Math.max(0, (n0(part) / n0(whole)) * 100)) : 0);
+const sumCount = (rows: any[] = []) => rows.reduce((s, r) => s + n0(r.Count), 0);
 
-// --- Glass panel wrapper for charts ------------------------------------------
-const GlassPanel: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+// ── C: the pipeline, drawn as a section through four stages ─────────────────
+const PipelineSection: React.FC<{ funnel: any; onOpen: (path: string) => void }> = ({ funnel, onOpen }) => {
+  const stages = [
+    { key: "Applications", label: "Applications", path: "/crm/applications" },
+    { key: "Bookings", label: "Bookings", path: "/crm/bookings" },
+    { key: "Agreements", label: "Agreements", path: "/crm/agreements" },
+    { key: "Possessions", label: "Possessions", path: "/crm/handover" },
+  ].map((s) => ({ ...s, value: n0(funnel?.[s.key]) }));
+  const max = Math.max(1, ...stages.map((s) => s.value));
+  const W = 760, H = 150, mid = 70, bw = 112, gap = (W - bw * 4) / 3;
+  const half = (v: number) => Math.max(5, (v / max) * 58);
   return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{
-        background: isDark ? "rgba(15,12,3,0.45)" : "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(14,165,233,0.18)",
-        backdropFilter: "blur(16px) saturate(150%)",
-        WebkitBackdropFilter: "blur(16px) saturate(150%)",
-        boxShadow: isDark
-          ? "0 4px 20px rgba(0,0,0,0.25)"
-          : "0 4px 20px rgba(14,165,233,0.06)",
-      }}
-    >
-      {/* Top amber shimmer line */}
-      <div
-        className="h-px w-full"
-        style={{ background: "linear-gradient(90deg, transparent, rgba(14,165,233,0.4), transparent)" }}
-      />
-      <div className="p-4">
-        <p className="text-xs font-semibold text-muted-foreground mb-3">{title}</p>
-        {children}
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Sales pipeline from applications to possessions">
+        <defs>
+          <pattern id="crm-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="var(--blue)" strokeWidth="1" opacity="0.35" />
+          </pattern>
+        </defs>
+        <line x1="0" y1={mid} x2={W} y2={mid} stroke="var(--rule)" strokeDasharray="10 4 2 4" />
+        {stages.map((s, i) => {
+          const x = i * (bw + gap);
+          const h = half(s.value);
+          const next = stages[i + 1];
+          const nh = next ? half(next.value) : 0;
+          return (
+            <g key={s.key}>
+              {next && (
+                <polygon points={`${x + bw},${mid - h} ${x + bw + gap},${mid - nh} ${x + bw + gap},${mid + nh} ${x + bw},${mid + h}`} fill="url(#crm-hatch)" stroke="var(--blue)" strokeOpacity="0.35" />
+              )}
+              <rect x={x} y={mid - h} width={bw} height={h * 2} fill="var(--blue)" fillOpacity={1 - i * 0.17} stroke="var(--ink)" strokeWidth="1.2" />
+              {next && (
+                <text x={x + bw + gap / 2} y={mid + 4} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="11" fill="var(--ink)">
+                  {s.value > 0 ? `${Math.round((next.value / s.value) * 100)}%` : "—"}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      <div className="stages" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 4 }}>
+        {stages.map((s, i) => (
+          <button key={s.key} onClick={() => onOpen(s.path)} style={{ textAlign: i === 0 ? "left" : i === 3 ? "right" : "center" }}>
+            <div className="figure" style={{ fontSize: 26 }}>{fmtInt(s.value)}</div>
+            <div className="label link" style={{ display: "inline-block", marginTop: 5 }}>{s.label}</div>
+          </button>
+        ))}
       </div>
     </div>
   );
 };
 
-// --- Horizontal bar row -------------------------------------------------------
-const HBar: React.FC<{ label: string; value: number; total: number; color?: string }> = ({
-  label, value, total, color = "#0ea5e9",
-}) => (
-  <div className="mb-2.5">
-    <div className="flex justify-between text-xs mb-1">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-semibold tabular-nums">{value}</span>
+// ── F: twelve months, bars for money received and a line for bookings ───────
+const TrendPlot: React.FC<{ rows: any[] }> = ({ rows }) => {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 760, H = 230, padL = 8, padR = 8, top = 16, base = 186;
+  const n = Math.max(1, rows.length);
+  const slot = (W - padL - padR) / n;
+  const maxMoney = Math.max(1, ...rows.map((r) => n0(r.Collected)));
+  const maxCount = Math.max(1, ...rows.map((r) => Math.max(n0(r.Bookings), n0(r.Applications))));
+  const y = (v: number, max: number) => base - (v / max) * (base - top);
+  const cx = (i: number) => padL + slot * i + slot / 2;
+  const line = (key: string) => rows.map((r, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${y(n0(r[key]), maxCount).toFixed(1)}`).join(" ");
+  const active = hover != null ? rows[hover] : null;
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "baseline", minHeight: 22, marginBottom: 6 }}>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 10, height: 10, background: "var(--blue)", display: "inline-block" }} /> Received</span>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 14, height: 2, background: "var(--ink)", display: "inline-block" }} /> Bookings</span>
+        <span className="label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><i style={{ width: 14, height: 0, borderTop: "2px dashed var(--graphite)", display: "inline-block" }} /> Applications</span>
+        <span className="mono" style={{ marginLeft: "auto", fontSize: 11, color: "var(--ink-2)" }}>
+          {active ? `${active.MonthLabel} · ${money(active.Collected)} received · ${fmtInt(active.Bookings)} bookings · ${fmtInt(active.Applications)} applications` : "Hover a month for its figures"}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Money received, bookings and applications by month" onMouseLeave={() => setHover(null)}>
+        {[0, 0.5, 1].map((t) => (
+          <g key={t}>
+            <line x1={padL} x2={W - padR} y1={y(maxMoney * t, maxMoney)} y2={y(maxMoney * t, maxMoney)} stroke="var(--rule)" strokeDasharray={t === 0 ? undefined : "2 5"} />
+            {t > 0 && <text x={padL + 2} y={y(maxMoney * t, maxMoney) - 4} fontFamily="DM Sans, sans-serif" fontSize="9" fill="var(--graphite)">{money(maxMoney * t)}</text>}
+          </g>
+        ))}
+        {rows.map((r, i) => {
+          const h = base - y(n0(r.Collected), maxMoney);
+          const w = Math.min(34, slot * 0.52);
+          return (
+            <g key={r.MonthLabel || i} onMouseEnter={() => setHover(i)}>
+              <rect x={padL + slot * i} y={top - 8} width={slot} height={H - top + 8} fill={hover === i ? "var(--blue-wash)" : "transparent"} />
+              <rect x={cx(i) - w / 2} y={base - h} width={w} height={Math.max(0, h)} fill="var(--blue)" fillOpacity={hover == null || hover === i ? 0.9 : 0.4} />
+              <text x={cx(i)} y={base + 16} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="10" fill={hover === i ? "var(--ink)" : "var(--graphite)"}>{String(r.MonthLabel || "").slice(0, 3).toUpperCase()}</text>
+              <text x={cx(i)} y={base + 29} textAnchor="middle" fontFamily="DM Sans, sans-serif" fontSize="8" fill="var(--faint)">{String(r.MonthLabel || "").slice(-2)}</text>
+            </g>
+          );
+        })}
+        {rows.length > 1 && (
+          <>
+            <path d={line("Applications")} fill="none" stroke="var(--graphite)" strokeWidth="1.4" strokeDasharray="4 4" pointerEvents="none" />
+            <path className="draw" d={line("Bookings")} fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round" pointerEvents="none" />
+            {rows.map((r, i) => (
+              <circle key={i} cx={cx(i)} cy={y(n0(r.Bookings), maxCount)} r={hover === i ? 4.5 : 3} fill="var(--sheet)" stroke="var(--ink)" strokeWidth="1.6" pointerEvents="none" />
+            ))}
+          </>
+        )}
+      </svg>
     </div>
-    <div className="w-full bg-muted/50 rounded-full h-1.5">
-      <div
-        className="h-1.5 rounded-full transition-all"
-        style={{ width: total ? `${(value / total) * 100}%` : "0%", background: color }}
-      />
-    </div>
-  </div>
-);
-
-// --- Alert Card ---------------------------------------------------------------
-interface AlertCardProps {
-  count: number;
-  label: string;
-  sublabel?: string;
-  icon: React.ElementType;
-  severity: "critical" | "warning" | "info" | "ok";
-  route: string;
-}
-
-// This app switches themes via a `data-theme` attribute + CSS variables
-// (see ThemeContext.tsx), not Tailwind's `dark` class — so `dark:` variant
-// classes never activate here and the light-mode fallback (solid pastel
-// bg-*-50) always renders, standing out badly against the app's dark
-// themes. Opacity-scaled colors (bg-*-500/10) apply on top of whatever the
-// page background actually is, so they read correctly in every theme.
-const SEVERITY_STYLES = {
-  critical: {
-    border: "border-red-500/30",
-    bg: "bg-red-500/10",
-    iconBg: "bg-red-500/15",
-    iconColor: "text-red-500",
-    countColor: "text-red-500",
-    labelColor: "text-red-500",
-    pulse: true,
-  },
-  warning: {
-    border: "border-sky-500/30",
-    bg: "bg-sky-500/10",
-    iconBg: "bg-sky-500/15",
-    iconColor: "text-sky-500",
-    countColor: "text-sky-500",
-    labelColor: "text-sky-500",
-    pulse: false,
-  },
-  info: {
-    border: "border-blue-500/30",
-    bg: "bg-blue-500/10",
-    iconBg: "bg-blue-500/15",
-    iconColor: "text-blue-500",
-    countColor: "text-blue-500",
-    labelColor: "text-blue-500",
-    pulse: false,
-  },
-  ok: {
-    border: "border-green-500/20",
-    bg: "bg-green-500/5",
-    iconBg: "bg-green-500/10",
-    iconColor: "text-green-500",
-    countColor: "text-green-500",
-    labelColor: "text-green-500",
-    pulse: false,
-  },
+  );
 };
 
-const AlertCard: React.FC<AlertCardProps> = ({ count, label, sublabel, icon: Icon, severity, route }) => {
-  const navigate = useNavigate();
-  const s = SEVERITY_STYLES[severity];
-  const isOk = severity === "ok";
+// ── H: one register = one bar split by status ───────────────────────────────
+const STATUS_TONE: Record<string, { fill: string; hatch?: boolean }> = {
+  Approved: { fill: "var(--blue)" }, Confirmed: { fill: "var(--blue)" }, Completed: { fill: "var(--ink)" }, Resolved: { fill: "var(--blue)" },
+  Closed: { fill: "var(--ink)" }, Pending: { fill: "var(--rule)", hatch: true }, Draft: { fill: "var(--rule-soft)", hatch: true }, Scheduled: { fill: "var(--blue-mid)" },
+  Open: { fill: "var(--red)" }, Cancelled: { fill: "var(--red)" }, Rejected: { fill: "var(--red)" },
+};
+const tone = (status: string) => STATUS_TONE[status] || { fill: "var(--faint)" };
 
+const Register: React.FC<{ name: string; rows: any[]; onOpen: () => void }> = ({ name, rows, onOpen }) => {
+  const total = sumCount(rows);
+  const sorted = [...rows].sort((a, b) => n0(b.Count) - n0(a.Count));
   return (
-    <button
-      onClick={() => navigate(route)}
-      className={`relative flex items-center gap-3 rounded-xl border p-3 text-left transition-all hover:shadow-md hover:-translate-y-0.5 group ${s.bg} ${s.border}`}
-    >
-      {s.pulse && count > 0 && (
-        <span className="absolute top-2 right-2 flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
-        </span>
-      )}
-      <div className={`flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${s.iconBg}`}>
-        {isOk && count === 0
-          ? <CheckCircle2 size={18} className={s.iconColor} />
-          : <Icon size={18} className={s.iconColor} />}
+    <button onClick={onOpen} style={{ display: "block", width: "100%", padding: "10px 0", borderBottom: "1px solid var(--rule-soft)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+        <span className="label link" style={{ color: "var(--ink)" }}>{name}</span>
+        <span className="figure" style={{ fontSize: 17 }}>{fmtInt(total)}</span>
       </div>
-      <div className="min-w-0 flex-1">
-        <div className={`text-2xl font-bold font-heading leading-none ${s.countColor}`}>{count}</div>
-        <div className={`text-xs font-medium mt-0.5 leading-tight ${s.labelColor}`}>{label}</div>
-        {sublabel && <div className="text-[0.625rem] text-muted-foreground mt-0.5">{sublabel}</div>}
+      <div style={{ display: "flex", height: 9, marginTop: 7, border: "1px solid var(--ink)", background: "var(--sheet)" }}>
+        {total === 0 ? null : sorted.map((r) => (
+          <span key={r.Status} title={`${r.Status}: ${r.Count}`} className={tone(r.Status).hatch ? "hatch" : undefined}
+            style={{ width: `${share(r.Count, total)}%`, background: tone(r.Status).hatch ? undefined : tone(r.Status).fill, borderRight: "1px solid var(--sheet)" }} />
+        ))}
       </div>
-      <ChevronRight size={14} className="text-muted-foreground/50 group-hover:text-muted-foreground transition-colors flex-shrink-0" />
+      <div className="mono" style={{ marginTop: 6, fontSize: 10, color: "var(--graphite)", lineHeight: 1.6 }}>
+        {total === 0 ? "No records" : sorted.slice(0, 4).map((r) => `${r.Status} ${r.Count}`).join("  ·  ")}
+      </div>
     </button>
   );
 };
 
-// --- This Week Strip ----------------------------------------------------------
-const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
-  const navigate = useNavigate();
-  if (!data?.length) return null;
-
-  return (
-    <div className="grid grid-cols-7 gap-2">
-      {data.map((day: any) => {
-        const hasEvents = day.Handovers > 0 || day.Registries > 0 || day.MilestonesDue > 0;
-        return (
-          <div
-            key={day.DayDate}
-            className={`rounded-xl border p-2.5 text-center transition-all ${
-              hasEvents
-                ? "border-sky-500/30 bg-sky-500/10"
-                : "border-border bg-card/60"
-            }`}
-          >
-            <div className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide">
-              {String(day.DayLabel).split(" ")[0]}
-            </div>
-            <div className="text-lg font-bold font-heading mt-0.5 leading-none">
-              {String(day.DayLabel).split(" ")[1]}
-            </div>
-            <div className="text-[0.5625rem] text-muted-foreground">
-              {String(day.DayLabel).split(" ")[2]}
-            </div>
-            <div className="mt-2 space-y-1">
-              {day.Handovers > 0 && (
-                <button onClick={() => navigate("/crm/handover")}
-                  className="w-full flex items-center gap-1 text-[0.625rem] text-green-500 bg-green-500/10 rounded px-1 py-0.5 hover:opacity-80">
-                  <Key size={9} /> {day.Handovers}
-                </button>
-              )}
-              {day.Registries > 0 && (
-                <button onClick={() => navigate("/crm/sales-deed?tab=Registry")}
-                  className="w-full flex items-center gap-1 text-[0.625rem] text-blue-500 bg-blue-500/10 rounded px-1 py-0.5 hover:opacity-80">
-                  <FileText size={9} /> {day.Registries}
-                </button>
-              )}
-              {day.MilestonesDue > 0 && (
-                <button onClick={() => navigate("/crm/payments")}
-                  className="w-full flex items-center gap-1 text-[0.625rem] text-sky-500 bg-sky-500/10 rounded px-1 py-0.5 hover:opacity-80">
-                  <IndianRupee size={9} /> {day.MilestonesDue}
-                </button>
-              )}
-              {!hasEvents && <div className="text-[0.625rem] text-muted-foreground/40 pt-1">·</div>}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-// --- Collection Per Project bar -----------------------------------------------
-const CollectionBar: React.FC<{ row: any }> = ({ row }) => {
-  const p = pct(row.TotalPaid, row.TotalDue);
-  const color = p >= 80 ? "#22c55e" : p >= 50 ? "#0ea5e9" : "#ef4444";
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs">
-        <span className="font-medium text-foreground truncate max-w-[140px]">{row.ProjectName || "Unknown"}</span>
-        <span className="text-muted-foreground shrink-0 ml-2">{fmtCr(row.TotalPaid)} / {fmtCr(row.TotalDue)}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-          <div className="h-full rounded-full transition-all" style={{ width: `${p}%`, background: color }} />
-        </div>
-        <span className="text-xs font-semibold w-9 text-right" style={{ color }}>{p}%</span>
-        {row.OverdueCount > 0 && (
-          <span className="text-[0.625rem] text-red-500 whitespace-nowrap">{row.OverdueCount} overdue</span>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// --- Pie chart tooltip --------------------------------------------------------
-const PieTooltip: React.FC<any> = ({ active, payload }) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-lg">
-      <span className="font-semibold">{payload[0].name}:</span>{" "}
-      <span>{payload[0].value}</span>
-    </div>
-  );
-};
-
-// --- Mini radial gauge (KPI tiles) ---------------------------------------------
-// Plain SVG rather than recharts' RadialBarChart — at ~52px this needs exact
-// stroke control (rounded caps, a faint background track) that's simpler to
-// get right directly than fighting a full chart container for something
-// this small.
-const MiniGauge: React.FC<{ value: number; color: string; size?: number }> = ({ value, color, size = 52 }) => {
-  const stroke = 5;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const clamped = Math.max(0, Math.min(100, value));
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={stroke} className="text-muted/40" />
-      <circle
-        cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
-        strokeDasharray={c} strokeDashoffset={c - (clamped / 100) * c} strokeLinecap="round"
-        transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        style={{ transition: "stroke-dashoffset 0.6s ease" }}
-      />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className="fill-foreground font-heading font-bold" style={{ fontSize: size * 0.26 }}>
-        {clamped}%
-      </text>
-    </svg>
-  );
-};
-
-// --- Mini trend sparkline (KPI tiles) ------------------------------------------
-const MiniSparkline: React.FC<{ data: any[]; dataKey: string; color: string }> = ({ data, dataKey, color }) => {
-  if (!data?.length) return <div className="h-9 flex items-center text-[0.625rem] text-muted-foreground">No trend data</div>;
-  return (
-    <ResponsiveContainer width="100%" height={36}>
-      <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-        <defs>
-          <linearGradient id={`spark-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.35} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <Area type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.75} fill={`url(#spark-${dataKey})`} dot={false} isAnimationActive={false} />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-};
-
-// --- Mini part/whole ratio bar (KPI tiles) --------------------------------------
-const MiniRatioBar: React.FC<{ part: number; whole: number; color: string; label: string }> = ({ part, whole, color, label }) => {
-  const p = whole > 0 ? Math.min(100, Math.round((part / whole) * 100)) : 0;
-  return (
-    <div className="mt-1">
-      <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
-        <div className="h-full rounded-full transition-all" style={{ width: `${p}%`, background: color }} />
-      </div>
-      <p className="text-[0.625rem] text-muted-foreground mt-1">{label}</p>
-    </div>
-  );
-};
-
-// --- Skeletons ----------------------------------------------------------------
-const AlertSkeleton = () => (
-  <div className="rounded-xl border border-border/40 p-3 flex items-center gap-3">
-    <Skeleton className="w-9 h-9 rounded-lg" />
-    <div className="flex-1 space-y-1.5">
-      <Skeleton className="h-6 w-10" />
-      <Skeleton className="h-3 w-28" />
-    </div>
-  </div>
-);
-
-const GlassCardSkeleton = () => (
-  <div className="rounded-xl border border-sky-200/30 p-4 space-y-3"
-    style={{ background: "rgba(14,165,233,0.04)" }}>
-    <div className="flex items-center gap-2">
-      <Skeleton className="w-6 h-6 rounded-md" />
-      <Skeleton className="h-3 w-20" />
-    </div>
-    <Skeleton className="h-8 w-16" />
-    {[1, 2, 3].map(i => <Skeleton key={i} className="h-3 w-full" />)}
-  </div>
-);
-
-// --- Main Component -----------------------------------------------------------
+// ── Page ────────────────────────────────────────────────────────────────────
 const CrmDashboard: React.FC = () => {
   usePageRights("crm-dashboard");
   const navigate = useNavigate();
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
   const qc = useQueryClient();
   const [projectId, setProjectId] = useState<string>(() => localStorage.getItem("crm_dash_project") || "");
-  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [updatedAt, setUpdatedAt] = useState<Date>(new Date());
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ["crm-dashboard", projectId],
     queryFn: async () => {
-      const url = projectId ? `${API}?projectId=${projectId}` : API;
-      const r = await fetchWithAuth(url);
+      const r = await fetchWithAuth(projectId ? `${API}?projectId=${projectId}` : API);
       if (!r.ok) return null;
       return r.json();
     },
@@ -385,519 +189,270 @@ const CrmDashboard: React.FC = () => {
     refetchInterval: 5 * 60_000,
   });
 
-  useEffect(() => { setLastUpdated(new Date()); }, [data]);
+  useEffect(() => { setUpdatedAt(new Date()); }, [data]);
 
-  const handleRefresh = useCallback(() => {
-    qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
-  }, [qc]);
-
-  const handleProjectChange = (pid: string) => {
-    const val = pid === "__all__" ? "" : pid;
-    setProjectId(val);
-    if (val) localStorage.setItem("crm_dash_project", val);
+  const refresh = useCallback(() => { qc.invalidateQueries({ queryKey: ["crm-dashboard"] }); }, [qc]);
+  const pickProject = (value: string) => {
+    setProjectId(value);
+    if (value) localStorage.setItem("crm_dash_project", value);
     else localStorage.removeItem("crm_dash_project");
   };
 
-  const alerts   = data?.alerts    ?? {};
-  const metrics  = data?.metrics   ?? {};
-  const payments = data?.payments  ?? {};
+  const alerts = data?.alerts ?? {};
+  const metrics = data?.metrics ?? {};
+  const payments = data?.payments ?? {};
   const projects: any[] = data?.projects ?? [];
+  const trend: any[] = data?.monthlyTrend ?? [];
+  const week: any[] = data?.thisWeek ?? [];
+  const perProject: any[] = metrics.collectionPerProject ?? [];
 
-  const appsData: any[] = data?.applications   ?? [];
-  const bkgsData: any[] = data?.bookings        ?? [];
-  const tickData: any[] = data?.serviceTickets  ?? [];
-  const cancData: any[] = data?.cancellations   ?? [];
-  const hndData:  any[] = data?.handovers       ?? [];
+  const due = n0(payments.TotalDue);
+  const paid = n0(payments.TotalPaid);
+  const outstanding = Math.max(0, due - paid);
+  const paidPct = share(paid, due);
+  const next30 = n0(metrics.forwardDue30Days);
+  const next30Pct = Math.min(100 - paidPct, share(next30, due));
 
-  const appsTotal = sumCount(appsData);
-  const bkgsTotal = sumCount(bkgsData);
-  const tickTotal = sumCount(tickData);
-  const cancTotal = sumCount(cancData);
-  const hndTotal  = sumCount(hndData);
-  const collPct   = pct(payments.TotalPaid ?? 0, payments.TotalDue ?? 0);
+  const attention = useMemo(() => {
+    const items = [
+      { key: "overduePayments", label: "Overdue payments", note: "Demand milestones past their due date", path: "/crm/payments", hot: true },
+      { key: "disputedNotices", label: "Possession notices disputed", note: "Disputed by the customer", path: "/crm/possession-notice", hot: true },
+      { key: "urgentTickets", label: "Urgent service tickets", note: "High priority, not resolved", path: "/crm/service-tickets", hot: true },
+      { key: "welcomeCallPending", label: "Welcome calls pending", note: "Approved bookings with no call made", path: "/crm/welcome-calls", hot: false },
+      { key: "agreementsPending", label: "Agreements need action", note: "None drawn up, or in draft over 5 days", path: "/crm/agreements", hot: false },
+      { key: "deedsAwaitingCustomer", label: "Deeds awaiting customer", note: "Not yet approved on the portal", path: "/crm/sales-deed", hot: false },
+      { key: "deedsAwaitingDirector", label: "Deeds awaiting director", note: "Pending director approval", path: "/crm/sales-deed", hot: false },
+      { key: "nocsNotIssued", label: "NOCs not issued", note: "Approved, not handed over", path: "/crm/noc", hot: false },
+      { key: "cancellationsPending", label: "Cancellations pending", note: "Awaiting management approval", path: "/crm/cancellations", hot: false },
+      { key: "handoversThisWeek", label: "Handovers this week", note: "Scheduled in the next 7 days", path: "/crm/handover", hot: false },
+    ].map((i) => ({ ...i, count: n0(alerts[i.key]) }));
+    const open = items.filter((i) => i.count > 0).sort((a, b) => Number(b.hot) - Number(a.hot) || b.count - a.count);
+    return { open, clear: items.filter((i) => i.count === 0), max: Math.max(1, ...open.map((i) => i.count)) };
+  }, [alerts]);
 
-  const axisColor = isDark ? "#94a3b8" : "#64748b";
-  const gridColor = isDark ? "rgba(14,165,233,0.10)" : "rgba(14,165,233,0.15)";
-
-  const bookingPie = bkgsData.map((b: any, i: number) => ({
-    name: b.Status,
-    value: b.Count,
-    color: STATUS_PIE_COLORS[b.Status] ?? PROJECT_COLORS[i % PROJECT_COLORS.length],
-  }));
-
-  const appPie = appsData.map((a: any, i: number) => ({
-    name: a.Status,
-    value: a.Count,
-    color: STATUS_PIE_COLORS[a.Status] ?? PROJECT_COLORS[i % PROJECT_COLORS.length],
-  }));
-
-  const minutesAgo = Math.floor((Date.now() - lastUpdated.getTime()) / 60000);
-  const updatedLabel = minutesAgo === 0 ? "Just now" : `${minutesAgo}m ago`;
-
-  const alertCards = [
-    { count: alerts.overduePayments ?? 0,      label: "Overdue Payments",       sublabel: "Demand milestones past due date",        icon: IndianRupee,  severity: (alerts.overduePayments      > 0 ? "critical" : "ok") as any, route: "/crm/payments" },
-    { count: alerts.welcomeCallPending ?? 0,   label: "Welcome Calls Pending",  sublabel: "Approved bookings, no call done",         icon: Phone,        severity: (alerts.welcomeCallPending   > 0 ? "warning"  : "ok") as any, route: "/crm/welcome-calls" },
-    { count: alerts.agreementsPending ?? 0,    label: "Agreements Need Action", sublabel: "No agreement or draft > 5 days",          icon: Scale,        severity: (alerts.agreementsPending    > 0 ? "warning"  : "ok") as any, route: "/crm/agreements" },
-    { count: alerts.disputedNotices ?? 0,      label: "Notices Disputed",       sublabel: "Possession notice disputed by customer",  icon: BadgeAlert,   severity: (alerts.disputedNotices      > 0 ? "critical" : "ok") as any, route: "/crm/possession-notice" },
-    { count: alerts.deedsAwaitingCustomer ?? 0,label: "Deeds Awaiting Customer",sublabel: "Customer hasn't approved on portal",      icon: FileText,     severity: (alerts.deedsAwaitingCustomer> 0 ? "warning"  : "ok") as any, route: "/crm/sales-deed" },
-    { count: alerts.deedsAwaitingDirector ?? 0,label: "Deeds Awaiting Director",sublabel: "Pending director approval",               icon: FileText,     severity: (alerts.deedsAwaitingDirector> 0 ? "info"     : "ok") as any, route: "/crm/sales-deed" },
-    { count: alerts.nocsNotIssued ?? 0,        label: "NOCs Not Issued",        sublabel: "Approved but not physically issued",      icon: ClipboardList,severity: (alerts.nocsNotIssued        > 0 ? "warning"  : "ok") as any, route: "/crm/noc" },
-    { count: alerts.cancellationsPending ?? 0, label: "Cancellations Pending",  sublabel: "Awaiting management approval",            icon: XCircle,      severity: (alerts.cancellationsPending > 0 ? "warning"  : "ok") as any, route: "/crm/cancellations" },
-    { count: alerts.urgentTickets ?? 0,        label: "Urgent/High Tickets",    sublabel: "After-sales, unresolved high priority",   icon: Wrench,       severity: (alerts.urgentTickets        > 0 ? "critical" : "ok") as any, route: "/crm/service-tickets" },
-    { count: alerts.handoversThisWeek ?? 0,    label: "Handovers This Week",    sublabel: "Scheduled in next 7 days",                icon: Key,          severity: "info" as any,                                                  route: "/crm/handover" },
-  ];
-
-  // Accent colours for pipeline glass cards
-  const pipelineCards = [
-    {
-      icon: ClipboardList, label: "Applications", accent: "#0ea5e9",
-      route: "/crm/applications", total: appsTotal,
-      bars: appsData.map((a: any) => ({ label: a.Status, value: a.Count, color: STATUS_PIE_COLORS[a.Status] ?? "#0ea5e9" })),
-      footer: appsTotal > 0 ? `${appsTotal} total` : null,
-    },
-    {
-      icon: BookOpen, label: "Bookings", accent: "#22c55e",
-      route: "/crm/bookings", total: bkgsTotal,
-      bars: bkgsData.map((b: any) => ({
-        label: b.Status, value: b.Count,
-        color: b.Status === CrmStatus.APPROVED ? "#22c55e" : b.Status === CrmStatus.CANCELLED ? "#ef4444" : "#0ea5e9",
-      })),
-      footer: bkgsTotal > 0
-        ? `${bkgsTotal} total · ${fmtCr(bkgsData.reduce((s: number, b: any) => s + (b.TotalValue || 0), 0))} value`
-        : null,
-    },
-    {
-      icon: Wrench, label: "Service Tickets", accent: "#f97316",
-      route: "/crm/service-tickets", total: tickTotal,
-      bars: tickData.map((t: any) => ({ label: t.Status, value: t.Count, color: "#f97316" })),
-      footer: tickTotal > 0 ? `${tickTotal} total` : null,
-    },
-    {
-      icon: XCircle, label: "Cancellations", accent: "#ef4444",
-      route: "/crm/cancellations", total: cancTotal,
-      bars: cancData.map((c: any) => ({ label: c.Status, value: c.Count, color: "#ef4444" })),
-      footer: cancTotal > 0 ? `${cancTotal} total` : null,
-    },
-    {
-      icon: Key, label: "Handovers", accent: "#6366f1",
-      route: "/crm/handover", total: hndTotal,
-      bars: hndData.map((h: any) => ({
-        label: h.Status, value: h.Count,
-        color: h.Status === "Completed" ? "#22c55e" : h.Status === "Scheduled" ? "#6366f1" : "#0ea5e9",
-      })),
-      footer: hndTotal > 0 ? `${hndTotal} total` : null,
-    },
-  ];
-
-  // Key numbers for CrmGlassCard row — each carries its own mini
-  // chart/gauge so the row reads as a real KPI strip instead of four bare
-  // numbers.
-  const outstandingDemand = Math.max(0, (payments.TotalDue ?? 0) - (payments.TotalPaid ?? 0));
-  const openTicketsCount = sumCount(tickData.filter((t: any) => !["Resolved", "Closed"].includes(t.Status)));
-
-  const keyNumbers = [
-    {
-      label: "Sold This Month",
-      value: metrics.unitsSoldThisMonth ?? 0,
-      sub: `${fmtCr(metrics.revenueThisMonth ?? 0)} in value`,
-      icon: BookOpen,
-      accent: "#22c55e",
-      route: "/crm/bookings",
-      chart: (
-        <MiniSparkline data={data?.monthlyTrend ?? []} dataKey="Bookings" color="#22c55e" />
-      ),
-    },
-    {
-      label: "Total Collection",
-      value: `${collPct}%`,
-      sub: `${fmtCr(payments.TotalPaid ?? 0)} of ${fmtCr(payments.TotalDue ?? 0)}`,
-      icon: IndianRupee,
-      accent: "#0ea5e9",
-      route: "/crm/payments",
-      chart: <MiniGauge value={collPct} color="#0ea5e9" />,
-    },
-    {
-      label: "Due Next 30 Days",
-      value: fmtCr(metrics.forwardDue30Days ?? 0),
-      sub: `Across ${metrics.forwardDueCount ?? 0} milestones`,
-      icon: ArrowUpRight,
-      accent: "#f97316",
-      route: "/crm/payments",
-      chart: (
-        <MiniRatioBar
-          part={metrics.forwardDue30Days ?? 0}
-          whole={outstandingDemand}
-          color="#f97316"
-          label={`${outstandingDemand > 0 ? Math.min(100, Math.round(((metrics.forwardDue30Days ?? 0) / outstandingDemand) * 100)) : 0}% of outstanding demand`}
-        />
-      ),
-    },
-    {
-      label: "Open Service Tickets",
-      value: openTicketsCount,
-      sub: `${tickTotal} total tickets`,
-      icon: Wrench,
-      accent: "#b45309",
-      route: "/crm/service-tickets",
-      chart: (
-        <MiniRatioBar
-          part={openTicketsCount}
-          whole={tickTotal}
-          color="#b45309"
-          label={`${tickTotal > 0 ? Math.round((openTicketsCount / tickTotal) * 100) : 0}% of tickets still open`}
-        />
-      ),
-    },
-  ];
+  const weekMax = Math.max(1, ...week.map((d) => n0(d.Handovers) + n0(d.Registries) + n0(d.MilestonesDue)));
+  const collected = fmtMoney(paid);
+  const projectName = projects.find((p) => String(p.Id) === projectId)?.Name;
 
   return (
-    <CrmShell
-      title="CRM Dashboard"
-      subtitle="Pipeline, closures, analytics and after-sales — all in one view"
-      icon={LayoutDashboard}
-    >
+    <div>
+      <style>{SHEET_CSS}</style>
       <Breadcrumbs items={["Dashboard", "CRM"]} />
 
-      {/* -- Top bar: project selector + refresh -------------------------------- */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Building2 size={14} className="text-muted-foreground shrink-0" />
-          <Select value={projectId || "__all__"} onValueChange={handleProjectChange}>
-            <SelectTrigger className="text-sm min-w-[200px] h-8 focus:ring-sky-500/40 focus:ring-1">
-              <SelectValue placeholder="All Projects" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Projects</SelectItem>
-              {projects.map((p: any) => (
-                <SelectItem key={p.Id} value={String(p.Id)}>{p.Name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Clock size={12} />
-          <span>Updated {updatedLabel}</span>
-          <button
-            onClick={handleRefresh}
-            disabled={isFetching}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors ${isFetching ? "opacity-50 cursor-not-allowed" : ""}`}
-          >
-            <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      {/* -- SECTION 1: Attention Required ------------------------------------- */}
-      <CrmSection title="Attention Required" icon={AlertTriangle} accentColor="#ef4444">
-        <p className="text-xs text-muted-foreground -mt-1 mb-2">
-          Items that need human action today — click any card to go directly to that module
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
-          {isLoading
-            ? Array.from({ length: 10 }).map((_, i) => <AlertSkeleton key={i} />)
-            : alertCards.map((c) => <AlertCard key={c.label} {...c} />)}
-        </div>
-        {!isLoading && alertCards.filter(c => c.severity !== "ok" && c.count > 0).length === 0 && (
-          <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400 mt-2 font-medium">
-            <CheckCircle2 size={16} /> All clear — no items need immediate attention
+      <div className="crm-sheet">
+        {/* Title block */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch" }}>
+          <div style={{ flex: "1 1 320px", padding: "22px 22px 20px", minWidth: 0 }}>
+            <p className="label">CivilierERP · Customer relations</p>
+            <h1 className="title" style={{ fontSize: "clamp(28px, 3.4vw, 44px)", margin: "8px 0 0", lineHeight: 1.05, textWrap: "balance" as any }}>
+              Sales &amp; collection register
+            </h1>
+            <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--ink-2)", maxWidth: "60ch" }}>
+              Every booking from application to possession, the money against it, and what is waiting on someone.
+            </p>
           </div>
-        )}
-      </CrmSection>
-
-      {/* -- SECTION 2: Key Numbers -------------------------------------------- */}
-      <CrmSection title="Key Numbers" icon={BarChart3} accentColor="#0ea5e9">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {isLoading
-            ? Array.from({ length: 4 }).map((_, i) => <GlassCardSkeleton key={i} />)
-            : keyNumbers.map((s) => (
-                <CrmGlassCard
-                  key={s.label}
-                  label={s.label}
-                  value={s.value}
-                  sub={s.sub}
-                  icon={s.icon}
-                  accentColor={s.accent}
-                  onClick={() => navigate(s.route)}
-                >
-                  <div className="mt-2 pt-2 border-t border-border/30">
-                    {s.chart}
-                  </div>
-                </CrmGlassCard>
-              ))}
+          <div className="mono titleblock" style={{ flex: "1 1 300px", maxWidth: 420, minWidth: 260, display: "grid", gridTemplateColumns: "1fr 1fr", borderLeft: "1px solid var(--ink)", fontSize: 12 }}>
+            <label style={{ gridColumn: "1 / -1", padding: "10px 14px", borderBottom: "1px solid var(--ink)", display: "block" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Project</span>
+              <select value={projectId} onChange={(e) => pickProject(e.target.value)} aria-label="Project">
+                <option value="">All projects</option>
+                {projects.map((p) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+              </select>
+            </label>
+            <div style={{ padding: "10px 14px", borderRight: "1px solid var(--ink)" }}>
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Date</span>
+              {updatedAt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+            </div>
+            <div style={{ padding: "10px 14px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8 }}>
+              <span>
+                <span className="label" style={{ display: "block", marginBottom: 3 }}>Read at</span>
+                {updatedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+              <button onClick={refresh} className="label link" style={{ color: "var(--blue)" }} disabled={isFetching}>
+                {isFetching ? "Reading…" : "Re-read"}
+              </button>
+            </div>
+          </div>
         </div>
-      </CrmSection>
 
-      {/* -- SECTION 3: Pipeline Overview (glass cards) ------------------------ */}
-      <CrmSection title="Pipeline Overview" icon={ClipboardList} accentColor="#0ea5e9">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-          {isLoading
-            ? Array.from({ length: 5 }).map((_, i) => <GlassCardSkeleton key={i} />)
-            : pipelineCards.map((card) => (
-                <CrmGlassCard
-                  key={card.label}
-                  label={card.label}
-                  value={card.total}
-                  icon={card.icon}
-                  accentColor={card.accent}
-                  onClick={() => navigate(card.route)}
-                  sub={card.footer ?? undefined}
-                >
-                  {card.bars.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-border/30">
-                      {card.bars.map((b) => (
-                        <HBar key={b.label} label={b.label} value={b.value} total={card.total} color={b.color} />
-                      ))}
+        {/* A: collection */}
+        <div className="grid2">
+          <Detail tag="A" title="Collection" note={projectName || "All projects"}>
+            {isLoading ? (<><Skel h={54} w="55%" /><Skel h={26} /><Skel w="70%" /></>) : (
+              <>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                  <span className="figure" style={{ fontSize: "clamp(44px, 6vw, 76px)" }}>
+                    <span style={{ fontSize: "0.5em", fontWeight: 500, marginRight: 4, color: "var(--ink-2)" }}>₹</span>{collected.num}
+                    <span style={{ fontSize: "0.34em", fontWeight: 500, marginLeft: 6, letterSpacing: 0 }}>{collected.unit}</span>
+                  </span>
+                  <span style={{ paddingBottom: 8, fontSize: 14, color: "var(--ink-2)" }}>
+                    received of <b style={{ color: "var(--ink)" }}>{money(due)}</b> demanded
+                  </span>
+                </div>
+
+                <div style={{ marginTop: 22 }}>
+                  <div style={{ position: "relative", display: "flex", height: 30, border: "1.5px solid var(--ink)", background: "var(--sheet)" }} role="img"
+                    aria-label={`${Math.round(paidPct)} percent of the demand received`}>
+                    <div className="grow" style={{ width: `${paidPct}%`, background: "var(--blue)" }} />
+                    <div className="hatch" style={{ flex: 1, position: "relative" }}>
+                      {next30Pct > 0 && paidPct < 100 && (
+                        <div title={`${money(next30)} falls due in the next 30 days`} style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${(next30Pct / (100 - paidPct)) * 100}%`, borderRight: "1.5px dashed var(--ink)", background: "var(--blue-tint)" }} />
+                      )}
                     </div>
+                  </div>
+                  <div style={{ display: "flex" }}>
+                    <div style={{ width: `${Math.max(paidPct, 14)}%`, minWidth: 0 }}><Dimension from={0} to={100} text={`${Math.round(paidPct)}% received`} color="var(--blue)" /></div>
+                    <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>{outstanding > 0 && <Dimension from={0} to={100} text={`${money(outstanding)} outstanding`} />}</div>
+                  </div>
+                </div>
+
+                <div className="mono" style={{ display: "flex", flexWrap: "wrap", gap: "6px 22px", marginTop: 18, fontSize: 11, color: "var(--ink-2)" }}>
+                  <span><i style={{ display: "inline-block", width: 10, height: 10, background: "var(--blue)", marginRight: 6 }} />Received</span>
+                  <span><i className="hatch" style={{ display: "inline-block", width: 10, height: 10, border: "1px solid var(--rule)", marginRight: 6 }} />Not yet received</span>
+                  <span><i style={{ display: "inline-block", width: 10, height: 10, background: "var(--blue-tint)", borderRight: "1.5px dashed var(--ink)", marginRight: 6 }} />Due within 30 days</span>
+                  {n0(payments.OverdueCount) > 0 && (
+                    <button onClick={() => navigate("/crm/payments")} style={{ color: "var(--red)", fontWeight: 600 }}>
+                      ✕ {fmtInt(payments.OverdueCount)} milestone{n0(payments.OverdueCount) === 1 ? "" : "s"} overdue
+                    </button>
                   )}
-                  {card.bars.length === 0 && (
-                    <p className="text-xs text-muted-foreground mt-2">None yet</p>
-                  )}
-                </CrmGlassCard>
-              ))}
+                </div>
+              </>
+            )}
+          </Detail>
+
+          <Detail tag="B" title="This month and next">
+            {isLoading ? (<><Skel h={40} /><Skel h={40} /><Skel h={40} /></>) : (
+              <div style={{ display: "grid", gap: 0 }}>
+                {[
+                  { label: "Units sold this month", value: fmtInt(metrics.unitsSoldThisMonth), sub: "bookings dated this month", path: "/crm/bookings" },
+                  { label: "Booking value this month", value: money(metrics.revenueThisMonth), sub: "agreed value of those units", path: "/crm/bookings" },
+                  { label: "Falling due in 30 days", value: money(next30), sub: `${fmtInt(metrics.forwardDueCount)} milestone${n0(metrics.forwardDueCount) === 1 ? "" : "s"}`, path: "/crm/payments" },
+                ].map((s, i) => (
+                  <button key={s.label} onClick={() => navigate(s.path)} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "13px 0", borderTop: i ? "1px solid var(--rule-soft)" : 0, width: "100%" }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span className="label link" style={{ color: "var(--ink)" }}>{s.label}</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 4 }}>{s.sub}</span>
+                    </span>
+                    <span className="figure" style={{ fontSize: 28, whiteSpace: "nowrap" }}>{s.value}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </Detail>
         </div>
 
-        {/* Payment Collection card — separate since it has a different internal layout */}
-        {!isLoading && (
-          <div className="mt-3">
-            <CrmGlassCard
-              label="Payment Collection"
-              value={`${collPct}%`}
-              icon={IndianRupee}
-              accentColor={collPct >= 80 ? "#22c55e" : collPct >= 50 ? "#0ea5e9" : "#ef4444"}
-              onClick={() => navigate("/crm/payments")}
-              sub={`${fmtCr(payments.TotalPaid ?? 0)} collected of ${fmtCr(payments.TotalDue ?? 0)} total demand`}
-            >
-              <div className="mt-2 pt-2 border-t border-border/30">
-                <div className="w-full bg-muted/50 rounded-full h-2 mb-2">
-                  <div
-                    className="h-2 rounded-full transition-all"
-                    style={{
-                      width: `${collPct}%`,
-                      background: collPct >= 80 ? "#22c55e" : collPct >= 50 ? "#0ea5e9" : "#ef4444",
-                    }}
-                  />
-                </div>
-                {(payments.OverdueCount ?? 0) > 0 && (
-                  <p className="text-xs text-red-500 font-medium">{payments.OverdueCount} milestone(s) overdue</p>
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mt-2">
-                  <div>
-                    <div className="text-muted-foreground">Due 30 days</div>
-                    <div className="font-semibold">{fmtCr(metrics.forwardDue30Days ?? 0)}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Milestones</div>
-                    <div className="font-semibold">{metrics.forwardDueCount ?? 0}</div>
-                  </div>
-                </div>
+        {/* C + D, beside E */}
+        <div className="grid2">
+          <div className="stack">
+          <Detail tag="C" title="Pipeline, in section" note="Share carried to the next stage">
+            {isLoading ? <Skel h={170} /> : <PipelineSection funnel={data?.funnel} onOpen={navigate} />}
+          </Detail>
+        <Detail tag="D" title="Seven-day lookahead" note="▲ Handover   ■ Registry   ● Payment due">
+          {isLoading ? <Skel h={90} /> : (
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, week.length)}, minmax(96px, 1fr))`, borderLeft: "1px solid var(--rule)", minWidth: 0 }}>
+                {week.map((d, i) => {
+                  const h = n0(d.Handovers), r = n0(d.Registries), m = n0(d.MilestonesDue);
+                  const total = h + r + m;
+                  const [dow, dd, mon] = String(d.DayLabel || "").split(" ");
+                  return (
+                    <div key={d.DayDate || i} style={{ borderRight: "1px solid var(--rule)", padding: "4px 12px 6px", background: i === 0 ? "var(--blue-wash)" : undefined }}>
+                      <div className="label" style={{ color: i === 0 ? "var(--blue)" : undefined }}>{i === 0 ? "Today" : dow}</div>
+                      <div className="figure" style={{ fontSize: 22, marginTop: 4 }}>{dd}<span className="mono" style={{ fontSize: 10, fontWeight: 400, marginLeft: 5, color: "var(--graphite)" }}>{(mon || "").toUpperCase()}</span></div>
+                      <div style={{ height: 4, marginTop: 9, background: "var(--rule-soft)" }}>
+                        <div style={{ height: 4, width: `${(total / weekMax) * 100}%`, background: "var(--ink)" }} />
+                      </div>
+                      <div className="mono" style={{ marginTop: 9, fontSize: 11.5, lineHeight: 1.75, color: total ? "var(--ink)" : "var(--graphite)" }}>
+                        {total === 0 ? "Nothing booked" : (
+                          <>
+                            {h > 0 && <button onClick={() => navigate("/crm/handover")} style={{ display: "block" }}>▲ {h} handover{h === 1 ? "" : "s"}</button>}
+                            {r > 0 && <button onClick={() => navigate("/crm/sales-deed?tab=Registry")} style={{ display: "block" }}>■ {r} registr{r === 1 ? "y" : "ies"}</button>}
+                            {m > 0 && <button onClick={() => navigate("/crm/payments")} style={{ display: "block" }}>● {m} payment{m === 1 ? "" : "s"} due</button>}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </CrmGlassCard>
-          </div>
-        )}
-      </CrmSection>
+            </div>
+          )}
+        </Detail>
 
-      {/* -- SECTION 4: Conversion Funnel -------------------------------------- */}
-      <CrmSection title="Conversion Funnel" icon={TrendingUp} accentColor="#0ea5e9">
-        <p className="text-xs text-muted-foreground -mt-1 mb-4">
-          Pipeline conversion from Applications through to Possession
-        </p>
-        {isLoading
-          ? <Skeleton className="h-28 w-full rounded-xl" />
-          : (() => {
-              const f = data?.funnel ?? { Applications: 0, Bookings: 0, Agreements: 0, Possessions: 0 };
-              const stages: { label: string; key: keyof typeof f; color: string; route: string }[] = [
-                { label: "Applications", key: "Applications", color: "#0ea5e9", route: "/crm/applications" },
-                { label: "Bookings",     key: "Bookings",     color: "#22c55e", route: "/crm/bookings" },
-                { label: "Agreements",   key: "Agreements",   color: "#3b82f6", route: "/crm/agreements" },
-                { label: "Possessions",  key: "Possessions",  color: "#8b5cf6", route: "/crm/handover" },
-              ];
-              const top = Math.max(1, f.Applications);
+          </div>
+
+          <Detail tag="E" title="Waiting on someone" note={`${attention.open.length} open · ${attention.clear.length} clear`}>
+            {isLoading ? (<><Skel h={30} /><Skel h={30} /><Skel h={30} /><Skel h={30} /></>) : attention.open.length === 0 ? (
+              <p style={{ fontSize: 14, color: "var(--ink-2)", margin: 0 }}>Nothing is waiting. All {attention.clear.length} checks are clear.</p>
+            ) : (
+              <>
+                {attention.open.map((a, i) => (
+                  <button key={a.key} onClick={() => navigate(a.path)} className={`row${a.hot ? " hot" : ""}`}>
+                    <span className="mono" style={{ fontSize: 10, color: a.hot ? "var(--red)" : "var(--graphite)" }}>{String(i + 1).padStart(2, "0")}</span>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, color: a.hot ? "var(--red)" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.label}</span>
+                      <span style={{ display: "block", height: 3, marginTop: 6, background: "var(--rule-soft)" }}>
+                        <span className="grow" style={{ display: "block", height: 3, width: `${(a.count / attention.max) * 100}%`, background: a.hot ? "var(--red)" : "var(--blue)" }} />
+                      </span>
+                      <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.note}</span>
+                    </span>
+                    <span className="figure" style={{ fontSize: 22, textAlign: "right", color: a.hot ? "var(--red)" : "var(--ink)" }}>{fmtInt(a.count)}</span>
+                  </button>
+                ))}
+                {attention.clear.length > 0 && (
+                  <p className="mono" style={{ fontSize: 10.5, color: "var(--graphite)", margin: "12px 0 0", lineHeight: 1.7 }}>
+                    Clear: {attention.clear.map((c) => c.label).join(" · ")}
+                  </p>
+                )}
+              </>
+            )}
+          </Detail>
+        </div>
+
+        {/* F + G */}
+        <div className="grid2">
+          <Detail tag="F" title="Twelve months" note="Money on the bars, counts on the lines">
+            {isLoading ? <Skel h={230} /> : trend.length === 0 ? <p style={{ fontSize: 13, color: "var(--graphite)" }}>No monthly figures yet.</p> : <TrendPlot rows={trend} />}
+          </Detail>
+
+          <Detail tag="G" title="Collection by project" note="Received against demanded">
+            {isLoading ? (<><Skel h={34} /><Skel h={34} /><Skel h={34} /></>) : perProject.length === 0 ? (
+              <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No project has a demand raised yet.</p>
+            ) : perProject.map((p) => {
+              const pc = share(p.TotalPaid, p.TotalDue);
               return (
-                <div
-                  className="rounded-xl p-4 space-y-3"
-                  style={{
-                    background: isDark ? "rgba(15,12,3,0.45)" : "rgba(255,255,255,0.72)",
-                    border: "1px solid rgba(14,165,233,0.18)",
-                    backdropFilter: "blur(16px)",
-                    WebkitBackdropFilter: "blur(16px)",
-                  }}
-                >
-                  {stages.map((s, i) => {
-                    const count = f[s.key] as number;
-                    const prev  = i === 0 ? null : f[stages[i - 1].key] as number;
-                    const p     = Math.round((count / top) * 100);
-                    const conv  = prev != null && prev > 0 ? Math.round((count / prev) * 100) : null;
-                    return (
-                      <button
-                        key={s.label}
-                        onClick={() => navigate(s.route)}
-                        className="w-full text-left group"
-                      >
-                        <div className="flex items-center justify-between mb-1 text-xs">
-                          <span className="font-medium text-foreground">{s.label}</span>
-                          <div className="flex items-center gap-2">
-                            {conv !== null && (
-                              <span className="text-muted-foreground">{conv}% of prev</span>
-                            )}
-                            <span className="font-bold tabular-nums" style={{ color: s.color }}>
-                              {count.toLocaleString()}
-                            </span>
-                            <ChevronRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        </div>
-                        <div className="w-full h-5 rounded-lg bg-muted/50 overflow-hidden">
-                          <div
-                            className="h-full rounded-lg transition-all duration-500"
-                            style={{ width: `${Math.max(p, count > 0 ? 2 : 0)}%`, background: s.color, opacity: 0.85 }}
-                          />
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div key={p.ProjectName} style={{ padding: "9px 0", borderBottom: "1px solid var(--rule-soft)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.ProjectName || "Unnamed project"}</span>
+                    <span className="mono" style={{ fontSize: 11, color: "var(--ink-2)", whiteSpace: "nowrap" }}>{money(p.TotalPaid)} / {money(p.TotalDue)}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 7 }}>
+                    <div className="hatch" style={{ flex: 1, height: 10, border: "1px solid var(--ink)" }}>
+                      <div className="grow" style={{ height: "100%", width: `${pc}%`, background: "var(--blue)" }} />
+                    </div>
+                    <span className="mono" style={{ width: 38, textAlign: "right", fontSize: 12, fontWeight: 600 }}>{Math.round(pc)}%</span>
+                  </div>
+                  {n0(p.OverdueCount) > 0 && <div className="mono" style={{ fontSize: 10.5, color: "var(--red)", marginTop: 5 }}>✕ {fmtInt(p.OverdueCount)} overdue</div>}
                 </div>
               );
-            })()
-        }
-      </CrmSection>
-
-      {/* -- SECTION 5: Status Distribution – Pie Charts ----------------------- */}
-      <CrmSection title="Status Distribution" icon={PieIcon} accentColor="#0ea5e9">
-        <p className="text-xs text-muted-foreground -mt-1 mb-3">
-          Booking and application status breakdown as of now
-        </p>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <GlassPanel title="Bookings by Status">
-            {isLoading ? <Skeleton className="h-[200px] w-full" />
-              : bkgsTotal === 0
-                ? <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">No bookings yet</div>
-                : (
-                  <div className="flex items-center gap-4">
-                    <ResponsiveContainer width="55%" height={180}>
-                      <PieChart>
-                        <Pie data={bookingPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
-                          {bookingPie.map((entry, i) => <Cell key={i} fill={bwChartColor(theme, i, entry.color)} />)}
-                        </Pie>
-                        <Tooltip content={<PieTooltip />} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="flex-1 space-y-2 min-w-0">
-                      {bookingPie.map((entry, i) => (
-                        <div key={entry.name} className="flex items-center gap-2 text-xs">
-                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: bwChartColor(theme, i, entry.color) }} />
-                          <span className="text-muted-foreground truncate flex-1">{entry.name}</span>
-                          <span className="font-semibold tabular-nums">{entry.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-          </GlassPanel>
-
-          <GlassPanel title="Applications by Status">
-            {isLoading ? <Skeleton className="h-[200px] w-full" />
-              : appsTotal === 0
-                ? <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">No applications yet</div>
-                : (
-                  <div className="flex items-center gap-4">
-                    <ResponsiveContainer width="55%" height={180}>
-                      <PieChart>
-                        <Pie data={appPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
-                          {appPie.map((entry, i) => <Cell key={i} fill={bwChartColor(theme, i, entry.color)} />)}
-                        </Pie>
-                        <Tooltip content={<PieTooltip />} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="flex-1 space-y-2 min-w-0">
-                      {appPie.map((entry, i) => (
-                        <div key={entry.name} className="flex items-center gap-2 text-xs">
-                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: bwChartColor(theme, i, entry.color) }} />
-                          <span className="text-muted-foreground truncate flex-1">{entry.name}</span>
-                          <span className="font-semibold tabular-nums">{entry.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-          </GlassPanel>
+            })}
+          </Detail>
         </div>
-      </CrmSection>
 
-      {/* -- SECTION 6: Monthly Trend – line + histogram ----------------------- */}
-      <CrmSection title="Monthly Trend" icon={TrendingUp} accentColor="#0ea5e9">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <GlassPanel title="Applications & Bookings">
-            {isLoading ? <Skeleton className="h-[180px] w-full" />
-              : !data?.monthlyTrend?.length
-                ? <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">No data yet</div>
-                : (
-                  <ResponsiveContainer width="100%" height={180}>
-                    <LineChart data={data.monthlyTrend} margin={{ top: 4, right: 12, left: -18, bottom: 0 }}>
-                      <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="MonthLabel" tick={{ fontSize: 10, fill: axisColor }} axisLine={{ stroke: gridColor }} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
-                      <Tooltip contentStyle={{ background: isDark ? "#1c1408" : "#fff", border: `1px solid ${gridColor}`, borderRadius: 8, fontSize: 11 }} />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line type="monotone" dataKey="Applications" stroke={theme === "bw" ? "#FFA500" : "#0ea5e9"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                      <Line type="monotone" dataKey="Bookings" stroke={theme === "bw" ? "#008000" : "#22c55e"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
-          </GlassPanel>
-
-          <GlassPanel title="Collections by Month (₹)">
-            {isLoading ? <Skeleton className="h-[180px] w-full" />
-              : !data?.monthlyTrend?.length
-                ? <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">No data yet</div>
-                : (
-                  <ResponsiveContainer width="100%" height={180}>
-                    <BarChart data={data.monthlyTrend} margin={{ top: 4, right: 12, left: -6, bottom: 0 }}>
-                      <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="MonthLabel" tick={{ fontSize: 10, fill: axisColor }} axisLine={{ stroke: gridColor }} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false}
-                        tickFormatter={(v) => v >= 100000 ? `${(v / 100000).toFixed(1)}L` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
-                      <Tooltip formatter={(v: number) => fmtINR(v)}
-                        contentStyle={{ background: isDark ? "#1c1408" : "#fff", border: `1px solid ${gridColor}`, borderRadius: 8, fontSize: 11 }} />
-                      <Bar dataKey="Collected" name="Collected (₹)" radius={[4, 4, 0, 0]}>
-                        {(data?.monthlyTrend ?? []).map((_: any, i: number) => (
-                          <Cell key={i} fill={bwChartColor(theme, i, PROJECT_COLORS[i % PROJECT_COLORS.length])} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-          </GlassPanel>
-        </div>
-      </CrmSection>
-
-      {/* -- SECTION 7: Collection by Project ---------------------------------- */}
-      {(metrics.collectionPerProject?.length ?? 0) > 0 && (
-        <CrmSection title="Collection by Project" icon={Building2} accentColor="#0ea5e9">
-          <p className="text-xs text-muted-foreground -mt-1 mb-2">
-            Payment collected vs total demand — per project
-          </p>
-          <GlassPanel title="">
-            <div className="space-y-4">
-              {isLoading
-                ? Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)
-                : (metrics.collectionPerProject ?? []).map((row: any) => (
-                    <CollectionBar key={row.ProjectName} row={row} />
-                  ))}
+        {/* H: registers */}
+        <Detail tag="H" title="Registers" note="Solid: settled · Hatched: in progress · Red: stopped">
+          {isLoading ? (<><Skel h={40} /><Skel h={40} /></>) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "0 28px" }}>
+              <Register name="Applications" rows={data?.applications ?? []} onOpen={() => navigate("/crm/applications")} />
+              <Register name="Bookings" rows={data?.bookings ?? []} onOpen={() => navigate("/crm/bookings")} />
+              <Register name="Handovers" rows={data?.handovers ?? []} onOpen={() => navigate("/crm/handover")} />
+              <Register name="Service tickets" rows={data?.serviceTickets ?? []} onOpen={() => navigate("/crm/service-tickets")} />
+              <Register name="Cancellations" rows={data?.cancellations ?? []} onOpen={() => navigate("/crm/cancellations")} />
             </div>
-          </GlassPanel>
-        </CrmSection>
-      )}
-
-      {/* -- SECTION 8: This Week's Schedule ----------------------------------- */}
-      <CrmSection title="This Week's Schedule" icon={Calendar} accentColor="#0ea5e9">
-        <p className="text-xs text-muted-foreground -mt-1 mb-2">
-          Handovers (green) · Registry appointments (blue) · Payment milestones due (amber)
-        </p>
-        {isLoading
-          ? <Skeleton className="h-28 w-full rounded-xl" />
-          : <ThisWeekStrip data={data?.thisWeek ?? []} />}
-      </CrmSection>
-    </CrmShell>
+          )}
+        </Detail>
+      </div>
+    </div>
   );
 };
 

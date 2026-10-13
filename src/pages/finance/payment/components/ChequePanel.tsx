@@ -1,3 +1,4 @@
+import { chequeLotRange } from "../chequeLotRange";
 import React, { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -136,11 +137,19 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
             </label>
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/40 border border-border/60">
               <BookOpen size={13} className="text-primary shrink-0" />
-              <span className="font-mono text-sm font-semibold text-foreground">
+              <span className="font-heading tabular-nums text-sm font-semibold text-foreground">
                 {activeLot?.ChequeLotNumber ?? "—"}
               </span>
+              {chequeLotRange(activeLot) && (
+                <span
+                  className="font-heading tabular-nums text-xs text-muted-foreground"
+                  title="Cheque numbers in this lot"
+                >
+                  · Cheques {chequeLotRange(activeLot)}
+                </span>
+              )}
               {activeLot?.RemainingCheques != null && (
-                <span className="ml-auto text-[0.6875rem] text-muted-foreground bg-primary/10 text-primary px-2 py-0.5 rounded-full font-heading">
+                <span className="ml-auto text-[0.6875rem] text-muted-foreground bg-primary/10 text-primary px-2 py-0.5 rounded-none font-heading">
                   {activeLot.RemainingCheques} remaining
                 </span>
               )}
@@ -149,12 +158,12 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
 
           {/* Lot detail panel */}
           {activeLot && (
-            <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl bg-primary/10 border border-foreground/40 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
                 <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   Cheque Range
                 </p>
-                <p className="font-mono text-xs font-semibold text-foreground mt-0.5">
+                <p className="font-heading tabular-nums text-xs font-semibold text-foreground mt-0.5">
                   {activeLot.ChequeStartNumber} – {activeLot.ChequeEndNumber}
                 </p>
               </div>
@@ -162,7 +171,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   Account No.
                 </p>
-                <p className="font-mono text-xs text-foreground mt-0.5">
+                <p className="font-heading tabular-nums text-xs text-foreground mt-0.5">
                   {activeLot.AccountNumber || "—"}
                 </p>
               </div>
@@ -170,7 +179,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   IFSC
                 </p>
-                <p className="font-mono text-xs text-foreground mt-0.5">
+                <p className="font-heading tabular-nums text-xs text-foreground mt-0.5">
                   {activeLot.IFSCCode || "—"}
                 </p>
               </div>
@@ -192,12 +201,13 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
               <select
                 value={form.chequeLotId ? String(form.chequeLotId) : ""}
                 onChange={(e) => handleLotSelect(e.target.value)}
-                className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+                className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary font-heading tabular-nums"
               >
                 <option value="">— Select lot —</option>
                 {lots.map((lot) => (
                   <option key={lot.CId} value={String(lot.CId)}>
                     {lot.ChequeLotNumber}
+                    {chequeLotRange(lot) ? `  · Cheques ${chequeLotRange(lot)}` : ""}
                     {lot.RemainingCheques != null
                       ? `  (${lot.RemainingCheques} remaining)`
                       : ""}
@@ -219,12 +229,12 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
 
           {/* Lot detail panel — shown once a lot is selected */}
           {activeLot && (
-            <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl bg-primary/10 border border-foreground/40 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
                 <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   Cheque Range
                 </p>
-                <p className="font-mono text-xs font-semibold text-foreground mt-0.5">
+                <p className="font-heading tabular-nums text-xs font-semibold text-foreground mt-0.5">
                   {activeLot.ChequeStartNumber} – {activeLot.ChequeEndNumber}
                 </p>
               </div>
@@ -232,7 +242,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   Account No.
                 </p>
-                <p className="font-mono text-xs text-foreground mt-0.5">
+                <p className="font-heading tabular-nums text-xs text-foreground mt-0.5">
                   {activeLot.AccountNumber || "—"}
                 </p>
               </div>
@@ -240,7 +250,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                 <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                   IFSC
                 </p>
-                <p className="font-mono text-xs text-foreground mt-0.5">
+                <p className="font-heading tabular-nums text-xs text-foreground mt-0.5">
                   {activeLot.IFSCCode || "—"}
                 </p>
               </div>
@@ -267,7 +277,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
                   value={form.chequeNo}
                   onChange={(e) => handleChequeSelect(e.target.value)}
                   disabled={loadingCheques || validating || !form.chequeLotId}
-                  className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 font-mono"
+                  className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 font-heading tabular-nums"
                 >
                   <option value="">— Select cheque number —</option>
                   {availableCheques.map((c) => (
@@ -325,7 +335,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
 
             if (!form.chequeDate) {
               return (
-                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-violet-600 dark:text-violet-400">
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-muted/60 border border-border text-xs text-foreground">
                   <Info size={13} className="shrink-0 mt-0.5" />
                   <span>Post-dated cheques are generally valid for <strong>3 months</strong> from the cheque date. Select a date to see the validity window.</span>
                 </div>
@@ -341,7 +351,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
 
             if (isExpired) {
               return (
-                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/8 border border-red-500/30 text-xs text-red-600 dark:text-red-400">
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-destructive/10 border border-destructive/40 text-xs text-destructive">
                   <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                   <div className="space-y-0.5">
                     <p className="font-semibold">Cheque validity expired</p>
@@ -352,7 +362,7 @@ export function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps
             }
 
             return (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-indigo-600 dark:text-indigo-400">
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-muted/60 border border-border text-xs text-foreground">
                 <CalendarClock size={13} className="shrink-0 mt-0.5" />
                 <div className="space-y-0.5">
                   <p className="font-semibold">PDC scheduled for {fmtDate(chequeD)}</p>

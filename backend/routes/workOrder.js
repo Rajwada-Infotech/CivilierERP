@@ -10,8 +10,8 @@ const { transition, guardEdit, getRecordStatus } = require("../services/approval
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const router = express.Router();
-const rateLimit = require("../middleware/rateLimiter");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
 

@@ -213,3 +213,39 @@ export function subscribeToActivityStream(
     if (onDisconnect) socket.off("disconnect", onDisconnect);
   };
 }
+
+// ==================== USER-WISE VIEW ====================
+
+export interface UserActivitySummary {
+  userId: string;
+  userName: string;
+  userEmail?: string | null;
+  userRole?: string | null;
+  lastSeen: string;
+  sessions: number;
+  logins: number;
+  reads: number;
+  creates: number;
+  updates: number;
+  deletes: number;
+  others: number;
+}
+
+export type UserActivityType = "all" | "changes" | "reads" | "logins";
+
+export const getActivityUsers = async (params: { dateFrom?: string; dateTo?: string; search?: string; role?: string } = {}): Promise<UserActivitySummary[]> => {
+  const query = buildQuery(params);
+  const response = await fetchWithAuth(`/api/user-activity/users${query ? `?${query}` : ""}`);
+  if (!response.ok) throw new Error("Failed to fetch users' activity");
+  return response.json();
+};
+
+export const getUserActivity = async (
+  userId: string,
+  params: { dateFrom?: string; dateTo?: string; type?: UserActivityType; page?: number; limit?: number } = {},
+): Promise<PaginatedActivity> => {
+  const query = buildQuery(params);
+  const response = await fetchWithAuth(`/api/user-activity/user/${encodeURIComponent(userId)}${query ? `?${query}` : ""}`);
+  if (!response.ok) throw new Error("Failed to fetch the user's activity");
+  return response.json();
+};

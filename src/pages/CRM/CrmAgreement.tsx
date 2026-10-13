@@ -1558,7 +1558,7 @@ const CrmAgreement: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                   {[
                     ["Legal Name",       detail.agreement?.LegalName || detail.agreement?.ApplicantName || "—"],
-                    ["PAN",              detail.agreement?.PanNo || detail.agreement?.CustomerPanNo || "—"],
+                    ["PAN (Permanent Account Number)",              detail.agreement?.PanNo || detail.agreement?.CustomerPanNo || "—"],
                     ["Aadhaar",          detail.agreement?.AadhaarNo || detail.agreement?.CustomerAadhaarNo || "—"],
                   ].map(([k, v]) => (
                     <div key={k}>
@@ -2218,7 +2218,7 @@ const CrmAgreement: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
                 { key: "LegalName",    label: "Legal Name",      type: "text" },
-                { key: "PanNo",        label: "PAN No",          type: "text" },
+                { key: "PanNo",        label: "PAN (Permanent Account Number)",          type: "text" },
                 { key: "AadhaarNo",    label: "Aadhaar No",      type: "text" },
               ].map(({ key, label, type }) => (
                 <div key={key}>
@@ -2596,7 +2596,7 @@ const CrmAgreement: React.FC = () => {
                         className={editInputCls} />
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground block mb-1">PAN No.</label>
+                      <label className="text-xs text-muted-foreground block mb-1">PAN (Permanent Account Number)</label>
                       <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value.toUpperCase() }))}
                         className={editInputCls} />
                     </div>

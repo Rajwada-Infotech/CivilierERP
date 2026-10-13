@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Brush } from "iconsax-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { useTheme, THEME_DOTS, type Theme } from "@/contexts/ThemeContext";
 
 // ─── useClickOutside ──────────────────────────────────────────────────────────
@@ -89,10 +89,10 @@ export const ThemeSwitcher: React.FC<ThemeSwitcherProps> = ({
       {/* Trigger */}
       <button
         onClick={onToggle}
-        className="p-2 rounded-md hover:bg-muted transition-all text-foreground"
+        className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
         title="Change theme"
       >
-        <Brush size={17} variant="Outline" color="hsl(var(--foreground))" />
+        <ChromeIcons.theme size={18} />
       </button>
 
       {/* Panel */}

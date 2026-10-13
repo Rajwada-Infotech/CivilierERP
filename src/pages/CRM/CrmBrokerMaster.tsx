@@ -102,7 +102,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Contact Person", accessor: "LHeadContactPerson" },
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },
-  { header: "PAN Number", accessor: "LHeadPan" },
+  { header: "PAN (Permanent Account Number)", accessor: "LHeadPan" },
   { header: "RERA Number", accessor: "LHeadRera" },
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
   { header: "TDS Applicable", accessor: (r) => (r.isTdsApplicable ? "Yes" : "No") },
@@ -373,7 +373,7 @@ const CrmBrokerMaster: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">PAN Number</label>
+                <label className="text-xs text-muted-foreground block mb-1">PAN (Permanent Account Number)</label>
                 <input value={form.LHeadPan} readOnly={locked} onChange={(e) => setForm((p) => ({ ...p, LHeadPan: e.target.value.toUpperCase() }))}
                   maxLength={10} className={`${inputCls} font-mono`} />
               </div>
@@ -502,7 +502,7 @@ const CrmBrokerMaster: React.FC = () => {
                 { label: "Contact Person", value: viewRecord.LHeadContactPerson || "—" },
                 { label: "Phone", value: viewRecord.LHeadPhone || "—" },
                 { label: "Email", value: viewRecord.LHeadEmail || "—" },
-                { label: "PAN Number", value: viewRecord.LHeadPan || "—" },
+                { label: "PAN (Permanent Account Number)", value: viewRecord.LHeadPan || "—" },
                 { label: "RERA Number", value: viewRecord.LHeadRera || "—" },
                 { label: "Payment Terms", value: viewRecord.LHeadPaymentTerms || "—" },
                 { label: "TDS Applicable", value: viewRecord.isTdsApplicable ? "Yes (Sec. 194H)" : "No" },

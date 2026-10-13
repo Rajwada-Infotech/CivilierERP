@@ -1,4 +1,4 @@
--- Migration 539: per-user module usage — how often and how recently each user
+-- Migration 561: per-user module usage — how often and how recently each user
 -- has worked in each module (Finance, Material, Engineering, CRM). Feeds the
 -- Home page's personalised widgets: the modules a user lives in get their
 -- widgets shown first.
@@ -14,5 +14,5 @@ BEGIN
 END
 GO
 
-PRINT '539-user-module-usage applied successfully.';
+PRINT '561-user-module-usage applied successfully.';
 GO

@@ -1,20 +1,5 @@
 import React from "react";
-import {
-  Bank,
-  Box,
-  Cpu,
-  Grid1,
-  Message2,
-  ShoppingCart,
-  Chart21,
-  Archive,
-  VideoPlay,
-  Shield,
-  MoneyRecive,
-  Profile2User,
-} from "iconsax-react";
-import { HardHat, Wrench } from "lucide-react";
-import { TimelineIcon } from "@/components/icons/TimelineIcon";
+import { ModuleIcons } from "@/components/icons/moduleIcons";
 import type { Module } from "@/contexts/module.utils";
 
 // The one list of modules — id, icon, name, colour — that the desktop module strip, the top bar's
@@ -23,14 +8,8 @@ import type { Module } from "@/contexts/module.utils";
 //
 // ringRgb: raw "r,g,b" used to build valid RGBA strings at runtime (kept equal to `color`).
 
-// iconsax icons take a `variant` prop ("Bold"/"Outline"); lucide's HardHat doesn't know that prop but
-// happily ignores extra ones via its ...rest spread, so this adapter gives it the same call signature as
-// the iconsax icons so it drops into MODULES without special-casing the render.
+// Icons come from components/icons/moduleIcons (Tabler), shared with the sidebar headers.
 export type ModuleIcon = React.ElementType;
-
-type AdapterProps = { size?: number; variant?: string; className?: string; style?: React.CSSProperties; color?: string };
-const HardHatIcon: React.FC<AdapterProps> = ({ variant: _variant, ...rest }) => <HardHat {...rest} />;
-const WrenchIcon: React.FC<AdapterProps> = ({ variant: _variant, ...rest }) => <Wrench {...rest} />;
 
 export type ModuleDef = {
   id: NonNullable<Module>;
@@ -45,7 +24,7 @@ export type ModuleDef = {
 export const MODULES: ModuleDef[] = [
   {
     id: "finance",
-    icon: Bank,
+    icon: ModuleIcons.finance,
     label: "Finance",
     desc: "Ledger, payments & BRS",
     color: "#2419e6",
@@ -54,7 +33,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "material",
-    icon: Box,
+    icon: ModuleIcons.material,
     label: "Material",
     desc: "GRN, PO & inventory",
     color: "#14b84b",
@@ -63,7 +42,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "fixed-asset",
-    icon: Cpu,
+    icon: ModuleIcons.fixedAsset,
     label: "Fixed Asset",
     desc: "Tagging, records & depreciation",
     color: "#a57e12",
@@ -72,7 +51,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "loan",
-    icon: MoneyRecive,
+    icon: ModuleIcons.loan,
     label: "Loan",
     desc: "Loan management",
     color: "#43a512",
@@ -81,7 +60,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "engineering",
-    icon: HardHatIcon,
+    icon: ModuleIcons.engineering,
     label: "Engineering",
     desc: "Projects, work orders & site",
     color: "#e66b19",
@@ -90,7 +69,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "civilworkdpr",
-    icon: TimelineIcon,
+    icon: ModuleIcons.civilWorkDpr,
     label: "Civil Work DPR",
     desc: "Internal operations workspace",
     color: "#14a2b8",
@@ -99,7 +78,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "followup",
-    icon: Grid1,
+    icon: ModuleIcons.followup,
     label: "Follow-Up",
     desc: "Sales, agreements & CRM",
     color: "#14b88c",
@@ -108,7 +87,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "ticket",
-    icon: Message2,
+    icon: ModuleIcons.ticket,
     label: "Ticket",
     desc: "Support & issue tracking",
     color: "#e619a8",
@@ -117,7 +96,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "sales",
-    icon: ShoppingCart,
+    icon: ModuleIcons.sales,
     label: "Sales",
     desc: "Sale orders & payments",
     color: "#6e19e6",
@@ -126,7 +105,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "sales-automation",
-    icon: VideoPlay,
+    icon: ModuleIcons.salesAutomation,
     label: "Sales Automation",
     desc: "Campaigns, leads & bookings",
     color: "#e6195d",
@@ -135,7 +114,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "crm",
-    icon: Chart21,
+    icon: ModuleIcons.crm,
     label: "CRM",
     desc: "Applications, bookings & agreements",
     color: "#1990e6",
@@ -144,7 +123,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "maintenance",
-    icon: WrenchIcon,
+    icon: ModuleIcons.maintenance,
     label: "Maintenance",
     desc: "Upkeep, repairs & servicing",
     color: "#88a512",
@@ -153,7 +132,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: "hr-payroll",
-    icon: Profile2User,
+    icon: ModuleIcons.hrPayroll,
     label: "HR and Payroll",
     desc: "Employees, attendance & payroll",
     color: "#ca19e6",
@@ -163,7 +142,7 @@ export const MODULES: ModuleDef[] = [
   // Records is always last — new modules get inserted above this entry
   {
     id: "records",
-    icon: Archive,
+    icon: ModuleIcons.records,
     label: "Records",
     desc: "Every attachment, in one place",
     color: "#e61919",
@@ -174,7 +153,7 @@ export const MODULES: ModuleDef[] = [
 
 export const ADMIN_MODULE: ModuleDef = {
   id: "admin",
-  icon: Shield,
+  icon: ModuleIcons.admin,
   label: "Admin",
   desc: "Users, rights & configuration",
   color: "#1957e6",

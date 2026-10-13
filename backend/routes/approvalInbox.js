@@ -1,10 +1,10 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("../middleware/rateLimiter");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const logger = require("../logger");
 const { getPool, sql } = require("../db");
-const { projectPredicate } = require("../services/projectScope");
+const { projectPredicate, ebResolvedProjectSql, paymentProjectSql } = require("../services/projectScope");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   MODULE_MAP,
@@ -297,6 +297,15 @@ const NULL_EXTRA_CIVILWORKDPR_APPROVAL = NULL_EXTRA.replace(
 // visibility filter as the list itself instead of a separate raw aggregate.
 function buildInboxQueries(module, projectScope = null) {
   const queries = [];
+  const pp = (col) => projectPredicate(projectScope, col);
+  const scopeIds = projectScope ? projectScope.map(Number).filter(Number.isFinite).join(",") || "NULL" : "";
+  // Stock transfers have no project of their own: visible when either godown belongs to an allowed project.
+  const godownScope = (a) =>
+    projectScope
+      ? ` AND EXISTS (SELECT 1 FROM dbo.Godowns sg WHERE sg.GodownID IN (${a}.FromGodownID, ${a}.ToGodownID) AND sg.ProjectID IN (${scopeIds}))`
+      : "";
+  const ictScope = (a) =>
+    projectScope ? ` AND (${a}.SenderProjectId IN (${scopeIds}) OR ${a}.ReceiverProjectId IN (${scopeIds}))` : "";
 
   if (!module || module === "purchase-orders") {
       queries.push(`
@@ -319,7 +328,7 @@ function buildInboxQueries(module, projectScope = null) {
           UpdatedAt                            AS LastModified
         FROM dbo.PurchaseOrders
         LEFT JOIN dbo.enterprise pr_po ON pr_po.id = dbo.PurchaseOrders.ProjectId
-        WHERE dbo.PurchaseOrders.Status = 'Pending'
+        WHERE dbo.PurchaseOrders.Status = 'Pending'${pp("dbo.PurchaseOrders.ProjectId")}
       `);
     }
 
@@ -344,7 +353,7 @@ function buildInboxQueries(module, projectScope = null) {
           UpdatedAt                            AS LastModified
         FROM dbo.WorkOrderHeader
         LEFT JOIN dbo.enterprise pr_wo ON pr_wo.id = dbo.WorkOrderHeader.ProjectId
-        WHERE dbo.WorkOrderHeader.Status = 'Pending'
+        WHERE dbo.WorkOrderHeader.Status = 'Pending'${pp("dbo.WorkOrderHeader.ProjectId")}
       `);
     }
 
@@ -371,7 +380,7 @@ function buildInboxQueries(module, projectScope = null) {
           ''                                   AS RejectionNote,
           CAST(NULL AS DATETIME2)              AS LastModified
         FROM dbo.NewPayment
-        WHERE Status = 'Pending' AND SourceCrmRefundId IS NULL
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NULL${pp(paymentProjectSql("NewPayment"))}
       `);
     }
 
@@ -401,7 +410,7 @@ function buildInboxQueries(module, projectScope = null) {
           ''                                   AS RejectionNote,
           CAST(NULL AS DATETIME2)              AS LastModified
         FROM dbo.NewPayment
-        WHERE Status = 'Pending' AND SourceCrmRefundId IS NOT NULL
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NOT NULL${pp(paymentProjectSql("NewPayment"))}
       `);
     }
 
@@ -425,7 +434,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(CAST(RPRejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
           RPUpdatedAt                                     AS LastModified
         FROM dbo.ReceivedPayment
-        WHERE RPStatus = 'Pending'
+        WHERE RPStatus = 'Pending'${pp("RPProjectId")}
       `);
     }
 
@@ -493,7 +502,7 @@ function buildInboxQueries(module, projectScope = null) {
         LEFT JOIN dbo.StockTransfers st ON st.TransferID = grn.SourceTransferID
         LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
         LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
-        WHERE grn.Status = 'Pending'
+        WHERE grn.Status = 'Pending'${pp("po.ProjectId")}
       `);
     }
 
@@ -554,7 +563,7 @@ function buildInboxQueries(module, projectScope = null) {
         LEFT JOIN dbo.users u_created  ON u_created.id = eb.ECreatedBy
         LEFT JOIN dbo.users u_approved ON u_approved.id = eb.EApprovedBy
         LEFT JOIN dbo.enterprise ebpr ON ebpr.id = TRY_CAST(eb.EProjectName AS INT)
-        WHERE eb.EStatus = 'Pending'
+        WHERE eb.EStatus = 'Pending'${pp(ebResolvedProjectSql("eb"))}
           AND NOT (
             ISNULL(eb.ESourceType, '') = 'GRN'
             AND ISNULL(eb.ERemarks, '') LIKE 'Auto-created for remaining items from GRN%'
@@ -582,7 +591,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(CAST(wd.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
           wd.UpdatedAt                         AS LastModified
         FROM dbo.WorkDone wd
-        WHERE ISNULL(wd.Status, 'Draft') = 'Pending'
+        WHERE ISNULL(wd.Status, 'Draft') = 'Pending'${pp("wd.ProjectId")}
       `);
     }
 
@@ -623,7 +632,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.BOQ b
         LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
-        WHERE ISNULL(b.Status, 'Draft') = 'Pending'
+        WHERE ISNULL(b.Status, 'Draft') = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -653,7 +662,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.MaterialRequests mr
         LEFT JOIN dbo.enterprise co ON co.id = mr.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = mr.ProjectId
-        WHERE mr.Status = 'Pending'
+        WHERE mr.Status = 'Pending'${pp("mr.ProjectId")}
       `);
     }
 
@@ -681,7 +690,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.StockTransfers st
         LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
         LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
-        WHERE st.Status = 'Pending'
+        WHERE st.Status = 'Pending'${godownScope("st")}
       `);
     }
 
@@ -706,7 +715,7 @@ function buildInboxQueries(module, projectScope = null) {
           v.UpdatedAt                            AS LastModified
         FROM dbo.VehicleInOut v
         LEFT JOIN dbo.enterprise vpr ON vpr.id = v.ProjectID
-        WHERE v.Status = 'Pending'
+        WHERE v.Status = 'Pending'${pp("v.ProjectID")}
       `);
     }
 
@@ -731,7 +740,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(mi.UpdatedAt, mi.CreatedAt)                            AS LastModified
         FROM dbo.MaterialIssues mi
         LEFT JOIN dbo.enterprise p ON p.id = mi.ProjectId
-        WHERE ISNULL(mi.Status, 'Pending') = 'Pending'
+        WHERE ISNULL(mi.Status, 'Pending') = 'Pending'${pp("mi.ProjectId")}
       `);
     }
 
@@ -757,7 +766,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.MaterialIssueReturn ir
         LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
         LEFT JOIN dbo.enterprise p ON p.id = ir.ProjectId
-        WHERE ISNULL(ir.Status, 'Pending') = 'Pending'
+        WHERE ISNULL(ir.Status, 'Pending') = 'Pending'${pp("ir.ProjectId")}
       `);
     }
 
@@ -878,7 +887,7 @@ function buildInboxQueries(module, projectScope = null) {
           ''                                    AS RejectionNote,
           ISNULL(jv.UpdatedAt, jv.CreatedAt)    AS LastModified
         FROM dbo.JournalVoucher jv
-        WHERE jv.Status = 'Pending'
+        WHERE jv.Status = 'Pending'${pp("jv.ProjectId")}
       `);
     }
 
@@ -904,7 +913,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.InterCompanyTransfer ict
         LEFT JOIN dbo.enterprise sp ON sp.id = ict.SenderProjectId
         LEFT JOIN dbo.enterprise rp ON rp.id = ict.ReceiverProjectId
-        WHERE ict.Status = 'Pending'
+        WHERE ict.Status = 'Pending'${ictScope("ict")}
       `);
     }
 
@@ -987,7 +996,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(b.UpdatedAt, b.CreatedAt)      AS LastModified
         FROM dbo.CrmBooking b
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE b.Status = 'Pending' AND b.IsActive = 1 AND b.ReadyForApprovalAt IS NOT NULL
+        WHERE b.Status = 'Pending' AND b.IsActive = 1 AND b.ReadyForApprovalAt IS NOT NULL${pp("b.ProjectId")}
       `);
     }
 
@@ -1013,7 +1022,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmAgreement ag
         JOIN dbo.CrmBooking b     ON b.Id = ag.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE ag.SeniorApprovalStatus = 'Pending'
+        WHERE ag.SeniorApprovalStatus = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1039,7 +1048,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmAgreement ag
         JOIN dbo.CrmBooking b     ON b.Id = ag.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE ag.DateApprovalStatus = 'Pending'
+        WHERE ag.DateApprovalStatus = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1065,7 +1074,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmSalesDeed d
         JOIN dbo.CrmBooking b     ON b.Id = d.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE d.DirectorApprovalStatus = 'Pending'
+        WHERE d.DirectorApprovalStatus = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1091,7 +1100,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmBrokerageMaster br
         JOIN dbo.CrmBooking b     ON b.Id = br.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE br.Status = 'Pending' AND br.IsLocked = 0
+        WHERE br.Status = 'Pending' AND br.IsLocked = 0${pp("b.ProjectId")}
       `);
     }
 
@@ -1117,7 +1126,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmCancellation c
         JOIN dbo.CrmBooking b     ON b.Id = c.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE c.Status = 'Pending'
+        WHERE c.Status = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1146,7 +1155,7 @@ function buildInboxQueries(module, projectScope = null) {
         LEFT JOIN dbo.Users u_cr   ON u_cr.id   = mr.CreatedBy
         LEFT JOIN dbo.Users u_appr ON u_appr.id = mr.ApprovedBy
         LEFT JOIN dbo.Users u_bnc  ON u_bnc.id  = mr.BouncedBy
-        WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL
+        WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL${pp("b.ProjectId")}
       `);
     }
 
@@ -1172,7 +1181,7 @@ function buildInboxQueries(module, projectScope = null) {
         FROM dbo.CrmNoc n
         JOIN dbo.CrmBooking b     ON b.Id = n.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE n.Status = 'Pending'
+        WHERE n.Status = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1200,7 +1209,7 @@ function buildInboxQueries(module, projectScope = null) {
         LEFT JOIN dbo.ExpenseBooking eb ON eb.Eid = dn.bill_id
         LEFT JOIN dbo.users u ON u.id = dn.created_by
         LEFT JOIN dbo.enterprise dnpr ON dnpr.id = TRY_CAST(eb.EProjectName AS INT)
-        WHERE ISNULL(dn.Status, 'Draft') = 'Pending' AND dn.is_active = 1
+        WHERE ISNULL(dn.Status, 'Draft') = 'Pending' AND dn.is_active = 1${pp(ebResolvedProjectSql("eb"))}
       `);
     }
 
@@ -1224,7 +1233,7 @@ function buildInboxQueries(module, projectScope = null) {
           ISNULL(CAST(c.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
           ISNULL(c.UpdatedAt, c.CreatedAt)      AS LastModified
         FROM dbo.Contract c
-        WHERE c.Status = 'Pending'
+        WHERE c.Status = 'Pending'${pp("c.ProjectId")}
       `);
     }
 
@@ -1252,7 +1261,7 @@ function buildInboxQueries(module, projectScope = null) {
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         LEFT JOIN dbo.Users u_req ON u_req.id = r.RequestedBy
         LEFT JOIN dbo.Users u_rev ON u_rev.id = r.ReviewedBy
-        WHERE r.Status = 'Pending'
+        WHERE r.Status = 'Pending'${pp("b.ProjectId")}
       `);
     }
 
@@ -1286,7 +1295,7 @@ function buildInboxQueries(module, projectScope = null) {
         JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
         LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
         LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
-        WHERE r.Status = 'Pending'
+        WHERE r.Status = 'Pending'${pp("COALESCE(r.ProjectId, (SELECT b2.ProjectId FROM dbo.CrmBooking b2 WHERE b2.Id = r.BookingId))")}
       `);
     }
 
@@ -1315,7 +1324,7 @@ function buildInboxQueries(module, projectScope = null) {
         LEFT JOIN dbo.CrmCustomer fc ON fc.Id = r.FromCustomerId
         LEFT JOIN dbo.CrmCustomer tc ON tc.Id = r.ToCustomerId
         LEFT JOIN dbo.Users rq ON rq.id = r.CreatedBy
-        WHERE r.IsActive = 1 AND r.Status = 'Pending' AND r.BookingIds IS NOT NULL
+        WHERE r.IsActive = 1 AND r.Status = 'Pending' AND r.BookingIds IS NOT NULL${pp("b.ProjectId")}
       `);
     }
 
@@ -1387,17 +1396,23 @@ function buildInboxQueries(module, projectScope = null) {
   return queries;
 }
 
+// One request per module, merged here, instead of one 30-way UNION ALL: with the project filters added, SQL Server's
+// plan for the combined statement took over a minute, while each module on its own answers in milliseconds.
+async function runInboxQueries(pool, queries) {
+  const parts = await Promise.all(queries.map((q) => pool.request().query(q)));
+  const time = (r) => (r.LastModified ? new Date(r.LastModified).getTime() || 0 : 0);
+  return parts.flatMap((p) => p.recordset).sort((x, y) => time(y) - time(x));
+}
+
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const queries = buildInboxQueries(req.query.module, req.projectScope);
     if (queries.length === 0) return res.json([]);
 
-    const fullQuery =
-      queries.join(" UNION ALL ") + " ORDER BY LastModified DESC";
-    const result = await pool.request().query(fullQuery);
+    const rows = await runInboxQueries(pool, queries);
 
-    res.json(await filterVisibleToViewer(result.recordset, req));
+    res.json(await filterVisibleToViewer(rows, req));
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox error");
     res.status(500).json({
@@ -1421,9 +1436,8 @@ router.get("/count", async (req, res) => {
     const queries = buildInboxQueries(undefined, req.projectScope);
     if (queries.length === 0) return res.json({ count: 0 });
 
-    const fullQuery = queries.join(" UNION ALL ");
-    const result = await pool.request().query(fullQuery);
-    const visible = await filterVisibleToViewer(result.recordset, req);
+    const rows = await runInboxQueries(pool, queries);
+    const visible = await filterVisibleToViewer(rows, req);
     res.json({ count: visible.length });
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox count error");

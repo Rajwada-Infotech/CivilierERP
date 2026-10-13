@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("../middleware/rateLimiter");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const sql = require("mssql");
 
 const { cache } = require("../middleware/cache");
@@ -429,11 +429,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ft.TransferDate          AS PayDate,
           'Fund Transfer'          AS Mode,
           ft.DocNo                 AS DocNo,
-          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          CAST(CASE WHEN ft.Mode LIKE '%Cheque%' THEN NULL ELSE ft.DigitalRefNumber END AS NVARCHAR(100)) AS TxnId,
           ft.Status                AS PayStatus,
           CAST(0 AS BIT)           AS IsChequeCancelled,
           ft.CreatedAt             AS CreatedAt,
-          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(CASE WHEN ft.Mode LIKE '%Cheque%' THEN ft.ChequeNo END AS NVARCHAR(50)) AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
           CAST(NULL AS NVARCHAR(200)) AS ProjectName,
           COALESCE(brc4.IsMatched, 0)  AS IsMatched,
@@ -473,11 +473,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ft2.TransferDate         AS PayDate,
           'Fund Transfer'          AS Mode,
           ft2.DocNo                AS DocNo,
-          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          CAST(CASE WHEN ft2.Mode LIKE '%Cheque%' THEN NULL ELSE ft2.DigitalRefNumber END AS NVARCHAR(100)) AS TxnId,
           ft2.Status                AS PayStatus,
           CAST(0 AS BIT)           AS IsChequeCancelled,
           ft2.CreatedAt            AS CreatedAt,
-          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(CASE WHEN ft2.Mode LIKE '%Cheque%' THEN ft2.ChequeNo END AS NVARCHAR(50)) AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
           CAST(NULL AS NVARCHAR(200)) AS ProjectName,
           COALESCE(brc5.IsMatched, 0)  AS IsMatched,
@@ -526,11 +526,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ls.LoanDate              AS PayDate,
           'Loan Disbursement'      AS Mode,
           ls.LoanNo                AS DocNo,
-          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          CAST(CASE WHEN ls.PaymentMode LIKE '%Cheque%' THEN NULL ELSE ls.DigitalRefNumber END AS NVARCHAR(100)) AS TxnId,
           'Approved'                AS PayStatus,
           CAST(0 AS BIT)           AS IsChequeCancelled,
           ls.LoanDate              AS CreatedAt,
-          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(CASE WHEN ls.PaymentMode LIKE '%Cheque%' THEN ls.ChequeNo END AS NVARCHAR(50)) AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
           CAST(NULL AS NVARCHAR(200)) AS ProjectName,
           COALESCE(brc6.IsMatched, 0)  AS IsMatched,
@@ -573,11 +573,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
           ls2.LoanDate             AS PayDate,
           'Loan Receipt'           AS Mode,
           ls2.LoanNo               AS DocNo,
-          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          CAST(CASE WHEN ls2.PaymentMode LIKE '%Cheque%' THEN NULL ELSE ls2.DigitalRefNumber END AS NVARCHAR(100)) AS TxnId,
           'Approved'                AS PayStatus,
           CAST(0 AS BIT)           AS IsChequeCancelled,
           ls2.LoanDate             AS CreatedAt,
-          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(CASE WHEN ls2.PaymentMode LIKE '%Cheque%' THEN ls2.ChequeNo END AS NVARCHAR(50)) AS ChequeNo,
           CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
           CAST(NULL AS NVARCHAR(200)) AS ProjectName,
           COALESCE(brc7.IsMatched, 0)  AS IsMatched,

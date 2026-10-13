@@ -2,7 +2,7 @@ import React from "react";
 import { DM_SANS_FACE_CSS, printWhenFontsReady } from "@/utils/documentFont";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
@@ -217,25 +217,25 @@ const normalizeCompanyName = (value: string | null | undefined) =>
 
 const modeIcon = (mode: string) => {
   if (mode === "Cash")
-    return <Banknote size={13} className="text-emerald-500" />;
-  if (mode === "Cheque") return <FileText size={13} className="text-blue-500" />;
-  if (mode === "Demand Draft") return <FileText size={13} className="text-blue-500" />;
+    return <Banknote size={13} className="text-foreground" />;
+  if (mode === "Cheque") return <FileText size={13} className="text-foreground" />;
+  if (mode === "Demand Draft") return <FileText size={13} className="text-foreground" />;
   if (mode === "UPI")
-    return <Smartphone size={13} className="text-violet-500" />;
+    return <Smartphone size={13} className="text-foreground" />;
   if (mode === "Card")
     return <CreditCard size={13} className="text-orange-500" />;
   if (mode === "EMI") return <IndianRupee size={13} className="text-primary" />;
-  return <Building2 size={13} className="text-sky-500" />;
+  return <Building2 size={13} className="text-foreground" />;
 };
 
 const modeColor: Record<string, string> = {
-  Cash: "bg-emerald-500/10 text-emerald-600",
-  Cheque: "bg-blue-500/10 text-blue-600",
-  "Demand Draft": "bg-blue-500/10 text-blue-600",
-  UPI: "bg-violet-500/10 text-violet-600",
-  IMPS: "bg-teal-500/10 text-teal-600",
-  NEFT: "bg-sky-500/10 text-sky-600",
-  RTGS: "bg-cyan-500/10 text-cyan-600",
+  Cash: "bg-primary/10 text-foreground",
+  Cheque: "bg-primary/10 text-foreground",
+  "Demand Draft": "bg-primary/10 text-foreground",
+  UPI: "bg-primary/10 text-foreground",
+  IMPS: "bg-primary/10 text-foreground",
+  NEFT: "bg-primary/10 text-foreground",
+  RTGS: "bg-primary/10 text-foreground",
   Card: "bg-orange-500/10 text-orange-600",
   EMI: "bg-primary/10 text-primary",
 };
@@ -621,9 +621,10 @@ export default function ReceivedPaymentPage() {
   // that link into always opening the form instead of the list).
   useEffect(() => {
     if (!wasPageReloaded()) return;
-    const hasContent = Object.keys(EMPTY_FORM).some(
-      (k) => String((form as any)[k] ?? "") !== String((EMPTY_FORM as any)[k] ?? ""),
-    );
+    // Only what a person types counts. The financial year, document number and mode are filled in by the page
+    // itself, so a draft holding nothing but those is an untouched form, not work in progress.
+    const typed = ["customerName", "amount", "remarks", "transactionId", "checkNumber", "bankName", "depositBankId", "contractId"] as const;
+    const hasContent = typed.some((k) => String((form as any)[k] ?? "").trim() !== "");
     if (hasContent) setView("form");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1010,11 +1011,11 @@ export default function ReceivedPaymentPage() {
       value: fmt(totalReceived),
       sub: "total inbound",
       icon: IndianRupee,
-      ring: "ring-emerald-500/20",
-      bg: "bg-emerald-500/10",
-      blob: "bg-emerald-500",
-      borderL: "border-l-emerald-500",
-      color: "text-emerald-500",
+      ring: "ring-foreground/30",
+      bg: "bg-primary/10",
+      blob: "bg-foreground",
+      borderL: "border-l-foreground/40",
+      color: "text-foreground",
     },
     {
       label: "Total Entries",
@@ -1032,11 +1033,11 @@ export default function ReceivedPaymentPage() {
       value: String(approved),
       sub: "approved",
       icon: CheckCircle2,
-      ring: "ring-emerald-500/20",
-      bg: "bg-emerald-500/10",
-      blob: "bg-emerald-500",
-      borderL: "border-l-emerald-500",
-      color: "text-emerald-500",
+      ring: "ring-foreground/30",
+      bg: "bg-primary/10",
+      blob: "bg-foreground",
+      borderL: "border-l-foreground/40",
+      color: "text-foreground",
     },
     {
       label: "Submitted",
@@ -1150,20 +1151,20 @@ export default function ReceivedPaymentPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Received Payments"]} />
-      <FinanceShell
-        title="Received Payments"
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Received payments"
         subtitle="All inbound payments received from clients & customers"
-        icon={Banknote}
         action={
           view === "list" ? (
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               {rights.canCreate && (
                 <Button
                   onClick={openAdd}
-                  className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
+                  className="shrink-0 bg-foreground text-card hover:bg-foreground/85 font-heading font-semibold uppercase tracking-[0.1em] text-[0.625rem] px-3 sm:px-4 py-2 h-auto"
                 >
                   <Plus size={13} className="sm:mr-1" />
-                  <span className="hidden sm:inline">Add Received Payment</span>
+                  <span className="hidden sm:inline">New receipt</span>
                 </Button>
               )}
               <ExportMenu
@@ -1176,8 +1177,7 @@ export default function ReceivedPaymentPage() {
               />
               <button
                 onClick={() => loadPayments(1)}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors"
-                style={{ color: "#818cf8" }}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground hover:bg-primary/10 transition-colors"
               >
                 <RefreshCw size={13} />
                 <span className="hidden sm:inline">Refresh</span>
@@ -1189,42 +1189,27 @@ export default function ReceivedPaymentPage() {
 
         {view === "list" && <>
         {/* ── Stats ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={stats.length === 4 ? "statrow four" : "statrow"}>
           {stats.map((s) => (
-            <div
-              key={s.label}
-              className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${s.ring} ${s.borderL}`}
-            >
-              <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${s.blob}`} />
-              <div className={`p-2 rounded-lg ${s.bg} ${s.color} shrink-0`}>
-                <s.icon size={16} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg font-bold font-heading text-foreground leading-none">
-                  {s.value}
-                </p>
-                <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
-                  {s.label}
-                </p>
-                <p className="text-[0.6875rem] text-muted-foreground font-mono mt-0.5 truncate">
-                  {s.sub}
-                </p>
-              </div>
+            <div key={s.label}>
+              <p className="label">{s.label}</p>
+              <p className="figure" style={{ fontSize: "clamp(20px, 2.2vw, 30px)", marginTop: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.value}</p>
+              <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.sub}</p>
             </div>
           ))}
         </div>
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 mb-4">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
           <Input
             placeholder="Search by customer, company, project, doc no…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 text-xs w-full sm:max-w-72 sm:flex-1 sm:min-w-0"
+            className="h-9 text-xs w-full sm:max-w-96 sm:flex-1 sm:min-w-0 border-foreground/40 bg-card"
           />
           <div className="flex gap-2">
             <Select value={filterMode} onValueChange={setFilterMode}>
-              <SelectTrigger className="h-8 text-xs flex-1 sm:w-32">
+              <SelectTrigger className="h-9 text-xs flex-1 sm:w-36 border-foreground/40 bg-card">
                 <SelectValue placeholder="Mode" />
               </SelectTrigger>
               <SelectContent>
@@ -1237,7 +1222,7 @@ export default function ReceivedPaymentPage() {
               </SelectContent>
             </Select>
             <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="h-8 text-xs flex-1 sm:w-32">
+              <SelectTrigger className="h-9 text-xs flex-1 sm:w-36 border-foreground/40 bg-card">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -1252,14 +1237,10 @@ export default function ReceivedPaymentPage() {
         </div>
 
         {/* Table */}
-        <div className="rounded-xl bg-card border border-border overflow-hidden">
-          <div className="p-4 border-b border-border flex items-center justify-between">
-            <h2 className="font-heading font-semibold text-foreground text-sm">
-              All Received Payments
-            </h2>
-            <span className="text-xs text-muted-foreground">
-              {filtered.length} entries
-            </span>
+        <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+          <div className="px-3 py-3 flex items-baseline justify-between gap-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+            <h2 className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">Receipt register</h2>
+            <span className="text-xs text-muted-foreground">{filtered.length} entries</span>
           </div>
 
           {apiLoading ? (
@@ -1279,97 +1260,78 @@ export default function ReceivedPaymentPage() {
               <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border">
+                    <tr>
                       {[
-                        "Doc No.",
-                        "Date",
-                        "Fin Year",
-                        "Company",
-                        "Project",
-                        "Customer",
-                        "Mode",
-                        "Deposit Bank",
-                        "Amount (₹)",
-                        "Status",
-                        "",
-                      ].map((h) => (
-                        <th
-                          key={h}
-                          className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold whitespace-nowrap"
-                        >
-                          {h}
-                        </th>
+                        { h: "No.", right: false },
+                        { h: "Receipt", right: false },
+                        { h: "Date", right: false },
+                        { h: "Received from", right: false },
+                        { h: "Company / project", right: false },
+                        { h: "Into", right: false },
+                        { h: "Amount", right: true },
+                        { h: "Status", right: false },
+                        { h: "", right: true },
+                      ].map((c, i) => (
+                        <th key={i} className={`px-3 py-3 whitespace-nowrap ${c.right ? "text-right" : "text-left"}`}>{c.h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.map((p, i) => (
-                      <tr
-                        key={p.id}
-                        className={`border-b border-border hover:bg-muted/50 transition-colors ${i % 2 === 1 ? "bg-muted/20" : ""}`}
-                      >
-                        <td className="px-4 py-3 text-primary font-heading text-xs font-medium whitespace-nowrap">
-                          {p.docNo}
+                      <tr key={p.id} className="align-top">
+                        <td className="px-3 py-3 font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground">
+                          {String((currentPage - 1) * PAGE_SIZE + i + 1).padStart(2, "0")}
                         </td>
-                        <td className="px-4 py-3 text-foreground whitespace-nowrap text-xs">
-                          {p.docDate ? format(new Date(p.docDate), "dd/MM/yyyy") : "—"}
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{p.docNo}</p>
+                          <p className="text-[0.6875rem] text-muted-foreground mt-1.5">{p.finYear || "—"}</p>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
-                          {p.finYear || "—"}
+                        <td className="px-3 py-3 text-[0.75rem] text-foreground tabular-nums whitespace-nowrap">
+                          {p.docDate ? format(new Date(p.docDate), "dd MMM yyyy") : "—"}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
-                          {p.companyName}
+                        <td className="px-3 py-3 max-w-[180px]">
+                          <p className="text-[0.8125rem] font-semibold text-foreground truncate">{p.customerName || p.receivedFrom || "—"}</p>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
-                          {p.projectName}
+                        <td className="px-3 py-3 max-w-[160px]">
+                          <p className="text-[0.75rem] text-foreground truncate">{p.companyName || "—"}</p>
+                          {p.projectName && <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate">{p.projectName}</p>}
                         </td>
-                        <td className="px-4 py-3 font-medium text-foreground text-xs max-w-[120px] truncate">
-                          {p.customerName || p.receivedFrom}
+                        {/* How it arrived, and the account it went into */}
+                        <td className="px-3 py-3 max-w-[160px]">
+                          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{modeShortLabel(p.mode)}</p>
+                          <p className="text-[0.75rem] text-foreground mt-1.5 truncate">{p.depositBankName || "—"}</p>
                         </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit whitespace-nowrap ${modeColor[p.mode]}`}
-                          >
-                            {modeIcon(p.mode)}
-                            {modeShortLabel(p.mode)}
-                          </span>
+                        <td className="px-3 py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">
+                          {fmt(p.amount)}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
-                          {p.depositBankName || "—"}
-                        </td>
-                        <td className="px-4 py-3 font-heading font-semibold text-emerald-600 whitespace-nowrap text-xs">
-                          +{fmt(p.amount)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={p.status} />
+                        <td className="px-3 py-3">
+                          <SheetMark text={p.status || "—"} tone={statusTone(p.status || "")} />
                           {p.status === "Pending" && p.crmBookingId != null && !p.depositBankId && (
-                            <span className="ml-1 inline-block text-[0.5625rem] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
+                            <p
+                              className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-amber-600 mt-1.5"
+                              title="CRM payment — Accounts must assign the deposit bank before approval"
+                            >
+                              Bank pending
+                            </p>
                           )}
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1">
-                            <button data-row-view
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1 justify-end">
+                            <button
+                              data-row-view
                               onClick={() => setViewingPayment(p)}
                               title="View (print & edit are here too)"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors"
+                              className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                             >
-                              <Eye size={13} />
+                              <Eye size={12} />
                             </button>
-                            {p.status === "Pending" && (
-                              <span
-                                title="Awaiting admin approval"
-                                className="p-1.5 rounded-md text-amber-500/60 cursor-default inline-flex"
-                              >
-                                <Clock size={13} />
-                              </span>
-                            )}
                             {rights.canDelete && (
                               <button
                                 onClick={() => deletePayment(p.id)}
                                 title="Delete"
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                className="p-1.5 border border-destructive/30 text-destructive/70 hover:text-destructive hover:border-destructive transition-colors"
                               >
-                                <Trash2 size={13} />
+                                <Trash2 size={12} />
                               </button>
                             )}
                           </div>
@@ -1401,26 +1363,21 @@ export default function ReceivedPaymentPage() {
                         </p>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-base font-heading font-bold text-emerald-600">
-                          +{fmt(p.amount)}
+                        <p className="text-base font-heading font-bold tabular-nums text-foreground">
+                          {fmt(p.amount)}
                         </p>
-                        <StatusBadge status={p.status} />
+                        <SheetMark text={p.status || "—"} tone={statusTone(p.status || "")} />
                         {p.status === "Pending" && p.crmBookingId != null && !p.depositBankId && (
-                          <span className="ml-1 inline-block text-[0.5625rem] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
+                          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-amber-600 mt-1" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</p>
                         )}
                       </div>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit whitespace-nowrap ${modeColor[p.mode]}`}
-                      >
-                        {modeIcon(p.mode)}
-                        {modeShortLabel(p.mode)}
-                      </span>
+                      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{modeShortLabel(p.mode)}</span>
                       <div className="flex items-center gap-1">
                         <button data-row-view
                           onClick={() => setViewingPayment(p)}
-                          className="p-1.5 text-muted-foreground/50 hover:text-emerald-600"
+                          className="p-1.5 text-muted-foreground hover:text-foreground"
                           title="View (print & edit are here too)"
                         >
                           <Eye size={13} />
@@ -1452,24 +1409,16 @@ export default function ReceivedPaymentPage() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between mt-4 px-1">
-            <span className="text-xs text-muted-foreground">
-              Page {currentPage} of {totalPages} · {totalCount} total
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="label">
+              Page {currentPage} of {totalPages} · {totalCount} in all
             </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => loadPayments(currentPage - 1)}
-                disabled={currentPage <= 1 || apiLoading}
-                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft size={14} />
+            <div className="seg">
+              <button onClick={() => loadPayments(currentPage - 1)} disabled={currentPage <= 1 || apiLoading} className="disabled:opacity-40" aria-label="Previous page">
+                <ChevronLeft size={13} />
               </button>
-              <button
-                onClick={() => loadPayments(currentPage + 1)}
-                disabled={currentPage >= totalPages || apiLoading}
-                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight size={14} />
+              <button onClick={() => loadPayments(currentPage + 1)} disabled={currentPage >= totalPages || apiLoading} className="disabled:opacity-40" aria-label="Next page">
+                <ChevronRight size={13} />
               </button>
             </div>
           </div>
@@ -1478,56 +1427,18 @@ export default function ReceivedPaymentPage() {
 
         {/* ── Inline Add / Edit Form ──────────────────────────────────────────── */}
         {view === "form" && (
-          <div
-            className="rounded-2xl overflow-hidden"
-            onKeyDown={preventEnterSubmit}
-            style={{
-              background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.80)",
-              border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.18)",
-              backdropFilter: "blur(20px) saturate(160%)",
-              WebkitBackdropFilter: "blur(20px) saturate(160%)",
-              boxShadow: isDark
-                ? "0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)"
-                : "0 8px 40px rgba(99,102,241,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
-            }}
-          >
+          <div onKeyDown={preventEnterSubmit} style={{ border: "1px solid hsl(var(--foreground))", background: "hsl(var(--card))" }}>
             {/* Form header */}
-            <div
-              className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
-              style={{
-                background: isDark ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.06)",
-                borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.14)",
-              }}
-            >
-              <div
-                className="absolute left-0 top-0 bottom-0 w-0.5"
-                style={{ background: "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)" }}
-              />
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={cancelForm}
-                  className="flex items-center gap-1.5 text-sm transition-colors hover:opacity-70"
-                  style={{ color: isDark ? "#94a3b8" : "#6366f1" }}
-                >
-                  <ArrowLeft size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-                <span style={{ color: isDark ? "rgba(99,102,241,0.4)" : "rgba(99,102,241,0.3)" }}>|</span>
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-6 h-6 rounded-lg flex items-center justify-center"
-                    style={{ background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.30)" }}
-                  >
-                    <ArrowDownCircle size={12} style={{ color: "#818cf8" }} />
-                  </div>
-                  <h2
-                    className="text-sm font-heading font-bold"
-                    style={{ color: isDark ? "#e0e7ff" : "#3730a3" }}
-                  >
-                    {editingId ? "Edit Received Payment" : "Record Received Payment"}
-                  </h2>
-                </div>
-              </div>
+            <div className="flex items-center gap-3 px-5 sm:px-6 py-3.5" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <button
+                onClick={cancelForm}
+                className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ArrowLeft size={14} />
+                <span className="hidden sm:inline">Back</span>
+              </button>
+              <span className="h-4 w-px" style={{ background: "hsl(var(--border))" }} />
+              <h2 className="font-heading text-sm font-bold text-foreground">{editingId ? "Edit receipt" : "New receipt"}</h2>
             </div>
 
           <div className="px-5 sm:px-6 py-6">
@@ -1616,10 +1527,10 @@ export default function ReceivedPaymentPage() {
                             type="button"
                             onClick={() => handleLoanEmiSelect(emi)}
                             className={cn(
-                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-none text-xs font-medium border transition-colors",
                               selectedLoanEmi?.LoanId === emi.LoanId
-                                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                : "border-border bg-background text-muted-foreground hover:border-emerald-500/40",
+                                ? "border-foreground/40 bg-primary/10 text-foreground"
+                                : "border-border bg-background text-muted-foreground hover:border-foreground",
                             )}
                           >
                             <Landmark size={11} />
@@ -1635,7 +1546,7 @@ export default function ReceivedPaymentPage() {
                             ? "Lump sum"
                             : `${selectedLoanEmiIds.length} EMI${selectedLoanEmiIds.length === 1 ? "" : "s"} selected`}
                           {" · "}
-                          <span className="font-mono font-medium text-foreground/80">{formatINR(Number(form.amount) || 0)}</span>
+                          <span className="font-heading tabular-nums font-medium text-foreground/80">{formatINR(Number(form.amount) || 0)}</span>
                         </p>
                         <div className="flex items-center gap-2">
                           <button
@@ -1681,7 +1592,7 @@ export default function ReceivedPaymentPage() {
                             type="button"
                             onClick={() => handleSelectBankLoanDisbursement(loan)}
                             className={cn(
-                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-none text-xs font-medium border transition-colors",
                               disbursingBankLoan?.LoanId === loan.LoanId
                                 ? "border-amber-500/50 bg-[#ffe2021a] text-amber-700 dark:text-amber-400"
                                 : "border-border bg-background text-muted-foreground hover:border-amber-500/40",
@@ -1833,7 +1744,7 @@ export default function ReceivedPaymentPage() {
                                   ) : null}
                                 </span>
                                 {(b.BAccountNumber || b.BIfscCode) && (
-                                  <span className="text-muted-foreground text-[0.625rem] font-mono">
+                                  <span className="text-muted-foreground text-[0.625rem] font-heading tabular-nums">
                                     {b.BAccountNumber
                                       ? `A/C ••${b.BAccountNumber.slice(-4)}`
                                       : ""}
@@ -1889,7 +1800,7 @@ export default function ReceivedPaymentPage() {
                       />
                       <Input
                         type="number"
-                        className="pl-8 h-9 text-sm font-mono"
+                        className="pl-8 h-9 text-sm font-heading tabular-nums"
                         placeholder="0.00"
                         value={form.amount}
                         onChange={(e) => setField("amount", e.target.value)}
@@ -1908,7 +1819,7 @@ export default function ReceivedPaymentPage() {
                         className={cn(
                           "h-9 flex items-center justify-between gap-2 px-3 rounded-md border font-heading font-semibold text-sm",
                           docNoPreview || form.docNo
-                            ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                            ? "border-foreground/40 bg-primary/10 text-foreground"
                             : "border-input bg-muted/30 text-muted-foreground font-normal",
                         )}
                       >
@@ -1936,7 +1847,7 @@ export default function ReceivedPaymentPage() {
                         )}
                       </div>
                     )}
-                    <p className="text-[0.625rem] text-muted-foreground mt-1 font-mono">
+                    <p className="text-[0.625rem] text-muted-foreground mt-1 font-heading tabular-nums">
                       REC / 000001 / {form.finYear || activeFinYear} — locked on
                       save
                     </p>
@@ -2033,17 +1944,17 @@ export default function ReceivedPaymentPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
             <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave
-                ? <span className="text-emerald-500 font-medium">Ready to save</span>
+                ? <span className="text-foreground font-medium">Ready to save</span>
                 : "Fill in the required fields to save"}
             </p>
             <div className="flex items-center gap-2 sm:ml-auto">
               <button
                 onClick={handleReset}
                 disabled={!isDirty && !editingId}
-                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                className="flex-1 sm:flex-none px-4 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
               >
                 <RotateCcw size={12} />
                 {editingId ? "Cancel" : "Reset"}
@@ -2051,22 +1962,22 @@ export default function ReceivedPaymentPage() {
               <button
                 onClick={handleSubmit}
                 disabled={!canSave || actionLoading}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                className="flex-1 sm:flex-none px-5 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground hover:bg-foreground/85 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {actionLoading ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
                 ) : editingId ? (
                   <Check size={14} />
                 ) : (
                   <Plus size={14} />
                 )}
-                {actionLoading ? "Saving…" : editingId ? "Update Payment" : "Save Payment"}
+                {actionLoading ? "Saving…" : editingId ? "Update receipt" : "Save receipt"}
               </button>
             </div>
           </div>
           </div>
         )}
-      </FinanceShell>
+      </SheetShell>
 
       {/* ── Loan Repayment details — EMIs / lump sum, late fee, notes ──────── */}
       <Dialog
@@ -2125,15 +2036,15 @@ export default function ReceivedPaymentPage() {
                         key={e.EMIId}
                         className={cn(
                           "flex items-center justify-between gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors",
-                          checked ? "border-emerald-500/40 bg-emerald-500/5" : "border-border hover:bg-muted/30",
+                          checked ? "border-foreground/40 bg-primary/10" : "border-border hover:bg-muted/30",
                         )}
                       >
                         <span className="flex items-center gap-2 text-xs">
-                          <input type="checkbox" checked={checked} onChange={() => toggleLoanEmiSelected(e.EMIId)} className="accent-emerald-500" />
+                          <input type="checkbox" checked={checked} onChange={() => toggleLoanEmiSelected(e.EMIId)} className="accent-foreground" />
                           Installment #{e.InstallmentNo}
                           {e.IsOverdue && <span className="text-[0.625rem] font-semibold text-destructive">OVERDUE</span>}
                         </span>
-                        <span className="font-mono text-xs font-medium">{formatINR(Number(e.EMIAmount))}</span>
+                        <span className="font-heading tabular-nums text-xs font-medium">{formatINR(Number(e.EMIAmount))}</span>
                       </label>
                     );
                   })}
@@ -2151,7 +2062,7 @@ export default function ReceivedPaymentPage() {
                     className="h-9 text-sm"
                   />
                   <p className="text-[0.6875rem] text-muted-foreground mt-1">
-                    Outstanding on this loan: <span className="font-mono font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
+                    Outstanding on this loan: <span className="font-heading tabular-nums font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
                   </p>
                 </div>
               )}
@@ -2191,25 +2102,14 @@ export default function ReceivedPaymentPage() {
           onClick={() => setViewingPayment(null)}
         >
           <div
-            className="w-full max-w-lg rounded-xl bg-card border border-border shadow-xl overflow-hidden"
+            className="sheet-frame w-full max-w-lg overflow-hidden" style={{ margin: 0 }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
-              <div className="flex items-center gap-2.5">
-                <div className="p-1.5 rounded-lg bg-emerald-500/10">
-                  <ArrowDownCircle size={15} className="text-emerald-500" />
-                </div>
-                <div>
-                  <h3 className="font-heading font-semibold text-foreground text-sm">
-                    {viewingPayment.companyName || "Received Payment"}
-                  </h3>
-                  {viewingPayment.docNo && (
-                    <span className="text-[0.6875rem] font-mono text-muted-foreground">
-                      {viewingPayment.docNo}
-                    </span>
-                  )}
-                </div>
+            <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <div className="min-w-0">
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Receipt · {viewingPayment.companyName || "Received payment"}</p>
+                <h3 className="font-heading font-bold text-foreground text-base sm:text-lg tabular-nums tracking-tight mt-1 truncate">{viewingPayment.docNo || "—"}</h3>
               </div>
               <div className="flex items-center gap-1.5">
                 {rights.canPrint && (
@@ -2231,15 +2131,13 @@ export default function ReceivedPaymentPage() {
             </div>
 
             {/* Tabs */}
-            <div className="flex items-center gap-1 px-5 pt-3 border-b border-border">
+            <div className="flex items-center px-5" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
               {(["details", "posting"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setDetailTab(t)}
-                  className={`px-3 py-2 text-xs font-heading font-semibold border-b-2 -mb-px transition-colors ${
-                    detailTab === t
-                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  className={`px-4 py-2.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] border-b-2 -mb-px transition-colors ${
+                    detailTab === t ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {t === "details" ? "Details" : "Posting"}
@@ -2251,13 +2149,13 @@ export default function ReceivedPaymentPage() {
               <>
             {/* Amount highlight */}
             <div className="px-5 pt-4 pb-2">
-              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-4 flex items-center justify-between">
+              <div className="px-5 py-4 flex items-center justify-between" style={{ border: "1.5px solid hsl(var(--foreground))" }}>
                 <div>
-                  <p className="text-[0.625rem] font-heading uppercase tracking-wider text-emerald-600/70 mb-1">
-                    Amount Received
+                  <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground mb-1.5">
+                    Amount received
                   </p>
-                  <p className="text-2xl font-heading font-bold text-emerald-600">
-                    +{fmt(viewingPayment.amount)}
+                  <p className="text-2xl sm:text-3xl font-heading font-semibold tabular-nums tracking-tight leading-none text-foreground">
+                    {fmt(viewingPayment.amount)}
                   </p>
                 </div>
                 <div className="text-right space-y-1">
@@ -2273,13 +2171,8 @@ export default function ReceivedPaymentPage() {
                         )
                       : "—"}
                   </p>
-                  <StatusBadge status={viewingPayment.status} />
-                  <span
-                    className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading ${modeColor[viewingPayment.mode]}`}
-                  >
-                    {modeIcon(viewingPayment.mode)}
-                    {viewingPayment.mode}
-                  </span>
+                  <SheetMark text={viewingPayment.status || "—"} tone={statusTone(viewingPayment.status || "")} />
+                  <span className="ml-2 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{viewingPayment.mode}</span>
                 </div>
               </div>
             </div>
@@ -2391,11 +2284,11 @@ export default function ReceivedPaymentPage() {
                         {postingData.entries[0]?.docNo}
                       </span>
                       {postingData.isPosted ? (
-                        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+                        <span className="text-[0.625rem] px-2 py-0.5 rounded-none bg-primary/10 text-foreground border border-foreground/40 font-medium whitespace-nowrap">
                           ✓ {postingData.jvNo}
                         </span>
                       ) : (
-                        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-[#ffe2021a] text-amber-600 border border-amber-500/20 font-medium whitespace-nowrap">
+                        <span className="text-[0.625rem] px-2 py-0.5 rounded-none bg-[#ffe2021a] text-amber-600 border border-amber-500/20 font-medium whitespace-nowrap">
                           Not yet posted
                         </span>
                       )}
@@ -2412,21 +2305,21 @@ export default function ReceivedPaymentPage() {
                       ].map((row, i) => (
                         <div key={i} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2.5 items-center gap-2">
                           <div className="flex items-center gap-2 min-w-0">
-                            <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-foreground" : "bg-destructive"}`} />
                             <span className="text-xs text-foreground truncate">{row.label}</span>
                           </div>
-                          <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                          <span className="text-xs text-right font-heading tabular-nums text-foreground">
                             {row.side === "debit" ? fmt(postingData.amount) : ""}
                           </span>
-                          <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                          <span className="text-xs text-right font-heading tabular-nums text-destructive">
                             {row.side === "credit" ? fmt(postingData.amount) : ""}
                           </span>
                         </div>
                       ))}
                       <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
                         <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
-                        <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(postingData.amount)}</span>
-                        <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(postingData.amount)}</span>
+                        <span className="text-right text-foreground font-heading tabular-nums">{fmt(postingData.amount)}</span>
+                        <span className="text-right text-destructive font-heading tabular-nums">{fmt(postingData.amount)}</span>
                       </div>
                     </div>
                   </div>

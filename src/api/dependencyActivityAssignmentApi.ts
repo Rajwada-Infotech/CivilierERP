@@ -128,6 +128,10 @@ export interface ApprovalLevel {
   mode: "all" | "any";
 }
 
+/** Activity Priority picked on the Work Allocation form, mildest first. */
+export const ASSIGNMENT_PRIORITIES = ["Low", "High", "Urgent", "Very Urgent"] as const;
+export type AssignmentPriority = (typeof ASSIGNMENT_PRIORITIES)[number];
+
 export interface RungAssignmentDetail {
   rungId: number;
   activityId: number;
@@ -159,6 +163,7 @@ export interface RungAssignmentDetail {
     } | null;
     description: string | null;
     remarks: string | null;
+    priority?: AssignmentPriority | null;
     materials: AssignmentMaterial[];
     checkpoints: AssignmentCheckpoint[];
   } | null;
@@ -177,6 +182,7 @@ export interface RungAssignmentPayload {
   materialContractorId: number | null;
   description: string | null;
   remarks: string | null;
+  priority?: AssignmentPriority | null;
   checkpoints: AssignmentCheckpoint[];
   materials: AssignmentMaterial[];
 }
@@ -292,6 +298,10 @@ export interface ReportedAssignment {
   materialSourceName?: string | null;
   description: string | null;
   remarks: string | null;
+  priority?: AssignmentPriority | null;
+  /** The activity's tag: the one set in Activity Reporting, else its Activity Master default. */
+  tagId?: number | null;
+  tagName?: string | null;
   status: AssignmentStatus;
   // What Status was right before this activity got Cancelled — only ever
   // non-null while status === "CANCELLED". Determines what restoring it
@@ -347,8 +357,14 @@ export const getReportedAssignments = async (params?: {
   status?: AssignmentStatus;
   /** Exactly one activity (its current attempt). */
   rungId?: number;
+  /** Words matched against activity, flat, room, project, chain alias or engineer (every word must match). */
+  search?: string;
+  /** Page size (server default applies when omitted). */
+  limit?: number;
 }): Promise<ReportedAssignment[]> => {
   const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.rungId) qs.set("rungId", String(params.rungId));
   if (params?.dependencyMasterId) qs.set("dependencyMasterId", String(params.dependencyMasterId));
   if (params && "roomId" in params && params.roomId !== undefined) {
@@ -450,6 +466,26 @@ export const updateAssignmentStatus = async (
 // independent — the Activity Detail modal's status dropdown, its Remarks
 // textarea (saved on blur), and its draggable progress bar (saved on
 // drag-release) each call this with only the field that actually changed.
+/** Change an activity's Priority (the same field the Work Allocation form sets); null clears it. */
+export const updateAssignmentPriority = async (rungId: number, priority: AssignmentPriority | null): Promise<{ priority: AssignmentPriority | null }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/priority`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ priority }),
+  });
+  return handleResponse<{ priority: AssignmentPriority | null }>(res);
+};
+
+/** Tag one reported activity. A new name is added to the DPR Tag Master; blank clears the activity's own tag. */
+export const setActivityTag = async (rungId: number, tagName: string): Promise<{ message: string; tagId: number | null }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/tag`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tagName }),
+  });
+  return handleResponse<{ message: string; tagId: number | null }>(res);
+};
+
 export const updateAssignmentDetail = async (
   rungId: number,
   patch: { status?: AssignmentStatus; remarks?: string; progressPercent?: number; append?: boolean },

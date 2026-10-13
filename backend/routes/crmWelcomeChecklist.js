@@ -4,7 +4,7 @@ const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on checklists outside their projects.
 require("../services/projectScope").crmProjectGuards(router);
-const rateLimit = require("../middleware/rateLimiter");
+const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -14,7 +14,7 @@ const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 
 router.use(authMiddleware);
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+router.use(apiRateLimit);
 
 // ─── Checklist template ──────────────────────────────────────────────────
 // ALWAYS_TEMPLATE applies to every booking — these facts exist for every
