@@ -4,6 +4,8 @@ const router = express.Router();
 // Project access: a refund's own project, else its booking's.
 const { projectParamGuard, projectPredicate } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT COALESCE(r.ProjectId, b.ProjectId) AS ProjectId FROM dbo.CrmRefund r LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId WHERE r.Id = @id"));
+// A refund's GST document (credit note / refund voucher, migration 565): its own project.
+router.param("noteId", projectParamGuard("SELECT n.ProjectId FROM dbo.CrmGstNote n WHERE n.Id = @id"));
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -294,6 +296,54 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
 });
 
 // ── GET /:id ─────────────────────────────────────────────────────────────
+// ── GST documents for money given back (services/crmGstNotes.js) ─────────────
+// Register: every credit note and refund voucher, for the GST return.
+router.get("/gst-notes", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  try {
+    const gst = require("../services/crmGstNotes");
+    res.json(await gst.list(getPool(), { from: req.query.from || null, to: req.query.to || null, type: req.query.type || null, projectScope: req.projectScope }));
+  } catch (e) {
+    console.error("[crm-refunds] GET /gst-notes:", e.message);
+    res.status(500).json({ error: "Couldn't load the GST documents" });
+  }
+});
+router.get("/gst-notes/:noteId/pdf", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  const id = parseId(req.params.noteId);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const gst = require("../services/crmGstNotes");
+    const n = await gst.load(getPool(), id);
+    if (!n) return res.status(404).json({ error: "Document not found" });
+    const buf = await gst.renderPdf(n);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${n.DocNo || `GST-certificate-${n.RefundNo}`}.pdf"`);
+    res.send(buf);
+  } catch (e) {
+    console.error("[crm-refunds] GET gst-note pdf:", e.message);
+    res.status(500).json({ error: "Couldn't make the PDF" });
+  }
+});
+router.get("/:id/gst-notes", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try { res.json(await require("../services/crmGstNotes").list(getPool(), { refundId: id })); }
+  catch (e) { console.error("[crm-refunds] GET /:id/gst-notes:", e.message); res.status(500).json({ error: "Couldn't load the GST documents" }); }
+});
+// A refund paid before these documents existed: Finance issues its set on request.
+router.post("/:id/gst-notes", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const gst = require("../services/crmGstNotes");
+    const out = await gst.issueForRefund(getPool(), id, req.user?.email || null);
+    if (out.none && out.none !== "already issued") return res.status(409).json({ error: `No GST document needed: ${out.none}` });
+    res.json(await gst.list(getPool(), { refundId: id }));
+  } catch (e) {
+    console.error("[crm-refunds] POST /:id/gst-notes:", e.message);
+    res.status(500).json({ error: "Couldn't issue the GST documents" });
+  }
+});
+
 router.get("/:id", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -857,6 +907,10 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
   } catch (glErr) {
     await recordGLPosting("crm-refund", refundId, { failed: true, reason: glErr.message }, userEmail);
   }
+  // Its GST documents: refund voucher for money never invoiced, credit notes
+  // against invoices (services/crmGstNotes.js). Never fatal to the payout.
+  try { await require("../services/crmGstNotes").issueForRefund(pool, refundId, userEmail); }
+  catch (e) { console.error(`[crm-refunds] GST documents for refund ${refundId}:`, e.message); }
   return { ok: true };
 }
 

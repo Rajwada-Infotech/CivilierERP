@@ -1632,4 +1632,35 @@ router.put("/transfer-deeds/:deedId/date/accept",
 router.post("/transfer-deeds/:deedId/duty/proof",
   deedUpload((pool, id, _role, req) => deedSvc.uploadDutyProof(pool, id, req.file, req.body || {}, portalCtx(req)), "POST deed duty proof"));
 
+// ─── GST documents for money given back (refund voucher / credit note) ──────
+// The customer's own, for every booking they were the customer on.
+router.get("/gst-notes", async (req, res) => {
+  try {
+    const rows = await require("../services/crmGstNotes").list(getPool(), { customerId: Number(req.portalUser.customerId) });
+    res.json(rows.map((n) => ({
+      Id: n.Id, DocNo: n.DocNo, DocType: n.DocType, Status: n.Status, DocDate: n.DocDate, RefundNo: n.RefundNo, Property: n.Property, BookingNo: n.BookingNo,
+      AgainstRef: n.AgainstRef, TaxableValue: n.TaxableValue, GstRate: n.GstRate, GstAmount: n.GstAmount, TotalAmount: n.TotalAmount,
+    })));
+  } catch (e) {
+    console.error("[crm-portal] GET /gst-notes:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+router.get("/gst-notes/:noteId/pdf", async (req, res) => {
+  const id = parseId(req.params.noteId);
+  if (id === null) return res.status(400).json({ error: "Invalid document" });
+  try {
+    const gst = require("../services/crmGstNotes");
+    const n = await gst.load(getPool(), id);
+    if (!n || Number(n.CustomerId) !== Number(req.portalUser.customerId)) return res.status(404).json({ error: "Document not found" });
+    const buf = await gst.renderPdf(n);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${n.DocNo || `GST-certificate-${n.RefundNo}`}.pdf"`);
+    res.send(buf);
+  } catch (e) {
+    console.error("[crm-portal] GET gst-note pdf:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 module.exports = router;

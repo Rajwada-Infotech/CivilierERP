@@ -100,8 +100,10 @@ async function unwindBouncedCrmPayment(pool, receivedPaymentId, reason, actorUse
     throw e;
   }
   const glReversed = await reverseGl();
-  // Issued invoices are tax documents — reported for staff to deal with
-  // (void / credit note), never silently changed here.
+  // Issued invoices stay as they are: a bounced payment doesn't cancel the
+  // sale — the customer still owes it, so no credit note (GST s.34 needs a
+  // cancelled / reduced supply). Listed for reference only. A credit note
+  // comes only when money is given back (services/crmGstNotes.js).
   const invoices = (await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT InvoiceNo FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status <> 'Void'")).recordset.map((r) => r.InvoiceNo);
   return { crm: true, bookingId, reversed: Math.round(reversed * 100) / 100, invoices, glReversed };

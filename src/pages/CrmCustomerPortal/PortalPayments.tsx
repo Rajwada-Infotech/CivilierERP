@@ -154,11 +154,43 @@ const PortalPayments: React.FC = () => {
         </Card>
       )}
 
+      <RefundDocuments />
+
       {previewInvoice && (
         <InvoicePdfDialog invoice={previewInvoice} applicationId={applicationId} onClose={() => setPreviewInvoice(null)} />
       )}
     </div>
   );
 };
+
+/** Refund vouchers / credit notes for money given back to this customer (all their bookings). */
+function RefundDocuments() {
+  const { data: notes = [] } = useQuery<any[]>({
+    queryKey: ["portal-gst-notes"],
+    queryFn: () => fetch(`${API}/gst-notes`, { headers: authHeaders() }).then((r) => (r.ok ? r.json() : [])),
+  });
+  if (!notes.length) return null;
+  const open = async (id: number) => {
+    const r = await fetch(`${API}/gst-notes/${id}/pdf`, { headers: authHeaders() });
+    if (r.ok) window.open(URL.createObjectURL(await r.blob()), "_blank");
+  };
+  const label = (n: any) => (n.Status === "TimeBarred" ? "GST paid certificate" : n.DocType === "CreditNote" ? "Credit note" : "Refund voucher");
+  return (
+    <Card>
+      <CardHeader icon={FileText} title="Refund documents" />
+      <p className="px-5 pt-3 text-xs" style={{ color: TEXT_MUTED }}>Your refund vouchers and credit notes for money we gave back — keep them for your records and tax filings.</p>
+      {notes.map((n) => (
+        <div key={n.Id} className="flex items-center gap-3 px-5 py-3 border-t" style={{ borderColor: HAIRLINE }}>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium" style={{ color: TEXT }}>{label(n)} {n.DocNo ? <span style={{ color: TEXT_MUTED }}>· {n.DocNo}</span> : null}</div>
+            <div className="text-xs" style={{ color: TEXT_FAINT }}>{n.Property} · {fmtDate(n.DocDate)} · refund {n.RefundNo}</div>
+          </div>
+          <div className="text-sm tabular-nums" style={{ color: TEXT }}>{fmtMoney(n.TotalAmount)}</div>
+          <button onClick={() => open(n.Id)} className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border" style={{ borderColor: HAIRLINE, color: TEXT }}><Download size={13} />PDF</button>
+        </div>
+      ))}
+    </Card>
+  );
+}
 
 export default PortalPayments;

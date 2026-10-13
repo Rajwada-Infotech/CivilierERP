@@ -17,6 +17,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { RefundGstNotesDialog, GstNotesRegisterDialog } from "@/components/crm/CrmGstNotes";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/refunds";
@@ -469,6 +470,8 @@ const CrmRefunds: React.FC = () => {
   const [page, setPage] = useState(1);
   const [showNew, setShowNew] = useState(false);
   const [financeDialog, setFinanceDialog] = useState<any | null>(null);
+  const [gstFor, setGstFor] = useState<any | null>(null);
+  const [gstRegister, setGstRegister] = useState(false);
   const [financeBank, setFinanceBank] = useState("");
   const [financeMode, setFinanceMode] = useState("");
 
@@ -543,6 +546,7 @@ const CrmRefunds: React.FC = () => {
               className="text-xs text-primary hover:underline flex items-center gap-1">{r.Status === "Paid" ? "Payment" : "Open in Payments"} <ExternalLink size={11} /></button>
           )}
           {r.Status === "Paid" && <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Paid</span>}
+          {r.Status === "Paid" && <button onClick={() => setGstFor(r)} className="text-xs text-primary hover:underline" title="Refund voucher / credit note for this refund">GST documents</button>}
         </div>
       );
     } },
@@ -557,6 +561,7 @@ const CrmRefunds: React.FC = () => {
         action={
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+            <button onClick={() => setGstRegister(true)} className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted" title="Credit notes and refund vouchers for the GST return">GST documents</button>
             {rights.canCreate && (
               <button onClick={() => setShowNew(true)}
                 className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-4 py-1.5 rounded-lg btn-module hover:shadow-lg transition-all">
@@ -595,6 +600,8 @@ const CrmRefunds: React.FC = () => {
         <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
         {showNew && <NewRefundDialog onClose={() => setShowNew(false)} onDone={invalidate} />}
+        {gstFor && <RefundGstNotesDialog refund={gstFor} canEdit={rights.canEdit} onClose={() => setGstFor(null)} />}
+        {gstRegister && <GstNotesRegisterDialog onClose={() => setGstRegister(false)} />}
 
         {/* Finance approve dialog */}
         <Dialog open={!!financeDialog} onOpenChange={(o) => { if (!o) { setFinanceDialog(null); setFinanceBank(""); setFinanceMode(""); } }}>
