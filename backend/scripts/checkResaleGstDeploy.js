@@ -1,5 +1,5 @@
 // Read-only check after deploying Resale (cases, transfer deeds, ownership
-// changes) and the refund GST documents (migrations 557-565). Changes nothing.
+// changes) and the refund credit notes (migrations 557-565). Changes nothing.
 //   node scripts/checkResaleGstDeploy.js
 const fs = require("fs");
 const path = require("path");
@@ -36,7 +36,7 @@ const line = (ok, msg) => console.log(`${ok ? "OK  " : "FIX "} ${msg}`);
     line(p > 0 && r > 0, `${k}: page ${p ? "defined" : "MISSING"}, ${r} role(s) can view`);
   }
 
-  console.log("\n== Companies on CRM bookings (printed on GST documents) ==");
+  console.log("\n== Companies on CRM bookings (printed on credit notes) ==");
   const comps = await q(`SELECT e.id, e.name, e.gst_no, e.address, e.state, COUNT(b.Id) AS bookings
     FROM dbo.enterprise e JOIN dbo.CrmBooking b ON b.CompanyId = e.id AND b.IsActive = 1
     WHERE e.business_type = 'C' GROUP BY e.id, e.name, e.gst_no, e.address, e.state ORDER BY e.name`);
@@ -48,7 +48,7 @@ const line = (ok, msg) => console.log(`${ok ? "OK  " : "FIX "} ${msg}`);
     WHERE p.business_type = 'P' AND ISNULL(p.state, '') = ''`);
   line(!projNoState.length, projNoState.length ? `projects without a state (place of supply falls back to the company's): ${projNoState.map((p) => p.name).join(", ")}` : "every project has a state");
 
-  console.log("\n== Refunds paid before GST documents existed (issue on request from Refunds) ==");
+  console.log("\n== Refunds paid before credit notes existed (issue on request: Refunds → Credit note) ==");
   const old = await q(`SELECT r.RefundNo, r.NetAmount, r.PaidAt, b.BookingNo FROM dbo.CrmRefund r JOIN dbo.CrmBooking b ON b.Id = r.BookingId
     WHERE r.Status = 'Paid' AND ISNULL(b.TotalGstAmount, 0) > 0 AND r.NetAmount > 0
       AND NOT EXISTS (SELECT 1 FROM dbo.CrmGstNote n WHERE n.RefundId = r.Id) ORDER BY r.PaidAt`);

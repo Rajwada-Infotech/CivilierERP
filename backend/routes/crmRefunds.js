@@ -304,7 +304,7 @@ router.get("/gst-notes", requirePageRight("crm-refunds", "view"), async (req, re
     res.json(await gst.list(getPool(), { from: req.query.from || null, to: req.query.to || null, type: req.query.type || null, projectScope: req.projectScope }));
   } catch (e) {
     console.error("[crm-refunds] GET /gst-notes:", e.message);
-    res.status(500).json({ error: "Couldn't load the GST documents" });
+    res.status(500).json({ error: "Couldn't load the credit notes" });
   }
 });
 router.get("/gst-notes/:noteId/pdf", requirePageRight("crm-refunds", "view"), async (req, res) => {
@@ -327,7 +327,7 @@ router.get("/:id/gst-notes", requirePageRight("crm-refunds", "view"), async (req
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try { res.json(await require("../services/crmGstNotes").list(getPool(), { refundId: id })); }
-  catch (e) { console.error("[crm-refunds] GET /:id/gst-notes:", e.message); res.status(500).json({ error: "Couldn't load the GST documents" }); }
+  catch (e) { console.error("[crm-refunds] GET /:id/gst-notes:", e.message); res.status(500).json({ error: "Couldn't load the credit notes" }); }
 });
 // A refund paid before these documents existed: Finance issues its set on request.
 router.post("/:id/gst-notes", requirePageRight("crm-refunds", "edit"), async (req, res) => {
@@ -336,11 +336,11 @@ router.post("/:id/gst-notes", requirePageRight("crm-refunds", "edit"), async (re
   try {
     const gst = require("../services/crmGstNotes");
     const out = await gst.issueForRefund(getPool(), id, req.user?.email || null);
-    if (out.none && out.none !== "already issued") return res.status(409).json({ error: `No GST document needed: ${out.none}` });
+    if (out.none && out.none !== "already issued") return res.status(409).json({ error: `No credit note needed: ${out.none}` });
     res.json(await gst.list(getPool(), { refundId: id }));
   } catch (e) {
     console.error("[crm-refunds] POST /:id/gst-notes:", e.message);
-    res.status(500).json({ error: "Couldn't issue the GST documents" });
+    res.status(500).json({ error: "Couldn't issue the credit note" });
   }
 });
 

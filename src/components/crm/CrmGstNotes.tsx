@@ -13,7 +13,7 @@ import { buildWorkbook, downloadBlob, type XlsxCell } from "@/lib/xlsxBook";
 const API = "/api/crm/refunds";
 const fmt = (n: any) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const day = (d: any) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
-const kind = (n: any) => (n.Status === "TimeBarred" ? "GST paid certificate" : n.DocType === "CreditNote" ? "Credit note" : "Refund voucher");
+const kind = (n: any) => (n.Status === "TimeBarred" ? "GST paid certificate" : n.DocType === "CreditNote" ? "Credit note" : "Credit note (refund voucher)");
 
 async function getJson(url: string, init?: RequestInit) {
   const r = await fetchWithAuth(url, init);
@@ -59,21 +59,21 @@ export function RefundGstNotesDialog({ refund, canEdit, onClose }: { refund: any
   const [busy, setBusy] = useState(false);
   const issue = async () => {
     setBusy(true);
-    try { await getJson(`${API}/${refund.Id}/gst-notes`, { method: "POST" }); toast.success("GST documents issued"); qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["crm-gst-notes"] }); }
+    try { await getJson(`${API}/${refund.Id}/gst-notes`, { method: "POST" }); toast.success("Credit note issued"); qc.invalidateQueries({ queryKey: key }); qc.invalidateQueries({ queryKey: ["crm-gst-notes"] }); }
     catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   };
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-xl">
-        <DialogHeader><DialogTitle className="font-heading">GST documents — {refund.RefundNo}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-heading">Credit note — {refund.RefundNo}</DialogTitle></DialogHeader>
         {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p>
           : isError ? <p className="text-sm text-red-600">{(error as any)?.message || "Couldn't load the documents"} — refresh and try again.</p>
           : notes.length ? <NoteRows notes={notes} />
           : (
             <div className="space-y-3 text-sm">
-              <p className="text-muted-foreground">No GST document for this refund yet. They are issued when Finance's payout is approved; this one was paid before they existed, or no GST was charged on the booking.</p>
-              {canEdit && <button onClick={issue} disabled={busy} className="h-9 px-4 text-sm btn-module text-white rounded-lg disabled:opacity-40">{busy ? "Issuing…" : "Issue GST documents"}</button>}
+              <p className="text-muted-foreground">No credit note for this refund yet. They are issued when Finance's payout is approved; this one was paid before they existed, or no GST was charged on the booking.</p>
+              {canEdit && <button onClick={issue} disabled={busy} className="h-9 px-4 text-sm btn-module text-white rounded-lg disabled:opacity-40">{busy ? "Issuing…" : "Issue credit note"}</button>}
             </div>
           )}
         <p className="text-[0.6875rem] text-muted-foreground">Money never invoiced gets a refund voucher; money that was invoiced gets a credit note against each invoice. Cancellation charges kept get none — their GST stays payable.</p>
@@ -98,21 +98,21 @@ export function GstNotesRegisterDialog({ onClose }: { onClose: () => void }) {
     const rows: XlsxCell[][] = [head, ...notes.map((n) => [kind(n), n.DocNo || "", String(n.DocDate).slice(0, 10), n.CustomerName || "", n.Property, n.BookingNo, n.AgainstRef || "",
       n.AgainstDate ? String(n.AgainstDate).slice(0, 10) : "", Number(n.TaxableValue), n.GstRate != null ? Number(n.GstRate) : "", Number(n.GstAmount), Number(n.TotalAmount),
       n.DeadlineDate ? String(n.DeadlineDate).slice(0, 10) : "", n.RefundNo])];
-    downloadBlob(await buildWorkbook([{ name: "GST documents", rows, widths: [20, 16, 12, 24, 18, 16, 22, 12, 14, 10, 12, 14, 12, 16], freezeBelowRow: 2 }]), `GST-credit-notes-refund-vouchers-${from}-to-${to}.xlsx`);
+    downloadBlob(await buildWorkbook([{ name: "Credit notes", rows, widths: [20, 16, 12, 24, 18, 16, 22, 12, 14, 10, 12, 14, 12, 16], freezeBelowRow: 2 }]), `Credit-notes-${from}-to-${to}.xlsx`);
   };
   const input = "h-9 px-2 text-sm border border-border rounded-lg bg-background";
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="font-heading">GST documents register</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="font-heading">Credit notes register</DialogTitle></DialogHeader>
         <div className="flex flex-wrap items-end gap-2 text-sm">
           <label className="text-xs text-muted-foreground">From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${input} block`} /></label>
           <label className="text-xs text-muted-foreground">To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${input} block`} /></label>
           <button onClick={exportXlsx} disabled={!notes.length} className="h-9 px-3 rounded-lg border border-border hover:bg-muted inline-flex items-center gap-1.5 disabled:opacity-40 ml-auto"><FileDown size={14} />Excel</button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-          <div className="rounded-lg border border-border p-3"><div className="text-muted-foreground">Credit notes — GST to reduce</div><div className="text-base font-semibold tabular-nums">{fmt(total("CreditNote", "GstAmount"))}</div></div>
-          <div className="rounded-lg border border-border p-3"><div className="text-muted-foreground">Refund vouchers — GST on advances given back</div><div className="text-base font-semibold tabular-nums">{fmt(total("RefundVoucher", "GstAmount"))}</div></div>
+          <div className="rounded-lg border border-border p-3"><div className="text-muted-foreground">Credit notes on invoices — GST to reduce</div><div className="text-base font-semibold tabular-nums">{fmt(total("CreditNote", "GstAmount"))}</div></div>
+          <div className="rounded-lg border border-border p-3"><div className="text-muted-foreground">Credit notes on advances (refund voucher)</div><div className="text-base font-semibold tabular-nums">{fmt(total("RefundVoucher", "GstAmount"))}</div></div>
           <div className="rounded-lg border border-border p-3"><div className="text-muted-foreground">Past the deadline — buyer claims</div><div className="text-base font-semibold tabular-nums">{fmt(total("TimeBarred", "GstAmount"))}</div></div>
         </div>
         {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p>

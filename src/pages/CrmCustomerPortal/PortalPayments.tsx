@@ -174,11 +174,11 @@ function RefundDocuments() {
     const r = await fetch(`${API}/gst-notes/${id}/pdf`, { headers: authHeaders() });
     if (r.ok) window.open(URL.createObjectURL(await r.blob()), "_blank");
   };
-  const label = (n: any) => (n.Status === "TimeBarred" ? "GST paid certificate" : n.DocType === "CreditNote" ? "Credit note" : "Refund voucher");
+  const label = (n: any) => (n.Status === "TimeBarred" ? "GST paid certificate" : n.DocType === "CreditNote" ? "Credit note" : "Credit note (refund voucher)");
   return (
     <Card>
-      <CardHeader icon={FileText} title="Refund documents" />
-      <p className="px-5 pt-3 text-xs" style={{ color: TEXT_MUTED }}>Your refund vouchers and credit notes for money we gave back — keep them for your records and tax filings.</p>
+      <CardHeader icon={FileText} title="Credit notes" />
+      <p className="px-5 pt-3 text-xs" style={{ color: TEXT_MUTED }}>Your credit notes for money we gave back — keep them for your records and tax filings.</p>
       {notes.map((n) => (
         <div key={n.Id} className="flex items-center gap-3 px-5 py-3 border-t" style={{ borderColor: HAIRLINE }}>
           <div className="flex-1 min-w-0">

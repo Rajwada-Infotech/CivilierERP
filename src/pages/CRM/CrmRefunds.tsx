@@ -546,7 +546,7 @@ const CrmRefunds: React.FC = () => {
               className="text-xs text-primary hover:underline flex items-center gap-1">{r.Status === "Paid" ? "Payment" : "Open in Payments"} <ExternalLink size={11} /></button>
           )}
           {r.Status === "Paid" && <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Paid</span>}
-          {r.Status === "Paid" && <button onClick={() => setGstFor(r)} className="text-xs text-primary hover:underline" title="Refund voucher / credit note for this refund">GST documents</button>}
+          {r.Status === "Paid" && <button onClick={() => setGstFor(r)} className="text-xs text-primary hover:underline" title="Credit note for this refund">Credit note</button>}
         </div>
       );
     } },
@@ -561,7 +561,7 @@ const CrmRefunds: React.FC = () => {
         action={
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-            <button onClick={() => setGstRegister(true)} className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted" title="Credit notes and refund vouchers for the GST return">GST documents</button>
+            <button onClick={() => setGstRegister(true)} className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted" title="Every credit note, for the GST return">Credit notes</button>
             {rights.canCreate && (
               <button onClick={() => setShowNew(true)}
                 className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-4 py-1.5 rounded-lg btn-module hover:shadow-lg transition-all">
