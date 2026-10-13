@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   ASSIGNMENT_STATUSES,
@@ -22,25 +22,16 @@ import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { ScopeLocationTree } from "@/components/civilworkdpr/ScopeLocationTree";
 import {
-  ClipboardList,
   UserRound,
   CalendarDays,
   Package,
   Loader2,
   ChevronDown,
   ChevronRight,
-  GitBranch,
   Camera,
-  Clock,
   Activity,
-  PauseCircle,
-  XCircle,
-  ShieldCheck,
-  RotateCcw,
-  CheckCircle2,
   Search,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
 import ActivityDetailModal from "./ActivityDetailModal";
@@ -48,66 +39,40 @@ import { dependencyAutoName } from "@/lib/dependencyAutoName";
 import { PriorityBadge } from "@/components/civilworkdpr/PriorityBadge";
 import { AssignmentPrioritySelect } from "@/components/civilworkdpr/AssignmentPrioritySelect";
 
-// Purely presentational — icon + accent color per status, same colors as
-// ASSIGNMENT_STATUS_META's Tailwind classes just as hex for GlassCard's
-// inline styling. "ALL" isn't in that enum so it gets its own entry.
-const STATUS_TILE_META: Record<AssignmentStatus | "ALL", { icon: LucideIcon; accentColor: string }> = {
-  ALL: { icon: ClipboardList, accentColor: "#06b6d4" },
-  PENDING: { icon: Clock, accentColor: "#64748b" },
-  ALLOCATED: { icon: GitBranch, accentColor: "#6366f1" },
-  IN_PROGRESS: { icon: Activity, accentColor: "#3b82f6" },
-  HOLD: { icon: PauseCircle, accentColor: "#f59e0b" },
-  CANCELLED: { icon: XCircle, accentColor: "#ef4444" },
-  APPROVED: { icon: ShieldCheck, accentColor: "#14b8a6" },
-  REWORK: { icon: RotateCcw, accentColor: "#d946ef" },
-  COMPLETED: { icon: CheckCircle2, accentColor: "#10b981" },
-};
-
 const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "All" },
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
 
-// Status filter chip — icon, label, and a count badge for how many
-// assigned activities currently sit in that status.
+// Status filter key — the label and how many assigned activities currently
+// sit in that status. The chosen one is inked; Cancelled keeps the one red.
 function StatusTile({
   label,
-  icon: Icon,
-  accentColor,
+  stopped,
   active,
   count,
   onClick,
 }: {
   label: string;
-  icon: LucideIcon;
-  accentColor: string;
+  stopped: boolean;
   active: boolean;
   count: number;
   onClick: () => void;
 }) {
+  const red = stopped && count > 0;
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-colors border shrink-0"
-      style={
+      aria-pressed={active}
+      className={`flex items-baseline gap-2 px-3 py-2 border shrink-0 transition-colors ${
         active
-          ? { background: `${accentColor}18`, borderColor: `${accentColor}59`, color: accentColor }
-          : { background: "transparent", borderColor: "var(--border)", color: "var(--muted-foreground)" }
-      }
+          ? red ? "bg-destructive border-destructive text-destructive-foreground" : "bg-foreground border-foreground text-card"
+          : red ? "border-destructive text-destructive hover:bg-destructive/10" : "border-foreground/40 text-foreground hover:border-foreground hover:bg-primary/10"
+      }`}
     >
-      <Icon size={12} />
-      {label}
-      <span
-        className="px-1.5 rounded-full text-[0.625rem] font-heading font-semibold leading-4"
-        style={
-          active
-            ? { background: `${accentColor}2e`, color: accentColor }
-            : { background: "var(--muted)", color: "var(--muted-foreground)" }
-        }
-      >
-        {count}
-      </span>
+      <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap">{label}</span>
+      <span className={`font-heading text-xs font-semibold tabular-nums ${active ? "" : red ? "" : "text-muted-foreground"}`}>{count}</span>
     </button>
   );
 }
@@ -124,8 +89,8 @@ function ActivityPhotosBadge({ rungId }: { rungId: number }) {
 
   return (
     <span
-      className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[0.6875rem] font-medium ${
-        count > 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+      className={`inline-flex items-center gap-1.5 px-2 py-1 text-[0.6875rem] font-medium border ${
+        count > 0 ? "border-foreground text-foreground" : "border-dashed border-foreground/40 text-muted-foreground"
       }`}
     >
       <Camera size={12} />
@@ -174,7 +139,7 @@ function ChainGroupList({
     });
 
   return (
-    <div className="rounded-lg border border-border/60 overflow-hidden divide-y divide-border">
+    <div className="overflow-hidden divide-y divide-foreground/40 border border-foreground/40">
       {groups.map((group) => {
         const collapsed = collapsedKeys.has(group.key);
         return (
@@ -182,25 +147,17 @@ function ChainGroupList({
             <button
               type="button"
               onClick={() => toggle(group.key)}
-              className="w-full flex items-center gap-2.5 px-4 py-2.5 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+              className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-primary/10 transition-colors text-left"
+              aria-expanded={!collapsed}
             >
               {collapsed ? (
-                <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                <ChevronRight size={14} className="text-foreground shrink-0" />
               ) : (
-                <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                <ChevronDown size={14} className="text-foreground shrink-0" />
               )}
-              <GitBranch size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
-              <span className="text-sm font-heading font-semibold text-foreground">{group.alias}</span>
-              <span
-                className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                  group.workType === "INTERNAL"
-                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                    : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                }`}
-              >
-                {group.workType}
-              </span>
-              <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+              <span className="text-sm font-semibold text-foreground">{group.alias}</span>
+              <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{group.workType}</span>
+              <span className="ml-auto font-heading text-[0.625rem] tabular-nums text-muted-foreground shrink-0">
                 {group.rows.length} activit{group.rows.length !== 1 ? "ies" : "y"}
               </span>
             </button>
@@ -218,7 +175,7 @@ function ChainGroupList({
                       <div
                         key={row.assignmentId}
                         onClick={() => openDetail(row, "overview")}
-                        className="p-3.5 active:bg-muted/30 cursor-pointer space-y-2.5"
+                        className="p-3.5 active:bg-primary/10 cursor-pointer space-y-2.5"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <span className="text-sm font-medium text-foreground leading-snug min-w-0">
@@ -226,7 +183,7 @@ function ChainGroupList({
                           </span>
                           <div onClick={(e) => e.stopPropagation()} className="shrink-0 flex flex-col items-end gap-0.5">
                             <PriorityBadge priority={row.priority} />
-                            {row.tagName && <span className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-600 dark:text-cyan-400" title="Tag">{row.tagName}</span>}
+                            {row.tagName && <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground" title="Tag">{row.tagName}</span>}
                             <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
                             <TimelineHint status={row.status} startDate={row.startDate} days={row.days} endDate={row.endDate} />
                           </div>
@@ -244,17 +201,13 @@ function ChainGroupList({
                           </span>
                           <span className="flex items-center gap-1.5">
                             <CalendarDays size={12} className="shrink-0" />
-                            {row.startDate ? new Date(row.startDate).toLocaleDateString() : "—"}
+                            {row.startDate ? new Date(row.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                           </span>
                         </div>
 
                         {delay && (
                           <span
-                            className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
-                              delay.tone === "on-time"
-                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
-                            }`}
+                            className={`block text-[0.625rem] leading-tight ${delay.tone === "on-time" ? "text-muted-foreground" : "text-foreground font-semibold"}`}
                           >
                             {delay.label}
                           </span>
@@ -297,7 +250,7 @@ function ChainGroupList({
                 <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                      <tr className="text-left">
                         <th className="px-5 py-2">Activity</th>
                         <th className="px-3 py-2">Engineer</th>
                         <th className="px-3 py-2">Tag</th>
@@ -313,7 +266,7 @@ function ChainGroupList({
                         <tr
                           key={row.assignmentId}
                           onClick={() => openDetail(row, "overview")}
-                          className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
+                          className="cursor-pointer"
                         >
                           <td className="px-5 py-3">
                             <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
@@ -330,7 +283,7 @@ function ChainGroupList({
                           </td>
                           <td className="px-3 py-3">
                             {row.tagName ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 whitespace-nowrap">{row.tagName}</span>
+                              <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground whitespace-nowrap">{row.tagName}</span>
                             ) : (
                               <span className="text-xs text-muted-foreground">—</span>
                             )}
@@ -341,18 +294,14 @@ function ChainGroupList({
                           <td className="px-3 py-3">
                             <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
                               <CalendarDays size={11} className="text-muted-foreground shrink-0" />
-                              {row.startDate ? new Date(row.startDate).toLocaleDateString() : "—"}
+                              {row.startDate ? new Date(row.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                             </span>
                             {(() => {
                               const delay = startDelayInfo(row.startDate, row.firstReportedAt);
                               if (!delay) return null;
                               return (
                                 <span
-                                  className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
-                                    delay.tone === "on-time"
-                                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                      : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
-                                  }`}
+                                  className={`mt-1 block text-[0.625rem] leading-tight ${delay.tone === "on-time" ? "text-muted-foreground" : "text-foreground font-semibold"}`}
                                 >
                                   {delay.label}
                                 </span>
@@ -481,13 +430,12 @@ function AutoNameLookup({
   const shown = fresh ?? picked;
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden mb-4">
-      <div className="flex items-center gap-2 px-3.5 sm:px-5 py-3 border-b border-border bg-muted/30">
-        <Search size={13} className="text-cyan-600 dark:text-cyan-400" />
-        <span className="text-sm font-heading font-semibold text-foreground">Find an activity by Auto Name</span>
+    <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Find an activity by auto name</span>
         <span className="hidden sm:inline text-[0.6875rem] text-muted-foreground">flat, room and activity, in any order</span>
       </div>
-      <div className="p-3.5 sm:p-5 space-y-3">
+      <div className="px-4 py-4 space-y-3">
         <div className="relative">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -500,7 +448,7 @@ function AutoNameLookup({
               }
             }}
             placeholder="e.g. NS/n1/101, Hall Room and 2.1 Column and Beam…"
-            className="w-full pl-8 pr-8 py-2 rounded-lg border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-cyan-500/30"
+            className="w-full h-10 pl-8 pr-8 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none"
           />
           {query && (
             <button onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Clear search">
@@ -520,7 +468,7 @@ function AutoNameLookup({
                 <p className="text-[0.6875rem] text-muted-foreground mb-1.5">
                   {matches.length}{matches.length === 25 ? "+" : ""} match{matches.length === 1 ? "" : "es"} — pick one to see its details
                 </p>
-                <ul className="divide-y divide-border/60 rounded-lg border border-border max-h-64 overflow-y-auto">
+                <ul className="divide-y divide-border/70 border border-foreground max-h-64 overflow-y-auto">
                   {matches.map((m) => (
                     <li key={m.assignmentId}>
                       <button
@@ -528,7 +476,7 @@ function AutoNameLookup({
                           setPicked(m);
                           setQuery("");
                         }}
-                        className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors"
+                        className="w-full text-left px-3 py-2 hover:bg-primary/10 transition-colors"
                       >
                         <p className="text-sm font-medium text-foreground">{autoNameOf(m)}</p>
                         <p className="text-[0.6875rem] text-muted-foreground">
@@ -545,17 +493,17 @@ function AutoNameLookup({
         )}
 
         {shown && (
-          <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/[0.04] overflow-hidden">
-            <div className="flex flex-wrap items-start justify-between gap-2 px-4 py-3 border-b border-border/60">
+          <div className="overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+            <div className="flex flex-wrap items-start justify-between gap-2 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
               <div className="min-w-0">
-                <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Auto Name</p>
+                <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Auto name</p>
                 <p className="text-sm font-semibold text-foreground break-words">{autoNameOf(shown)}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {shown.projectName ? `${shown.projectName} > ` : ""}{shown.scopePath}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs font-medium tabular-nums text-foreground">{Math.round(shown.progressPercent * 10) / 10}% done</span>
+                <span className="font-heading text-xs font-semibold tabular-nums text-foreground">{Math.round(shown.progressPercent * 10) / 10}% done</span>
                 <button onClick={() => setPicked(null)} className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
                   <X size={12} /> Close
                 </button>
@@ -695,27 +643,30 @@ export default function ActivityReporting() {
           { label: "Reporting" },
         ]}
       />
-      <CivilWorkDprShell
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
         title="Reporting"
-        subtitle="Every activity assigned an engineer or material from Work Allocation, tracked through to completion"
-        icon={ClipboardList}
+        subtitle="Every activity given an engineer or material in Work Allocation, followed through to completion."
       >
         {!rights.canView ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          <div className="bg-card p-8 text-center text-sm text-muted-foreground" style={{ border: "1px dashed hsl(var(--border))" }}>
             You don't have access to this page.
           </div>
         ) : (
           <>
           <AutoNameLookup openDetail={openDetail} />
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3 px-3.5 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-muted/30">
-              <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
+          <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <p className="flex items-baseline gap-2.5">
+                <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Assigned activities</span>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{total.toLocaleString("en-IN")}</span>
+              </p>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
               {projects.length > 0 && (
                 <select
                   value={projectId}
                   onChange={(e) => setProjectId(e.target.value)}
-                  className="py-1.5 px-2.5 w-full sm:w-52 text-xs rounded-lg border border-border bg-background text-foreground outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  className="h-9 px-2.5 w-full sm:w-52 text-xs border border-foreground/40 focus:border-foreground bg-card text-foreground outline-none"
                 >
                   <option value="">All projects</option>
                   {projects.map((p) => (
@@ -729,7 +680,7 @@ export default function ActivityReporting() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search Auto Name — flat, room or activity…"
-                  className="pl-7 pr-7 py-1.5 w-full sm:w-56 text-xs rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  className="pl-7 pr-7 h-9 w-full sm:w-64 text-xs border border-foreground/40 focus:border-foreground bg-card text-foreground placeholder:text-muted-foreground/70 outline-none"
                 />
                 {search && (
                   <button
@@ -749,16 +700,14 @@ export default function ActivityReporting() {
                 letting 9 pills wrap into 3-4 full-width rows a user has to
                 scroll past before reaching any actual content. Desktop keeps
                 the original wrapping layout — there's room for it there. */}
-            <div className="flex sm:flex-wrap items-center gap-1.5 px-3.5 sm:px-5 py-2.5 sm:py-3 border-b border-border bg-muted/10 overflow-x-auto sm:overflow-visible thin-scroll">
+            <div className="flex sm:flex-wrap items-center gap-1.5 px-4 py-3 overflow-x-auto sm:overflow-visible thin-scroll" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
               {FILTER_OPTIONS.map((opt) => {
-                const meta = STATUS_TILE_META[opt.value];
                 const count = opt.value === "ALL" ? total : (statusCounts[opt.value] ?? 0);
                 return (
                   <StatusTile
                     key={opt.value}
                     label={opt.label}
-                    icon={meta.icon}
-                    accentColor={meta.accentColor}
+                    stopped={opt.value === "CANCELLED"}
                     active={statusFilter === opt.value}
                     count={count}
                     onClick={() => setStatusFilter(opt.value)}
@@ -801,7 +750,7 @@ export default function ActivityReporting() {
           </div>
           </>
         )}
-      </CivilWorkDprShell>
+      </SheetShell>
       {detailRow && (
         <ActivityDetailModal row={detailRow} initialTab={detailTab} onClose={closeDetail} />
       )}
