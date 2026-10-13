@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useRef } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftFormSync, preventEnterSubmit } from "@/hooks/useDraftForm";
-import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -29,7 +28,6 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
-  XCircle,
   Download,
   Upload,
   Loader2,
@@ -130,7 +128,13 @@ function formatted(num: string) {
 }
 
 const inp =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
+  "w-full px-3 py-2.5 text-sm bg-card border border-foreground/40 focus:border-foreground focus:outline-none text-foreground placeholder:text-muted-foreground/50";
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+const FIG = "font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
 
 type FormState = Omit<CardRecord, "_id" | "reminderDismissed">;
 
@@ -209,98 +213,47 @@ const ReminderBanner: React.FC<{
 
   if (!due.length && !upcoming.length) return null;
 
+  const notice = (card: CardRecord, rd: string, overdue: boolean, text: string, when: string) => (
+    <div
+      key={card._id}
+      className="bg-card px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3"
+      style={{ border: `1px solid hsl(var(--${overdue ? "destructive" : "foreground"}))` }}
+    >
+      <div className="flex-1 min-w-0">
+        <SheetMark text={text} tone={overdue ? "stopped" : "waiting"} />
+        <p className="text-xs text-muted-foreground mt-1.5">
+          <span className="font-medium text-foreground">{card.bankName}</span>
+          {" · "}
+          <span className="font-heading tabular-nums">{masked(card.cardNumber)}</span>
+          {` · ${when} `}
+          <span className="font-medium text-foreground tabular-nums">{formatDisplayDate(rd)}</span>
+        </p>
+      </div>
+      <div className="flex items-center gap-2 sm:ml-auto">
+        <button
+          onClick={onAddNew}
+          className={`${KEY} px-3 py-2 border ${overdue ? "border-destructive bg-destructive text-destructive-foreground" : "border-foreground text-foreground hover:bg-primary/10"}`}
+        >
+          <Plus size={12} /> Add new card
+        </button>
+        <button onClick={() => onDismiss(card._id)} className={ACT} title="Dismiss" aria-label="Dismiss">
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-3">
       {due.map((card) => {
         const rd = reminderDate(card);
         const overdue = Math.abs(daysFromNow(rd));
-        return (
-          <div
-            key={card._id}
-            className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 flex flex-col sm:flex-row sm:items-center gap-3"
-          >
-            <div className="flex items-start gap-3 flex-1 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                <BellRing
-                  size={16}
-                  className="text-destructive animate-pulse"
-                />
-              </div>
-              <div>
-                <p className="text-sm font-heading font-semibold text-destructive">
-                  Overdue by {overdue} day{overdue !== 1 ? "s" : ""}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  <span className="font-medium text-foreground">
-                    {card.bankName}
-                  </span>
-                  {" · "}
-                  {masked(card.cardNumber)}
-                  {" — Was due on "}
-                  <span className="font-medium">{formatDisplayDate(rd)}</span>
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 sm:ml-auto">
-              <button
-                onClick={onAddNew}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-all"
-              >
-                <Plus size={12} /> Add New Card
-              </button>
-              <button
-                onClick={() => onDismiss(card._id)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
-        );
+        return notice(card, rd, true, `Overdue by ${overdue} day${overdue !== 1 ? "s" : ""}`, "was due on");
       })}
       {upcoming.map((card) => {
         const rd = reminderDate(card);
         const inDays = daysFromNow(rd);
-        return (
-          <div
-            key={card._id}
-            className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col sm:flex-row sm:items-center gap-3"
-          >
-            <div className="flex items-start gap-3 flex-1 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-[#ffe2021a] flex items-center justify-center flex-shrink-0">
-                <Bell size={16} className="text-amber-500" />
-              </div>
-              <div>
-                <p className="text-sm font-heading font-semibold text-amber-600">
-                  Due in {inDays} day{inDays !== 1 ? "s" : ""}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  <span className="font-medium text-foreground">
-                    {card.bankName}
-                  </span>
-                  {" · "}
-                  {masked(card.cardNumber)}
-                  {" — Reminder on "}
-                  <span className="font-medium">{formatDisplayDate(rd)}</span>
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onAddNew}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-all"
-              >
-                <Plus size={12} /> Add New Card
-              </button>
-              <button
-                onClick={() => onDismiss(card._id)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
-        );
+        return notice(card, rd, false, `Due in ${inDays} day${inDays !== 1 ? "s" : ""}`, "reminder on");
       })}
     </div>
   );
@@ -329,20 +282,12 @@ function buildCardColumns(
     {
       accessorKey: "companyName",
       header: "Company",
-      cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span>,
     },
     {
       accessorKey: "bankName",
       header: "Bank",
-      cell: ({ getValue }) => (
-        <span className="text-xs font-medium text-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="font-medium text-foreground">{(getValue() as string) || "—"}</span>,
     },
     {
       accessorKey: "cardNumber",
@@ -352,13 +297,13 @@ function buildCardColumns(
         const num = row.original.cardNumber;
         const revealed = revealedRows[id];
         return (
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-xs">
-              {revealed ? formatted(num) : masked(num)}
-            </span>
+          <div className="flex items-center gap-1.5">
+            <span className={`${FIG} tracking-wide whitespace-nowrap`}>{revealed ? formatted(num) : masked(num)}</span>
             <button
               onClick={() => setRevealedRows((p) => ({ ...p, [id]: !p[id] }))}
-              className="p-1 rounded text-muted-foreground hover:text-primary"
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+              title={revealed ? "Hide number" : "Show number"}
+              aria-label={revealed ? "Hide number" : "Show number"}
             >
               {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
             </button>
@@ -369,40 +314,28 @@ function buildCardColumns(
     {
       accessorKey: "cardHolder",
       header: "Card Holder",
-      cell: ({ getValue }) => (
-        <span className="text-xs text-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="text-xs text-foreground">{(getValue() as string) || "—"}</span>,
     },
     {
       accessorKey: "network",
       header: "Network",
-      cell: ({ getValue }) => (
-        <span className="px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className={LBL}>{(getValue() as string) || "—"}</span>,
     },
     {
       accessorKey: "cardType",
       header: "Type",
-      cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span>,
     },
     {
       accessorKey: "expiryDate",
       header: "Expiry",
-      cell: ({ getValue }) => {
+      cell: ({ getValue, row }) => {
         const val = getValue() as string;
-        return (
-          <span className="font-mono text-xs text-muted-foreground">
-            {val || "—"}
-          </span>
-        );
+        // A card past its reminder date (and not dismissed) is the one figure here that turns red.
+        const c = row.original;
+        const rd = c.reminderEnabled && val ? calculateReminderDate(val, c.reminderDays) : "";
+        const late = !!rd && !dismissed.includes(c._id) && daysFromNow(rd) <= 0;
+        return <span className={`font-heading text-[0.6875rem] font-semibold tabular-nums ${late ? "text-destructive" : "text-foreground"}`}>{val || "—"}</span>;
       },
     },
     {
@@ -410,13 +343,7 @@ function buildCardColumns(
       header: "Status",
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
-        return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
-            {active ? "Active" : "Inactive"}
-          </span>
-        );
+        return <SheetMark text={active ? "Active" : "Inactive"} tone={active ? "done" : "none"} />;
       },
     },
     {
@@ -425,28 +352,22 @@ function buildCardColumns(
       enableSorting: false,
       cell: ({ row }) => {
         const id = row.original._id;
-        const isEditing = editingId === id;
         return (
           <div className="flex items-center justify-end gap-1">
-            <button data-row-view
-              onClick={() => onView(row.original)}
-              className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
-              title="View details"
-            >
+            <button data-row-view onClick={() => onView(row.original)} className={ACT} title="View details" aria-label="View details">
               <Eye size={13} />
             </button>
             {canEdit && (
-              <button
-                onClick={() => handleEdit(id)}
-                className={`p-1.5 rounded-lg transition-colors ${isEditing ? "text-blue-400 bg-blue-400/10" : "text-blue-400 hover:bg-blue-400/10"}`}
-              >
+              <button onClick={() => handleEdit(id)} className={ACT} title="Edit" aria-label="Edit">
                 <Edit2 size={13} />
               </button>
             )}
             {canDelete && (
               <button
                 onClick={() => setDeleteId(id)}
-                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
+                title="Delete"
+                aria-label="Delete"
               >
                 <Trash2 size={13} />
               </button>
@@ -462,8 +383,6 @@ function buildCardColumns(
 const CardMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("card-master");
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
   const { data: dbData, isLoading: loadingCards } = useQuery({
     queryKey: ["cards"],
     queryFn: getCards,
@@ -972,41 +891,23 @@ const CardMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Card Master"]} />
-      <FinanceShell
-        title="Card Master"
-        subtitle="Register and manage bank cards with network, type and security details"
-        icon={CreditCard}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Bank cards"
+        subtitle="The company's debit and credit cards: bank, network, holder and expiry, with a reminder before each one runs out."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {hasAlerts && (
               <button
                 onClick={() => setShowReminderPanel((p) => !p)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-heading font-semibold transition-all ${overdueCount > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-amber-500/40 bg-[#ffe2021a] text-amber-600"}`}
+                aria-expanded={showReminderPanel}
+                className={`${KEY} px-3 py-2 border ${overdueCount > 0 ? "border-destructive text-destructive" : "border-foreground text-foreground hover:bg-primary/10"}`}
               >
-                <BellRing
-                  size={13}
-                  className={overdueCount > 0 ? "animate-pulse" : ""}
-                />
-                {overdueCount > 0
-                  ? `${overdueCount} overdue`
-                  : `${upcomingCount} upcoming`}
-                {showReminderPanel ? (
-                  <ChevronUp size={12} />
-                ) : (
-                  <ChevronDown size={12} />
-                )}
+                <BellRing size={13} />
+                {overdueCount > 0 ? `${overdueCount} overdue` : `${upcomingCount} upcoming`}
+                {showReminderPanel ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               </button>
             )}
-            <span
-              className="text-xs font-heading px-3 py-1.5 rounded-lg"
-              style={{
-                background: "rgba(99,102,241,0.12)",
-                border: "1px solid rgba(99,102,241,0.25)",
-                color: "#818cf8",
-              }}
-            >
-              {dbItems.length} Cards
-            </span>
             <input
               ref={importFileInputRef}
               type="file"
@@ -1017,30 +918,42 @@ const CardMaster: React.FC = () => {
             <button
               onClick={handleDownloadTemplate}
               title="Download a blank CSV template"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              className={`${KEY} px-3 py-2 border border-foreground text-foreground hover:bg-primary/10`}
             >
               <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
+              <span className="hidden sm:inline">Template</span>
             </button>
             <button
               onClick={handleImportClick}
               disabled={importing}
               title="Import cards from CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className={`${KEY} px-3 py-2 border border-foreground bg-foreground text-card`}
             >
-              {importing ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
-              </span>
+              {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              <span className="hidden sm:inline">{importing ? "Importing…" : "Import CSV"}</span>
             </button>
           </div>
         }
       >
-        <div className="space-y-4">
+        <div className="space-y-5">
+          {/* ── Figures ── */}
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {[
+                { label: "Cards", value: cardsWithDismiss.length, note: "in all", red: false },
+                { label: "Active", value: cardsWithDismiss.filter((c) => c.status).length, note: "in use", red: false },
+                { label: "Renewal due soon", value: upcomingCount, note: "reminder within 7 days", red: false },
+                { label: "Renewal overdue", value: overdueCount, note: "past the reminder date", red: overdueCount > 0 },
+              ].map((x) => (
+                <div key={x.label}>
+                  <p className="label" style={x.red ? { color: "var(--red)" } : undefined}>{x.label}</p>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color: x.red ? "var(--red)" : undefined }}>{x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {showReminderPanel && (
             <ReminderBanner
               cards={cardsWithDismiss}
@@ -1050,89 +963,51 @@ const CardMaster: React.FC = () => {
           )}
 
           {/* Form */}
-          {rights.canCreate && (
-          <div
-            className="rounded-xl overflow-hidden"
-            onKeyDown={preventEnterSubmit}
-            style={{
-              background: isDark
-                ? "rgba(12,14,22,0.55)"
-                : "rgba(255,255,255,0.82)",
-              border: isDark
-                ? "1px solid rgba(99,102,241,0.20)"
-                : "1px solid rgba(99,102,241,0.16)",
-              backdropFilter: "blur(18px) saturate(150%)",
-              WebkitBackdropFilter: "blur(18px) saturate(150%)",
-              boxShadow: isDark
-                ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
-                : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
-            }}
-          >
-            <div
-              className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
-              style={{
-                background: isDark
-                  ? "rgba(99,102,241,0.09)"
-                  : "rgba(99,102,241,0.05)",
-                borderBottom: isDark
-                  ? "1px solid rgba(99,102,241,0.18)"
-                  : "1px solid rgba(99,102,241,0.13)",
-              }}
-            >
-              <div>
-                <h2 className="text-sm font-heading font-semibold text-foreground">
-                  {editingId ? "Edit Card" : "Add Card"}
-                </h2>
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                  Fields marked <span className="text-destructive">*</span> are
-                  required
-                </p>
-              </div>
+          {(rights.canCreate || (rights.canEdit && editingId !== null)) && (
+          <div className="bg-card relative" onKeyDown={preventEnterSubmit} style={{ border: RULE, zIndex: 10 }}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+              <h2 className={HEAD}>{editingId ? "Edit card" : "Add card"}</h2>
+              <p className="text-[0.6875rem] text-muted-foreground">
+                Fields marked <span className="text-destructive">*</span> are required
+              </p>
             </div>
 
-            <div className="p-5">
-              {/* Card Preview */}
-              <div className="mb-5 rounded-2xl bg-gradient-to-br from-primary/80 via-primary to-primary/60 p-5 flex items-end justify-between shadow-lg min-h-[110px] relative overflow-hidden">
-                <div className="absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white/5" />
-                <div className="absolute -bottom-8 -left-4 w-40 h-40 rounded-full bg-white/5" />
-                <div>
-                  <p className="text-[0.625rem] text-primary-foreground/60 font-heading uppercase tracking-widest mb-1">
+            <div className="px-4 py-5">
+              {/* The card as it is being filled in: an outline drawing, not a coloured card */}
+              <div className="mb-6 max-w-[420px] px-5 py-4 flex items-end justify-between gap-4 min-h-[124px]" style={{ border: "1.5px solid hsl(var(--foreground))" }}>
+                <div className="min-w-0">
+                  <p className={LBL}>
                     {form.network || "Network"} · {form.cardType || "Type"}
                   </p>
-                  <p className="text-lg font-mono font-bold text-primary-foreground tracking-widest">
+                  <p className="font-heading text-lg font-semibold tabular-nums tracking-[0.08em] text-foreground mt-3 whitespace-nowrap">
                     {form.cardNumber
                       ? showFormCard
                         ? formatted(form.cardNumber)
                         : masked(form.cardNumber)
                       : "•••• •••• •••• ••••"}
                   </p>
-                  <p className="text-xs text-primary-foreground/70 mt-2 font-heading">
-                    {form.cardHolder || "Card Holder Name"}
+                  <p className={`text-xs mt-2 truncate ${form.cardHolder ? "text-foreground" : "text-muted-foreground"}`}>
+                    {form.cardHolder || "Card holder name"}
                   </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-[0.625rem] text-primary-foreground/60 font-heading uppercase tracking-widest">
-                    Expires
-                  </p>
-                  <p className="text-sm font-mono text-primary-foreground font-semibold">
+                <div className="text-right shrink-0">
+                  <p className={LBL}>Expires</p>
+                  <p className="font-heading text-sm font-semibold tabular-nums text-foreground mt-1">
                     {form.expiryDate || "MM/YY"}
                   </p>
                   {form.reminderEnabled && previewReminderDate && (
-                    <div className="flex items-center justify-end gap-1 mt-1.5">
-                      <Bell size={9} className="text-primary-foreground/50" />
-                      <p className="text-[0.625rem] text-primary-foreground/50 font-heading">
-                        {formatDisplayDate(previewReminderDate)}
-                      </p>
-                    </div>
+                    <p className="flex items-center justify-end gap-1 mt-2 text-[0.625rem] text-muted-foreground tabular-nums">
+                      <Bell size={9} /> {formatDisplayDate(previewReminderDate)}
+                    </p>
                   )}
                 </div>
               </div>
 
               {/* Fields */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
                 {/* Bank dropdown — live from BankMaster DB */}
                 <div>
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     Bank Name <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1166,7 +1041,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     Company Name
                   </label>
                   <div className="relative">
@@ -1191,9 +1066,9 @@ const CardMaster: React.FC = () => {
 
                 {/* Account Number — auto-filled from bank selection */}
                 <div>
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     Account Number
-                    <span className="ml-2 normal-case text-[0.625rem] text-muted-foreground/60">
+                    <span className="ml-2 normal-case tracking-normal font-body font-normal text-[0.625rem] text-muted-foreground">
                       (auto-filled)
                     </span>
                   </label>
@@ -1209,11 +1084,11 @@ const CardMaster: React.FC = () => {
                         setField("accountNumber", e.target.value)
                       }
                       placeholder="Auto-filled on bank selection"
-                      className={`${inp} pl-8 font-mono tracking-widest`}
+                      className={`${inp} pl-8 font-heading tabular-nums tracking-wide`}
                     />
                     {form.accountNumber && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                        AUTO
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                        Auto
                       </span>
                     )}
                   </div>
@@ -1221,9 +1096,9 @@ const CardMaster: React.FC = () => {
 
                 {/* IFSC — auto-filled, read-only */}
                 <div>
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     IFSC Code
-                    <span className="ml-2 normal-case text-[0.625rem] text-muted-foreground/60">
+                    <span className="ml-2 normal-case tracking-normal font-body font-normal text-[0.625rem] text-muted-foreground">
                       (auto-filled)
                     </span>
                   </label>
@@ -1237,18 +1112,18 @@ const CardMaster: React.FC = () => {
                       value={form.ifscCode}
                       readOnly
                       placeholder="Auto-filled on bank selection"
-                      className={`${inp} pl-8 font-mono tracking-widest bg-muted/50 cursor-default text-muted-foreground`}
+                      className={`${inp} pl-8 font-heading tabular-nums tracking-wide border-dashed cursor-default text-muted-foreground`}
                     />
                     {form.ifscCode && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                        AUTO
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                        Auto
                       </span>
                     )}
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     Card Network
                   </label>
                   <div className="relative">
@@ -1272,7 +1147,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     Card Type
                   </label>
                   <div className="relative">
@@ -1296,7 +1171,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     Card Holder Name
                   </label>
                   <input
@@ -1309,7 +1184,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     Card Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1327,7 +1202,7 @@ const CardMaster: React.FC = () => {
                         )
                       }
                       placeholder="16-digit card number"
-                      className={`${inp} pl-8 pr-10 font-mono tracking-widest ${errors.cardNumber ? "border-destructive" : ""}`}
+                      className={`${inp} pl-8 pr-10 font-heading tabular-nums tracking-wide ${errors.cardNumber ? "border-destructive" : ""}`}
                     />
                     <button
                       type="button"
@@ -1345,7 +1220,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     CVC / CVV <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1363,7 +1238,7 @@ const CardMaster: React.FC = () => {
                         )
                       }
                       placeholder="3 or 4 digits"
-                      className={`${inp} pl-8 pr-10 font-mono tracking-widest ${errors.cvv ? "border-destructive" : ""}`}
+                      className={`${inp} pl-8 pr-10 font-heading tabular-nums tracking-wide ${errors.cvv ? "border-destructive" : ""}`}
                     />
                     <button
                       type="button"
@@ -1381,7 +1256,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className={`block ${LBL} mb-1.5`}>
                     Expiry Date <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1404,7 +1279,7 @@ const CardMaster: React.FC = () => {
                         const [year, month] = val.split("-");
                         handleExpiry(`${month}${year.slice(-2)}`);
                       }}
-                      className={`${inp} pl-8 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.expiryDate ? "border-destructive" : ""}`}
+                      className={`${inp} pl-8 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.expiryDate ? "border-destructive" : ""}`}
                     />
                   </div>
                   {errors.expiryDate && (
@@ -1416,51 +1291,34 @@ const CardMaster: React.FC = () => {
 
                 {/* Reminder */}
                 <div className="sm:col-span-2">
-                  <div
-                    className={`rounded-xl border p-4 transition-all ${form.reminderEnabled ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30"}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center ${form.reminderEnabled ? "bg-primary/15" : "bg-muted"}`}
-                        >
-                          <Bell
-                            size={15}
-                            className={
-                              form.reminderEnabled
-                                ? "text-primary"
-                                : "text-muted-foreground"
-                            }
-                          />
-                        </div>
-                        <div>
-                          <p className="text-sm font-heading font-semibold text-foreground">
-                            Card Renewal Reminder
-                          </p>
-                          <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
-                            {form.reminderEnabled && previewReminderDate
-                              ? `Will remind on ${formatDisplayDate(previewReminderDate)}`
-                              : "No reminder set"}
-                          </p>
-                        </div>
+                  <div className="p-4" style={{ border: `1px solid hsl(var(--foreground) / ${form.reminderEnabled ? 1 : 0.4})` }}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground">Card renewal reminder</p>
+                        <p className="text-[0.6875rem] text-muted-foreground mt-1">
+                          {form.reminderEnabled && previewReminderDate
+                            ? `Will remind on ${formatDisplayDate(previewReminderDate)}`
+                            : "No reminder set"}
+                        </p>
                       </div>
                       <button
                         type="button"
                         onClick={() =>
                           setField("reminderEnabled", !form.reminderEnabled)
                         }
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.reminderEnabled ? "bg-primary" : "bg-muted border border-border"}`}
+                        aria-pressed={form.reminderEnabled}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none shrink-0 ${form.reminderEnabled ? "bg-foreground" : "bg-muted-foreground/30"}`}
                       >
                         <span
-                          className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform shadow-sm ${form.reminderEnabled ? "translate-x-6" : "translate-x-1"}`}
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${form.reminderEnabled ? "translate-x-4" : "translate-x-0.5"}`}
                         />
                       </button>
                     </div>
 
                     {form.reminderEnabled && (
-                      <div className="mt-4 pt-4 border-t border-primary/15 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="mt-4 pt-4 border-t border-border grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                         <div>
-                          <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                          <label className={`block ${LBL} mb-1.5`}>
                             Remind Before Expiry (Days)
                           </label>
                           <div className="relative">
@@ -1479,16 +1337,17 @@ const CardMaster: React.FC = () => {
                                   Math.max(1, parseInt(e.target.value) || 1),
                                 )
                               }
-                              className={`${inp} pl-8 font-mono`}
+                              className={`${inp} pl-8 font-heading tabular-nums`}
                             />
                           </div>
-                          <div className="flex flex-wrap gap-1.5 mt-2">
+                          <div className="seg mt-2">
                             {[7, 14, 30, 45, 60, 90].map((d) => (
                               <button
                                 key={d}
                                 type="button"
                                 onClick={() => setField("reminderDays", d)}
-                                className={`px-2.5 py-1 rounded-lg text-[0.6875rem] font-heading border transition-all ${form.reminderDays === d ? "btn-module text-white border-primary" : "bg-card border-border text-muted-foreground hover:border-primary/40"}`}
+                                aria-pressed={form.reminderDays === d}
+                                className={form.reminderDays === d ? "on" : undefined}
                               >
                                 {d}d
                               </button>
@@ -1496,26 +1355,16 @@ const CardMaster: React.FC = () => {
                           </div>
                         </div>
                         <div>
-                          <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                          <label className={`block ${LBL} mb-1.5`}>
                             Reminder Will Fire On
                           </label>
-                          <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary/10 border border-primary/20">
-                            <CalendarDays
-                              size={14}
-                              className="text-primary flex-shrink-0"
-                            />
-                            <div>
-                              <p className="text-sm font-heading font-semibold text-primary">
-                                {previewReminderDate
-                                  ? formatDisplayDate(previewReminderDate)
-                                  : "—"}
-                              </p>
-                              <p className="text-[0.6875rem] text-muted-foreground">
-                                {form.reminderDays} day
-                                {form.reminderDays !== 1 ? "s" : ""} before
-                                expiry
-                              </p>
-                            </div>
+                          <div className="px-3 py-2.5 border border-dashed border-foreground/40">
+                            <p className="font-heading text-sm font-semibold tabular-nums text-foreground">
+                              {previewReminderDate ? formatDisplayDate(previewReminderDate) : "—"}
+                            </p>
+                            <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+                              {form.reminderDays} day{form.reminderDays !== 1 ? "s" : ""} before expiry
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -1528,19 +1377,15 @@ const CardMaster: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setField("status", !form.status)}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form.status ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${form.status ? "bg-foreground" : "bg-muted-foreground/30"}`}
                     >
                       <span
-                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.status ? "translate-x-4" : "translate-x-0.5"}`}
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${form.status ? "translate-x-4" : "translate-x-0.5"}`}
                       />
                     </button>
-                    <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                    <span className={LBL}>
                       Status —{" "}
-                      <span
-                        className={
-                          form.status ? "text-emerald-600" : "text-foreground"
-                        }
-                      >
+                      <span className="text-foreground">
                         {form.status ? "Active" : "Inactive"}
                       </span>
                     </span>
@@ -1549,22 +1394,16 @@ const CardMaster: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-              <p className="text-[0.6875rem] text-muted-foreground">
-                {canSave ? (
-                  <span className="text-emerald-500 font-medium">
-                    Ready to save
-                  </span>
-                ) : (
-                  "Fill in the required fields to save"
-                )}
-              </p>
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3" style={{ borderTop: RULE }}>
+              <div className="hidden sm:block">
+                {canSave ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-[0.6875rem] text-muted-foreground">Fill in the required fields to save</span>}
+              </div>
+              <div className="flex items-center gap-2 sm:ml-auto">
                 <button
                   type="button"
                   onClick={handleReset}
                   disabled={!isDirty && !editingId}
-                  className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  className={`${KEY} flex-1 sm:flex-none h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}
                 >
                   <RotateCcw size={12} />
                   {editingId ? "Cancel" : "Reset"}
@@ -1572,10 +1411,10 @@ const CardMaster: React.FC = () => {
                 <button
                   onClick={handleSave}
                   disabled={!canSave}
-                  className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                  className={`${KEY} flex-1 sm:flex-none h-9 px-5 bg-foreground text-card border border-foreground whitespace-nowrap`}
                 >
-                  {editingId ? <Check size={14} /> : <Plus size={14} />}
-                  {editingId ? "Update Card" : "Save Card"}
+                  {editingId ? <Check size={13} /> : <Plus size={13} />}
+                  {editingId ? "Update card" : "Save card"}
                 </button>
               </div>
             </div>
@@ -1583,27 +1422,20 @@ const CardMaster: React.FC = () => {
           )}
 
           {/* Table */}
-          <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-              <div>
-                <h3 className="font-heading font-semibold text-foreground text-sm">
-                  Card Records
-                </h3>
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                  {filtered.length} record{filtered.length !== 1 ? "s" : ""}
-                </p>
-              </div>
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+              <p className="flex items-baseline gap-2.5">
+                <span className={HEAD}>Cards</span>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
+              </p>
               <div className="relative">
-                <Search
-                  size={13}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-                />
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
                   type="text"
                   placeholder="Search..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-36 sm:w-44"
+                  className="pl-8 pr-3 h-9 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none w-40 sm:w-48"
                 />
               </div>
             </div>
@@ -1622,7 +1454,7 @@ const CardMaster: React.FC = () => {
                 }
                 rowClassName={(row) =>
                   row.original._id === editingId
-                    ? "bg-primary/5 border-l-2 border-l-primary"
+                    ? "shadow-[inset_3px_0_0_hsl(var(--primary))]"
                     : ""
                 }
               />
@@ -1632,32 +1464,23 @@ const CardMaster: React.FC = () => {
           {/* Delete Confirm */}
           {deleteId && (
             <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-              <div className="rounded-xl bg-card border border-border shadow-xl p-6 max-w-sm w-full mx-4">
-                <h3 className="font-heading font-semibold text-foreground mb-2">
-                  Delete Card?
-                </h3>
-                <p className="text-sm text-muted-foreground mb-5">
-                  This action cannot be undone.
-                </p>
-                <div className="flex gap-3 justify-end">
-                  <button
-                    onClick={() => setDeleteId(null)}
-                    className="px-4 py-2 rounded-lg border border-border text-sm font-heading text-muted-foreground hover:bg-muted transition-all"
-                  >
+              <div className="sheet-frame bg-card p-5 max-w-sm w-full mx-4" style={{ margin: "0 16px", border: "1.5px solid hsl(var(--destructive))" }}>
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-destructive">Delete card</p>
+                <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1">Delete this card?</h3>
+                <p className="text-sm text-muted-foreground mt-2 mb-5">This cannot be undone.</p>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setDeleteId(null)} className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}>
                     Cancel
                   </button>
-                  <button
-                    onClick={() => handleDelete(deleteId)}
-                    className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground text-sm font-heading hover:bg-destructive/90 transition-all"
-                  >
-                    Delete
+                  <button onClick={() => handleDelete(deleteId)} className={`${KEY} h-9 px-4 bg-destructive text-destructive-foreground border border-destructive`}>
+                    <Trash2 size={12} /> Delete
                   </button>
                 </div>
               </div>
             </div></BodyPortal>
           )}
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {/* Import Results Modal */}
       {importResults && (
@@ -1665,51 +1488,33 @@ const CardMaster: React.FC = () => {
           open={!!importResults}
           onOpenChange={() => setImportResults(null)}
         >
-          <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogContent className="sheet-frame max-w-lg max-h-[80vh] flex flex-col" style={{ margin: 0 }}>
             <DialogHeader>
-              <DialogTitle className="font-heading text-base">
-                Import Results
-              </DialogTitle>
+              <div className="pb-3" style={{ borderBottom: RULE }}>
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Cards · CSV import</p>
+                <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Import results</DialogTitle>
+              </div>
             </DialogHeader>
-            <div className="flex gap-3 text-sm mb-2">
-              <span className="text-emerald-600 font-medium">
-                ✓ {importResults.filter((r) => r.status === "success").length}{" "}
-                imported
-              </span>
-              <span className="text-destructive font-medium">
-                ✗ {importResults.filter((r) => r.status === "error").length}{" "}
-                failed
-              </span>
+            <div className="flex items-center gap-4 flex-wrap mb-3">
+              <SheetMark text={`${importResults.filter((r) => r.status === "success").length} imported`} tone="done" />
+              {importResults.some((r) => r.status === "error") && (
+                <SheetMark text={`${importResults.filter((r) => r.status === "error").length} failed`} tone="stopped" />
+              )}
             </div>
-            <div className="overflow-y-auto flex-1 space-y-1.5 pr-1">
-              {importResults.map((r) => (
-                <div
-                  key={r.row}
-                  className={`flex items-start gap-2.5 rounded-lg px-3 py-2 text-xs ${
-                    r.status === "success"
-                      ? "bg-emerald-500/8 text-emerald-700"
-                      : "bg-destructive/8 text-destructive"
-                  }`}
-                >
-                  <span className="font-mono shrink-0 text-muted-foreground">
-                    Row {r.row}
-                  </span>
-                  <span className="font-medium shrink-0">{r.name}</span>
-                  {r.status === "success" ? (
-                    <span className="ml-auto text-emerald-600">✓</span>
-                  ) : (
-                    <span className="ml-2 text-destructive/80">
-                      {r.message}
-                    </span>
-                  )}
+            <div className="overflow-y-auto flex-1" style={{ border: RULE }}>
+              {importResults.map((r, i) => (
+                <div key={r.row} className="flex items-start gap-3 px-3 py-2 text-sm" style={i ? { borderTop: "1px solid hsl(var(--border) / 0.7)" } : undefined}>
+                  <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0 mt-1 w-12">Row {r.row}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate text-foreground">{r.name}</p>
+                    {r.status !== "success" && r.message && <p className="text-xs text-destructive mt-0.5">{r.message}</p>}
+                  </div>
+                  {r.status === "success" ? <Check size={14} className="text-foreground shrink-0 mt-0.5" /> : <X size={14} className="text-destructive shrink-0 mt-0.5" />}
                 </div>
               ))}
             </div>
             <div className="pt-3 flex justify-end">
-              <button
-                onClick={() => setImportResults(null)}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
+              <button onClick={() => setImportResults(null)} className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}>
                 Close
               </button>
             </div>
@@ -1727,147 +1532,93 @@ const CardMaster: React.FC = () => {
               setDrawerRevealed(false);
             }}
           />
-          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-2">
-                <CreditCard size={15} className="text-primary" />
-                <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Card Details
-                </h3>
+          <div
+            className="sheet-frame relative w-full max-w-sm bg-card flex flex-col animate-in slide-in-from-right duration-200"
+            style={{ margin: 0, borderLeft: RULE }}
+          >
+            <div className="flex items-end justify-between gap-3 px-5 py-4" style={{ borderBottom: RULE }}>
+              <div className="min-w-0">
+                <p className={LBL}>{[viewRecord.network, viewRecord.cardType].filter(Boolean).join(" · ") || "Card"}</p>
+                <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{viewRecord.bankName || "Card"}</h3>
               </div>
               <button
                 onClick={() => {
                   setViewRecord(null);
                   setDrawerRevealed(false);
                 }}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+                className="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Close"
               >
-                <XCircle size={15} />
+                <X size={16} />
               </button>
             </div>
-            <div className="p-5 space-y-4 overflow-y-auto flex-1">
-              {viewRecord.companyName && (
-                <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    Company
-                  </p>
-                  <p className="text-sm font-medium text-foreground">
-                    {viewRecord.companyName}
-                  </p>
-                </div>
-              )}
+            <div className="p-5 space-y-5 overflow-y-auto flex-1">
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Bank
-                </p>
-                <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
-                  <Landmark size={12} className="text-muted-foreground" />
-                  {viewRecord.bankName || "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Card Holder
-                </p>
-                <p className="text-sm text-foreground">
-                  {viewRecord.cardHolder || "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Card Number
-                </p>
+                <p className={`${LBL} mb-1`}>Card number</p>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm text-foreground">
-                    {drawerRevealed
-                      ? formatted(viewRecord.cardNumber)
-                      : masked(viewRecord.cardNumber)}
+                  <span className="font-heading text-sm font-semibold tabular-nums tracking-wide text-foreground">
+                    {drawerRevealed ? formatted(viewRecord.cardNumber) : masked(viewRecord.cardNumber)}
                   </span>
                   <button
                     onClick={() => setDrawerRevealed((p) => !p)}
-                    className="p-1 rounded text-muted-foreground hover:text-primary"
+                    className="p-1 text-muted-foreground hover:text-foreground transition-colors"
                     title={drawerRevealed ? "Hide" : "Reveal"}
+                    aria-label={drawerRevealed ? "Hide number" : "Reveal number"}
                   >
                     {drawerRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
                   </button>
                 </div>
-                <p className="text-[0.625rem] text-muted-foreground mt-0.5 flex items-center gap-1">
-                  <ShieldAlert size={9} /> Card number hidden for security
-                </p>
+                {!drawerRevealed && <p className="text-[0.625rem] text-muted-foreground mt-1">Hidden for security</p>}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    Network
-                  </p>
-                  <span className="inline-flex px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary font-medium">
-                    {viewRecord.network || "—"}
-                  </span>
+              {[
+                { l: "Card holder", v: viewRecord.cardHolder || "—", fig: false },
+                { l: "Company", v: viewRecord.companyName || "—", fig: false },
+                { l: "Expiry", v: viewRecord.expiryDate || "—", fig: true },
+              ].map((x) => (
+                <div key={x.l}>
+                  <p className={`${LBL} mb-1`}>{x.l}</p>
+                  <p className={`text-sm text-foreground break-words ${x.fig ? "font-heading font-semibold tabular-nums" : ""}`}>{x.v}</p>
                 </div>
-                <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    Card Type
-                  </p>
-                  <p className="text-sm text-foreground">
-                    {viewRecord.cardType || "—"}
-                  </p>
-                </div>
+              ))}
+              <div>
+                <p className={`${LBL} mb-1.5`}>Status</p>
+                <SheetMark text={viewRecord.status ? "Active" : "Inactive"} tone={viewRecord.status ? "done" : "none"} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    Expiry
-                  </p>
-                  <p className="font-mono text-sm text-foreground flex items-center gap-1">
-                    <CalendarDays size={11} className="text-muted-foreground" />
-                    {viewRecord.expiryDate || "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    Status
-                  </p>
-                  <span
-                    className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.status ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-                  >
-                    {viewRecord.status ? "Active" : "Inactive"}
-                  </span>
-                </div>
-              </div>
-              {viewRecord.reminderEnabled && viewRecord.expiryDate && (
-                <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    Reminder
-                  </p>
-                  <p className="text-sm text-foreground flex items-center gap-1.5">
-                    <Bell size={12} className="text-amber-500" />
-                    {viewRecord.reminderDays} days before expiry
-                  </p>
-                  {(() => {
-                    const rd = calculateReminderDate(
-                      viewRecord.expiryDate,
-                      viewRecord.reminderDays,
-                    );
-                    return rd ? (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {formatDisplayDate(rd)}
-                      </p>
-                    ) : null;
-                  })()}
-                </div>
-              )}
+              {viewRecord.reminderEnabled && viewRecord.expiryDate && (() => {
+                const rd = calculateReminderDate(viewRecord.expiryDate, viewRecord.reminderDays);
+                return (
+                  <div>
+                    <p className={`${LBL} mb-1`}>Renewal reminder</p>
+                    <p className="text-sm text-foreground">
+                      {viewRecord.reminderDays} days before expiry
+                      {rd ? <span className="text-muted-foreground tabular-nums"> · {formatDisplayDate(rd)}</span> : null}
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
-            <div className="px-5 py-3 border-t border-border">
+            <div className="px-5 py-3 flex justify-end gap-2" style={{ borderTop: RULE }}>
               <button
                 onClick={() => {
-                  handleEdit(viewRecord._id);
                   setViewRecord(null);
                   setDrawerRevealed(false);
                 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white "
+                className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}
               >
-                <Edit2 size={13} /> Edit Card
+                Close
               </button>
+              {rights.canEdit && (
+                <button
+                  onClick={() => {
+                    handleEdit(viewRecord._id);
+                    setViewRecord(null);
+                    setDrawerRevealed(false);
+                  }}
+                  className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}
+                >
+                  <Edit2 size={12} /> Edit
+                </button>
+              )}
             </div>
           </div>
         </div></BodyPortal>
