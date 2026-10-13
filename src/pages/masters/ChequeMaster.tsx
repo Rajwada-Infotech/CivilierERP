@@ -1,8 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftFormSync, preventEnterSubmit } from "@/hooks/useDraftForm";
-import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,7 +20,6 @@ import {
   X,
   Search,
   Hash,
-  Calculator,
   BookOpen,
   Eye,
   Printer,
@@ -158,18 +156,17 @@ interface ImportRowResult {
 function MicrBreakdown({ value }: { value: string }) {
   const p = parseMicr(value);
   const segments = [
-    { label: "Cheque No", val: p.chequeNo, color: "text-primary" },
-    { label: "City",      val: p.cityCode,   color: "text-amber-600 dark:text-amber-400" },
-    { label: "Bank",      val: p.bankCode,   color: "text-emerald-600 dark:text-emerald-400" },
-    { label: "Branch",    val: p.branchCode, color: "text-sky-600 dark:text-sky-400" },
+    { label: "Cheque No", val: p.chequeNo },
+    { label: "City",      val: p.cityCode },
+    { label: "Bank",      val: p.bankCode },
+    { label: "Branch",    val: p.branchCode },
   ];
   return (
-    <div className="flex items-center gap-2 mt-1 flex-wrap">
+    <div className="flex items-baseline gap-x-3 gap-y-1 mt-1.5 flex-wrap">
       {segments.map((s, i) => (
-        <span key={i} className="flex items-center gap-1">
-          <span className={`font-mono text-[0.6875rem] font-semibold ${s.color}`}>{s.val.trim() || "···"}</span>
-          <span className="text-[0.625rem] text-muted-foreground">{s.label}</span>
-          {i < segments.length - 1 && <span className="text-muted-foreground/40 text-[0.625rem]">·</span>}
+        <span key={i} className="flex items-baseline gap-1.5">
+          <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{s.val.trim() || "···"}</span>
+          <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{s.label}</span>
         </span>
       ))}
     </div>
@@ -177,9 +174,15 @@ function MicrBreakdown({ value }: { value: string }) {
 }
 
 const inp =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
+  "w-full text-sm border border-foreground/40 focus:border-foreground px-3 py-2.5 bg-card text-foreground placeholder:text-muted-foreground/50 focus:outline-none";
 const sel =
-  "w-full appearance-none pl-3 pr-9 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
+  "w-full appearance-none pl-3 pr-9 py-2.5 text-sm border border-foreground/40 focus:border-foreground bg-card text-foreground focus:outline-none";
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+const FIG = "font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
 
 // ─── Column builder ────────────────────────────────────────────────────────────
 function buildChequeColumns(
@@ -198,36 +201,25 @@ function buildChequeColumns(
     {
       id: "bank",
       header: "Bank",
-      cell: ({ row }) => (
-        <span className="font-medium text-foreground">
-          {row.original.BankName || "—"}
-        </span>
-      ),
+      cell: ({ row }) => <span className="font-medium text-foreground">{row.original.BankName || "—"}</span>,
     },
     {
       accessorKey: "AccountNumber",
       header: "Account Number",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className={`${FIG} tracking-wide`}>{(getValue() as string) || "—"}</span>,
     },
     {
       accessorKey: "ChequeLotNumber",
       header: "Cheque Book Number",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs text-primary">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className={FIG}>{(getValue() as string) || "—"}</span>,
     },
     {
       id: "range",
       header: "Range",
       cell: ({ row }) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {displayChequeNo(row.original.ChequeStartMICR, row.original.ChequeStartNumber)} –{" "}
+        <span className={`${FIG} whitespace-nowrap`}>
+          {displayChequeNo(row.original.ChequeStartMICR, row.original.ChequeStartNumber)}
+          <span className="text-muted-foreground font-normal"> to </span>
           {displayChequeNo(row.original.ChequeEndMICR, row.original.ChequeEndNumber)}
         </span>
       ),
@@ -235,24 +227,14 @@ function buildChequeColumns(
     {
       accessorKey: "TotalCheques",
       header: "Total",
-      cell: ({ getValue }) => (
-        <span className="text-xs font-semibold text-foreground">
-          {((getValue() as number) || 0).toLocaleString()}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className={FIG}>{((getValue() as number) || 0).toLocaleString()}</span>,
     },
     {
       accessorKey: "Status",
       header: "Status",
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
-        return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
-            {active ? "Active" : "Inactive"}
-          </span>
-        );
+        return <SheetMark text={active ? "Active" : "Inactive"} tone={active ? "done" : "none"} />;
       },
     },
     {
@@ -264,54 +246,40 @@ function buildChequeColumns(
         if (deleteId === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[0.6875rem] text-muted-foreground mr-1">
-                Delete?
-              </span>
               <button
                 onClick={() => handleDelete(id)}
-                className="p-1 rounded text-destructive hover:bg-destructive/10"
+                className="h-7 px-2 flex items-center gap-1 border border-destructive bg-destructive text-destructive-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]"
+                title="Confirm delete"
               >
-                <Check size={12} />
+                <Check size={12} /> Delete
               </button>
-              <button
-                onClick={() => setDeleteId(null)}
-                className="p-1 rounded text-muted-foreground hover:bg-muted"
-              >
-                <X size={12} />
+              <button onClick={() => setDeleteId(null)} className={ACT} title="Keep" aria-label="Keep">
+                <X size={13} />
               </button>
             </div>
           );
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button data-row-view
-              onClick={() => onView(row.original)}
-              className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
-              title="View details"
-            >
+            <button data-row-view onClick={() => onView(row.original)} className={ACT} title="View details" aria-label="View details">
               <Eye size={13} />
             </button>
             {canPrint && (
-              <button
-                onClick={() => onPrint(row.original)}
-                className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors"
-                title="Print"
-              >
+              <button onClick={() => onPrint(row.original)} className={ACT} title="Print" aria-label="Print">
                 <Printer size={13} />
               </button>
             )}
             {canEdit && (
-              <button
-                onClick={() => handleEdit(row.original)}
-                className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10"
-              >
+              <button onClick={() => handleEdit(row.original)} className={ACT} title="Edit" aria-label="Edit">
                 <Edit2 size={13} />
               </button>
             )}
             {canDelete && (
               <button
                 onClick={() => setDeleteId(id)}
-                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10"
+                className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
+                title="Delete"
+                aria-label="Delete"
               >
                 <Trash2 size={13} />
               </button>
@@ -327,8 +295,6 @@ function buildChequeColumns(
 const ChequeMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("cheque-master");
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
 
   const { data: chequeData, isLoading: loadingCheques } = useQuery({
     queryKey: ["cheques"],
@@ -761,22 +727,12 @@ const ChequeMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Cheque Master"]} />
-      <FinanceShell
-        title="Cheque Master"
-        subtitle="Register and manage cheque books / lots with bank and lot details"
-        icon={BookOpen}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Cheque books"
+        subtitle="Each cheque book issued by a bank: its book number and the run of cheque numbers it holds."
         action={
-          <div className="flex items-center gap-2">
-            <span
-              className="text-xs font-heading px-3 py-1.5 rounded-lg"
-              style={{
-                background: "rgba(99,102,241,0.12)",
-                border: "1px solid rgba(99,102,241,0.25)",
-                color: "#818cf8",
-              }}
-            >
-              {dbCheques.length} Lots
-            </span>
+          <div className="flex items-center gap-2 flex-wrap">
             <input
               ref={importFileInputRef}
               type="file"
@@ -787,85 +743,61 @@ const ChequeMaster: React.FC = () => {
             <button
               onClick={handleDownloadTemplate}
               title="Download a blank CSV template"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              className={`${KEY} px-3 py-2 border border-foreground text-foreground hover:bg-primary/10`}
             >
               <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
+              <span className="hidden sm:inline">Template</span>
             </button>
             <button
               onClick={handleImportClick}
               disabled={importing}
               title="Import cheque lots from CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className={`${KEY} px-3 py-2 border border-foreground bg-foreground text-card`}
             >
-              {importing ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
-              </span>
+              {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              <span className="hidden sm:inline">{importing ? "Importing…" : "Import CSV"}</span>
             </button>
           </div>
         }
       >
-        {/* Form */}
-        {rights.canCreate && (
-        <div
-          className="rounded-xl overflow-hidden"
-          onKeyDown={preventEnterSubmit}
-          style={{
-            background: isDark
-              ? "rgba(12,14,22,0.55)"
-              : "rgba(255,255,255,0.82)",
-            border: isDark
-              ? "1px solid rgba(99,102,241,0.20)"
-              : "1px solid rgba(99,102,241,0.16)",
-            backdropFilter: "blur(18px) saturate(150%)",
-            WebkitBackdropFilter: "blur(18px) saturate(150%)",
-            boxShadow: isDark
-              ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
-              : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
-          }}
-        >
-          <div
-            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
-            style={{
-              background: isDark
-                ? "rgba(99,102,241,0.09)"
-                : "rgba(99,102,241,0.05)",
-              borderBottom: isDark
-                ? "1px solid rgba(99,102,241,0.18)"
-                : "1px solid rgba(99,102,241,0.13)",
-            }}
-          >
-            <div>
-              <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? "Edit Cheque Lot" : "Add Cheque Lot"}
-              </h2>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                Fields marked <span className="text-destructive">*</span> are
-                required
-              </p>
-            </div>
+        {/* ── Figures ── */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Cheque books", value: dbCheques.length, note: "in all" },
+              { label: "Active", value: dbCheques.filter((c) => c.Status).length, note: "in use" },
+              { label: "Cheques", value: dbCheques.reduce((sum, c) => sum + Number(c.TotalCheques || 0), 0), note: "across all books" },
+              { label: "Banks", value: new Set(dbCheques.map((c) => c.BankId).filter((id) => id != null)).size, note: "with a book on file" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Form ── */}
+        {(rights.canCreate || (rights.canEdit && editingId !== null)) && (
+        <div className="bg-card relative" onKeyDown={preventEnterSubmit} style={{ border: RULE, zIndex: 10 }}>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+            <h2 className={HEAD}>{editingId ? "Edit cheque book" : "Add cheque book"}</h2>
+            <p className="text-[0.6875rem] text-muted-foreground">
+              Fields marked <span className="text-destructive">*</span> are required
+            </p>
           </div>
 
-          <div className="px-5 sm:px-6 py-6 space-y-7">
+          <div className="px-4 py-5 space-y-7">
             {/* ── Section: Bank Details ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <Landmark size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Bank Details
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Bank Details
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
                 {/* Company */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Company <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -895,10 +827,10 @@ const ChequeMaster: React.FC = () => {
 
                 {/* Bank */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     Bank Name <span className="text-destructive">*</span>
                     {form.companyId && (
-                      <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
+                      <span className="normal-case tracking-normal font-body text-[0.625rem] text-muted-foreground font-normal">
                         ({selectedCompanyLabel} only)
                       </span>
                     )}
@@ -940,9 +872,9 @@ const ChequeMaster: React.FC = () => {
 
                 {/* Account Number */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     Account Number <span className="text-destructive">*</span>
-                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
+                    <span className="normal-case tracking-normal font-body text-[0.625rem] text-muted-foreground font-normal">
                       (auto-filled)
                     </span>
                   </label>
@@ -958,11 +890,11 @@ const ChequeMaster: React.FC = () => {
                         setField("accountNumber", e.target.value)
                       }
                       placeholder="Auto-filled on bank selection"
-                      className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNumber ? "border-destructive" : ""}`}
+                      className={`${inp} pl-8 font-heading tabular-nums tracking-wide ${errors.accountNumber ? "border-destructive" : ""}`}
                     />
                     {form.accountNumber && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                        AUTO
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                        Auto
                       </span>
                     )}
                   </div>
@@ -975,9 +907,9 @@ const ChequeMaster: React.FC = () => {
 
                 {/* IFSC */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     IFSC Code
-                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
+                    <span className="normal-case tracking-normal font-body text-[0.625rem] text-muted-foreground font-normal">
                       (auto-filled)
                     </span>
                   </label>
@@ -991,11 +923,11 @@ const ChequeMaster: React.FC = () => {
                       value={form.ifscCode}
                       readOnly
                       placeholder="Auto-filled on bank selection"
-                      className={`${inp} pl-8 font-mono tracking-widest bg-muted/50 cursor-default text-muted-foreground`}
+                      className={`${inp} pl-8 font-heading tabular-nums tracking-wide border-dashed cursor-default text-muted-foreground`}
                     />
                     {form.ifscCode && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                        AUTO
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                        Auto
                       </span>
                     )}
                   </div>
@@ -1005,18 +937,13 @@ const ChequeMaster: React.FC = () => {
 
             {/* ── Section: Cheque Lot ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <BookOpen size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Cheque Lot
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Cheque Lot
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
                 {/* Cheque Book Number */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     Cheque Book Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1041,9 +968,9 @@ const ChequeMaster: React.FC = () => {
 
                 {/* First Cheque Number (MICR) */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     First Cheque Number <span className="text-destructive">*</span>
-                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
+                    <span className="normal-case tracking-normal font-body text-[0.625rem] text-muted-foreground font-normal">
                       (6 digits, or full 15-char MICR)
                     </span>
                   </label>
@@ -1056,7 +983,7 @@ const ChequeMaster: React.FC = () => {
                       onChange={(e) => setField("chqStart", e.target.value.toUpperCase())}
                       onBlur={(e) => setField("chqStart", autoPadChequeNo(e.target.value.toUpperCase()))}
                       placeholder="e.g. 600001"
-                      className={`${inp} pl-8 font-mono tracking-widest ${errors.chqStart ? "border-destructive" : ""}`}
+                      className={`${inp} pl-8 font-heading tabular-nums tracking-wide ${errors.chqStart ? "border-destructive" : ""}`}
                     />
                   </div>
                   {form.chqStart.length > 0 && (
@@ -1069,9 +996,9 @@ const ChequeMaster: React.FC = () => {
 
                 {/* Last Cheque Number (MICR) */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     Last Cheque Number <span className="text-destructive">*</span>
-                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
+                    <span className="normal-case tracking-normal font-body text-[0.625rem] text-muted-foreground font-normal">
                       (6 digits, or full 15-char MICR)
                     </span>
                   </label>
@@ -1084,7 +1011,7 @@ const ChequeMaster: React.FC = () => {
                       onChange={(e) => setField("chqEnd", e.target.value.toUpperCase())}
                       onBlur={(e) => setField("chqEnd", autoPadChequeNo(e.target.value.toUpperCase()))}
                       placeholder="e.g. 600050"
-                      className={`${inp} pl-8 font-mono tracking-widest ${errors.chqEnd ? "border-destructive" : ""}`}
+                      className={`${inp} pl-8 font-heading tabular-nums tracking-wide ${errors.chqEnd ? "border-destructive" : ""}`}
                     />
                   </div>
                   {form.chqEnd.length > 0 && (
@@ -1101,44 +1028,26 @@ const ChequeMaster: React.FC = () => {
 
                 {/* Total Cheques */}
                 <div className="space-y-1.5 sm:col-span-3">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     Total Cheques
-                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
+                    <span className="normal-case tracking-normal font-body text-[0.625rem] text-muted-foreground font-normal">
                       (auto-calculated)
                     </span>
                   </label>
-                  <div
-                    className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-all ${rangeValid ? "bg-primary/5 border-primary/30" : "bg-muted/40 border-border"}`}
-                  >
-                    <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${rangeValid ? "bg-primary/10" : "bg-muted"}`}
-                    >
-                      <Calculator
-                        size={16}
-                        className={
-                          rangeValid ? "text-primary" : "text-muted-foreground"
-                        }
-                      />
-                    </div>
+                  <div className="flex items-end justify-between gap-4 px-4 py-3" style={{ border: `1.5px solid hsl(var(--foreground) / ${rangeValid ? 1 : 0.3})` }}>
                     <div>
-                      <p
-                        className={`text-2xl font-heading font-bold leading-none ${rangeValid ? "text-primary" : "text-muted-foreground/40"}`}
-                      >
+                      <p className={`font-heading text-2xl font-semibold tabular-nums tracking-tight leading-none ${rangeValid ? "text-foreground" : "text-muted-foreground/40"}`}>
                         {rangeValid ? totalCheques.toLocaleString() : "—"}
                       </p>
-                      <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                        {rangeValid
-                          ? `Cheques from ${form.chqStart} to ${form.chqEnd}`
-                          : "Enter start and end numbers above"}
+                      <p className="text-[0.6875rem] text-muted-foreground mt-1.5">
+                        {rangeValid ? "cheques in this book" : "Enter the first and last numbers above"}
                       </p>
                     </div>
                     {rangeValid && (
-                      <div className="ml-auto text-right hidden sm:block">
-                        <p className="text-[0.625rem] font-heading text-muted-foreground uppercase tracking-widest">
-                          Range
-                        </p>
-                        <p className="text-xs font-mono text-foreground">
-                          {form.chqStart} – {form.chqEnd}
+                      <div className="text-right hidden sm:block">
+                        <p className={LBL}>Range</p>
+                        <p className="font-heading text-xs font-semibold tabular-nums text-foreground mt-1">
+                          {form.chqStart} to {form.chqEnd}
                         </p>
                       </div>
                     )}
@@ -1149,17 +1058,12 @@ const ChequeMaster: React.FC = () => {
 
             {/* ── Section: Additional ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <FileText size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Additional
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Additional
+              </p>
               <div className="space-y-5">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Remarks
                   </label>
                   <textarea
@@ -1174,19 +1078,15 @@ const ChequeMaster: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setField("status", !form.status)}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form.status ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${form.status ? "bg-foreground" : "bg-muted-foreground/30"}`}
                   >
                     <span
-                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form.status ? "translate-x-4" : "translate-x-0.5"}`}
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${form.status ? "translate-x-4" : "translate-x-0.5"}`}
                     />
                   </button>
-                  <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                  <span className={LBL}>
                     Status —{" "}
-                    <span
-                      className={
-                        form.status ? "text-emerald-600" : "text-foreground"
-                      }
-                    >
+                    <span className="text-foreground">
                       {form.status ? "Active" : "Inactive"}
                     </span>
                   </span>
@@ -1195,22 +1095,16 @@ const ChequeMaster: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
-              {canSave ? (
-                <span className="text-emerald-500 font-medium">
-                  Ready to save
-                </span>
-              ) : (
-                "Fill in the required fields to save"
-              )}
-            </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3" style={{ borderTop: RULE }}>
+            <div className="hidden sm:block">
+              {canSave ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-[0.6875rem] text-muted-foreground">Fill in the required fields to save</span>}
+            </div>
             <div className="flex items-center gap-2 sm:ml-auto">
               <button
                 type="button"
                 onClick={handleReset}
                 disabled={!isDirty && !editingId}
-                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                className={`${KEY} flex-1 sm:flex-none h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}
               >
                 <RotateCcw size={12} />
                 {editingId ? "Cancel" : "Reset"}
@@ -1218,10 +1112,10 @@ const ChequeMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={!canSave}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                className={`${KEY} flex-1 sm:flex-none h-9 px-5 bg-foreground text-card border border-foreground whitespace-nowrap`}
               >
-                {editingId ? <Check size={14} /> : <Plus size={14} />}
-                {editingId ? "Update Lot" : "Save Lot"}
+                {editingId ? <Check size={13} /> : <Plus size={13} />}
+                {editingId ? "Update book" : "Save book"}
               </button>
             </div>
           </div>
@@ -1229,36 +1123,23 @@ const ChequeMaster: React.FC = () => {
         )}
 
         {/* Table */}
-        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-            <div className="min-w-0 flex-1 mr-3">
-              <h3 className="font-heading font-semibold text-foreground text-sm">
-                Cheque Lot Records
-              </h3>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                {filtered.length} lot{filtered.length !== 1 ? "s" : ""}
-                {filtered.length > 0 && (
-                  <span className="ml-1 text-primary font-semibold">
-                    ·{" "}
-                    {filtered
-                      .reduce((s, r) => s + Number(r.TotalCheques || 0), 0)
-                      .toLocaleString()}{" "}
-                    total cheques
-                  </span>
-                )}
-              </p>
-            </div>
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+            <p className="flex items-baseline gap-2.5 flex-wrap">
+              <span className={HEAD}>Cheque books</span>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">
+                {filtered.length} book{filtered.length !== 1 ? "s" : ""}
+                {filtered.length > 0 && ` · ${filtered.reduce((s, r) => s + Number(r.TotalCheques || 0), 0).toLocaleString()} cheques`}
+              </span>
+            </p>
             <div className="relative">
-              <Search
-                size={13}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
                 placeholder="Search..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-36 sm:w-44"
+                className="pl-8 pr-3 h-9 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none w-40 sm:w-48"
               />
             </div>
           </div>
@@ -1277,13 +1158,13 @@ const ChequeMaster: React.FC = () => {
               }
               rowClassName={(row) =>
                 String(row.original.CId) === editingId
-                  ? "bg-primary/5 border-l-2 border-l-primary"
+                  ? "shadow-[inset_3px_0_0_hsl(var(--primary))]"
                   : ""
               }
             />
           </div>
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {/* Import Results Modal */}
       {importResults && (
@@ -1291,51 +1172,33 @@ const ChequeMaster: React.FC = () => {
           open={!!importResults}
           onOpenChange={() => setImportResults(null)}
         >
-          <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogContent className="sheet-frame max-w-lg max-h-[80vh] flex flex-col" style={{ margin: 0 }}>
             <DialogHeader>
-              <DialogTitle className="font-heading text-base">
-                Import Results
-              </DialogTitle>
+              <div className="pb-3" style={{ borderBottom: RULE }}>
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Cheque books · CSV import</p>
+                <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Import results</DialogTitle>
+              </div>
             </DialogHeader>
-            <div className="flex gap-3 text-sm mb-2">
-              <span className="text-emerald-600 font-medium">
-                ✓ {importResults.filter((r) => r.status === "success").length}{" "}
-                imported
-              </span>
-              <span className="text-destructive font-medium">
-                ✗ {importResults.filter((r) => r.status === "error").length}{" "}
-                failed
-              </span>
+            <div className="flex items-center gap-4 flex-wrap mb-3">
+              <SheetMark text={`${importResults.filter((r) => r.status === "success").length} imported`} tone="done" />
+              {importResults.some((r) => r.status === "error") && (
+                <SheetMark text={`${importResults.filter((r) => r.status === "error").length} failed`} tone="stopped" />
+              )}
             </div>
-            <div className="overflow-y-auto flex-1 space-y-1.5 pr-1">
-              {importResults.map((r) => (
-                <div
-                  key={r.row}
-                  className={`flex items-start gap-2.5 rounded-lg px-3 py-2 text-xs ${
-                    r.status === "success"
-                      ? "bg-emerald-500/8 text-emerald-700"
-                      : "bg-destructive/8 text-destructive"
-                  }`}
-                >
-                  <span className="font-mono shrink-0 text-muted-foreground">
-                    Row {r.row}
-                  </span>
-                  <span className="font-medium shrink-0">{r.name}</span>
-                  {r.status === "success" ? (
-                    <span className="ml-auto text-emerald-600">✓</span>
-                  ) : (
-                    <span className="ml-2 text-destructive/80">
-                      {r.message}
-                    </span>
-                  )}
+            <div className="overflow-y-auto flex-1" style={{ border: RULE }}>
+              {importResults.map((r, i) => (
+                <div key={r.row} className="flex items-start gap-3 px-3 py-2 text-sm" style={i ? { borderTop: "1px solid hsl(var(--border) / 0.7)" } : undefined}>
+                  <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0 mt-1 w-12">Row {r.row}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate text-foreground">{r.name}</p>
+                    {r.status !== "success" && r.message && <p className="text-xs text-destructive mt-0.5">{r.message}</p>}
+                  </div>
+                  {r.status === "success" ? <Check size={14} className="text-foreground shrink-0 mt-0.5" /> : <X size={14} className="text-destructive shrink-0 mt-0.5" />}
                 </div>
               ))}
             </div>
             <div className="pt-3 flex justify-end">
-              <button
-                onClick={() => setImportResults(null)}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
+              <button onClick={() => setImportResults(null)} className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}>
                 Close
               </button>
             </div>
@@ -1348,14 +1211,15 @@ const ChequeMaster: React.FC = () => {
         open={!!viewRow}
         onOpenChange={(open) => !open && setViewRow(null)}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle className="font-heading text-base">
-              Cheque Lot Details
-            </DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Cheque book{viewRow?.BankName ? ` · ${viewRow.BankName}` : ""}</p>
+              <DialogTitle className="font-heading text-lg font-bold tabular-nums tracking-tight mt-1">{viewRow?.ChequeLotNumber || "Cheque book"}</DialogTitle>
+            </div>
           </DialogHeader>
           {viewRow && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 pt-1">
               {[
                 { label: "Company", value: viewRow.CompanyName },
                 { label: "Bank", value: viewRow.BankName },
@@ -1388,31 +1252,21 @@ const ChequeMaster: React.FC = () => {
                 },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
-                    {label}
-                  </p>
-                  <p
-                    className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
-                  >
+                  <p className={`${LBL} mb-1`}>{label}</p>
+                  <p className={`text-sm text-foreground break-words ${mono ? "font-heading tabular-nums font-semibold" : ""}`}>
                     {value || "—"}
                   </p>
                 </div>
               ))}
             </div>
           )}
-          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
-            {viewRow && (
-              <button
-                onClick={() => handlePrint(viewRow)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
-              >
-                <Printer size={13} /> Print
+          <div className="flex justify-end gap-2 pt-3 mt-3" style={{ borderTop: RULE }}>
+            {viewRow && rights.canPrint && (
+              <button onClick={() => handlePrint(viewRow)} className={`${KEY} h-9 px-3 border border-foreground text-foreground hover:bg-primary/10`}>
+                <Printer size={12} /> Print
               </button>
             )}
-            <button
-              onClick={() => setViewRow(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
-            >
+            <button onClick={() => setViewRow(null)} className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}>
               Close
             </button>
           </div>
