@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
@@ -1752,10 +1752,10 @@ export default function MaterialExpenseBooking() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Invoice"]} />
-      <FinanceShell
-        title="Invoice"
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Invoices"
         subtitle="Book expenses against purchase orders, confirmed work done, or invoice documents"
-        icon={Receipt}
         action={
           view === "list" ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1771,16 +1771,16 @@ export default function MaterialExpenseBooking() {
               <button
                 onClick={handleDownloadTemplate}
                 title="Download a blank CSV template"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Download size={13} />
-                <span className="hidden sm:inline">Download Template</span>
+                <span className="hidden sm:inline">Template</span>
               </button>
               <button
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -1788,9 +1788,9 @@ export default function MaterialExpenseBooking() {
               {rights.canCreate && (
                 <Button
                   onClick={openNew}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
+                  className="gap-1.5 shrink-0 bg-foreground text-card hover:bg-foreground/85 font-heading font-semibold uppercase tracking-[0.1em] text-[0.625rem] px-3 sm:px-4 py-2 h-auto"
                 >
-                  <Plus size={13} /> New Invoice
+                  <Plus size={13} /> New invoice
                 </Button>
               )}
             </div>
@@ -3039,7 +3039,7 @@ export default function MaterialExpenseBooking() {
         />
 
         {/* Remaining GRN Items — auto-created silently on save */}
-      </FinanceShell>
+      </SheetShell>
     </>
   );
 }
