@@ -1355,6 +1355,35 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
+    // A new owner of a conveyed property, recorded from their registered sale deed.
+    if (!module || module === "crm-ownership-changes") {
+      queries.push(`
+        SELECT
+          'crm-ownership-changes'                AS Module,
+          'Ownership Change'                     AS ModuleLabel,
+          CAST(o.Id AS NVARCHAR)                 AS RecordId,
+          CONCAT(o.ChangeNo, ' · ', ISNULL(b.UnitNo, b.BookingNo)) AS Reference,
+          o.CreatedAt                            AS RecordDate,
+          o.Status,
+          CAST(tc.CustomerName AS NVARCHAR(255)) AS ContractorName,
+          fc.CustomerName                        AS SupplierName,
+          o.ConsiderationValue                   AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(o.CreatedBy AS NVARCHAR(255))) AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ISNULL(CAST(o.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(o.UpdatedAt, o.CreatedAt)       AS LastModified
+        FROM dbo.CrmOwnershipChange o
+        LEFT JOIN dbo.CrmBooking b  ON b.Id = o.BookingId
+        LEFT JOIN dbo.CrmCustomer fc ON fc.Id = o.FromCustomerId
+        LEFT JOIN dbo.CrmCustomer tc ON tc.Id = o.ToCustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = o.CreatedBy
+        WHERE o.IsActive = 1 AND o.Status = 'Pending'
+      `);
+    }
+
     // A refund has ONE Finance step: CRM approval raises its payout voucher,
     // which Finance approves in Payments (module crm-refund-payment above).
     // The separate 'crm-refunds-finance' tier listed here before was a second

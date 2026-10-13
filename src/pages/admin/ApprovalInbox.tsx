@@ -365,6 +365,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/resales",
     label: "Property Resale & Buy-back",
   },
+  "crm-ownership-changes": {
+    icon: Undo2,
+    color: "text-teal-600 bg-teal-600/10",
+    navPath: "/crm/ownership-changes",
+    apiEndpoint: "/api/crm/ownership-changes",
+    label: "Ownership Change",
+  },
   "crm-refunds": {
     icon: Undo2,
     color: "text-orange-600 bg-orange-600/10",
@@ -534,6 +541,7 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "crm-resales": "sales",
   "crm-transfer-deeds": "sales",
   "crm-transfer-deed-date": "sales",
+  "crm-ownership-changes": "sales",
 };
 
 export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
@@ -603,6 +611,9 @@ export function openInModulePath(item: InboxItem, navPath: string): string {
   // dialog directly via CrmApplication.tsx-style searchParams.get("id") effects).
   if (item.Module === "crm-transfer-deeds" || item.Module === "crm-transfer-deed-date") {
     return hasValidId ? `${navPath}?id=${item.RecordId}&tab=${encodeURIComponent("Legal & Approval")}` : navPath;
+  }
+  if (item.Module === "crm-ownership-changes") {
+    return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }
   if (item.Module === "crm-agreements" || item.Module === "crm-agreement-date") {
     return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;

@@ -55,7 +55,7 @@ async function conveyedReason(db, bookingIds) {
     WHERE b.Id IN (${ids.join(",")})
       AND (EXISTS (SELECT 1 FROM dbo.CrmSalesDeed d WHERE d.BookingId = b.Id AND d.Status = N'Registered')
         OR EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id))`)).recordset[0];
-  return r ? `${r.BookingNo}: ${r.Why} — the property is conveyed to its owner, so it can no longer be resold or bought back through its booking` : null;
+  return r ? `${r.BookingNo}: ${r.Why} — the property is conveyed to its owner, so it can no longer be resold or bought back through its booking — record a new owner in Ownership Changes instead` : null;
 }
 
 /** An open resale or buy-back already on any of these bookings. */
@@ -65,6 +65,72 @@ async function openResaleOn(db, bookingIds) {
   return (await db.request().query(`
     SELECT TOP 1 r.Id, r.Kind, r.Status FROM dbo.CrmUnitResale r
     WHERE r.IsActive = 1 AND r.Status IN (N'Pending', N'Approved') AND (${likes})`)).recordset[0] || null;
+}
+
+/**
+ * Passes one booking to another customer, inside the caller's transaction:
+ * the new person's application (the one given, or a new Converted one) takes
+ * the booking and its unit / plot lines; the old owner's co-applicants, home
+ * loan (closed), bank details (back on their own application) and financing
+ * type stay behind as their history. Used by a resale (before conveyance) and
+ * by an ownership change (after it). Returns the new application's id.
+ * `b` is the booking row (Id, BookingNo, UnitId, UnitNo, ProjectId, CompanyId,
+ * ApplicationId, InterestedProject, InterestedUnit, PaymentPlanId).
+ */
+async function moveBookingToCustomer(tx, b, person, { applicationId = null, actorUserId, note, loanNote }) {
+  let appId = applicationId;
+  if (appId) {
+    await tx.request().input("a", sql.Int, appId).input("uid", sql.Int, b.UnitId).input("pid", sql.Int, b.ProjectId).input("co", sql.Int, b.CompanyId)
+      .input("pp", sql.Int, b.PaymentPlanId || null).input("ref", sql.Int, b.ApplicationId)
+      .query(`UPDATE dbo.CrmApplication SET Status = N'Converted', PreferredUnitId = @uid, ProjectId = ISNULL(ProjectId, @pid), CompanyId = ISNULL(CompanyId, @co),
+                PaymentPlanId = @pp, ReferredByApplicationId = @ref, UpdatedAt = SYSDATETIME() WHERE Id = @a`);
+  } else {
+    const { getNextDocNumber } = require("./docNumber");
+    const appNo = await getNextDocNumber(require("../db").getPool(), "APP", "APP");
+    const app = await tx.request()
+      .input("no", sql.NVarChar(50), appNo).input("cid", sql.Int, person.Id)
+      .input("name", sql.NVarChar(200), person.CustomerName).input("mob", sql.NVarChar(20), person.Mobile || null)
+      .input("em", sql.NVarChar(200), person.Email || null).input("pid", sql.Int, b.ProjectId).input("co", sql.Int, b.CompanyId)
+      .input("uid", sql.Int, b.UnitId).input("proj", sql.NVarChar(200), b.InterestedProject || null)
+      .input("unit", sql.NVarChar(200), b.UnitNo || b.InterestedUnit || null).input("pp", sql.Int, b.PaymentPlanId || null)
+      .input("ref", sql.Int, b.ApplicationId).input("by", sql.Int, actorUserId)
+      .input("note", sql.NVarChar(sql.MAX), note)
+      .query(`INSERT INTO dbo.CrmApplication (ApplicationNo, CustomerId, ApplicantName, Mobile, Email, ProjectId, CompanyId, PreferredUnitId,
+                InterestedProject, InterestedUnit, PaymentPlanId, Source, Status, Notes, ReferredByApplicationId, DateOfApply, IsActive, CreatedBy, CreatedAt, AssignedTo, AssignedBy)
+              OUTPUT INSERTED.Id
+              VALUES (@no, @cid, @name, @mob, @em, @pid, @co, @uid, @proj, @unit, @pp, N'Other', N'Converted', @note, @ref, CAST(SYSDATETIME() AS DATE), 1, @by, SYSDATETIME(), @by, @by)`);
+    appId = app.recordset[0].Id;
+  }
+  // One Active application line per unit / plot: the old owner's goes first.
+  for (const t of [["CrmApplicationUnit", "UnitId"], ["CrmApplicationPlot", "PlotId"]]) {
+    const lines = (await tx.request().input("a", sql.Int, b.ApplicationId)
+      .query(`SELECT ${t[1]} AS Ref, IsPrimary FROM dbo.${t[0]} WHERE ApplicationId = @a AND Status = N'Active'`)).recordset;
+    await tx.request().input("a", sql.Int, b.ApplicationId)
+      .query(`UPDATE dbo.${t[0]} SET Status = N'Transferred' WHERE ApplicationId = @a AND Status = N'Active'`);
+    for (const l of lines) {
+      await tx.request().input("a", sql.Int, appId).input("r", sql.Int, l.Ref).input("pri", sql.Bit, l.IsPrimary ? 1 : 0)
+        .query(`INSERT INTO dbo.${t[0]} (ApplicationId, ${t[1]}, Status, IsPrimary, CreatedAt) VALUES (@a, @r, N'Active', @pri, SYSDATETIME())`);
+    }
+  }
+  await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, appId).input("by", sql.Int, actorUserId)
+    .query("UPDATE dbo.CrmBooking SET ApplicationId = @a, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @b");
+  await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, b.ApplicationId)
+    .query("UPDATE dbo.CrmCoApplicant SET IsActive = 0 WHERE (BookingId = @b OR ApplicationId = @a) AND IsActive = 1");
+  // What was the old owner's stays as their history, off the new booking:
+  //  - their home loan is closed (its bank NOC was verified before),
+  //    so it no longer asks the new person for a bank NOC or a sanction;
+  //  - their bank details move to their own (old) application, so a refund
+  //    or cancellation for the new person is never pre-filled with them;
+  //  - how the property is financed is the new person's to declare.
+  await tx.request().input("b", sql.Int, b.Id).input("n", sql.NVarChar(300), loanNote)
+    .query(`UPDATE dbo.CrmLoanDetail SET SanctionStatus = N'Closed', UpdatedAt = SYSDATETIME(),
+              Notes = LTRIM(ISNULL(Notes, N'') + CHAR(10) + @n)
+            WHERE BookingId = @b AND ISNULL(SanctionStatus, N'') <> N'Closed'`);
+  await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, b.ApplicationId)
+    .query("UPDATE dbo.CrmCustomerBankDetail SET ApplicationId = ISNULL(ApplicationId, @a), BookingId = NULL, UpdatedAt = SYSDATETIME() WHERE BookingId = @b");
+  await tx.request().input("b", sql.Int, b.Id)
+    .query("UPDATE dbo.CrmBooking SET FinancingType = NULL WHERE Id = @b");
+  return appId;
 }
 
 /**
@@ -90,67 +156,18 @@ async function endorseToBuyer(tx, resale, actorUserId) {
   if (bookings.some((b) => b.CustomerId !== resale.FromCustomerId)) throw new ResaleError("The property no longer belongs to the seller on this resale", 409);
   if (resale.ToCustomerId === resale.FromCustomerId) throw new ResaleError("The new buyer is the same customer as the seller");
 
-  const { getNextDocNumber } = require("./docNumber");
   const applicationIds = [];
   let paid = 0;
   for (const b of bookings) {
     paid += Number(b.Paid || 0);
     // The case opened the buyer's application already (their KYC and
     // co-applicants are on it): the first booking takes that one.
-    let appId = null;
-    if (resale.BuyerApplicationId && !applicationIds.includes(resale.BuyerApplicationId)) {
-      appId = resale.BuyerApplicationId;
-      await tx.request().input("a", sql.Int, appId).input("uid", sql.Int, b.UnitId).input("pid", sql.Int, b.ProjectId).input("co", sql.Int, b.CompanyId)
-        .input("pp", sql.Int, b.PaymentPlanId || null).input("ref", sql.Int, b.ApplicationId)
-        .query(`UPDATE dbo.CrmApplication SET Status = N'Converted', PreferredUnitId = @uid, ProjectId = ISNULL(ProjectId, @pid), CompanyId = ISNULL(CompanyId, @co),
-                  PaymentPlanId = @pp, ReferredByApplicationId = @ref, UpdatedAt = SYSDATETIME() WHERE Id = @a`);
-    }
-    if (appId == null) {
-    const appNo = await getNextDocNumber(require("../db").getPool(), "APP", "APP");
-    const app = await tx.request()
-      .input("no", sql.NVarChar(50), appNo).input("cid", sql.Int, buyer.Id)
-      .input("name", sql.NVarChar(200), buyer.CustomerName).input("mob", sql.NVarChar(20), buyer.Mobile || null)
-      .input("em", sql.NVarChar(200), buyer.Email || null).input("pid", sql.Int, b.ProjectId).input("co", sql.Int, b.CompanyId)
-      .input("uid", sql.Int, b.UnitId).input("proj", sql.NVarChar(200), b.InterestedProject || null)
-      .input("unit", sql.NVarChar(200), b.UnitNo || b.InterestedUnit || null).input("pp", sql.Int, b.PaymentPlanId || null)
-      .input("ref", sql.Int, b.ApplicationId).input("by", sql.Int, actorUserId)
-      .input("note", sql.NVarChar(sql.MAX), `Resale: ${b.BookingNo} passed to ${buyer.CustomerName} by endorsement (resale #${resale.Id}).`)
-      .query(`INSERT INTO dbo.CrmApplication (ApplicationNo, CustomerId, ApplicantName, Mobile, Email, ProjectId, CompanyId, PreferredUnitId,
-                InterestedProject, InterestedUnit, PaymentPlanId, Source, Status, Notes, ReferredByApplicationId, DateOfApply, IsActive, CreatedBy, CreatedAt, AssignedTo, AssignedBy)
-              OUTPUT INSERTED.Id
-              VALUES (@no, @cid, @name, @mob, @em, @pid, @co, @uid, @proj, @unit, @pp, N'Other', N'Converted', @note, @ref, CAST(SYSDATETIME() AS DATE), 1, @by, SYSDATETIME(), @by, @by)`);
-    appId = app.recordset[0].Id;
-    }
-    applicationIds.push(appId);
-    // One Active application line per unit / plot: the seller's goes first.
-    for (const t of [["CrmApplicationUnit", "UnitId"], ["CrmApplicationPlot", "PlotId"]]) {
-      const lines = (await tx.request().input("a", sql.Int, b.ApplicationId)
-        .query(`SELECT ${t[1]} AS Ref, IsPrimary FROM dbo.${t[0]} WHERE ApplicationId = @a AND Status = N'Active'`)).recordset;
-      await tx.request().input("a", sql.Int, b.ApplicationId)
-        .query(`UPDATE dbo.${t[0]} SET Status = N'Transferred' WHERE ApplicationId = @a AND Status = N'Active'`);
-      for (const l of lines) {
-        await tx.request().input("a", sql.Int, appId).input("r", sql.Int, l.Ref).input("pri", sql.Bit, l.IsPrimary ? 1 : 0)
-          .query(`INSERT INTO dbo.${t[0]} (ApplicationId, ${t[1]}, Status, IsPrimary, CreatedAt) VALUES (@a, @r, N'Active', @pri, SYSDATETIME())`);
-      }
-    }
-    await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, appId).input("by", sql.Int, actorUserId)
-      .query("UPDATE dbo.CrmBooking SET ApplicationId = @a, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @b");
-    await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, b.ApplicationId)
-      .query("UPDATE dbo.CrmCoApplicant SET IsActive = 0 WHERE (BookingId = @b OR ApplicationId = @a) AND IsActive = 1");
-    // What was the seller's stays as their history, off the buyer's booking:
-    //  - their home loan is closed (its bank NOC was verified at clearance),
-    //    so it no longer asks the buyer for a bank NOC or a sanction;
-    //  - their bank details move to their own (old) application, so a refund
-    //    or cancellation for the buyer is never pre-filled with them;
-    //  - how the property is financed is the buyer's to declare.
-    await tx.request().input("b", sql.Int, b.Id).input("rid", sql.Int, resale.Id)
-      .query(`UPDATE dbo.CrmLoanDetail SET SanctionStatus = N'Closed', UpdatedAt = SYSDATETIME(),
-                Notes = LTRIM(ISNULL(Notes, N'') + CHAR(10) + N'Seller''s loan — closed when the property was resold (case #' + CAST(@rid AS NVARCHAR(20)) + N')')
-              WHERE BookingId = @b AND ISNULL(SanctionStatus, N'') <> N'Closed'`);
-    await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, b.ApplicationId)
-      .query("UPDATE dbo.CrmCustomerBankDetail SET ApplicationId = ISNULL(ApplicationId, @a), BookingId = NULL, UpdatedAt = SYSDATETIME() WHERE BookingId = @b");
-    await tx.request().input("b", sql.Int, b.Id)
-      .query("UPDATE dbo.CrmBooking SET FinancingType = NULL WHERE Id = @b");
+    const useApp = resale.BuyerApplicationId && !applicationIds.includes(resale.BuyerApplicationId) ? resale.BuyerApplicationId : null;
+    applicationIds.push(await moveBookingToCustomer(tx, b, buyer, {
+      applicationId: useApp, actorUserId,
+      note: `Resale: ${b.BookingNo} passed to ${buyer.CustomerName} by endorsement (resale #${resale.Id}).`,
+      loanNote: `Seller's loan — closed when the property was resold (case #${resale.Id})`,
+    }));
   }
   paid = Math.round(paid * 100) / 100;
   await tx.request().input("id", sql.Int, resale.Id).input("paid", sql.Decimal(18, 2), paid).input("by", sql.Int, actorUserId)
@@ -296,4 +313,4 @@ async function buyBackVoucherRejected(pool, resaleId, newPaymentId, note) {
             WHERE Id = @id AND PayoutNewPaymentId = @np AND Status = N'Approved'`);
 }
 
-module.exports = { movingBookings, openResaleOn, conveyedReason, endorseToBuyer, raiseBuyBackVoucher, completeBuyBack, buyBackVoucherRejected, ResaleError };
+module.exports = { movingBookings, openResaleOn, conveyedReason, endorseToBuyer, moveBookingToCustomer, raiseBuyBackVoucher, completeBuyBack, buyBackVoucherRejected, ResaleError };

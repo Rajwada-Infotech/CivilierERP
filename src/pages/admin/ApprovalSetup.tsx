@@ -272,6 +272,12 @@ const MODULE_OPTIONS = [
     desc: "A sold property passing to a new buyer, or bought back by us",
   },
   {
+    id: "crm-ownership-changes",
+    label: "Ownership Change",
+    icon: "🏠",
+    desc: "A new owner after the sale deed is registered, recorded from their own registered sale deed",
+  },
+  {
     id: "crm-refunds",
     label: "CRM Refund",
     icon: "💸",
@@ -338,6 +344,7 @@ const MODULE_GROUPS = [
       "crm-resales",
       "crm-transfer-deeds",
       "crm-transfer-deed-date",
+      "crm-ownership-changes",
       "crm-cancellations",
     ],
   },

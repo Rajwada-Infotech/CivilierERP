@@ -223,9 +223,10 @@ router.get("/applications", async (req, res) => {
       FROM dbo.CrmApplication a
       LEFT JOIN dbo.CrmBooking b ON b.ApplicationId = a.Id AND b.IsActive = 1
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
-      LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id
-      LEFT JOIN dbo.CrmHandover h ON h.BookingId = b.Id
+      -- The latest of each (a redone agreement / deed leaves its old row): one line per booking.
+      OUTER APPLY (SELECT TOP 1 x.* FROM dbo.CrmAgreement x WHERE x.BookingId = b.Id ORDER BY x.Id DESC) ag
+      OUTER APPLY (SELECT TOP 1 x.* FROM dbo.CrmSalesDeed x WHERE x.BookingId = b.Id ORDER BY x.Id DESC) sd
+      OUTER APPLY (SELECT TOP 1 x.* FROM dbo.CrmHandover x WHERE x.BookingId = b.Id ORDER BY x.Id DESC) h
       WHERE a.IsActive = 1 AND (a.CustomerId = @cid OR ${CO_APPLICANT_OF("a")})
       ORDER BY a.CreatedAt DESC
     `);

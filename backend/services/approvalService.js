@@ -40,6 +40,8 @@ const MAKER_COLUMNS = {
   // Not money, but the same separation: whoever prepared a transfer deed
   // can't give it the Legal Head's sign-off too.
   "crm-transfer-deeds": "CreatedBy",
+  // Whoever recorded a new owner can't approve the record too.
+  "crm-ownership-changes": "CreatedBy",
 };
 
 // Map module slug → { table, pkCol, statusCol }
@@ -145,6 +147,8 @@ const MODULE_MAP = {
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
   "crm-refunds": { table: "dbo.CrmRefund", pk: "Id", status: "Status" },
   "crm-resales": { table: "dbo.CrmUnitResale", pk: "Id", status: "Status" },
+  // A new owner after conveyance (migration 562), from their registered sale deed.
+  "crm-ownership-changes": { table: "dbo.CrmOwnershipChange", pk: "Id", status: "Status" },
   // A resale / buy-back's transfer deed (migration 560): the Legal Head's
   // sign-off on its papers, and — a second gate on the same row, same
   // single-level ApprovalAuditLog caveat as crm-agreement-date — the
