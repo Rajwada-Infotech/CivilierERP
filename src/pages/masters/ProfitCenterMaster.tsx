@@ -7,7 +7,6 @@ import {
   type ColumnDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
-import { GLAccountMultiSelect } from "@/components/finance/GLAccountMultiSelect";
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -69,16 +68,6 @@ const ProfitCenterMaster: React.FC = () => {
       label: "Description",
       type: "textarea",
       fullWidth: true,
-    },
-    {
-      name: "GLAccountIds",
-      label: "GL Accounts",
-      type: "custom",
-      fullWidth: true,
-      defaultValue: [],
-      render: ({ value, onChange }) => (
-        <GLAccountMultiSelect value={value} onChange={onChange} />
-      ),
     },
     { name: "IsActive", label: "Status", type: "toggle", defaultValue: true },
   ];
