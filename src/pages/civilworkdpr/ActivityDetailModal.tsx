@@ -230,7 +230,7 @@ function PhotoLightbox({ rungId, photo, onClose }: { rungId: number; photo: Acti
           <img src={`data:${data.mimeType};base64,${data.dataBase64}`} alt={photo.fileName} className="max-w-full max-h-[75vh] rounded-xl shadow-2xl object-contain" />
         )}
         <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-white/70">
-          <span className="flex items-center gap-1.5 font-semibold" style={{ color: meta.color }}>
+          <span className="flex items-center gap-1.5 font-semibold text-white">
             <Icon size={12} /> {meta.label}
           </span>
           <span>{fmtDateTime(photo.capturedAt)}</span>
@@ -321,31 +321,23 @@ function PhotosTab({ rungId }: { rungId: number }) {
   return (
     <div className="flex flex-col gap-4">
       {/* Tag picker — applies to whatever gets captured next. */}
-      <div className="flex items-center gap-1.5">
-        {TAG_ORDER.map((tag) => {
-          const meta = TAG_META[tag];
-          const Icon = meta.icon;
-          const active = activeTag === tag;
-          return (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => setActiveTag(tag)}
-              className="flex items-center gap-1 px-2 py-1 rounded-full text-[0.6875rem] font-medium border transition-colors"
-              style={
-                active
-                  ? { background: `${meta.color}1A`, borderColor: `${meta.color}60`, color: meta.color }
-                  : { borderColor: "var(--border)", color: "var(--muted-foreground)" }
-              }
-            >
-              <Icon size={11} /> {meta.label}
-            </button>
-          );
-        })}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">File the next photo under</span>
+        <div className="seg">
+          {TAG_ORDER.map((tag) => {
+            const meta = TAG_META[tag];
+            const active = activeTag === tag;
+            return (
+              <button key={tag} type="button" onClick={() => setActiveTag(tag)} aria-pressed={active} className={active ? "on" : undefined}>
+                {meta.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Camera panel */}
-      <div className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+      <div className="overflow-hidden" style={{ border: "1px dashed hsl(var(--foreground) / 0.5)" }}>
         {camera.isActive ? (
           <div className="relative bg-black">
             <video ref={camera.videoRef} playsInline muted className="w-full max-h-72 object-contain" />
@@ -369,11 +361,11 @@ function PhotosTab({ rungId }: { rungId: number }) {
             <button
               type="button"
               onClick={openCamera}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white transition-colors"
-              style={{ background: TAG_META[activeTag].color }}
+              className="inline-flex items-center gap-1.5 h-9 px-4 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground"
             >
               <CameraIcon size={13} /> Open camera
             </button>
+            <p className="text-[0.6875rem] text-muted-foreground">The photo will be filed under {TAG_META[activeTag].label.toLowerCase()}.</p>
           </div>
         )}
       </div>
@@ -384,18 +376,18 @@ function PhotosTab({ rungId }: { rungId: number }) {
           <Loader2 size={18} className="animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
           {TAG_ORDER.map((tag) => {
             const meta = TAG_META[tag];
-            const Icon = meta.icon;
             const photos = data?.[tag] ?? [];
             const carriedCount = photos.filter((p) => p.note === CARRIED_FORWARD_NOTE).length;
             return (
-              <div key={tag} className="pl-3 border-l-2" style={{ borderColor: `${meta.color}45` }}>
-                <p className="flex items-center gap-1 text-[0.625rem] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
-                  <Icon size={10} /> {meta.label} · {photos.length}
+              <div key={tag}>
+                <p className="flex items-baseline gap-2 font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2 mb-2.5" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                  {meta.label}
+                  <span className="font-semibold tabular-nums text-muted-foreground">{photos.length}</span>
                   {carriedCount > 0 && (
-                    <span className="normal-case font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
+                    <span className="normal-case tracking-normal font-body font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
                       (<RotateCcw size={9} /> {carriedCount} carried forward)
                     </span>
                   )}
@@ -1659,7 +1651,7 @@ export default function ActivityDetailModal({
                     key={t.id}
                     type="button"
                     onClick={() => setTab(t.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors shrink-0 whitespace-nowrap ${
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors shrink-0 whitespace-nowrap focus:outline-none focus-visible:bg-primary/10 ${
                       active ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >
