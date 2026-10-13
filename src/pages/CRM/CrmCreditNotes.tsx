@@ -633,7 +633,7 @@ function DetailDialog({
   const k = kindOf(n);
   const half = Math.round((Number(n.GstAmount) / 2) * 100) / 100;
   const norm = (x: any) => String(x || "").trim().toLowerCase();
-  const sameState = !n.ProjectState || !n.CompanyState || norm(n.ProjectState) === norm(n.CompanyState);
+  const sameState = n.IntraState !== false; // worked out on the server (project / company GSTIN state codes)
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["crm-credit-note"] });
@@ -885,7 +885,7 @@ function DetailDialog({
                   <span className="tabular-nums">{inr(n.TotalAmount)}</span>
                 </div>
                 <div className="text-[0.6875rem] text-muted-foreground pt-1">
-                  Place of supply: {n.ProjectState || n.CompanyState || "where the property is"} · HSN/SAC{" "}
+                  Place of supply: {n.PlaceOfSupply ? `${n.PlaceOfSupply}${n.PlaceOfSupplyCode ? ` (${n.PlaceOfSupplyCode})` : ""}` : "where the property is"} · HSN/SAC{" "}
                   {formatSac(n.HsnCode)}
                 </div>
               </div>
@@ -1207,7 +1207,7 @@ const CrmCreditNotes: React.FC = () => {
     const live = exportRows.filter((n) => ["invoice", "advance"].includes(kindOf(n)));
     const norm = (x: any) => String(x || "").trim().toLowerCase();
     const split = (n: any) => {
-      const same = !n.ProjectState || !n.CompanyState || norm(n.ProjectState) === norm(n.CompanyState);
+      const same = n.IntraState !== false;
       const half = Math.round((Number(n.GstAmount) / 2) * 100) / 100;
       return same ? [half, Number(n.GstAmount) - half, 0] : [0, 0, Number(n.GstAmount)];
     };
