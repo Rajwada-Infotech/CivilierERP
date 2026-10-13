@@ -107,6 +107,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Money Receipts",     path: "/crm/money-receipts",  pageKey: "crm-money-receipts"  },
       { label: "On Account",         path: "/crm/on-account",      pageKey: "crm-payments"        },
       { label: "Refunds",            path: "/crm/refunds",         pageKey: "crm-refunds"         },
+      { label: "Credit Notes",       path: "/crm/credit-notes",    pageKey: "crm-refunds"         },
       { label: "Invoices",           path: "/crm/invoices",        pageKey: "crm-invoices"        },
       { label: "Parking Booking",    path: "/crm/parking-booking", pageKey: "crm-parking-booking" },
       { label: "Brokerage",          path: "/crm/brokerage",       pageKey: "crm-brokerage"       },

@@ -37,9 +37,9 @@ async function rateFor(pool, bookingId) {
  * Splits a paid refund into its GST documents and records them.
  * Returns { issued: [...] } or { none: reason }.
  */
-async function issueForRefund(pool, refundId, userEmail) {
+async function issueForRefund(pool, refundId, userEmail, { replacesId = null } = {}) {
   const already = (await pool.request().input("r", sql.Int, refundId)
-    .query("SELECT COUNT(*) AS n FROM dbo.CrmGstNote WHERE RefundId = @r")).recordset[0].n;
+    .query("SELECT COUNT(*) AS n FROM dbo.CrmGstNote WHERE RefundId = @r AND Status <> N'Cancelled'")).recordset[0].n;
   if (already) return { none: "already issued" };
   const rf = (await pool.request().input("r", sql.Int, refundId).query(`
     SELECT r.Id, r.RefundNo, r.BookingId, r.SourceOnAccountId, r.CustomerId, r.CompanyId, r.ProjectId, r.NetAmount, r.DeductionAmount, r.GrossAmount, r.Status, r.PaidAt,
@@ -58,7 +58,7 @@ async function issueForRefund(pool, refundId, userEmail) {
     SELECT
       (SELECT ISNULL(SUM(RPAmount), 0) FROM dbo.ReceivedPayment WHERE CrmBookingId = @b AND RPStatus = N'Approved' AND SourceCrmResaleId IS NULL) AS Received,
       (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmInvoice WHERE BookingId = @b AND Status <> N'Void' AND InvoiceType IN (N'Milestone', N'Booking', N'Final')) AS Invoiced,
-      (SELECT ISNULL(SUM(TotalAmount), 0) FROM dbo.CrmGstNote WHERE BookingId = @b AND DocType = N'RefundVoucher') AS PriorVouchers,
+      (SELECT ISNULL(SUM(TotalAmount), 0) FROM dbo.CrmGstNote WHERE BookingId = @b AND DocType = N'RefundVoucher' AND Status <> N'Cancelled') AS PriorVouchers,
       (SELECT ISNULL(SUM(DeductionAmount), 0) FROM dbo.CrmRefund WHERE BookingId = @b AND Status = N'Paid' AND Id <> @r) AS PriorKept`)).recordset[0];
   // Money still sitting as an advance (received, never invoiced, not given back or kept before).
   const uninvoiced = Math.max(0, r2(sums.Received) - r2(sums.Invoiced) - r2(sums.PriorVouchers) - r2(sums.PriorKept));
@@ -70,7 +70,7 @@ async function issueForRefund(pool, refundId, userEmail) {
   if (creditPart > 0) {
     const invoices = (await pool.request().input("b", sql.Int, b).query(`
       SELECT i.Id, i.InvoiceNo, i.InvoiceDate, i.Amount,
-             i.Amount - ISNULL((SELECT SUM(n.TotalAmount) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id), 0) AS Open
+             i.Amount - ISNULL((SELECT SUM(n.TotalAmount) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Status <> N'Cancelled'), 0) AS Open
       FROM dbo.CrmInvoice i
       WHERE i.BookingId = @b AND i.Status <> N'Void' AND i.InvoiceType IN (N'Milestone', N'Booking', N'Final')
       ORDER BY i.InvoiceDate DESC, i.Id DESC`)).recordset;
@@ -115,21 +115,26 @@ async function issueForRefund(pool, refundId, userEmail) {
       .input("inv", sql.Int, p.invoice?.Id ?? null)
       .input("ag", sql.NVarChar(400), p.type === "CreditNote" ? p.invoice.InvoiceNo : (receipts.map((x) => x.No).filter(Boolean).join(", ") || null))
       .input("agd", sql.Date, p.type === "CreditNote" ? p.invoice.InvoiceDate : (receipts[0]?.RPDocDate || null))
-      .input("dd", sql.Date, rf.PaidAt || new Date())
+      .input("dd", sql.Date, replacesId ? new Date() : (rf.PaidAt || new Date()))
       .input("tv", sql.Decimal(18, 2), r2(p.amount - gst)).input("rate", sql.Decimal(9, 4), rate || null)
       .input("g", sql.Decimal(18, 2), gst).input("tot", sql.Decimal(18, 2), p.amount)
       .input("dl", sql.Date, p.deadline || null).input("rm", sql.NVarChar(500), remarks).input("by", sql.NVarChar(200), userEmail || null)
+      .input("rep", sql.Int, replacesId)
       .query(`INSERT INTO dbo.CrmGstNote (DocNo, DocType, Status, RefundId, BookingId, CustomerId, CompanyId, ProjectId, InvoiceId, AgainstRef, AgainstDate,
-                DocDate, TaxableValue, GstRate, GstAmount, TotalAmount, DeadlineDate, Remarks, CreatedBy)
+                DocDate, TaxableValue, GstRate, GstAmount, TotalAmount, DeadlineDate, Remarks, CreatedBy, ReplacesId)
               OUTPUT INSERTED.Id
-              VALUES (@no, @t, @st, @r, @b, @c, @co, @pr, @inv, @ag, @agd, @dd, @tv, @rate, @g, @tot, @dl, @rm, @by)`);
+              VALUES (@no, @t, @st, @r, @b, @c, @co, @pr, @inv, @ag, @agd, @dd, @tv, @rate, @g, @tot, @dl, @rm, @by, @rep)`);
     issued.push({ id: row.recordset[0].Id, docNo, type: p.type, status: p.barred ? "TimeBarred" : "Issued", amount: p.amount, gst });
   }
   return { issued };
 }
 
 const SELECT_NOTE = `
-  SELECT n.*, r.RefundNo, b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, b.HsnCode,
+  SELECT n.*, r.RefundNo, r.SourceType AS RefundSource, r.Reason AS RefundReason, r.PaidAt AS RefundPaidAt, r.GrossAmount AS RefundGross,
+         r.DeductionAmount AS RefundKept, r.NetAmount AS RefundNet,
+         b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, b.HsnCode, b.ApplicationId,
+         rn.DocNo AS ReplacesNo,
+         (SELECT TOP 1 x.DocNo FROM dbo.CrmGstNote x WHERE x.ReplacesId = n.Id) AS ReplacedByNo,
          c.CustomerName, c.CustomerNo, c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode, c.Mobile AS CustomerMobile,
          comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2, comp.city AS CompanyCity, comp.state AS CompanyState,
          comp.pincode AS CompanyPincode, comp.gst_no AS CompanyGst, comp.pan_no AS CompanyPan, comp.logo AS CompanyLogo,
@@ -139,9 +144,10 @@ const SELECT_NOTE = `
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
   LEFT JOIN dbo.CrmCustomer c ON c.Id = n.CustomerId
   LEFT JOIN dbo.enterprise comp ON comp.id = n.CompanyId AND comp.business_type = 'C'
-  LEFT JOIN dbo.enterprise proj ON proj.id = n.ProjectId AND proj.business_type = 'P'`;
+  LEFT JOIN dbo.enterprise proj ON proj.id = n.ProjectId AND proj.business_type = 'P'
+  LEFT JOIN dbo.CrmGstNote rn ON rn.Id = n.ReplacesId`;
 
-async function list(pool, { refundId = null, customerId = null, from = null, to = null, type = null, projectScope = null } = {}) {
+async function list(pool, { refundId = null, customerId = null, from = null, to = null, type = null, projectScope = null, includeCancelled = true } = {}) {
   const req = pool.request();
   const w = ["1 = 1"];
   if (refundId) { w.push("n.RefundId = @r"); req.input("r", sql.Int, refundId); }
@@ -149,6 +155,7 @@ async function list(pool, { refundId = null, customerId = null, from = null, to 
   if (from) { w.push("n.DocDate >= @f"); req.input("f", sql.Date, from); }
   if (to) { w.push("n.DocDate <= @t"); req.input("t", sql.Date, to); }
   if (type) { w.push("n.DocType = @ty"); req.input("ty", sql.NVarChar(20), type); }
+  if (!includeCancelled) w.push("n.Status <> N'Cancelled'");
   if (projectScope) w.push(require("./projectScope").projectPredicate(projectScope, "n.ProjectId", "").trim());
   return (await req.query(`${SELECT_NOTE} WHERE ${w.join(" AND ")} ORDER BY n.DocDate DESC, n.Id DESC`)).recordset;
 }
@@ -169,7 +176,7 @@ function renderPdf(n) {
     const W = doc.page.width - 80, L = 40;
     const money = (x) => `Rs. ${Number(x || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const date = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "-");
-    const barred = n.Status === "TimeBarred";
+    const barred = n.Status === "TimeBarred" || (n.Status === "Cancelled" && !n.DocNo);
     const title = barred ? "CERTIFICATE OF GST PAID" : n.DocType === "CreditNote" ? "CREDIT NOTE" : "REFUND VOUCHER";
     const law = barred ? "For the recipient's refund claim — CBIC Circular 188/20/2022-GST"
       : n.DocType === "CreditNote" ? "Section 34 of the CGST Act, 2017 read with Rule 53" : "Section 31(3)(e) of the CGST Act, 2017 read with Rule 51";
@@ -229,10 +236,63 @@ function renderPdf(n) {
     doc.font(F.regular).fontSize(8.5).fillColor("#334155").text(
       barred ? `The tax shown was charged on invoice ${n.AgainstRef} and paid by us to the government. It has not been adjusted or refunded to us, and the time to issue a credit note has passed (${date(n.DeadlineDate)}). The recipient may claim it from the department.`
         : n.Remarks || "", L, y, { width: W });
+    if (n.Status === "Cancelled") {
+      doc.save().rotate(-30, { origin: [L + W / 2, 420] }).fillColor("#dc2626").opacity(0.18).font(F.bold).fontSize(64)
+        .text("CANCELLED", L, 390, { width: W, align: "center" }).restore();
+      doc.opacity(1).fillColor("#b91c1c").font(F.regular).fontSize(8.5)
+        .text(`Cancelled on ${date(n.CancelledAt)}${n.CancelReason ? ` — ${n.CancelReason}` : ""}${n.ReplacedByNo ? `. Replaced by ${n.ReplacedByNo}.` : ""}`, L, y + 40, { width: W });
+    }
+    if (n.ReplacesNo) doc.fillColor("#475569").font(F.regular).fontSize(8).text(`Replaces ${n.ReplacesNo} (cancelled).`, L, y + 54, { width: W });
     doc.fillColor("#000").font(F.bold).fontSize(9).text(`For ${n.CompanyName || ""}`, L + W * 0.6, y + 70, { width: W * 0.4, align: "right" });
     doc.font(F.regular).fontSize(8).text("Authorised signatory", L + W * 0.6, y + 110, { width: W * 0.4, align: "right" });
     doc.end();
   });
 }
 
-module.exports = { issueForRefund, list, load, renderPdf, creditNoteDeadline };
+class GstNoteError extends Error { constructor(m, status = 400) { super(m); this.status = status; } }
+
+/**
+ * Cancel one issued in error: it keeps its number (the series stays unbroken
+ * for the GST return) and says who and why. Every document of that refund is
+ * cancelled together — they were worked out as one split.
+ */
+async function cancel(pool, id, reason, userEmail) {
+  const n = await load(pool, id);
+  if (!n) throw new GstNoteError("Credit note not found", 404);
+  if (n.Status === "Cancelled") throw new GstNoteError("It is already cancelled", 409);
+  if (!String(reason || "").trim()) throw new GstNoteError("Say why it is being cancelled");
+  await pool.request().input("r", sql.Int, n.RefundId).input("why", sql.NVarChar(500), String(reason).trim().slice(0, 500)).input("by", sql.NVarChar(200), userEmail || null)
+    .query(`UPDATE dbo.CrmGstNote SET Status = N'Cancelled', CancelledAt = SYSDATETIME(), CancelledBy = @by, CancelReason = @why
+            WHERE RefundId = @r AND Status <> N'Cancelled'`);
+  return load(pool, id);
+}
+
+/** A fresh set for a refund whose documents were all cancelled. */
+async function reissue(pool, refundId, userEmail) {
+  const live = (await pool.request().input("r", sql.Int, refundId)
+    .query("SELECT COUNT(*) AS n FROM dbo.CrmGstNote WHERE RefundId = @r AND Status <> N'Cancelled'")).recordset[0].n;
+  if (live) throw new GstNoteError("This refund still has a live credit note — cancel it first", 409);
+  const last = (await pool.request().input("r", sql.Int, refundId)
+    .query("SELECT TOP 1 Id FROM dbo.CrmGstNote WHERE RefundId = @r AND Status = N'Cancelled' ORDER BY Id DESC")).recordset[0];
+  const out = await issueForRefund(pool, refundId, userEmail, { replacesId: last?.Id ?? null });
+  if (out.none) throw new GstNoteError(`No credit note needed: ${out.none}`, 409);
+  return out;
+}
+
+/** Paid refunds that carried GST but have no live credit note yet. */
+async function pending(pool, { projectScope = null } = {}) {
+  const scope = projectScope ? ` AND ${require("./projectScope").projectPredicate(projectScope, "COALESCE(r.ProjectId, b.ProjectId)", "").trim()}` : "";
+  return (await pool.request().query(`
+    SELECT r.Id AS RefundId, r.RefundNo, r.NetAmount, r.DeductionAmount, r.PaidAt, r.SourceType, b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property,
+           c.CustomerName, proj.name AS ProjectName,
+           (SELECT COUNT(*) FROM dbo.CrmGstNote x WHERE x.RefundId = r.Id AND x.Status = N'Cancelled') AS CancelledCount
+    FROM dbo.CrmRefund r
+    JOIN dbo.CrmBooking b ON b.Id = r.BookingId
+    LEFT JOIN dbo.CrmCustomer c ON c.Id = r.CustomerId
+    LEFT JOIN dbo.enterprise proj ON proj.id = COALESCE(r.ProjectId, b.ProjectId) AND proj.business_type = 'P'
+    WHERE r.Status = N'Paid' AND r.NetAmount > 0 AND ISNULL(b.TotalGstAmount, 0) > 0
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmGstNote n WHERE n.RefundId = r.Id AND n.Status <> N'Cancelled')${scope}
+    ORDER BY r.PaidAt DESC`)).recordset;
+}
+
+module.exports = { issueForRefund, reissue, cancel, pending, list, load, renderPdf, creditNoteDeadline, GstNoteError };

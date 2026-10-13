@@ -1636,7 +1636,7 @@ router.post("/transfer-deeds/:deedId/duty/proof",
 // The customer's own, for every booking they were the customer on.
 router.get("/gst-notes", async (req, res) => {
   try {
-    const rows = await require("../services/crmGstNotes").list(getPool(), { customerId: Number(req.portalUser.customerId) });
+    const rows = await require("../services/crmGstNotes").list(getPool(), { customerId: Number(req.portalUser.customerId), includeCancelled: false });
     res.json(rows.map((n) => ({
       Id: n.Id, DocNo: n.DocNo, DocType: n.DocType, Status: n.Status, DocDate: n.DocDate, RefundNo: n.RefundNo, Property: n.Property, BookingNo: n.BookingNo,
       AgainstRef: n.AgainstRef, TaxableValue: n.TaxableValue, GstRate: n.GstRate, GstAmount: n.GstAmount, TotalAmount: n.TotalAmount,
@@ -1652,7 +1652,7 @@ router.get("/gst-notes/:noteId/pdf", async (req, res) => {
   try {
     const gst = require("../services/crmGstNotes");
     const n = await gst.load(getPool(), id);
-    if (!n || Number(n.CustomerId) !== Number(req.portalUser.customerId)) return res.status(404).json({ error: "Document not found" });
+    if (!n || n.Status === "Cancelled" || Number(n.CustomerId) !== Number(req.portalUser.customerId)) return res.status(404).json({ error: "Document not found" });
     const buf = await gst.renderPdf(n);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${n.DocNo || `GST-certificate-${n.RefundNo}`}.pdf"`);
