@@ -8,7 +8,7 @@ import { useSearchParams, useLocation } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SheetShell } from "@/components/sheet/Sheet";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
@@ -4538,7 +4538,7 @@ const Payment: React.FC = () => {
                         <span className="font-heading font-semibold text-sm text-foreground truncate">
                           {rec.paymentName}
                         </span>
-                        <ModeBadge mode={rec.mode} />
+                        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{rec.mode || "—"}</span>
                       </div>
                       {rec.paidTo && (
                         <p className="text-xs text-muted-foreground truncate">
@@ -4574,7 +4574,7 @@ const Payment: React.FC = () => {
                           <ApprovalStatusChain
                             table="NewPayment"
                             recordId={rec.id}
-                            fallback={<StatusBadge status={rec.status} />}
+                            fallback={<SheetMark text={rec.status || "—"} tone={statusTone(rec.status || "")} />}
                             preloaded={approvalTrails.get(String(rec.id)) ?? null}
                             preloadedLoading={approvalTrailsLoading}
                           />
@@ -5118,8 +5118,8 @@ const Payment: React.FC = () => {
 
               {/* Status + Mode row */}
               <div className="flex items-center gap-2">
-                <StatusBadge status={viewingRec.status} />
-                <ModeBadge mode={viewingRec.mode} />
+                <SheetMark text={viewingRec.status || "—"} tone={statusTone(viewingRec.status || "")} />
+                <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{viewingRec.mode || "—"}</span>
                 {viewingChain?.billStatus && (
                   <span
                     className={`flex items-center gap-1 text-[0.625rem] font-semibold px-2.5 py-1 rounded-lg border ${
@@ -5731,7 +5731,7 @@ const Payment: React.FC = () => {
                       viewingChain,
                     )
                   }
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors"
                 >
                   <Printer size={12} /> Print
                 </button>
@@ -5745,7 +5745,7 @@ const Payment: React.FC = () => {
                       viewingChain,
                     )
                   }
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors"
                 >
                   <FileDown size={12} /> Generate PDF
                 </button>
@@ -5757,7 +5757,7 @@ const Payment: React.FC = () => {
                     setViewingChain(null);
                     openEdit(viewingRec);
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors"
                 >
                   <Edit size={12} />
                   Edit
@@ -5768,7 +5768,7 @@ const Payment: React.FC = () => {
                   setViewingRec(null);
                   setViewingChain(null);
                 }}
-                className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium gradient-accent text-white shadow-sm"
+                className="px-4 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground hover:bg-foreground/85 transition-colors"
               >
                 Close
               </button>
