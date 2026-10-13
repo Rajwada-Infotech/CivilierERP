@@ -71,6 +71,8 @@ router.get("/:id/deed", requirePageRight("crm-ownership-changes", "view"), async
     res.send(Buffer.from(f.FileBase64, "base64"));
   } catch (e) { fail(res, e, "GET deed"); }
 });
+router.get("/:id/history", requirePageRight("crm-ownership-changes", "view"), withId((db, id) => svc.history(db, id), "GET history"));
+router.put("/:id/owner-application", requirePageRight("crm-ownership-changes", "edit"), withId((db, id, req) => svc.openOwnerApplication(db, id, actorId(req)), "open application"));
 router.put("/:id/submit", requirePageRight("crm-ownership-changes", "edit"), withId((db, id, req) => svc.submit(db, id, user(req)), "submit"));
 router.put("/:id/approve", requirePageRight("crm-ownership-changes", "edit"), withId((db, id, req) => svc.decide(db, id, true, rmk(req), user(req)), "approve"));
 router.put("/:id/reject", requirePageRight("crm-ownership-changes", "edit"), withId((db, id, req) => svc.decide(db, id, false, rmk(req), user(req)), "reject"));

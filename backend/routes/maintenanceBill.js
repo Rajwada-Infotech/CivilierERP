@@ -22,7 +22,8 @@ const LIST_SELECT = `
     comp.gst_no AS CompanyGstNo
   FROM dbo.MaintenanceBill b
   JOIN dbo.CrmBooking cb ON cb.Id = b.BookingId
-  JOIN dbo.CrmApplication a ON a.Id = cb.ApplicationId
+  -- Who it was billed to (migration 563); NULL = the booking's current owner.
+  JOIN dbo.CrmApplication a ON a.Id = COALESCE(b.BillToApplicationId, cb.ApplicationId)
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = cb.UnitId
   LEFT JOIN dbo.BlockMaster blk ON blk.Id = um.BlockId
   LEFT JOIN dbo.enterprise  comp ON comp.id = cb.CompanyId AND comp.business_type = 'C'
@@ -183,9 +184,9 @@ router.post("/", requirePageRight("maintenance-bills", "create"), async (req, re
         .input("CreatedAt", sql.DateTime, new Date())
         .query(`
           INSERT INTO dbo.MaintenanceBill
-            (BillNo, BookingId, BillDate, DueDate, PeriodFrom, PeriodTo, Notes, Subtotal, TotalTax, GrandTotal, Status, CreatedBy, CreatedAt)
+            (BillNo, BookingId, BillToApplicationId, BillDate, DueDate, PeriodFrom, PeriodTo, Notes, Subtotal, TotalTax, GrandTotal, Status, CreatedBy, CreatedAt)
           OUTPUT INSERTED.Id
-          VALUES (@BillNo, @BookingId, @BillDate, @DueDate, @PeriodFrom, @PeriodTo, @Notes, @Subtotal, @TotalTax, @GrandTotal, 'Active', @CreatedBy, @CreatedAt)
+          VALUES (@BillNo, @BookingId, (SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @BookingId), @BillDate, @DueDate, @PeriodFrom, @PeriodTo, @Notes, @Subtotal, @TotalTax, @GrandTotal, 'Active', @CreatedBy, @CreatedAt)
         `);
       const billId = billResult.recordset[0].Id;
 

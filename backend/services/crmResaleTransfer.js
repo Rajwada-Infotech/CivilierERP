@@ -112,6 +112,12 @@ async function moveBookingToCustomer(tx, b, person, { applicationId = null, acto
         .query(`INSERT INTO dbo.${t[0]} (ApplicationId, ${t[1]}, Status, IsPrimary, CreatedAt) VALUES (@a, @r, N'Active', @pri, SYSDATETIME())`);
     }
   }
+  // Bills raised so far stay the old owner's (migration 563).
+  for (const t of ["MaintenanceBill", "ElectricityBill"]) {
+    await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, b.ApplicationId)
+      .query(`IF COL_LENGTH('dbo.${t}', 'BillToApplicationId') IS NOT NULL
+                EXEC sp_executesql N'UPDATE dbo.${t} SET BillToApplicationId = @a WHERE BookingId = @b AND BillToApplicationId IS NULL', N'@a INT, @b INT', @a = @a, @b = @b`);
+  }
   await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, appId).input("by", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmBooking SET ApplicationId = @a, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @b");
   await tx.request().input("b", sql.Int, b.Id).input("a", sql.Int, b.ApplicationId)

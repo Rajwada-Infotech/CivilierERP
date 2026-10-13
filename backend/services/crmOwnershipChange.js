@@ -23,14 +23,31 @@ const SELECT_CHANGE = `
          o.Status, o.Notes, o.RejectionNote, o.ApprovedBy, o.ApprovedAt, o.SubmittedAt, o.CreatedBy, o.CreatedAt, o.UpdatedAt,
          b.BookingNo, b.ProjectId, ISNULL(b.UnitNo, b.BookingNo) AS Property, p.name AS ProjectName,
          fc.CustomerName AS FromName, fc.Mobile AS FromMobile, tc.CustomerName AS ToName, tc.Mobile AS ToMobile, tc.CustomerNo AS ToCode,
+         tc.PanNo AS ToPan, tc.AadhaarNo AS ToAadhaar, tc.Address AS ToAddress, ta.ApplicationNo AS ToApplicationNo,
+         (SELECT COUNT(*) FROM dbo.CrmCoApplicant co WHERE co.IsActive = 1 AND co.ApplicationId = o.ToApplicationId) AS CoOwnerCount,
          cu.name AS CreatedByName, au.name AS ApprovedByName
   FROM dbo.CrmOwnershipChange o
   JOIN dbo.CrmBooking b ON b.Id = o.BookingId
   LEFT JOIN dbo.enterprise p ON p.id = b.ProjectId
   LEFT JOIN dbo.CrmCustomer fc ON fc.Id = o.FromCustomerId
   LEFT JOIN dbo.CrmCustomer tc ON tc.Id = o.ToCustomerId
+  LEFT JOIN dbo.CrmApplication ta ON ta.Id = o.ToApplicationId
   LEFT JOIN dbo.Users cu ON cu.id = o.CreatedBy
   LEFT JOIN dbo.Users au ON au.id = o.ApprovedBy`;
+
+async function log(db, id, action, userId, remarks = null) {
+  await db.request().input("c", sql.Int, id).input("a", sql.NVarChar(100), action.slice(0, 100))
+    .input("r", sql.NVarChar(1000), remarks ? String(remarks).slice(0, 1000) : null).input("u", sql.Int, userId ?? null)
+    .query("INSERT INTO dbo.CrmOwnershipChangeLog (ChangeId, Action, Remarks, UserId) VALUES (@c, @a, @r, @u)");
+}
+
+/** Who did what and when (migration 564), newest first. */
+async function history(db, id) {
+  return (await db.request().input("c", sql.Int, id).query(`
+    SELECT l.Id, l.Action, l.Remarks, l.CreatedAt, u.name AS UserName
+    FROM dbo.CrmOwnershipChangeLog l LEFT JOIN dbo.Users u ON u.id = l.UserId
+    WHERE l.ChangeId = @c ORDER BY l.CreatedAt DESC, l.Id DESC`)).recordset;
+}
 
 async function load(db, id) {
   const r = (await db.request().input("id", sql.Int, id).query(`${SELECT_CHANGE} WHERE o.Id = @id AND o.IsActive = 1`)).recordset[0];
@@ -70,6 +87,12 @@ async function list(db, { status = "", search = "", projectScope = null } = {}) 
 function missing(o) {
   const out = [];
   if (!o.ToCustomerId) out.push("the new owner");
+  else {
+    if (!o.ToPan) out.push("the new owner's PAN (Customers)");
+    if (!o.ToAadhaar) out.push("the new owner's Aadhaar (Customers)");
+    if (!o.ToAddress) out.push("the new owner's address (Customers)");
+    if (!o.ToApplicationId) out.push("the new owner's application (open it here, then add any co-owners on it)");
+  }
   if (!String(o.DeedNo || "").trim()) out.push("the sale deed's registration number");
   if (!o.DeedDate) out.push("the sale deed's date");
   if (!String(o.RegOffice || "").trim()) out.push("the registration office");
@@ -123,6 +146,7 @@ async function create(db, body, actorUserId, projectScope = null) {
     .input("cv", sql.Decimal(18, 2), f.ConsiderationValue).input("n", sql.NVarChar(1000), f.Notes).input("by", sql.Int, actorUserId)
     .query(`INSERT INTO dbo.CrmOwnershipChange (ChangeNo, BookingId, FromCustomerId, FromApplicationId, ToCustomerId, DeedNo, DeedDate, RegOffice, ConsiderationValue, Notes, Status, CreatedBy, CreatedAt)
             OUTPUT INSERTED.Id VALUES (@no, @b, @fc, @fa, @tc, @dn, @dd, @ro, @cv, @n, N'Draft', @by, SYSDATETIME())`);
+  await log(db, r.recordset[0].Id, "Entered", actorUserId);
   return load(db, r.recordset[0].Id);
 }
 
@@ -132,8 +156,22 @@ async function update(db, id, body, actorUserId) {
   const o = await load(db, id);
   editable(o);
   const toId = body.ToCustomerId ? parseInt(body.ToCustomerId, 10) : null;
-  if (toId) await assertNewOwner(db, o.BookingId, o.FromCustomerId, toId);
+  const ownerChanged = !!toId && toId !== Number(o.ToCustomerId);
+  if (ownerChanged) {
+    if (o.ToApplicationId) throw new OwnershipError("The new owner's application is already open — cancel this record and start again to name someone else", 409);
+    await assertNewOwner(db, o.BookingId, o.FromCustomerId, toId);
+  }
   const f = cleanFields(body);
+  const day = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+  const changed = [
+    ["new owner", ownerChanged],
+    ["registration no.", (f.DeedNo || null) !== (o.DeedNo || null)],
+    ["date", day(f.DeedDate) !== day(o.DeedDate)],
+    ["office", (f.RegOffice || null) !== (o.RegOffice || null)],
+    ["value", (f.ConsiderationValue ?? null) !== (o.ConsiderationValue == null ? null : Number(o.ConsiderationValue))],
+    ["notes", (f.Notes || null) !== (o.Notes || null)],
+  ].filter(([, c]) => c).map(([n]) => n);
+  if (changed.length) await log(db, id, "Details changed", actorUserId, changed.join(", "));
   await db.request().input("id", sql.Int, id).input("tc", sql.Int, toId)
     .input("dn", sql.NVarChar(100), f.DeedNo).input("dd", sql.Date, f.DeedDate).input("ro", sql.NVarChar(200), f.RegOffice)
     .input("cv", sql.Decimal(18, 2), f.ConsiderationValue).input("n", sql.NVarChar(1000), f.Notes).input("by", sql.Int, actorUserId)
@@ -148,6 +186,39 @@ async function attachDeed(db, id, file, actorUserId) {
   await db.request().input("id", sql.Int, id).input("fn", sql.NVarChar(300), file.originalname).input("b", sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
     .input("fs", sql.BigInt, file.size).input("mt", sql.NVarChar(150), file.mimetype).input("by", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmOwnershipChange SET FileName = @fn, FileBase64 = @b, FileSize = @fs, MimeType = @mt, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+  await log(db, id, o.FileName ? "Sale deed copy replaced" : "Sale deed copy attached", actorUserId, file.originalname);
+  return load(db, id);
+}
+
+/**
+ * The new owner's application, opened before approval (as a resale case
+ * opens its buyer's): co-owners are added on it, and it takes the booking
+ * when the change is approved. Draft until then.
+ */
+async function openOwnerApplication(db, id, actorUserId) {
+  const o = await load(db, id);
+  editable(o);
+  if (o.ToApplicationId) return o;
+  const person = (await db.request().input("c", sql.Int, o.ToCustomerId)
+    .query("SELECT Id, CustomerName, Mobile, Email FROM dbo.CrmCustomer WHERE Id = @c AND IsActive = 1")).recordset[0];
+  if (!person) throw new OwnershipError("The new owner's customer record was not found");
+  const b = (await db.request().input("b", sql.Int, o.BookingId)
+    .query("SELECT ProjectId, CompanyId, UnitNo FROM dbo.CrmBooking WHERE Id = @b")).recordset[0] || {};
+  const { getNextDocNumber } = require("./docNumber");
+  const appNo = await getNextDocNumber(db, "APP", "APP");
+  const app = await db.request()
+    .input("no", sql.NVarChar(50), appNo).input("cid", sql.Int, person.Id).input("name", sql.NVarChar(200), person.CustomerName)
+    .input("mob", sql.NVarChar(20), person.Mobile || null).input("em", sql.NVarChar(200), person.Email || null)
+    .input("pid", sql.Int, b.ProjectId ?? null).input("co", sql.Int, b.CompanyId ?? null).input("unit", sql.NVarChar(200), b.UnitNo || null)
+    .input("by", sql.Int, actorUserId)
+    .input("note", sql.NVarChar(sql.MAX), `${o.ChangeNo}: ${b.UnitNo || "property"} to pass to ${person.CustomerName} when the ownership change is approved.`)
+    .query(`INSERT INTO dbo.CrmApplication (ApplicationNo, CustomerId, ApplicantName, Mobile, Email, ProjectId, CompanyId,
+              InterestedUnit, Source, Status, Notes, DateOfApply, IsActive, CreatedBy, CreatedAt, AssignedTo, AssignedBy)
+            OUTPUT INSERTED.Id
+            VALUES (@no, @cid, @name, @mob, @em, @pid, @co, @unit, N'Other', N'Draft', @note, CAST(SYSDATETIME() AS DATE), 1, @by, SYSDATETIME(), @by, @by)`);
+  await db.request().input("id", sql.Int, id).input("a", sql.Int, app.recordset[0].Id).input("by", sql.Int, actorUserId)
+    .query("UPDATE dbo.CrmOwnershipChange SET ToApplicationId = @a, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id AND ToApplicationId IS NULL");
+  await log(db, id, "New owner's application opened", actorUserId, appNo);
   return load(db, id);
 }
 
@@ -169,6 +240,7 @@ async function submit(db, id, user) {
   await transition("crm-ownership-changes", id, "Pending", user.email, user.role, null, user.userId);
   await db.request().input("id", sql.Int, id).input("by", sql.Int, user.userId)
     .query("UPDATE dbo.CrmOwnershipChange SET SubmittedAt = SYSDATETIME(), SubmittedBy = @by, RejectionNote = NULL, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+  await log(db, id, o.Status === "Rejected" ? "Sent for approval again" : "Sent for approval", user.userId);
   return load(db, id);
 }
 
@@ -181,8 +253,13 @@ async function decide(pool, id, approve, note, user) {
   if (r.newStatus === "Rejected") {
     await pool.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), note)
       .query("UPDATE dbo.CrmOwnershipChange SET RejectionNote = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    await log(pool, id, "Sent back", user.userId, note);
+  } else if (r.newStatus === "Approved") {
+    await applyChange(pool, id, user.userId);
+    await log(pool, id, "Approved — the property passed to the new owner", user.userId, note);
+  } else {
+    await log(pool, id, "Approval level passed", user.userId, note);
   }
-  if (r.newStatus === "Approved") await applyChange(pool, id, user.userId);
   return { status: r.newStatus, change: await load(pool, id) };
 }
 
@@ -203,7 +280,7 @@ async function applyChange(pool, id, actorUserId) {
       .query("SELECT Id, CustomerName, Mobile, Email FROM dbo.CrmCustomer WHERE Id = @c")).recordset[0];
     const { moveBookingToCustomer } = require("./crmResaleTransfer");
     appId = await moveBookingToCustomer(tx, b, person, {
-      actorUserId,
+      applicationId: o.ToApplicationId || null, actorUserId,
       note: `Owner of ${b.BookingNo} since sale deed ${o.DeedNo} (${o.ChangeNo}).`,
       loanNote: `Previous owner's loan — closed when ownership changed (${o.ChangeNo})`,
     });
@@ -212,6 +289,7 @@ async function applyChange(pool, id, actorUserId) {
     await tx.commit();
   } catch (e) {
     await tx.rollback().catch(() => {});
+    await log(pool, id, "Approval could not be applied", actorUserId, e.message).catch(() => {});
     // The approval stands but nothing moved: put it back to Pending so it can
     // be approved again once the cause is fixed.
     await pool.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), `Not applied: ${e.message}`.slice(0, 500))
@@ -228,13 +306,11 @@ async function cancel(db, id, note, actorUserId) {
   if (!String(note || "").trim()) throw new OwnershipError("Say why it is being cancelled");
   await db.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), note).input("by", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmOwnershipChange SET Status = N'Cancelled', RejectionNote = @n, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+  // The new owner's application opened for it never took the booking.
+  if (o.ToApplicationId) await db.request().input("a", sql.Int, o.ToApplicationId)
+    .query("UPDATE dbo.CrmApplication SET Status = N'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @a AND Status = N'Draft'");
+  await log(db, id, "Cancelled", actorUserId, note);
   return load(db, id);
 }
 
-/** Every owner a booking has had, oldest first (its original buyer, then each recorded change). */
-async function history(db, bookingId) {
-  return (await db.request().input("b", sql.Int, bookingId).query(`${SELECT_CHANGE}
-    WHERE o.BookingId = @b AND o.IsActive = 1 AND o.Status = N'Approved' ORDER BY o.ApprovedAt`)).recordset;
-}
-
-module.exports = { list, eligibleBookings, load, create, update, attachDeed, deedFile, submit, decide, cancel, history, missing, OwnershipError };
+module.exports = { list, eligibleBookings, load, create, update, attachDeed, openOwnerApplication, deedFile, submit, decide, cancel, history, missing, OwnershipError };

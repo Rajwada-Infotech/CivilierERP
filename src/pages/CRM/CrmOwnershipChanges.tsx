@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -11,7 +11,7 @@ import { translateError } from "@/lib/translateError";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableSelect } from "@/components/SearchableSelect";
-import { CheckCircle2, Circle, FileText, Info, Plus, Search, Upload } from "lucide-react";
+import { CheckCircle2, Circle, ExternalLink, FileText, History, Info, Plus, Search, Upload, Users } from "lucide-react";
 
 // Ownership Changes — after a property's sale deed is registered it is its
 // owner's; if they sell it on, the sale is between owners and we only RECORD
@@ -93,6 +93,7 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
   const qc = useQueryClient();
   const { data: o, isLoading } = useQuery<any>({ queryKey: ["crm-ownership-change", id], queryFn: () => send("GET", `${API}/${id}`) });
   const { data: customers = [] } = useQuery<any[]>({ queryKey: ["crm-customers-dropdown"], queryFn: () => send("GET", "/api/crm/customers"), staleTime: 60_000 });
+  const { data: log = [] } = useQuery<any[]>({ queryKey: ["crm-ownership-change-log", id], queryFn: () => send("GET", `${API}/${id}/history`) });
   const [f, setF] = useState<any>(null);
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
@@ -101,7 +102,7 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
   }, [o]);
   if (isLoading || !o || !f) return <div className="rounded-xl border border-border p-10 text-center text-sm text-muted-foreground">Loading…</div>;
   const editable = canEdit && ["Draft", "Rejected"].includes(o.Status);
-  const refresh = () => { qc.invalidateQueries({ queryKey: ["crm-ownership-change", id] }); onChanged(); };
+  const refresh = () => { qc.invalidateQueries({ queryKey: ["crm-ownership-change", id] }); qc.invalidateQueries({ queryKey: ["crm-ownership-change-log", id] }); onChanged(); };
   const run = async (key: string, fn: () => Promise<any>, ok: string) => {
     setBusy(key);
     try { await fn(); toast.success(ok); setNote(""); refresh(); }
@@ -117,8 +118,14 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
   };
   const dirty = f.ToCustomerId !== String(o.ToCustomerId || "") || f.DeedNo !== (o.DeedNo || "") || f.DeedDate !== (o.DeedDate ? String(o.DeedDate).slice(0, 10) : "")
     || f.RegOffice !== (o.RegOffice || "") || String(f.ConsiderationValue ?? "") !== String(o.ConsiderationValue ?? "") || f.Notes !== (o.Notes || "");
-  const checks: [string, boolean][] = [
+  // [what, done, where to fix it]
+  const kyc = o.ToCustomerId ? `/crm/customers?customerId=${o.ToCustomerId}` : undefined;
+  const checks: [string, boolean, string?][] = [
     ["New owner chosen", !!o.ToCustomerId],
+    ["New owner's PAN on file", !!o.ToPan, kyc],
+    ["New owner's Aadhaar on file", !!o.ToAadhaar, kyc],
+    ["New owner's address on file", !!o.ToAddress, kyc],
+    ["New owner's application opened (co-owners go on it)", !!o.ToApplicationId],
     ["Sale deed's registration number", !!o.DeedNo],
     ["Sale deed's date", !!o.DeedDate],
     ["Registration office", !!o.RegOffice],
@@ -132,7 +139,7 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
     : o.Status === "Pending" ? "Waiting for approval in the Approval Inbox. Whoever entered it can't approve it."
     : o.Status === "Cancelled" ? `Cancelled — ${o.RejectionNote || ""}`
     : o.Status === "Rejected" ? `Sent back: ${o.RejectionNote || "—"}. Fix it and send it again.`
-    : ready ? "Everything is in — send it for approval." : "Fill in the sale deed's details and attach its registered copy, then send it for approval.";
+    : ready ? "Everything is in — send it for approval." : "Complete the list on the right — the new owner's KYC and application, the sale deed's details and its registered copy — then send it for approval.";
 
   return (
     <div className="space-y-4">
@@ -157,6 +164,23 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
               <SearchableSelect value={f.ToCustomerId} onChange={(v) => setF({ ...f, ToCustomerId: v })} placeholder="Choose the new owner" searchPlaceholder="Search name, mobile or customer no…"
                 options={customers.filter((c: any) => c.Id !== o.FromCustomerId).map((c: any) => ({ value: String(c.Id), label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · ") }))} />
             ) : <div className="text-sm">{o.ToName}{o.ToMobile ? ` · ${o.ToMobile}` : ""}</div>}
+            {editable && o.ToApplicationId && <p className="mt-1 text-[0.6875rem] text-muted-foreground">Their application is open, so the new owner is fixed — cancel this record to name someone else.</p>}
+          </div>
+          <div className="rounded-lg border border-border bg-muted/30 p-3 flex flex-wrap items-center gap-2 text-xs">
+            <Users size={14} className="text-muted-foreground" />
+            {o.ToApplicationId ? (
+              <>
+                <span className="flex-1">Application <b className="font-mono">{o.ToApplicationNo}</b> · {o.CoOwnerCount ? `${o.CoOwnerCount} co-owner${o.CoOwnerCount > 1 ? "s" : ""}` : "no co-owners"}</span>
+                <Link to={`/crm/applications?id=${o.ToApplicationId}`} target="_blank" className="h-7 px-2.5 rounded-md border border-border hover:bg-muted inline-flex items-center gap-1">Add co-owners / KYC <ExternalLink size={11} /></Link>
+              </>
+            ) : (
+              <>
+                <span className="flex-1 text-muted-foreground">The new owner's application takes the property when this is approved. Open it to add any co-owners named on the sale deed.</span>
+                {editable && <button disabled={!!busy || dirty} title={dirty ? "Save your changes first" : undefined}
+                  onClick={() => run("app", () => send("PUT", `${API}/${id}/owner-application`), "Application opened")}
+                  className="h-7 px-2.5 rounded-md bg-primary text-primary-foreground disabled:opacity-40">{busy === "app" ? "Opening…" : "Open application"}</button>}
+              </>
+            )}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div><label className={label}>Registration number</label>
@@ -188,9 +212,11 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
           <div className="rounded-xl border border-border bg-card p-4">
             <h3 className="text-sm font-semibold mb-2">Before it goes for approval</h3>
             <ul className="space-y-1.5">
-              {checks.map(([t, ok]) => (
+              {checks.map(([t, ok, to]) => (
                 <li key={t} className={`flex items-center gap-2 text-xs ${ok ? "" : "text-muted-foreground"}`}>
-                  {ok ? <CheckCircle2 size={14} className="text-green-600" /> : <Circle size={14} />}{t}
+                  {ok ? <CheckCircle2 size={14} className="text-green-600 shrink-0" /> : <Circle size={14} className="shrink-0" />}
+                  <span className="flex-1">{t}</span>
+                  {!ok && to && <Link to={to} target="_blank" className="text-primary hover:underline inline-flex items-center gap-0.5">Fix <ExternalLink size={10} /></Link>}
                 </li>
               ))}
             </ul>
@@ -221,6 +247,21 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
             {o.ConsiderationValue != null && <div className="flex justify-between"><span className="text-muted-foreground">Sale value</span><span className="tabular-nums">{fmtMoney(o.ConsiderationValue)}</span></div>}
           </div>
         </aside>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4">
+        <h3 className="text-sm font-semibold mb-3 inline-flex items-center gap-1.5"><History size={14} />History</h3>
+        {!log.length ? <p className="text-xs text-muted-foreground">Nothing recorded yet.</p> : (
+          <ol className="space-y-2">
+            {log.map((l) => (
+              <li key={l.Id} className="flex gap-3 text-xs">
+                <span className="text-muted-foreground tabular-nums shrink-0 w-36">{new Date(l.CreatedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                <span className="flex-1"><b className="font-medium">{l.Action}</b>{l.Remarks ? <span className="text-muted-foreground"> — {l.Remarks}</span> : null}</span>
+                <span className="text-muted-foreground shrink-0">{l.UserName || ""}</span>
+              </li>
+            ))}
+          </ol>
+        )}
       </div>
     </div>
   );
