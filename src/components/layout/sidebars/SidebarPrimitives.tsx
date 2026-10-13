@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ArrowDown2, ArrowUp2 } from "iconsax-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import {
   Tooltip,
   TooltipContent,
@@ -96,32 +96,29 @@ export interface NavItem {
 
 // ─── Shared bits ──────────────────────────────────────────────────────────────
 
-/** Icon, sat inside a soft rounded chip — matches the icon-tile look of the
- *  reference design rather than a bare glyph. */
-const IconChip = ({
-  icon: _icon,
-  size,
-  active,
-  compact,
-}: {
-  icon: React.ElementType;
-  size: number;
-  active: boolean;
-  compact?: boolean;
-}) => {
-  const pad = compact ? 6 : 12;
-  return (
-    <span
-      className="flex items-center justify-center shrink-0 transition-colors text-sidebar-foreground/60"
-      style={{
-        width: compact ? 10 : 14,
-        height: size + pad,
-      }}
-    >
-      <span className={`rounded-full ${active ? "w-1.5 h-1.5 bg-sidebar-primary" : "w-1 h-1 bg-current"}`} />
-    </span>
-  );
-};
+/** The item's number in the module's index ("01", "02" ...), in place of a bullet. The active one takes the
+ *  module's hue; it also tells items apart in the collapsed rail, where there are no labels. */
+const IndexMark = ({ index, active, accentColor }: { index: number; active: boolean; accentColor?: string }) => (
+  <span
+    className="shrink-0 font-heading tabular-nums text-[0.625rem] font-semibold leading-none transition-colors"
+    style={{ width: 18, color: active ? accentColor || "hsl(var(--primary))" : "hsl(var(--muted-foreground))" }}
+  >
+    {String(index).padStart(2, "0")}
+  </span>
+);
+
+/** Sub-items hang off a short rule; the active one's rule is longer and takes the module's hue. */
+const SubMark = ({ active, accentColor }: { active: boolean; accentColor?: string }) => (
+  <span
+    className="shrink-0 transition-all duration-200"
+    style={{
+      width: active ? 12 : 6,
+      height: active ? 2 : 1,
+      background: active ? accentColor || "hsl(var(--primary))" : "currentColor",
+      opacity: active ? 1 : 0.45,
+    }}
+  />
+);
 
 /** Hover tooltip used in the collapsed (icon-only) rail — a small pill that
  *  flies out to the right of the icon, mirroring the reference design. */
@@ -133,7 +130,7 @@ const RailTooltip = ({
   accentColor?: string;
 }) => (
   <span
-    className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold text-white opacity-0 scale-95 shadow-lg transition-all duration-150 group-hover:opacity-100 group-hover:scale-100"
+    className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50 whitespace-nowrap px-3 py-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100"
     style={{ background: accentColor || "hsl(var(--primary))" }}
   >
     {label}
@@ -145,7 +142,7 @@ const RailTooltip = ({
 );
 
 const Badge = ({ count }: { count: number }) => (
-  <span className="bg-blue-500 text-white text-[0.625rem] font-bold min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full shrink-0">
+  <span className="bg-foreground text-card font-heading text-[0.625rem] font-semibold tabular-nums min-w-[20px] h-[18px] px-1 flex items-center justify-center shrink-0">
     {count}
   </span>
 );
@@ -171,12 +168,12 @@ const NavLabel = ({
     className={`relative inline-block min-w-0 max-w-full ${wrap ? "line-clamp-2 leading-tight" : "truncate"} ${className}`}
   >
     <span
-      className={`transition-all duration-200 ease-out ${active ? "font-bold" : "font-normal"}`}
+      className={`transition-all duration-200 ease-out ${active ? "font-semibold text-foreground" : "font-normal"}`}
     >
       {label}
     </span>
     <span
-      className="absolute left-0 right-0 -bottom-0.5 h-[2px] rounded-full origin-left transition-transform duration-300 ease-out"
+      className="absolute left-0 right-0 -bottom-0.5 h-[2px] origin-left transition-transform duration-300 ease-out"
       style={{
         transform: active ? "scaleX(1)" : "scaleX(0)",
         background: accentColor || "hsl(var(--primary))",
@@ -193,34 +190,29 @@ export const NavButton = ({
   collapsed,
   isActive,
   accentColor,
+  index = 1,
 }: {
   item: NavItem;
   collapsed: boolean;
   isActive: boolean;
   accentColor?: string;
+  index?: number;
 }) => {
   const navigate = useNavigate();
-  const iconSize = item.isDashboard ? 16 : 15;
 
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
-      className={`group relative w-full flex items-center gap-2 rounded-lg transition-all duration-200 ${
+      className={`group relative w-full flex items-center gap-2 transition-colors duration-150 ${
         item.isDashboard
-          ? "px-2.5 py-1.5 mb-1 text-xs font-semibold"
+          ? "px-2.5 py-2 mb-1 text-xs font-semibold"
           : "px-2.5 py-2 text-xs"
       } text-sidebar-foreground ${
-        isActive
-          ? ""
-          : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        isActive ? "" : "hover:bg-primary/10"
       } ${collapsed ? "justify-center" : ""}`}
+      style={isActive ? { background: `${accentColor || "#6366f1"}14`, boxShadow: `inset 3px 0 0 ${accentColor || "hsl(var(--primary))"}` } : undefined}
     >
-      <IconChip
-        icon={item.icon}
-        size={iconSize}
-        active={isActive}
-        compact={item.isDashboard}
-      />
+      <IndexMark index={index} active={isActive} accentColor={accentColor} />
       {!collapsed && (
         <NavLabel
           label={item.label}
@@ -243,11 +235,13 @@ export const NavGroup = ({
   collapsed,
   hasActiveChild,
   accentColor,
+  index = 1,
 }: {
   item: NavItem;
   collapsed: boolean;
   hasActiveChild: boolean;
   accentColor?: string;
+  index?: number;
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -279,17 +273,12 @@ export const NavGroup = ({
     <div>
       <button
         onClick={handleClick}
-        className={`group relative w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-sidebar-foreground transition-all duration-200 ${
-          hasActiveChild
-            ? ""
-            : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        className={`group relative w-full flex items-center gap-2 px-2.5 py-2 text-xs text-sidebar-foreground transition-colors duration-150 ${
+          hasActiveChild ? "" : "hover:bg-primary/10"
         } ${collapsed ? "justify-center" : ""}`}
+        style={hasActiveChild ? { boxShadow: `inset 3px 0 0 ${accentColor || "hsl(var(--primary))"}` } : undefined}
       >
-        <IconChip
-          icon={item.icon}
-          size={15}
-          active={hasActiveChild}
-        />
+        <IndexMark index={index} active={hasActiveChild} accentColor={accentColor} />
         {!collapsed && (
           <NavLabel
             label={item.label}
@@ -299,7 +288,7 @@ export const NavGroup = ({
           />
         )}
         {!collapsed &&
-          (open ? <ArrowUp2 size={12} /> : <ArrowDown2 size={12} />)}
+          (open ? <ChromeIcons.up size={13} /> : <ChromeIcons.down size={13} />)}
         {collapsed && <RailTooltip label={item.label} accentColor={accentColor} />}
       </button>
 
@@ -308,26 +297,21 @@ export const NavGroup = ({
           !collapsed && open ? "max-h-[1000px] opacity-100" : "max-h-0 opacity-0"
         }`}
       >
-        <div className="ml-4 mt-1 space-y-0.5 border-l border-sidebar-border/60 pl-2.5">
+        <div className="ml-[18px] mt-1 mb-1 space-y-0.5 pl-2.5" style={{ borderLeft: "1px solid hsl(var(--border))" }}>
           {item.children?.map((child: SubItem) => {
             const childActive = location.pathname === child.path;
             return (
               <button
                 key={child.path}
                 onClick={() => navigate(child.path, child.state ? { state: child.state } : undefined)}
-                className={`w-full flex justify-between items-center gap-2 text-[0.6875rem] px-2 py-1 rounded-md text-sidebar-foreground/70 transition-all duration-200 ${
-                  childActive
-                    ? ""
-                    : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                className={`w-full flex justify-between items-center gap-2 text-[0.6875rem] px-2 py-1.5 text-sidebar-foreground/70 transition-colors duration-150 ${
+                  childActive ? "" : "hover:bg-primary/10"
                 }`}
               >
-                <span
-                  className="shrink-0 w-1 h-1 rounded-full transition-colors"
-                  style={{ background: childActive ? (accentColor || "hsl(var(--primary))") : "currentColor", opacity: childActive ? 1 : 0.4 }}
-                />
+                <SubMark active={childActive} accentColor={accentColor} />
                 <NavLabel label={child.label} active={childActive} accentColor={accentColor} className="flex-1 text-left" />
                 {child.badge && (
-                  <span className="bg-blue-500 text-white text-[0.5625rem] font-bold min-w-[16px] h-[16px] flex items-center justify-center rounded-full">
+                  <span className="bg-foreground text-card font-heading text-[0.5625rem] font-semibold tabular-nums min-w-[16px] h-[16px] px-0.5 flex items-center justify-center">
                     {child.badge}
                   </span>
                 )}
@@ -339,18 +323,17 @@ export const NavGroup = ({
             <div key={section.label}>
               <button
                 onClick={() => toggleSection(section.label)}
-                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[0.6875rem] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                className="w-full flex items-center gap-2 px-2 py-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:bg-primary/10"
               >
-                <span className="w-1 h-1 rounded-full bg-current shrink-0" />
                 <OverflowTooltip text={section.label}>
-                  <span className="flex-1 text-left truncate font-medium">
+                  <span className="flex-1 text-left truncate">
                     {section.label}
                   </span>
                 </OverflowTooltip>
                 {openSections[section.label] ? (
-                  <ArrowUp2 size={10} />
+                  <ChromeIcons.up size={12} />
                 ) : (
-                  <ArrowDown2 size={10} />
+                  <ChromeIcons.down size={12} />
                 )}
               </button>
               <div
@@ -365,16 +348,11 @@ export const NavGroup = ({
                       <button
                         key={child.path}
                         onClick={() => navigate(child.path)}
-                        className={`w-full flex items-center gap-2 text-[0.6875rem] px-2 py-1 rounded-md text-sidebar-foreground/70 transition-all duration-200 ${
-                          sChildActive
-                            ? ""
-                            : "hover:bg-sidebar-accent"
+                        className={`w-full flex items-center gap-2 text-[0.6875rem] px-2 py-1.5 text-sidebar-foreground/70 transition-colors duration-150 ${
+                          sChildActive ? "" : "hover:bg-primary/10"
                         }`}
                       >
-                        <span
-                          className="shrink-0 w-1 h-1 rounded-full transition-colors"
-                          style={{ background: sChildActive ? (accentColor || "hsl(var(--primary))") : "currentColor", opacity: sChildActive ? 1 : 0.4 }}
-                        />
+                        <SubMark active={sChildActive} accentColor={accentColor} />
                         <NavLabel label={child.label} active={sChildActive} accentColor={accentColor} className="flex-1 text-left" />
                       </button>
                     );
@@ -403,10 +381,11 @@ export const SidebarNav = ({
   const location = useLocation();
   return (
     <div className={collapsed ? "space-y-1.5" : "space-y-1"}>
-      {items.map((item) =>
+      {items.map((item, i) =>
         item.children || item.sections ? (
           <NavGroup
             key={item.label}
+            index={i + 1}
             item={item}
             collapsed={collapsed}
             accentColor={accentColor}
@@ -422,6 +401,7 @@ export const SidebarNav = ({
         ) : (
           <NavButton
             key={item.label}
+            index={i + 1}
             item={item}
             collapsed={collapsed}
             accentColor={accentColor}

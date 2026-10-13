@@ -1,6 +1,5 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Building2, FolderKanban, CalendarDays, Users, Search, X, ChevronDown } from "lucide-react";
 import type { BookingFilters } from "../types";
 import { PARTY_TYPE_LABELS } from "../api";
@@ -248,36 +247,16 @@ export function FilterBar({
     },
   ];
 
-  const { theme: _fbTheme } = useTheme();
-  const _fbDark = !isLightTheme(_fbTheme);
   return (
-    <div
-      className="rounded-xl p-3 space-y-3"
-      style={{
-        background: _fbDark ? "rgba(15,17,26,0.4)" : "rgba(248,250,252,0.72)",
-        border: _fbDark
-          ? "1px solid rgba(99,102,241,0.14)"
-          : "1px solid rgba(99,102,241,0.12)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-      }}
-    >
+    <div className="p-3 space-y-3 bg-card" style={{ border: "1px solid hsl(var(--border))" }}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <div
-            className="flex items-center justify-center w-5 h-5 rounded"
-            style={{ background: "rgba(99,102,241,0.15)" }}
-          >
-            <Search size={11} style={{ color: "#818cf8" }} />
-          </div>
-          <span
-            className="text-[0.6875rem] font-heading uppercase tracking-wider"
-            style={{ color: _fbDark ? "#64748b" : "#6366f1" }}
-          >
+          <Search size={12} className="text-muted-foreground" />
+          <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             Filter expense bookings
           </span>
           {activeCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
+            <span className="px-1.5 py-0.5 rounded-none text-[0.625rem] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
               {activeCount} active
             </span>
           )}
@@ -349,7 +328,7 @@ export function FilterBar({
               return (
                 <span
                   key={key}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-none text-[0.625rem] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
                 >
                   {val}
                   <button

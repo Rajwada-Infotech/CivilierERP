@@ -27,23 +27,23 @@ export function GRNItemsSummary({
                 <div className="space-y-3">
                   <SectionHeader label="GRN Items Summary" />
                   {grnItemsLoading ? (
-                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-teal-400 border-t-transparent animate-spin shrink-0" />
+                    <div className="border border-dashed border-foreground/40 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <div className="w-3.5 h-3.5 rounded-full border-2 border-foreground/40 border-t-transparent animate-spin shrink-0" />
                       <span>Loading GRN items…</span>
                     </div>
                   ) : !grnItems ||
                     grnItems.length === 0 ? (
-                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                      <Truck size={13} className="text-teal-400 shrink-0" />
+                    <div className="border border-dashed border-foreground/40 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <Truck size={13} className="text-foreground shrink-0" />
                       <span>No items recorded against this GRN.</span>
                     </div>
                   ) : (
                     <div className="space-y-3">
                       {/* Per-item breakdown table */}
-                      <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 overflow-hidden">
-                        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-teal-500/20 bg-teal-500/8">
-                          <Truck size={12} className="text-teal-500 shrink-0" />
-                          <span className="text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
+                      <div className="border border-foreground bg-card overflow-hidden">
+                        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-foreground">
+                          <Truck size={12} className="text-foreground shrink-0" />
+                          <span className="text-xs font-heading font-semibold text-foreground">
                             Items received against this GRN
                           </span>
                           <span className="ml-auto text-[0.625rem] text-muted-foreground">
@@ -56,14 +56,14 @@ export function GRNItemsSummary({
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs" style={{ minWidth: 720 }}>
                             <thead>
-                              <tr className="bg-muted/20 border-b border-teal-500/15">
+                              <tr className="bg-muted/20 border-b border-foreground/40">
                                 <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[0.625rem]">
                                   Item
                                 </th>
                                 <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[0.625rem] hidden sm:table-cell">
                                   HSN
                                 </th>
-                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[0.625rem]">
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-foreground text-[0.625rem]">
                                   Rcvd Qty
                                 </th>
                                 <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[0.625rem] hidden sm:table-cell">
@@ -75,16 +75,16 @@ export function GRNItemsSummary({
                                 <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[0.625rem]">
                                   Incl. GST (₹)
                                 </th>
-                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[0.625rem]">
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-foreground text-[0.625rem]">
                                   Base (₹)
                                 </th>
-                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[0.625rem] hidden md:table-cell">
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-foreground text-[0.625rem] hidden md:table-cell">
                                   CGST
                                 </th>
-                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-violet-600 dark:text-violet-400 text-[0.625rem] hidden md:table-cell">
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-foreground text-[0.625rem] hidden md:table-cell">
                                   SGST
                                 </th>
-                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-orange-600 dark:text-orange-400 text-[0.625rem]">
+                                <th className="px-3 py-2.5 text-right font-heading uppercase tracking-wider text-foreground text-[0.625rem]">
                                   GST (₹)
                                 </th>
                               </tr>
@@ -110,36 +110,36 @@ export function GRNItemsSummary({
                                 return rows.map((item, idx) => (
                                   <tr
                                     key={idx}
-                                    className="hover:bg-teal-500/5 transition-colors"
+                                    className="hover:bg-primary/10 transition-colors"
                                   >
                                     <td className="px-3 py-2.5 font-medium text-foreground max-w-[160px] truncate">
                                       {item.itemName || `Item ${idx + 1}`}
                                     </td>
-                                    <td className="px-3 py-2.5 text-muted-foreground font-mono text-[0.625rem] hidden sm:table-cell">
+                                    <td className="px-3 py-2.5 text-muted-foreground font-heading tabular-nums text-[0.625rem] hidden sm:table-cell">
                                       {item.hsnCode || "—"}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                    <td className="px-3 py-2.5 text-right font-heading tabular-nums font-semibold text-foreground">
                                       {fmtQty(Number(item.receivedQty) || 0)}
                                     </td>
                                     <td className="px-3 py-2.5 text-muted-foreground hidden sm:table-cell">
                                       {item.uom || "—"}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono text-muted-foreground hidden sm:table-cell">
+                                    <td className="px-3 py-2.5 text-right font-heading tabular-nums text-muted-foreground hidden sm:table-cell">
                                       {Number(item.rate || 0) > 0
                                         ? `₹${fmt(Number(item.rate))}`
                                         : "—"}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-foreground">
+                                    <td className="px-3 py-2.5 text-right font-heading tabular-nums font-semibold text-foreground">
                                       {Number(item.totalAmountInclGST) > 0
                                         ? `₹${fmt(Number(item.totalAmountInclGST))}`
                                         : "—"}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                    <td className="px-3 py-2.5 text-right font-heading tabular-nums font-semibold text-foreground">
                                       {item.baseAmount != null
                                         ? `₹${fmt(item.baseAmount)}`
                                         : "—"}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono text-violet-600 dark:text-violet-400 hidden md:table-cell">
+                                    <td className="px-3 py-2.5 text-right font-heading tabular-nums text-foreground hidden md:table-cell">
                                       {item.cgstRate != null &&
                                       item.cgstAmount != null ? (
                                         <span className="flex flex-col items-end gap-0.5">
@@ -152,7 +152,7 @@ export function GRNItemsSummary({
                                         "—"
                                       )}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono text-violet-600 dark:text-violet-400 hidden md:table-cell">
+                                    <td className="px-3 py-2.5 text-right font-heading tabular-nums text-foreground hidden md:table-cell">
                                       {item.sgstRate != null &&
                                       item.sgstAmount != null ? (
                                         <span className="flex flex-col items-end gap-0.5">
@@ -165,7 +165,7 @@ export function GRNItemsSummary({
                                         "—"
                                       )}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">
+                                    <td className="px-3 py-2.5 text-right font-heading tabular-nums font-semibold text-foreground">
                                       {item.gstAmount != null
                                         ? `₹${fmt(item.gstAmount)}`
                                         : "—"}
@@ -174,7 +174,7 @@ export function GRNItemsSummary({
                                 ));
                               })()}
                             </tbody>
-                            <tfoot className="border-t-2 border-teal-500/30 bg-muted/15">
+                            <tfoot className="border-t-2 border-foreground/40 bg-muted/15">
                               <tr>
                                 <td
                                   colSpan={5}
@@ -182,7 +182,7 @@ export function GRNItemsSummary({
                                 >
                                   Totals
                                 </td>
-                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-foreground">
+                                <td className="px-3 py-2.5 text-right font-heading tabular-nums text-xs font-bold text-foreground">
                                   ₹
                                   {fmt(
                                     gstBreakdown?.totals.totalInclGST ??
@@ -196,22 +196,22 @@ export function GRNItemsSummary({
                                       ),
                                   )}
                                 </td>
-                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                                <td className="px-3 py-2.5 text-right font-heading tabular-nums text-xs font-bold text-foreground">
                                   {gstBreakdown
                                     ? `₹${fmt(gstBreakdown.totals.totalBase)}`
                                     : "—"}
                                 </td>
-                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">
+                                <td className="px-3 py-2.5 text-right font-heading tabular-nums text-xs font-bold text-foreground">
                                   {gstBreakdown
                                     ? `₹${fmt(gstBreakdown.totals.totalCGST)}`
                                     : "—"}
                                 </td>
-                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-violet-600 dark:text-violet-400">
+                                <td className="px-3 py-2.5 text-right font-heading tabular-nums text-xs font-bold text-foreground">
                                   {gstBreakdown
                                     ? `₹${fmt(gstBreakdown.totals.totalSGST)}`
                                     : "—"}
                                 </td>
-                                <td className="px-3 py-2.5 text-right font-mono text-xs font-bold text-orange-600 dark:text-orange-400">
+                                <td className="px-3 py-2.5 text-right font-heading tabular-nums text-xs font-bold text-foreground">
                                   {gstBreakdown
                                     ? `₹${fmt(gstBreakdown.totals.totalGST)}`
                                     : "—"}
@@ -230,22 +230,22 @@ export function GRNItemsSummary({
                               {
                                 label: "Base Amount",
                                 value: gstBreakdown.totals.totalBase,
-                                cls: "border-emerald-500/30 bg-emerald-500/[0.05] text-emerald-700 dark:text-emerald-300",
+                                cls: "border-foreground/40 bg-card text-foreground",
                               },
                               {
                                 label: "CGST",
                                 value: gstBreakdown.totals.totalCGST,
-                                cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                cls: "border-foreground/40 bg-card text-foreground",
                               },
                               {
                                 label: "SGST",
                                 value: gstBreakdown.totals.totalSGST,
-                                cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                cls: "border-foreground/40 bg-card text-foreground",
                               },
                               {
                                 label: "Total GST",
                                 value: gstBreakdown.totals.totalGST,
-                                cls: "border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-300",
+                                cls: "border-orange-500/30 bg-orange-500/5 text-foreground",
                               },
                             ].map(({ label, value, cls }) => (
                               <div
@@ -255,29 +255,29 @@ export function GRNItemsSummary({
                                 <div className="text-[0.625rem] font-heading uppercase tracking-wider opacity-70">
                                   {label}
                                 </div>
-                                <div className="text-sm font-mono font-bold mt-1">
+                                <div className="text-sm font-heading tabular-nums font-bold mt-1">
                                   ₹{fmt(value)}
                                 </div>
                               </div>
                             ))}
                           </div>
 
-                          <div className="px-4 py-2.5 bg-muted/10 border-t border-emerald-500/10 flex flex-wrap items-center gap-1.5 text-[0.6875rem] font-mono mt-3">
-                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                          <div className="px-4 py-2.5 bg-muted/10 border-t border-foreground/40 flex flex-wrap items-center gap-1.5 text-[0.6875rem] font-heading tabular-nums mt-3">
+                            <span className="text-foreground font-semibold">
                               ₹{fmt(gstBreakdown.totals.totalBase)}
                             </span>
                             <span className="text-muted-foreground">
                               (base)
                             </span>
                             <span className="text-muted-foreground">+</span>
-                            <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                            <span className="text-foreground font-semibold">
                               ₹{fmt(gstBreakdown.totals.totalCGST)}
                             </span>
                             <span className="text-muted-foreground">
                               (CGST)
                             </span>
                             <span className="text-muted-foreground">+</span>
-                            <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                            <span className="text-foreground font-semibold">
                               ₹{fmt(gstBreakdown.totals.totalSGST)}
                             </span>
                             <span className="text-muted-foreground">

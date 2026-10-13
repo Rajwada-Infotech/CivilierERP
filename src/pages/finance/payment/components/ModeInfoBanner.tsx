@@ -4,32 +4,32 @@ import { Banknote, BookOpen, CalendarClock, Hash, Smartphone, CreditCard } from 
 export function ModeInfoBanner({ mode }: { mode: string }) {
   const colorClasses: Record<string, { container: string; icon: string }> = {
     emerald: {
-      container: "bg-emerald-500/5 border border-emerald-500/20",
-      icon: "text-emerald-500",
+      container: "bg-primary/10 border border-foreground/40",
+      icon: "text-foreground",
     },
     blue: {
-      container: "bg-blue-500/5 border border-blue-500/20",
-      icon: "text-blue-500",
+      container: "bg-primary/10 border border-foreground/40",
+      icon: "text-foreground",
     },
     indigo: {
-      container: "bg-indigo-500/5 border border-indigo-500/20",
-      icon: "text-indigo-500",
+      container: "bg-muted/60 border border-border",
+      icon: "text-foreground",
     },
     cyan: {
-      container: "bg-cyan-500/5 border border-cyan-500/20",
-      icon: "text-cyan-500",
+      container: "bg-primary/10 border border-foreground/40",
+      icon: "text-foreground",
     },
     violet: {
-      container: "bg-violet-500/5 border border-violet-500/20",
-      icon: "text-violet-500",
+      container: "bg-muted/60 border border-border",
+      icon: "text-foreground",
     },
     orange: {
-      container: "bg-orange-500/5 border border-orange-500/20",
-      icon: "text-orange-500",
+      container: "bg-primary/10 border border-foreground/40",
+      icon: "text-foreground",
     },
     pink: {
-      container: "bg-pink-500/5 border border-pink-500/20",
-      icon: "text-pink-500",
+      container: "bg-primary/10 border border-foreground/40",
+      icon: "text-foreground",
     },
     amber: {
       container: "bg-amber-500/5 border border-amber-500/20",
