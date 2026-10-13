@@ -24,6 +24,14 @@ function creditNoteDeadline(d) {
   return `${fyEnd}-11-30`;
 }
 
+/** Formats SAC code for statutory documents (strips internal rate suffixes like AFH/OTH to leave standard SAC e.g. 9954). */
+function formatSac(code) {
+  if (!code) return "9954";
+  const s = String(code).trim();
+  const m = s.match(/^(\d{4,6})/);
+  return m ? m[1] : s;
+}
+
 /** The rate printed on the document: the booking's own GST rate, else the one its GST total implies. */
 async function rateFor(pool, bookingId) {
   const b = (await pool.request().input("b", sql.Int, bookingId)
@@ -344,7 +352,7 @@ function renderPdf(n) {
     const REASON_TEXT = { Discount: "Discount allowed", AreaChange: "Change in area", PriceCorrection: "Price correction", Other: "Reduction in value" };
     const desc = n.Source === "Adjustment" ? `${REASON_TEXT[n.ReasonType] || "Reduction in value"} on the sale — ${n.Remarks || ""}`
       : n.DocType === "CreditNote" ? "Reduction of the sale value — booking cancelled / amount refunded" : "Advance received for the property, refunded — no supply made against it";
-    const cells = [desc, n.HsnCode || "-", money(n.TaxableValue), n.GstRate != null ? `${Number(n.GstRate)}%` : "-", money(n.GstAmount)];
+    const cells = [desc, formatSac(n.HsnCode), money(n.TaxableValue), n.GstRate != null ? `${Number(n.GstRate)}%` : "-", money(n.GstAmount)];
     doc.font(F.regular).fontSize(8.5);
     cells.forEach((c, i) => { doc.text(c, x + 4, y, { width: W * cols[i][1] - 8, align: i === 0 ? "left" : "right" }); x += W * cols[i][1]; });
     y += 34;
@@ -747,6 +755,6 @@ async function creditableInvoices(pool, { search = "", projectScope = null } = {
 }
 
 module.exports = {
-  issueForRefund, reissue, cancel, pending, list, load, renderPdf, creditNoteDeadline, GstNoteError,
+  issueForRefund, reissue, cancel, pending, list, load, renderPdf, creditNoteDeadline, formatSac, GstNoteError,
   createAdjustment, updateAdjustment, submitAdjustment, decideAdjustment, requestCancel, decideCancel, creditableInvoices, invoiceCreditable, REASONS,
 };

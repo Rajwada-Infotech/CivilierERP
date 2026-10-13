@@ -48,6 +48,12 @@ const PAGE_SIZE = 20;
 const inr = (n: any) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const day = (d: any) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const formatSac = (hsn: any) => {
+  if (!hsn) return "9954";
+  const s = String(hsn).trim();
+  const m = s.match(/^(\d{4,6})/);
+  return m ? m[1] : s;
+};
 
 async function getJson(url: string, init?: RequestInit) {
   const r = await fetchWithAuth(url, init);
@@ -786,7 +792,7 @@ function DetailDialog({
                 </div>
                 <div className="text-[0.6875rem] text-muted-foreground pt-1">
                   Place of supply: {n.ProjectState || n.CompanyState || "where the property is"} · HSN/SAC{" "}
-                  {n.HsnCode || "—"}
+                  {formatSac(n.HsnCode)}
                 </div>
               </div>
 
@@ -1148,7 +1154,7 @@ const CrmCreditNotes: React.FC = () => {
             n.BookingNo,
             n.AgainstRef || "",
             n.AgainstDate ? String(n.AgainstDate).slice(0, 10) : "",
-            n.HsnCode || "",
+            formatSac(n.HsnCode),
             n.GstRate != null ? Number(n.GstRate) : "",
             Number(n.TaxableValue),
             c,

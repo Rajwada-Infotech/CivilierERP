@@ -24,5 +24,14 @@ describe("crmGstNotes service", () => {
     expect(typeof gst.decideCancel).toBe("function");
     expect(typeof gst.reissue).toBe("function");
     expect(typeof gst.renderPdf).toBe("function");
+    expect(typeof gst.formatSac).toBe("function");
+  });
+
+  it("formatSac strips internal rate suffixes for statutory documents", () => {
+    expect(gst.formatSac("9954AFH")).toBe("9954");
+    expect(gst.formatSac("9954OTH")).toBe("9954");
+    expect(gst.formatSac("995411")).toBe("995411");
+    expect(gst.formatSac(null)).toBe("9954");
+    expect(gst.formatSac("")).toBe("9954");
   });
 });
