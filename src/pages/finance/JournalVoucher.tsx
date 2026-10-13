@@ -70,39 +70,12 @@ const emptyLine = (): JournalVoucherLineUI => ({
   Narration: "",
 });
 
-const STATUS_CFG: Record<string, { cls: string; dot: string; icon: React.ElementType }> = {
-  Draft:    { cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",   dot: "bg-slate-400",   icon: FileText },
-  Pending:  { cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",   dot: "bg-amber-400",   icon: Clock },
-  Approved: { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", dot: "bg-emerald-500", icon: CheckCircle2 },
-  Rejected: { cls: "bg-rose-500/10 text-rose-600 border-rose-400/20",     dot: "bg-rose-500",    icon: AlertCircle },
-};
-
 function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CFG[status] ?? STATUS_CFG.Draft;
-  return (
-    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border", cfg.cls)}>
-      <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
-      {status}
-    </span>
-  );
+  return <SheetMark text={status || "—"} tone={statusTone(status || "")} />;
 }
 
 function GLBadge({ status, postedToGL }: { status: string; postedToGL?: boolean }) {
-  if (status !== "Approved") {
-    return <span className="text-muted-foreground text-xs">--</span>;
-  }
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border",
-        postedToGL
-          ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
-          : "bg-rose-500/10 text-rose-600 border-rose-400/20",
-      )}
-    >
-      {postedToGL ? "Posted" : "Not posted"}
-    </span>
-  );
+  return <SheetMark text={postedToGL ? "Posted" : "Not posted"} tone={status !== "Approved" ? "none" : postedToGL ? "done" : "stopped"} />;
 }
 
 function fmtDate(d?: string | null) {
@@ -549,16 +522,14 @@ export default function JournalVoucher() {
               </div>
             ) : (
               filtered.map((v) => (
-                <div key={v.JVID} className="px-4 py-3.5 hover:bg-muted/20 transition-colors">
+                <div key={v.JVID} className="px-4 py-3.5 hover:bg-primary/[0.06] transition-colors">
                   {/* Row 1: JV No + date + amount */}
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
-                        {v.JVNo || `JV-${v.JVID}`}
-                      </span>
+                      <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{v.JVNo || `JV-${v.JVID}`}</span>
                       <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtDate(v.JVDate)}</span>
                     </div>
-                    <span className="font-mono text-sm font-semibold text-foreground tabular-nums shrink-0">
+                    <span className="font-heading tabular-nums text-sm font-semibold text-foreground tabular-nums shrink-0">
                       {formatINR(v.TotalAmount || 0)}
                     </span>
                   </div>
@@ -872,9 +843,9 @@ export default function JournalVoucher() {
             <div className={cn(
               "flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-medium",
               totals.balanced
-                ? "border-emerald-400/30 bg-emerald-500/5 text-emerald-600"
+                ? "border-foreground/40 bg-primary/10 text-foreground"
                 : totals.debit > 0 || totals.credit > 0
-                ? "border-rose-400/30 bg-rose-500/5 text-rose-600"
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
                 : "border-border bg-muted/20 text-muted-foreground"
             )}>
               {totals.balanced
@@ -928,7 +899,7 @@ export default function JournalVoucher() {
             <>
               <DialogHeader className="shrink-0 px-4 sm:px-5 py-4 border-b border-foreground">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
+                  <span className="font-heading tabular-nums text-xs bg-muted px-2 py-1 rounded text-foreground">
                     {viewingJV.JVNo || `JV-${viewingJV.JVID}`}
                   </span>
                   <StatusBadge status={viewingJV.Status} />
@@ -965,13 +936,13 @@ export default function JournalVoucher() {
                     <p className="text-sm font-medium text-foreground">{viewingJV.Mode}</p>
                     {viewingJV.BankName && <p className="text-muted-foreground">Bank: {viewingJV.BankName}</p>}
                     {viewingJV.ChequeNo && (
-                      <p className="text-muted-foreground font-mono">
+                      <p className="text-muted-foreground font-heading tabular-nums">
                         {viewingJV.ChequeLotNumber ? `${viewingJV.ChequeLotNumber} · ` : ""}Cheque #{viewingJV.ChequeNo}
                         {viewingJV.ChequeDate ? ` · ${fmtDate(viewingJV.ChequeDate)}` : ""}
                       </p>
                     )}
                     {viewingJV.DigitalRefNumber && (
-                      <p className="text-muted-foreground font-mono">Ref: {viewingJV.DigitalRefNumber}</p>
+                      <p className="text-muted-foreground font-heading tabular-nums">Ref: {viewingJV.DigitalRefNumber}</p>
                     )}
                   </div>
                 )}
@@ -991,14 +962,14 @@ export default function JournalVoucher() {
                         className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 border-b border-border/50 last:border-0 items-center gap-1 sm:gap-2"
                       >
                         <div className="flex items-center gap-2 min-w-0 pl-1">
-                          <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDebit ? "bg-emerald-500" : "bg-rose-500"}`} />
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDebit ? "bg-foreground" : "bg-destructive"}`} />
                           <div className="min-w-0">
                             <p className="text-[0.6875rem] sm:text-xs text-foreground truncate flex items-center gap-1.5">
                               <span className="truncate">{l.LHeadName || "—"}</span>
                               {kind && (
-                                <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-none ${
                                   kind === "Investment"
-                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                    ? "bg-primary/10 text-foreground"
                                     : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                                 }`}>
                                   {kind}
@@ -1010,10 +981,10 @@ export default function JournalVoucher() {
                             )}
                           </div>
                         </div>
-                        <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                        <span className="text-xs text-right font-heading tabular-nums text-foreground">
                           {l.DebitAmount ? formatINR(l.DebitAmount) : ""}
                         </span>
-                        <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                        <span className="text-xs text-right font-heading tabular-nums text-destructive">
                           {l.CreditAmount ? formatINR(l.CreditAmount) : ""}
                         </span>
                       </div>
@@ -1021,10 +992,10 @@ export default function JournalVoucher() {
                   })}
                   <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
                     <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
-                    <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">
+                    <span className="text-right text-foreground font-heading tabular-nums">
                       {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0))}
                     </span>
-                    <span className="text-right text-rose-600 dark:text-rose-400 font-mono">
+                    <span className="text-right text-destructive font-heading tabular-nums">
                       {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.CreditAmount) || 0), 0))}
                     </span>
                   </div>
@@ -1032,9 +1003,9 @@ export default function JournalVoucher() {
 
                 {viewingJV.Status === "Approved" && (
                   viewingJV.PostedToGL ? (
-                    <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-                      <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
-                      <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                    <div className="flex items-center gap-2.5 rounded-xl border border-foreground/40 bg-primary/10 px-4 py-3">
+                      <CheckCircle2 size={13} className="text-foreground flex-shrink-0" />
+                      <p className="text-xs text-foreground">
                         Posted to General Ledger. Entries are visible in the Trial Balance.
                       </p>
                     </div>
