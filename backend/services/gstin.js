@@ -55,10 +55,10 @@ const codeOf = (gstin) => { const v = normalize(gstin); return /^[0-9]{2}/.test(
 /**
  * Place of supply for a property sale (IGST Act s.12(3): where the property
  * is) and whether it is inside the supplier's state (CGST+SGST) or not (IGST).
- * The project's own GSTIN state code says where it is registered — the
- * project master has no separate state field — compared with the company's;
- * the typed state names are the fallback; with neither, intra-state (a
- * developer registers in the state of its projects).
+ * Projects carry no GSTIN of their own (routes/projectMaster.js: GST lives
+ * on the parent company, which registers in the state it sells property in),
+ * so in practice this is the company's GSTIN state. A project GSTIN or typed
+ * states, if ever present, are compared first.
  */
 function placeOfSupply({ projectGst, companyGst, projectState, companyState }) {
   const p = codeOf(projectGst), c = codeOf(companyGst);

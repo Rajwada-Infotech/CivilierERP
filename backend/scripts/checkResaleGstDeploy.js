@@ -44,11 +44,14 @@ const line = (ok, msg) => console.log(`${ok ? "OK  " : "FIX "} ${msg}`);
     const miss = [!c.address && "address", !c.state && "state"].filter(Boolean);
     line(!miss.length, `${c.name} (${c.bookings} bookings)${miss.length ? ` — missing ${miss.join(", ")} (Company master)` : ""}${c.gst_no ? "" : " · no GSTIN (right only if it isn't GST-registered — then it shouldn't charge GST)"}`);
   }
-  // Place of supply comes from the project's GSTIN state code (the Project
-  // master has no separate state field), else a typed state.
-  const projNoPlace = await q(`SELECT DISTINCT p.name FROM dbo.enterprise p JOIN dbo.CrmBooking b ON b.ProjectId = p.id AND b.IsActive = 1
-    WHERE p.business_type = 'P' AND ISNULL(p.gst_no, '') = '' AND ISNULL(p.state, '') = ''`);
-  line(!projNoPlace.length, projNoPlace.length ? `projects with no GSTIN (place of supply falls back to the company's state — Project master → Compliance → GSTIN): ${projNoPlace.map((p) => p.name).join(", ")}` : "every project's place of supply is known (from its GSTIN)");
+  // Place of supply is the company's GSTIN state: projects carry no GSTIN of
+  // their own (routes/projectMaster.js — GST lives on the parent company), so
+  // there is nothing to fill per project. A registered company's GSTIN must be valid.
+  const { checkGstin, STATE_CODES } = require("../services/gstin");
+  for (const c of comps.filter((x) => x.gst_no)) {
+    const g = checkGstin(c.gst_no);
+    line(!g.error, g.error ? `${c.name}: ${g.error} (Company master)` : `${c.name}: GSTIN ${g.value} — place of supply ${STATE_CODES[g.stateCode] || g.stateCode}`);
+  }
 
   console.log("\n== Refunds paid before credit notes existed (issue on request: Refunds → Credit note) ==");
   const old = await q(`SELECT r.RefundNo, r.NetAmount, r.PaidAt, b.BookingNo FROM dbo.CrmRefund r JOIN dbo.CrmBooking b ON b.Id = r.BookingId
