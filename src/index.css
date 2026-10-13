@@ -2634,7 +2634,7 @@ select[aria-hidden="true"] {
     background: color-mix(in srgb, var(--mod-from) 6%, hsl(var(--card))) !important;
 }
 
-/* BW: the module sidebar is a plain matte graphite panel. The panel and
+/* BW: the module sidebar is a dark matte brick wall. The panel and
    its items paint with --card / --foreground / --border, so re-point those tokens inside it. */
 [data-theme="bw"] .app-sidebar {
     --card: 0 0% 29%;
@@ -2644,12 +2644,13 @@ select[aria-hidden="true"] {
     --primary: 0 0% 95%;
     --sidebar-foreground: 0 0% 90%;
     color: hsl(var(--foreground));
-    background-color: #3f4245 !important;
-    /* plain matte graphite: a barely-there top-to-bottom sheen + fine seamless grain, no pattern */
+    background-color: #1c1d1f !important;
+    /* dark matte brick wall: soft top-down light falloff + seamless brick tile + fine grain */
     background-image:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.06) 100%),
-        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.08'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23g)'/></svg>") !important;
-    background-size: 100% 100%, 160px 160px !important;
+        radial-gradient(120% 60% at 50% 0%, rgba(255, 255, 255, 0.06) 0%, rgba(0, 0, 0, 0.35) 100%),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.10'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23g)'/></svg>"),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='32'><rect width='64' height='32' fill='%23121314'/><g fill='%232a2c2f'><rect x='1' y='1' width='30' height='14' rx='1'/><rect x='33' y='1' width='30' height='14' rx='1'/><rect x='-15' y='17' width='30' height='14' rx='1'/><rect x='17' y='17' width='30' height='14' rx='1'/><rect x='49' y='17' width='30' height='14' rx='1'/></g><g fill='%23ffffff' fill-opacity='0.035'><rect x='1' y='1' width='30' height='2'/><rect x='33' y='1' width='30' height='2'/><rect x='17' y='17' width='30' height='2'/><rect x='-15' y='17' width='30' height='2'/><rect x='49' y='17' width='30' height='2'/></g></svg>") !important;
+    background-size: 100% 100%, 160px 160px, 64px 32px !important;
     border-color: hsl(0 0% 18%) !important;
 }
 /* Module header + accents: a deep module hue (e.g. Finance blue) is unreadable on stone — go light. */
