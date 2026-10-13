@@ -301,7 +301,22 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
 router.get("/gst-notes", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const gst = require("../services/crmGstNotes");
-    res.json(await gst.list(getPool(), { from: req.query.from || null, to: req.query.to || null, type: req.query.type || null, projectScope: req.projectScope }));
+    const { applyPagination } = require("../services/crmListPagination");
+    const pag = req.query.page ? applyPagination(req, 20, 200) : null;
+    const result = await gst.list(getPool(), {
+      from: req.query.from || null,
+      to: req.query.to || null,
+      type: req.query.type || null,
+      status: req.query.status || null,
+      search: req.query.search || null,
+      companyId: req.query.companyId ? parseInt(req.query.companyId, 10) : null,
+      projectId: req.query.projectId ? parseInt(req.query.projectId, 10) : null,
+      projectScope: req.projectScope,
+      page: pag?.page,
+      pageSize: pag?.pageSize,
+      offset: pag?.offset,
+    });
+    res.json(result);
   } catch (e) {
     console.error("[crm-refunds] GET /gst-notes:", e.message);
     res.status(500).json({ error: "Couldn't load the credit notes" });

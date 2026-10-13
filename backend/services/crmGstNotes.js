@@ -88,50 +88,133 @@ async function issueForRefund(pool, refundId, userEmail, { replacesId = null } =
   const voucherTotal = r2(voucherPart + Math.max(0, creditPart));
   if (voucherTotal > 0) pieces.unshift({ type: "RefundVoucher", amount: voucherTotal });
 
-  // The receipt(s) we gave for that money: the one the refund came from, else the latest.
-  const receipts = voucherTotal > 0 ? (await pool.request().input("b", sql.Int, b).input("oa", sql.Int, rf.SourceOnAccountId ?? null).query(`
-    SELECT TOP 5 ReceiptNo AS No, ReceivedDate AS RPDocDate FROM dbo.CrmOnAccountPayment
-    WHERE ReceiptNo IS NOT NULL AND ((@oa IS NOT NULL AND Id = @oa) OR (@oa IS NULL AND (BookingId = @b OR HeldFromBookingId = @b)))
-    ORDER BY ReceivedDate DESC, Id DESC`)).recordset : [];
+  // The receipt(s) we gave for that money: hierarchical lookup so statutory
+  // Refund Voucher (s.31(3)(e), Rule 51) always references the actual payment receipt.
+  let receipts = [];
+  if (voucherTotal > 0) {
+    if (rf.SourceOnAccountId) {
+      const oaRec = (await pool.request().input("oa", sql.Int, rf.SourceOnAccountId).query(`
+        SELECT TOP 1 oa.ReceiptNo AS No, oa.ReceivedDate AS RPDocDate, oa.SourceReceivedPaymentId
+        FROM dbo.CrmOnAccountPayment oa WHERE oa.Id = @oa`)).recordset[0];
+      if (oaRec) {
+        if (oaRec.SourceReceivedPaymentId) {
+          const rpRec = (await pool.request().input("srp", sql.Int, oaRec.SourceReceivedPaymentId).query(`
+            SELECT TOP 1 COALESCE(mr.ReceiptNo, rp.RPDocNo, rp.DocNo, @oaNo) AS No,
+                         COALESCE(mr.ReceivedDate, rp.RPDocDate, @oaDate) AS RPDocDate
+            FROM dbo.ReceivedPayment rp
+            LEFT JOIN dbo.CrmMoneyReceipt mr ON mr.ReceivedPaymentId = rp.RPPaymentID
+            WHERE rp.RPPaymentID = @srp`).input("oaNo", sql.NVarChar(50), oaRec.No).input("oaDate", sql.Date, oaRec.RPDocDate)).recordset[0];
+          receipts.push(rpRec || oaRec);
+        } else {
+          receipts.push(oaRec);
+        }
+      }
+    }
+    if (!receipts.length) {
+      receipts = (await pool.request().input("b", sql.Int, b).query(`
+        SELECT TOP 3 oa.ReceiptNo AS No, oa.ReceivedDate AS RPDocDate
+        FROM dbo.CrmOnAccountPayment oa
+        WHERE (oa.BookingId = @b OR oa.HeldFromBookingId = @b) AND oa.ReceiptNo IS NOT NULL
+        ORDER BY oa.ReceivedDate DESC, oa.Id DESC`)).recordset;
+    }
+    if (!receipts.length) {
+      receipts = (await pool.request().input("b", sql.Int, b).query(`
+        SELECT TOP 3 mr.ReceiptNo AS No, mr.ReceivedDate AS RPDocDate
+        FROM dbo.CrmMoneyReceipt mr
+        WHERE mr.BookingId = @b AND mr.Status = N'Approved'
+        ORDER BY mr.ReceivedDate DESC, mr.Id DESC`)).recordset;
+    }
+    if (!receipts.length) {
+      receipts = (await pool.request().input("b", sql.Int, b).query(`
+        SELECT TOP 3 pr.ReceiptNo AS No, pr.ReceivedDate AS RPDocDate
+        FROM dbo.CrmPaymentReceipt pr
+        JOIN dbo.CrmPaymentMilestone m ON m.Id = pr.MilestoneId
+        WHERE m.BookingId = @b AND pr.ReceiptNo IS NOT NULL
+        ORDER BY pr.ReceivedDate DESC, pr.Id DESC`)).recordset;
+    }
+    if (!receipts.length) {
+      receipts = (await pool.request().input("b", sql.Int, b).query(`
+        SELECT TOP 3 COALESCE(rp.RPDocNo, rp.DocNo, CONCAT('RP-', rp.RPPaymentID)) AS No, rp.RPDocDate AS RPDocDate
+        FROM dbo.ReceivedPayment rp
+        WHERE rp.CrmBookingId = @b AND rp.RPStatus = N'Approved'
+        ORDER BY rp.RPDocDate DESC, rp.RPPaymentID DESC`)).recordset;
+    }
+  }
 
   // GST split of each piece: the shares add up exactly to the refund's GST.
   let gstLeft = totalGst;
   const { getNextDocNumber } = require("./docNumber");
   const issued = [];
-  for (let i = 0; i < pieces.length; i++) {
-    const p = pieces[i];
-    const gst = i === pieces.length - 1 ? r2(gstLeft) : r2((totalGst * p.amount) / net);
-    gstLeft = r2(gstLeft - gst);
-    const docNo = p.type === "CreditNote" && p.barred ? null
-      : await getNextDocNumber(pool, p.type === "CreditNote" ? "CRN" : "RFV", p.type === "CreditNote" ? "CRN" : "RFV");
-    const remarks = p.type === "RefundVoucher"
-      ? "Advance received with GST and never invoiced — given back"
-      : p.barred
-        ? `Past ${p.deadline}: no credit note can be declared for ${p.invoice.InvoiceNo}. The buyer claims this GST from the department (Circular 188/20/2022); give them the certificate.`
-        : `Reduces invoice ${p.invoice.InvoiceNo}; declare in GSTR-1 by ${p.deadline} (or the annual return, if filed earlier).`;
-    const row = await pool.request()
-      .input("no", sql.NVarChar(16), docNo).input("t", sql.NVarChar(20), p.type).input("st", sql.NVarChar(20), p.barred ? "TimeBarred" : "Issued")
-      .input("r", sql.Int, refundId).input("b", sql.Int, b).input("c", sql.Int, rf.CustomerId ?? null)
-      .input("co", sql.Int, rf.CompanyId ?? rf.BookingCompanyId ?? null).input("pr", sql.Int, rf.ProjectId ?? rf.BookingProjectId ?? null)
-      .input("inv", sql.Int, p.invoice?.Id ?? null)
-      .input("ag", sql.NVarChar(400), p.type === "CreditNote" ? p.invoice.InvoiceNo : (receipts.map((x) => x.No).filter(Boolean).join(", ") || null))
-      .input("agd", sql.Date, p.type === "CreditNote" ? p.invoice.InvoiceDate : (receipts[0]?.RPDocDate || null))
-      .input("dd", sql.Date, replacesId ? new Date() : (rf.PaidAt || new Date()))
-      .input("tv", sql.Decimal(18, 2), r2(p.amount - gst)).input("rate", sql.Decimal(9, 4), rate || null)
-      .input("g", sql.Decimal(18, 2), gst).input("tot", sql.Decimal(18, 2), p.amount)
-      .input("dl", sql.Date, p.deadline || null).input("rm", sql.NVarChar(500), remarks).input("by", sql.NVarChar(200), userEmail || null)
-      .input("rep", sql.Int, replacesId)
-      .query(`INSERT INTO dbo.CrmGstNote (DocNo, DocType, Status, RefundId, BookingId, CustomerId, CompanyId, ProjectId, InvoiceId, AgainstRef, AgainstDate,
-                DocDate, TaxableValue, GstRate, GstAmount, TotalAmount, DeadlineDate, Remarks, CreatedBy, ReplacesId)
-              OUTPUT INSERTED.Id
-              VALUES (@no, @t, @st, @r, @b, @c, @co, @pr, @inv, @ag, @agd, @dd, @tv, @rate, @g, @tot, @dl, @rm, @by, @rep)`);
-    issued.push({ id: row.recordset[0].Id, docNo, type: p.type, status: p.barred ? "TimeBarred" : "Issued", amount: p.amount, gst });
+  const tx = new sql.Transaction(pool);
+  await tx.begin();
+  try {
+    for (let i = 0; i < pieces.length; i++) {
+      const p = pieces[i];
+      const gst = i === pieces.length - 1 ? r2(gstLeft) : r2((totalGst * p.amount) / net);
+      gstLeft = r2(gstLeft - gst);
+      const docNo = p.type === "CreditNote" && p.barred ? null
+        : await getNextDocNumber(pool, p.type === "CreditNote" ? "CRN" : "RFV", p.type === "CreditNote" ? "CRN" : "RFV");
+      const remarks = p.type === "RefundVoucher"
+        ? "Advance received with GST and never invoiced — given back"
+        : p.barred
+          ? `Past ${p.deadline}: no credit note can be declared for ${p.invoice.InvoiceNo}. The buyer claims this GST from the department (Circular 188/20/2022); give them the certificate.`
+          : `Reduces invoice ${p.invoice.InvoiceNo}; declare in GSTR-1 by ${p.deadline} (or the annual return, if filed earlier).`;
+      const row = await tx.request()
+        .input("no", sql.NVarChar(16), docNo).input("t", sql.NVarChar(20), p.type).input("st", sql.NVarChar(20), p.barred ? "TimeBarred" : "Issued")
+        .input("r", sql.Int, refundId).input("b", sql.Int, b).input("c", sql.Int, rf.CustomerId ?? null)
+        .input("co", sql.Int, rf.CompanyId ?? rf.BookingCompanyId ?? null).input("pr", sql.Int, rf.ProjectId ?? rf.BookingProjectId ?? null)
+        .input("inv", sql.Int, p.invoice?.Id ?? null)
+        .input("ag", sql.NVarChar(400), p.type === "CreditNote" ? p.invoice.InvoiceNo : (receipts.map((x) => x.No).filter(Boolean).join(", ") || null))
+        .input("agd", sql.Date, p.type === "CreditNote" ? p.invoice.InvoiceDate : (receipts[0]?.RPDocDate || null))
+        .input("dd", sql.Date, replacesId ? new Date() : (rf.PaidAt || new Date()))
+        .input("tv", sql.Decimal(18, 2), r2(p.amount - gst)).input("rate", sql.Decimal(9, 4), rate || null)
+        .input("g", sql.Decimal(18, 2), gst).input("tot", sql.Decimal(18, 2), p.amount)
+        .input("dl", sql.Date, p.deadline || null).input("rm", sql.NVarChar(500), remarks).input("by", sql.NVarChar(200), userEmail || null)
+        .input("rep", sql.Int, replacesId)
+        .query(`INSERT INTO dbo.CrmGstNote (DocNo, DocType, Status, RefundId, BookingId, CustomerId, CompanyId, ProjectId, InvoiceId, AgainstRef, AgainstDate,
+                  DocDate, TaxableValue, GstRate, GstAmount, TotalAmount, DeadlineDate, Remarks, CreatedBy, ReplacesId)
+                OUTPUT INSERTED.Id
+                VALUES (@no, @t, @st, @r, @b, @c, @co, @pr, @inv, @ag, @agd, @dd, @tv, @rate, @g, @tot, @dl, @rm, @by, @rep)`);
+      issued.push({ id: row.recordset[0].Id, docNo, type: p.type, status: p.barred ? "TimeBarred" : "Issued", amount: p.amount, gst });
+    }
+    await tx.commit();
+  } catch (err) {
+    try { await tx.rollback(); } catch { /* rolled back */ }
+    throw err;
   }
   return { issued };
 }
 
-const SELECT_NOTE = `
-  SELECT n.*, r.RefundNo, r.SourceType AS RefundSource, r.Reason AS RefundReason, r.PaidAt AS RefundPaidAt, r.GrossAmount AS RefundGross,
+const SELECT_NOTE_BASE = `
+  SELECT n.Id, n.DocNo, n.DocType, n.Status, n.RefundId, n.BookingId, n.CustomerId, n.CompanyId, n.ProjectId, n.InvoiceId,
+         n.AgainstRef, n.AgainstDate, n.DocDate, n.TaxableValue, n.GstRate, n.GstAmount, n.TotalAmount, n.DeadlineDate,
+         n.Remarks, n.CreatedBy, n.CreatedAt, n.CancelledAt, n.CancelledBy, n.CancelReason, n.ReplacesId, n.Source,
+         n.ReasonType, n.ApprovalStatus, n.RequestedById, n.RequestedAt, n.ApprovedAt, n.RejectionNote, n.MilestoneId,
+         n.OnAccountId, n.MovedToAccount, n.CancelApprovalStatus, n.CancelRequestedById, n.CancelRequestedAt, n.CancelRequestReason,
+         r.RefundNo, r.SourceType AS RefundSource, r.Reason AS RefundReason, r.PaidAt AS RefundPaidAt, r.GrossAmount AS RefundGross,
+         r.DeductionAmount AS RefundKept, r.NetAmount AS RefundNet,
+         b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, b.HsnCode, b.ApplicationId,
+         rn.DocNo AS ReplacesNo,
+         (SELECT TOP 1 x.DocNo FROM dbo.CrmGstNote x WHERE x.ReplacesId = n.Id) AS ReplacedByNo,
+         c.CustomerName, c.CustomerNo, c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode, c.Mobile AS CustomerMobile,
+         comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2, comp.city AS CompanyCity, comp.state AS CompanyState,
+         comp.pincode AS CompanyPincode, comp.gst_no AS CompanyGst, comp.pan_no AS CompanyPan,
+         proj.name AS ProjectName, proj.state AS ProjectState
+  FROM dbo.CrmGstNote n
+  LEFT JOIN dbo.CrmRefund r ON r.Id = n.RefundId
+  JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+  LEFT JOIN dbo.CrmCustomer c ON c.Id = n.CustomerId
+  LEFT JOIN dbo.enterprise comp ON comp.id = n.CompanyId AND comp.business_type = 'C'
+  LEFT JOIN dbo.enterprise proj ON proj.id = n.ProjectId AND proj.business_type = 'P'
+  LEFT JOIN dbo.CrmGstNote rn ON rn.Id = n.ReplacesId`;
+
+const SELECT_NOTE_DETAIL = `
+  SELECT n.Id, n.DocNo, n.DocType, n.Status, n.RefundId, n.BookingId, n.CustomerId, n.CompanyId, n.ProjectId, n.InvoiceId,
+         n.AgainstRef, n.AgainstDate, n.DocDate, n.TaxableValue, n.GstRate, n.GstAmount, n.TotalAmount, n.DeadlineDate,
+         n.Remarks, n.CreatedBy, n.CreatedAt, n.CancelledAt, n.CancelledBy, n.CancelReason, n.ReplacesId, n.Source,
+         n.ReasonType, n.ApprovalStatus, n.RequestedById, n.RequestedAt, n.ApprovedAt, n.RejectionNote, n.MilestoneId,
+         n.OnAccountId, n.MovedToAccount, n.CancelApprovalStatus, n.CancelRequestedById, n.CancelRequestedAt, n.CancelRequestReason,
+         r.RefundNo, r.SourceType AS RefundSource, r.Reason AS RefundReason, r.PaidAt AS RefundPaidAt, r.GrossAmount AS RefundGross,
          r.DeductionAmount AS RefundKept, r.NetAmount AS RefundNet,
          b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, b.HsnCode, b.ApplicationId,
          rn.DocNo AS ReplacesNo,
@@ -148,21 +231,65 @@ const SELECT_NOTE = `
   LEFT JOIN dbo.enterprise proj ON proj.id = n.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.CrmGstNote rn ON rn.Id = n.ReplacesId`;
 
-async function list(pool, { refundId = null, customerId = null, from = null, to = null, type = null, projectScope = null, includeCancelled = true } = {}) {
+async function list(pool, {
+  refundId = null, customerId = null, companyId = null, projectId = null,
+  from = null, to = null, type = null, status = null, search = null,
+  projectScope = null, includeCancelled = true, page = null, pageSize = null, offset = null
+} = {}) {
   const req = pool.request();
   const w = ["1 = 1"];
   if (refundId) { w.push("n.RefundId = @r"); req.input("r", sql.Int, refundId); }
   if (customerId) { w.push("n.CustomerId = @c"); req.input("c", sql.Int, customerId); }
+  if (companyId) { w.push("n.CompanyId = @co"); req.input("co", sql.Int, companyId); }
+  if (projectId) { w.push("n.ProjectId = @pr"); req.input("pr", sql.Int, projectId); }
   if (from) { w.push("n.DocDate >= @f"); req.input("f", sql.Date, from); }
   if (to) { w.push("n.DocDate <= @t"); req.input("t", sql.Date, to); }
   if (type) { w.push("n.DocType = @ty"); req.input("ty", sql.NVarChar(20), type); }
-  if (!includeCancelled) w.push("n.Status <> N'Cancelled'");
+  if (status && status !== "all") {
+    if (status === "request") {
+      w.push("n.Status IN (N'Draft', N'Pending', N'Rejected')");
+    } else if (status === "invoice") {
+      w.push("n.DocType = N'CreditNote' AND n.Status = N'Issued'");
+    } else if (status === "advance") {
+      w.push("n.DocType = N'RefundVoucher' AND n.Status = N'Issued'");
+    } else if (status === "barred") {
+      w.push("n.Status = N'TimeBarred'");
+    } else if (status === "cancelled") {
+      w.push("n.Status = N'Cancelled'");
+    } else {
+      w.push("n.Status = @st"); req.input("st", sql.NVarChar(20), status);
+    }
+  } else if (!includeCancelled) {
+    w.push("n.Status <> N'Cancelled'");
+  }
+  if (search && search.trim()) {
+    w.push("(n.DocNo LIKE @q OR c.CustomerName LIKE @q OR b.UnitNo LIKE @q OR b.BookingNo LIKE @q OR r.RefundNo LIKE @q OR n.AgainstRef LIKE @q)");
+    req.input("q", sql.NVarChar(100), `%${search.trim()}%`);
+  }
   if (projectScope) w.push(require("./projectScope").projectPredicate(projectScope, "n.ProjectId", "").trim());
-  return (await req.query(`${SELECT_NOTE} WHERE ${w.join(" AND ")} ORDER BY n.DocDate DESC, n.Id DESC`)).recordset;
+
+  if (page != null && pageSize != null) {
+    const countSql = `SELECT COUNT(*) AS total
+      FROM dbo.CrmGstNote n
+      LEFT JOIN dbo.CrmRefund r ON r.Id = n.RefundId
+      JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+      LEFT JOIN dbo.CrmCustomer c ON c.Id = n.CustomerId
+      WHERE ${w.join(" AND ")}`;
+    const total = (await req.query(countSql)).recordset[0].total;
+
+    const off = offset != null ? offset : (page - 1) * pageSize;
+    req.input("offset", sql.Int, off);
+    req.input("limit", sql.Int, pageSize);
+    const dataSql = `${SELECT_NOTE_BASE} WHERE ${w.join(" AND ")} ORDER BY n.DocDate DESC, n.Id DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
+    const rows = (await req.query(dataSql)).recordset;
+    return { rows, total };
+  }
+
+  return (await req.query(`${SELECT_NOTE_BASE} WHERE ${w.join(" AND ")} ORDER BY n.DocDate DESC, n.Id DESC`)).recordset;
 }
 
 async function load(pool, id) {
-  return (await pool.request().input("id", sql.Int, id).query(`${SELECT_NOTE} WHERE n.Id = @id`)).recordset[0] || null;
+  return (await pool.request().input("id", sql.Int, id).query(`${SELECT_NOTE_DETAIL} WHERE n.Id = @id`)).recordset[0] || null;
 }
 
 /** The document as a PDF: refund voucher, credit note, or (time-barred) the buyer's tax-paid certificate. */
@@ -326,7 +453,7 @@ const SALE_INVOICE_TYPES = ["Milestone", "Booking", "Final"];
 async function invoiceCreditable(pool, invoiceId) {
   const inv = (await pool.request().input("i", sql.Int, invoiceId).query(`
     SELECT i.Id, i.InvoiceNo, i.InvoiceDate, i.InvoiceType, i.Amount, i.Status, i.MilestoneId, i.BookingId,
-           b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, b.ProjectId, b.CompanyId, a.CustomerId, c.CustomerName,
+           b.Status AS BookingStatus, b.IsActive AS BookingActive, b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, b.ProjectId, b.CompanyId, a.CustomerId, c.CustomerName,
            i.Amount - ISNULL((SELECT SUM(n.TotalAmount) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Status IN (N'Issued', N'TimeBarred')), 0) AS OpenAmount,
            (SELECT COUNT(*) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Source = N'Adjustment' AND n.Status IN (N'Draft', N'Pending', N'Rejected')) AS OpenRequests
     FROM dbo.CrmInvoice i JOIN dbo.CrmBooking b ON b.Id = i.BookingId
@@ -340,6 +467,8 @@ async function invoiceCreditable(pool, invoiceId) {
 function assertCreditable(inv, amount, { ignoreOpenRequests = false } = {}) {
   if (!SALE_INVOICE_TYPES.includes(inv.InvoiceType)) throw new GstNoteError("Only a sale invoice (booking / milestone / final) can be credited");
   if (inv.Status === "Void") throw new GstNoteError(`Invoice ${inv.InvoiceNo} is void`, 409);
+  if (!inv.BookingActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(inv.BookingStatus))
+    throw new GstNoteError(`The booking of ${inv.InvoiceNo} is ${String(inv.BookingStatus || "closed").toLowerCase()} — its money is settled through the cancellation / refund`, 409);
   if (inv.pastDeadline) throw new GstNoteError(`Too late for a credit note on ${inv.InvoiceNo}: it had to be declared by ${inv.deadline}`, 409);
   if (!ignoreOpenRequests && inv.OpenRequests) throw new GstNoteError(`A credit note on ${inv.InvoiceNo} is already being prepared or approved — finish that one first`, 409);
   if (!(amount > 0)) throw new GstNoteError("Enter the amount to credit");
@@ -609,7 +738,8 @@ async function creditableInvoices(pool, { search = "", projectScope = null } = {
            i.Amount - ISNULL((SELECT SUM(n.TotalAmount) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Status IN (N'Issued', N'TimeBarred')), 0) AS OpenAmount
     FROM dbo.CrmInvoice i JOIN dbo.CrmBooking b ON b.Id = i.BookingId
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
-    WHERE i.Status <> N'Void' AND i.InvoiceType IN (N'Milestone', N'Booking', N'Final') AND b.IsActive = 1${scope}
+    WHERE i.Status <> N'Void' AND i.InvoiceType IN (N'Milestone', N'Booking', N'Final') AND b.IsActive = 1
+      AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')${scope}
       ${t ? "AND (i.InvoiceNo LIKE @q OR b.BookingNo LIKE @q OR b.UnitNo LIKE @q OR c.CustomerName LIKE @q)" : ""}
     ORDER BY i.InvoiceDate DESC, i.Id DESC`)).recordset;
   return rows.map((r) => ({ ...r, Open: r2(r.OpenAmount), Deadline: creditNoteDeadline(r.InvoiceDate) }))
