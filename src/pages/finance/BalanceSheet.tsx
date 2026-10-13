@@ -700,7 +700,7 @@ export default function BalanceSheet() {
       >
 
         {/* ── Filters ── */}
-        <div className="mb-5 bg-card px-4 py-4 flex flex-wrap items-end gap-x-4 gap-y-3" style={{ border: "1px solid hsl(var(--foreground))" }}>
+        <div className="bg-card px-4 py-4 flex flex-wrap items-end gap-x-4 gap-y-3" style={{ border: "1px solid hsl(var(--foreground))" }}>
           <div className="flex flex-col gap-1">
             <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1"><CalendarDays size={9} /> As at</span>
             <DateInput value={asOf}
@@ -771,7 +771,7 @@ export default function BalanceSheet() {
           return (
             <>
               {/* ── Figures ── */}
-              <div className="mb-5 bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+              <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
                 <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
                   {[
                     {

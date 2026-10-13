@@ -775,7 +775,7 @@ export default function ProfitAndLoss() {
       >
 
         {/* ── Filters ── */}
-        <div className="mb-5 bg-card px-4 py-4 space-y-4" style={{ border: "1px solid hsl(var(--foreground))" }}>
+        <div className="bg-card px-4 py-4 space-y-4" style={{ border: "1px solid hsl(var(--foreground))" }}>
 
           {/* Period keys */}
           <div className="flex flex-wrap items-center gap-3">
@@ -896,7 +896,7 @@ export default function ProfitAndLoss() {
             <>
               {/* Figures */}
               {showKpi && st && (
-                <div className="mb-5 bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+                <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
                   <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
                     {[
                       { label: "Revenue from operations", amount: st.revenueFromOperations.total, note: `plus ${fmt(st.otherIncome.total)} other income`, signed: false },
