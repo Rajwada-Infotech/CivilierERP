@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard, Building2, FileText, CreditCard, HardHat, LifeBuoy, IdCard,
   LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers,
+  FileSignature,
 } from "lucide-react";
 import { fetchMe, fetchApplications, fetchTimeline } from "./portalApi";
 import {
@@ -23,6 +24,7 @@ const NAV_GROUPS: { label: string; items: { to: string; label: string; icon: any
   ]},
   { label: "Finance", items: [
     { to: "/crm-client-portal/agreement", label: "Agreement", icon: FileText },
+    { to: "/crm-client-portal/transfer-deed", label: "Transfer Deed", icon: FileSignature },
     { to: "/crm-client-portal/payments", label: "Payments", icon: CreditCard },
   ]},
   { label: "Support", items: [
@@ -43,6 +45,8 @@ function initials(name: string | null | undefined) {
 }
 
 const SIDEBAR_BG = `linear-gradient(180deg, ${INK} 0%, ${VIOLET_DEEP} 55%, ${VIOLET} 100%)`;
+
+const ACCOUNT_WIDE_PATHS = ["/crm-client-portal/transfer-deed"];
 
 // ── Application Selector — shown when the customer has multiple applications ──
 function ApplicationSelector({
@@ -243,7 +247,10 @@ const PortalLayout: React.FC = () => {
   const isLoading = !me || !applications;
 
   // Show application selector if customer has multiple apps and none selected yet
-  const showSelector = !isLoading && hasMultipleApps && !selectedApplicationId;
+  // Pages about the customer, not one booking (a transfer deed: a buyer may own
+  // nothing yet) open straight away, without choosing an application.
+  const accountWide = ACCOUNT_WIDE_PATHS.some((p) => location.pathname.startsWith(p));
+  const showSelector = !isLoading && hasMultipleApps && !selectedApplicationId && !accountWide;
 
   return (
     <div className="min-h-screen flex" style={{ background: PORCELAIN }}>
@@ -410,6 +417,10 @@ const PortalLayout: React.FC = () => {
               onSelect={setSelectedApplicationId}
               me={me}
             />
+          ) : accountWide ? (
+            <Suspense fallback={<PortalSkeleton />}>
+              <Outlet context={{ me, timeline, applicationId: selectedApplicationId, applications }} />
+            </Suspense>
           ) : !selectedApplicationId ? (
             <div className="min-h-[60vh] flex items-center justify-center text-sm" style={{ color: TEXT_FAINT }}>
               No active applications found.

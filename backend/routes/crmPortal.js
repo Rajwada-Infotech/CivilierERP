@@ -1513,4 +1513,115 @@ router.get("/activity", async (req, res) => {
   }
 });
 
+// ─── Transfer deeds (a resale / buy-back the customer is a party to) ────────
+// A deed belongs to people, not to one application: the SELLER (whose booking
+// is passing on) and, for a resale, the BUYER (who may own nothing yet). The
+// customer sees every live deed they are a party to and does their own part:
+// approve the draft or ask for a recheck, agree the signing date, upload their
+// papers and — when it is theirs to pay — the stamp-duty challan. Staff can do
+// any of it for them (proxy) from Transfer Deeds; the rules are the same
+// (services/crmTransferDeed.js), and each answer is recorded as theirs.
+const deedSvc = require("../services/crmTransferDeed");
+/** The deed and this customer's side of it — 404 when they aren't a party. */
+async function portalDeed(pool, req) {
+  const id = parseId(req.params.deedId);
+  if (id === null) { const e = new Error("Invalid deed"); e.status = 400; throw e; }
+  const st = await deedSvc.deedState(pool, id).catch(() => null);
+  const cid = Number(req.portalUser.customerId);
+  const role = !st ? null : Number(st.deed.SellerCustomerId) === cid ? "Seller"
+    : st.deed.DeedType === "Assignment" && Number(st.deed.BuyerCustomerId) === cid ? "Buyer" : null;
+  if (!st || !role || st.deed.Status === "Cancelled") { const e = new Error("Deed not found"); e.status = 404; throw e; }
+  return { st, role, id };
+}
+/** What a party sees: the draft, the registered copy and their own papers — nobody else's remarks. */
+function portalView(st, role) {
+  const d = st.deed;
+  const mine = (x) => x.Party === role || x.DocumentType === "DeedDraft" || x.DocumentType === "RegisteredDeed";
+  const pay = st.payment;
+  const payer = !!pay && (pay.PayableBy === role || pay.PayableBy === "Shared");
+  return {
+    role,
+    deed: {
+      Id: d.Id, DeedNo: d.DeedNo, DeedType: d.DeedType, Property: d.Property, BookingNo: d.BookingNo, Status: d.Status, StatusLabel: d.StatusLabel,
+      SellerName: d.SellerName, BuyerName: d.DeedType === "Assignment" ? d.BuyerName : null, VersionNo: d.VersionNo,
+      MyApproval: d[`${role}Approval`], MyDateAccepted: !!d[`${role}DateAccepted`],
+      ProposedDate: d.ProposedDate, ProposedBy: d.ProposedBy, DateApprovalStatus: d.DateApprovalStatus, DeedDate: d.DeedDate, ExecutedAt: d.ExecutedAt,
+    },
+    parties: st.parties,
+    approvals: Object.fromEntries(st.parties.map((p) => [p, d[`${p}Approval`]])),
+    dateAccepted: Object.fromEntries(st.parties.map((p) => [p, !!d[`${p}DateAccepted`]])),
+    documents: st.documents.filter(mine).map((x) => ({
+      Id: x.Id, DocumentType: x.DocumentType, Label: x.Label, Party: x.Party, Status: x.Status, HasFile: !!x.FileName,
+      Remarks: x.Party === role ? x.Remarks : null,
+    })),
+    payment: pay ? {
+      StampDuty: pay.StampDuty, RegistrationFee: pay.RegistrationFee, PayableBy: pay.PayableBy, Status: pay.Status, PaidRef: pay.PaidRef,
+      AmountPaid: pay.AmountPaid, ConfirmRemarks: payer ? pay.ConfirmRemarks : null, IAmPayer: payer,
+    } : null,
+    registry: st.registry ? { Office: st.registry.Office, ScheduledAt: st.registry.ScheduledAt, Attendees: st.registry.Attendees, RegNo: st.registry.RegNo, Status: st.registry.Status } : null,
+    steps: st.steps.map((s) => ({ key: s.key, label: s.label, ok: s.ok, state: s.state })),
+  };
+}
+const portalCtx = (req) => ({ actorType: "Portal", customerId: Number(req.portalUser.customerId) });
+const deedFail = (res, e, where) => {
+  if (e.status) return res.status(e.status).json({ error: e.message });
+  console.error(`[crm-portal] ${where}:`, e.message);
+  res.status(500).json({ error: "An internal error occurred. Please try again later." });
+};
+const deedAction = (fn, where) => async (req, res) => {
+  try {
+    const pool = getPool();
+    const { id, role } = await portalDeed(pool, req);
+    await fn(pool, id, role, req);
+    res.json(portalView(await deedSvc.deedState(pool, id), role));
+  } catch (e) { deedFail(res, e, where); }
+};
+const deedUpload = (fn, where) => (req, res) => portalDocUpload.single("file")(req, res, (err) => {
+  if (err) return res.status(400).json({ error: err.message });
+  if (!req.file) return res.status(400).json({ error: "Choose a file" });
+  return deedAction(fn, where)(req, res);
+});
+
+router.get("/transfer-deeds", async (req, res) => {
+  try {
+    const pool = getPool();
+    const cid = Number(req.portalUser.customerId);
+    const rows = (await pool.request().input("c", sql.Int, cid).query(`
+      SELECT d.Id FROM dbo.CrmTransferDeed d JOIN dbo.CrmUnitResale r ON r.Id = d.ResaleId
+      WHERE d.IsActive = 1 AND d.Status <> N'Cancelled'
+        AND (r.FromCustomerId = @c OR (d.DeedType = N'Assignment' AND r.ToCustomerId = @c))
+      ORDER BY d.CreatedAt DESC`)).recordset;
+    const out = [];
+    for (const r of rows) {
+      const st = await deedSvc.deedState(pool, r.Id);
+      out.push(portalView(st, Number(st.deed.SellerCustomerId) === cid ? "Seller" : "Buyer"));
+    }
+    res.json(out);
+  } catch (e) { deedFail(res, e, "GET /transfer-deeds"); }
+});
+
+router.get("/transfer-deeds/:deedId/documents/:docId/file", async (req, res) => {
+  try {
+    const pool = getPool();
+    const { st, role, id } = await portalDeed(pool, req);
+    const doc = st.documents.find((x) => x.Id === Number(req.params.docId));
+    if (!doc || !(doc.Party === role || ["DeedDraft", "RegisteredDeed"].includes(doc.DocumentType))) return res.status(404).json({ error: "Document not found" });
+    const f = await deedSvc.documentFile(pool, id, doc.Id);
+    if (!f?.FileBase64) return res.status(404).json({ error: "No file yet" });
+    res.setHeader("Content-Type", f.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(f.FileName || "document")}"`);
+    res.send(Buffer.from(f.FileBase64, "base64"));
+  } catch (e) { deedFail(res, e, "GET deed file"); }
+});
+router.post("/transfer-deeds/:deedId/documents/:docId/upload",
+  deedUpload((pool, id, _role, req) => deedSvc.uploadDocument(pool, id, Number(req.params.docId), req.file, portalCtx(req)), "POST deed upload"));
+router.put("/transfer-deeds/:deedId/respond",
+  deedAction((pool, id, role, req) => deedSvc.partyRespond(pool, id, role, req.body?.decision, { ...portalCtx(req), remarks: req.body?.remarks || null }), "PUT deed respond"));
+router.put("/transfer-deeds/:deedId/date/propose",
+  deedAction((pool, id, role, req) => deedSvc.proposeDate(pool, id, role, req.body?.Date, portalCtx(req), null), "PUT deed propose date"));
+router.put("/transfer-deeds/:deedId/date/accept",
+  deedAction((pool, id, role, req) => deedSvc.acceptDate(pool, id, role, portalCtx(req), null), "PUT deed accept date"));
+router.post("/transfer-deeds/:deedId/duty/proof",
+  deedUpload((pool, id, _role, req) => deedSvc.uploadDutyProof(pool, id, req.file, req.body || {}, portalCtx(req)), "POST deed duty proof"));
+
 module.exports = router;

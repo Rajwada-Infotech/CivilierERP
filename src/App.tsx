@@ -503,6 +503,7 @@ const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
+const PortalTransferDeed   = lazy(() => import("./pages/CrmCustomerPortal/PortalTransferDeed"));
 const Issues = lazy(() => import("./pages/material/Issues"));
 const IssueReturn = lazy(() => import("./pages/material/IssueReturn"));
 const MaterialRequestPage = lazy(
@@ -736,6 +737,7 @@ function AppRoutes() {
         <Route path="tickets" element={<PortalTickets />} />
         <Route path="activity" element={<PortalActivity />} />
         <Route path="profile" element={<PortalProfile />} />
+        <Route path="transfer-deed" element={<PortalTransferDeed />} />
       </Route>
 
       {/* Public — reachable without logging in, so the QR/link can be shared freely */}
