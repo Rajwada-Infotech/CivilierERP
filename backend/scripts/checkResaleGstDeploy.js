@@ -41,12 +41,14 @@ const line = (ok, msg) => console.log(`${ok ? "OK  " : "FIX "} ${msg}`);
     FROM dbo.enterprise e JOIN dbo.CrmBooking b ON b.CompanyId = e.id AND b.IsActive = 1
     WHERE e.business_type = 'C' GROUP BY e.id, e.name, e.gst_no, e.address, e.state ORDER BY e.name`);
   for (const c of comps) {
-    const miss = [!c.gst_no && "GSTIN", !c.address && "address", !c.state && "state"].filter(Boolean);
-    line(!miss.length, `${c.name} (${c.bookings} bookings)${miss.length ? ` — missing ${miss.join(", ")} (Company master)` : ""}`);
+    const miss = [!c.address && "address", !c.state && "state"].filter(Boolean);
+    line(!miss.length, `${c.name} (${c.bookings} bookings)${miss.length ? ` — missing ${miss.join(", ")} (Company master)` : ""}${c.gst_no ? "" : " · no GSTIN (right only if it isn't GST-registered — then it shouldn't charge GST)"}`);
   }
-  const projNoState = await q(`SELECT DISTINCT p.name FROM dbo.enterprise p JOIN dbo.CrmBooking b ON b.ProjectId = p.id AND b.IsActive = 1
-    WHERE p.business_type = 'P' AND ISNULL(p.state, '') = ''`);
-  line(!projNoState.length, projNoState.length ? `projects without a state (place of supply falls back to the company's): ${projNoState.map((p) => p.name).join(", ")}` : "every project has a state");
+  // Place of supply comes from the project's GSTIN state code (the Project
+  // master has no separate state field), else a typed state.
+  const projNoPlace = await q(`SELECT DISTINCT p.name FROM dbo.enterprise p JOIN dbo.CrmBooking b ON b.ProjectId = p.id AND b.IsActive = 1
+    WHERE p.business_type = 'P' AND ISNULL(p.gst_no, '') = '' AND ISNULL(p.state, '') = ''`);
+  line(!projNoPlace.length, projNoPlace.length ? `projects with no GSTIN (place of supply falls back to the company's state — Project master → Compliance → GSTIN): ${projNoPlace.map((p) => p.name).join(", ")}` : "every project's place of supply is known (from its GSTIN)");
 
   console.log("\n== Refunds paid before credit notes existed (issue on request: Refunds → Credit note) ==");
   const old = await q(`SELECT r.RefundNo, r.NetAmount, r.PaidAt, b.BookingNo FROM dbo.CrmRefund r JOIN dbo.CrmBooking b ON b.Id = r.BookingId

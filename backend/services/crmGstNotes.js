@@ -193,6 +193,13 @@ async function issueForRefund(pool, refundId, userEmail, { replacesId = null } =
   return { issued };
 }
 
+/** Place of supply / CGST+SGST vs IGST, worked out once (services/gstin.js placeOfSupply). */
+function withSupply(n) {
+  if (!n) return n;
+  const pos = require("./gstin").placeOfSupply({ projectGst: n.ProjectGst, companyGst: n.CompanyGst, projectState: n.ProjectState, companyState: n.CompanyState });
+  return { ...n, PlaceOfSupply: pos.name, PlaceOfSupplyCode: pos.code, IntraState: pos.intraState };
+}
+
 const SELECT_NOTE_BASE = `
   SELECT n.Id, n.DocNo, n.DocType, n.Status, n.RefundId, n.BookingId, n.CustomerId, n.CompanyId, n.ProjectId, n.InvoiceId,
          n.AgainstRef, n.AgainstDate, n.DocDate, n.TaxableValue, n.GstRate, n.GstAmount, n.TotalAmount, n.DeadlineDate,
@@ -207,7 +214,7 @@ const SELECT_NOTE_BASE = `
          c.CustomerName, c.CustomerNo, c.GstNo AS CustomerGst, c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode, c.Mobile AS CustomerMobile,
          comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2, comp.city AS CompanyCity, comp.state AS CompanyState,
          comp.pincode AS CompanyPincode, comp.gst_no AS CompanyGst, comp.pan_no AS CompanyPan,
-         proj.name AS ProjectName, proj.state AS ProjectState
+         proj.name AS ProjectName, proj.state AS ProjectState, proj.gst_no AS ProjectGst
   FROM dbo.CrmGstNote n
   LEFT JOIN dbo.CrmRefund r ON r.Id = n.RefundId
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
@@ -230,7 +237,7 @@ const SELECT_NOTE_DETAIL = `
          c.CustomerName, c.CustomerNo, c.GstNo AS CustomerGst, c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode, c.Mobile AS CustomerMobile,
          comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2, comp.city AS CompanyCity, comp.state AS CompanyState,
          comp.pincode AS CompanyPincode, comp.gst_no AS CompanyGst, comp.pan_no AS CompanyPan, comp.logo AS CompanyLogo,
-         proj.name AS ProjectName, proj.state AS ProjectState
+         proj.name AS ProjectName, proj.state AS ProjectState, proj.gst_no AS ProjectGst
   FROM dbo.CrmGstNote n
   LEFT JOIN dbo.CrmRefund r ON r.Id = n.RefundId
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
@@ -293,11 +300,11 @@ async function list(pool, {
     return { rows, total };
   }
 
-  return (await req.query(`${SELECT_NOTE_BASE} WHERE ${w.join(" AND ")} ORDER BY n.DocDate DESC, n.Id DESC`)).recordset;
+  return (await req.query(`${SELECT_NOTE_BASE} WHERE ${w.join(" AND ")} ORDER BY n.DocDate DESC, n.Id DESC`)).recordset.map(withSupply);
 }
 
 async function load(pool, id) {
-  return (await pool.request().input("id", sql.Int, id).query(`${SELECT_NOTE_DETAIL} WHERE n.Id = @id`)).recordset[0] || null;
+  return withSupply((await pool.request().input("id", sql.Int, id).query(`${SELECT_NOTE_DETAIL} WHERE n.Id = @id`)).recordset[0] || null);
 }
 
 /** The document as a PDF: refund voucher, credit note, or (time-barred) the buyer's tax-paid certificate. */
@@ -361,7 +368,7 @@ function renderPdf(n) {
     // Place of supply for property is where the property is (IGST Act s.12(3)),
     // not the buyer's state: CGST + SGST unless the project is in another state.
     const norm = (x) => String(x || "").trim().toLowerCase();
-    const sameState = !n.ProjectState || !n.CompanyState || norm(n.ProjectState) === norm(n.CompanyState);
+    const sameState = n.IntraState !== false;
     const half = Math.round((Number(n.GstAmount) / 2) * 100) / 100;
     const rows = [["Taxable value", money(n.TaxableValue)],
       ...(sameState ? [["CGST", money(half)], ["SGST", money(Number(n.GstAmount) - half)]] : [["IGST", money(n.GstAmount)]]),
@@ -370,7 +377,7 @@ function renderPdf(n) {
       doc.font(k === "Total" ? F.bold : F.regular).fontSize(9).text(k, L + W * 0.55, y, { width: W * 0.25 }).text(v, L + W * 0.8, y, { width: W * 0.2, align: "right" });
       y += 15;
     }
-    doc.fillColor("#94a3b8").fontSize(7).text(`Place of supply: ${n.ProjectState || n.CompanyState || "where the property is"} (location of the property).`, L, y); doc.fillColor("#000"); y += 12;
+    doc.fillColor("#94a3b8").fontSize(7).text(`Place of supply: ${n.PlaceOfSupply ? `${n.PlaceOfSupply}${n.PlaceOfSupplyCode ? ` (${n.PlaceOfSupplyCode})` : ""}` : "where the property is"} — location of the property.`, L, y); doc.fillColor("#000"); y += 12;
     y += 14;
     doc.font(F.regular).fontSize(8.5).fillColor("#334155").text(
       barred ? `The tax shown was charged on invoice ${n.AgainstRef} and paid by us to the government. It has not been adjusted or refunded to us, and the time to issue a credit note has passed (${date(n.DeadlineDate)}). The recipient may claim it from the department.`

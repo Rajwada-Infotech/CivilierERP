@@ -39,3 +39,35 @@ function checkGstin(raw, { pan = null } = {}) {
 }
 
 module.exports = { checkGstin, normalizeGstin: normalize, gstinCheckChar: checkChar };
+
+// GST state codes (the first two digits of a GSTIN), as the GST network lists them.
+const STATE_CODES = {
+  "01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand",
+  "06": "Haryana", "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim",
+  "12": "Arunachal Pradesh", "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura", "17": "Meghalaya",
+  "18": "Assam", "19": "West Bengal", "20": "Jharkhand", "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh",
+  "24": "Gujarat", "26": "Dadra and Nagar Haveli and Daman and Diu", "27": "Maharashtra", "29": "Karnataka", "30": "Goa",
+  "31": "Lakshadweep", "32": "Kerala", "33": "Tamil Nadu", "34": "Puducherry", "35": "Andaman and Nicobar Islands",
+  "36": "Telangana", "37": "Andhra Pradesh", "38": "Ladakh", "97": "Other Territory", "99": "Centre Jurisdiction",
+};
+const codeOf = (gstin) => { const v = normalize(gstin); return /^[0-9]{2}/.test(v) ? v.slice(0, 2) : null; };
+
+/**
+ * Place of supply for a property sale (IGST Act s.12(3): where the property
+ * is) and whether it is inside the supplier's state (CGST+SGST) or not (IGST).
+ * The project's own GSTIN state code says where it is registered — the
+ * project master has no separate state field — compared with the company's;
+ * the typed state names are the fallback; with neither, intra-state (a
+ * developer registers in the state of its projects).
+ */
+function placeOfSupply({ projectGst, companyGst, projectState, companyState }) {
+  const p = codeOf(projectGst), c = codeOf(companyGst);
+  const norm = (x) => String(x || "").trim().toLowerCase();
+  if (p && c) return { name: STATE_CODES[p] || p, code: p, intraState: p === c, basis: "gstin" };
+  if (projectState && companyState) return { name: projectState, code: null, intraState: norm(projectState) === norm(companyState), basis: "state" };
+  const name = (p && STATE_CODES[p]) || projectState || (c && STATE_CODES[c]) || companyState || null;
+  return { name, code: p || c || null, intraState: true, basis: name ? "partial" : "assumed" };
+}
+
+module.exports.placeOfSupply = placeOfSupply;
+module.exports.STATE_CODES = STATE_CODES;
