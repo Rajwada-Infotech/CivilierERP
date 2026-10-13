@@ -155,6 +155,8 @@ export const SHEET_FRAME_CSS =
 .sheet-frame .dt-toolbar { background: transparent !important; border-bottom: 1px solid var(--rule) !important; }
 .sheet-frame .dt-toolbar input { background: hsl(var(--card)) !important; border-color: var(--ink) !important; }
 .sheet-frame tfoot tr, .sheet-frame tfoot td { background: transparent !important; border-top: 1px solid var(--ink); }
+.sheet-frame .table-sticky-actions :is(.sticky-act, .sticky-status) { background-color: hsl(var(--card)) !important; box-shadow: none !important; }
+.sheet-frame .table-sticky-actions tbody tr:hover > :is(.sticky-act, .sticky-status) { background-color: color-mix(in srgb, hsl(var(--card)) 90%, hsl(var(--primary)) 10%) !important; }
 
 /* Dialogs, menus and pop-ups open outside the page, so they are matched by role instead of by the frame. This style
    block is only on the page while a sheet page is showing, so other pages keep their own look. */

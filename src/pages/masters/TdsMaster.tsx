@@ -1,8 +1,8 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import React, { useRef, useState } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
-import { FileText, Download, Upload, Check, X, Loader2, AlertTriangle } from "lucide-react";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { Download, Upload, Check, X, Loader2 } from "lucide-react";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
 import {
@@ -267,64 +267,37 @@ const TdsMaster: React.FC = () => {
     }
   };
 
+  const FIG = "font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground";
   const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
-    status: (value) => (
-      <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value ? "bg-green-500/10 border-green-500/20 text-green-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
-      >
-        <span
-          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value ? "bg-green-500" : "bg-red-500"}`}
-        />
-        {value ? "Active" : "Inactive"}
-      </span>
-    ),
-    percentage: (value) => (
-      <span className="font-mono text-sm">
-        {value !== "" ? `${value}%` : "—"}
-      </span>
-    ),
-    nature: (value) => (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border bg-blue-500/10 border-blue-500/20 text-blue-600">
-        {String(value || "—")}
-      </span>
-    ),
+    status: (value) => <SheetMark text={value ? "Active" : "Inactive"} tone={value ? "done" : "none"} />,
+    percentage: (value) => <span className={FIG}>{value !== "" ? `${value}%` : "—"}</span>,
+    nature: (value) => <span className={FIG}>{String(value || "—")}</span>,
+    // A nature with no ledger linked cannot be posted against, so it is marked in red.
     glHeadLabel: (value) =>
       value ? (
         <span className="text-sm text-foreground">{String(value)}</span>
       ) : (
-        <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-amber-600 dark:text-amber-400">
-          <AlertTriangle size={11} /> Not linked — invoice posting will fail
-        </span>
+        <SheetMark text="Not linked: invoice posting will fail" tone="stopped" />
       ),
   };
+  const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  const RULE = "1px solid hsl(var(--foreground))";
+  const unlinked = dbItems.filter((d) => !d.GLHeadId).length;
 
   if (isLoading)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
   if (error)
-    return <div className="p-6 text-red-500">Failed to load TDS records.</div>;
+    return <div className="p-6 text-destructive">Failed to load TDS records.</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Masters", "TDS Master"]} />
-      <FinanceShell
-        title="TDS Master"
-        subtitle="Configure TDS natures, names and rates for tax deduction at source"
-        icon={FileText}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="TDS rates"
+        subtitle="Each nature of tax deducted at source: its rate, and the ledger its deduction is posted to."
         action={
-          <div className="flex items-center gap-2">
-            {/* Record count chip */}
-            <span
-              className="text-xs font-heading px-3 py-1.5 rounded-lg"
-              style={{
-                background: "rgba(99,102,241,0.12)",
-                border: "1px solid rgba(99,102,241,0.25)",
-                color: "#818cf8",
-              }}
-            >
-              {dbItems.length} TDS Rates
-            </span>
-
-            {/* Hidden file input */}
+          <div className="flex items-center gap-2 flex-wrap">
             <input
               ref={importFileInputRef}
               type="file"
@@ -332,36 +305,42 @@ const TdsMaster: React.FC = () => {
               onChange={handleImportFileChange}
               className="hidden"
             />
-
-            {/* Download template */}
             <button
               onClick={handleDownloadTemplate}
               title="Download a blank CSV with all TDS Master fields"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              className={`${KEY} px-3 py-2 border border-foreground text-foreground hover:bg-primary/10`}
             >
               <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
+              <span className="hidden sm:inline">Template</span>
             </button>
-
-            {/* Import CSV */}
             <button
               onClick={handleImportClick}
               disabled={importing}
               title="Import TDS rates from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className={`${KEY} px-3 py-2 border border-foreground bg-foreground text-card`}
             >
-              {importing ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
-              </span>
+              {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              <span className="hidden sm:inline">{importing ? "Importing…" : "Import CSV"}</span>
             </button>
           </div>
         }
       >
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "TDS rates", value: dbItems.length, note: "in all", red: false },
+              { label: "Active", value: dbItems.filter((d) => d.Status).length, note: "available on invoices", red: false },
+              { label: "No ledger linked", value: unlinked, note: unlinked > 0 ? "invoice posting will fail for these" : "every nature has its ledger", red: unlinked > 0 },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label" style={x.red ? { color: "var(--red)" } : undefined}>{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color: x.red ? "var(--red)" : undefined }}>{x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <MasterPage
           title="TDS"
           fields={[
@@ -432,75 +411,43 @@ const TdsMaster: React.FC = () => {
           open={!!importResults}
           onOpenChange={(open) => !open && setImportResults(null)}
         >
-          <DialogContent className="max-w-lg">
+          <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
             <DialogHeader>
-              <DialogTitle className="font-heading text-base">
-                Import Results
-              </DialogTitle>
+              <div className="pb-3" style={{ borderBottom: RULE }}>
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">TDS rates · CSV import</p>
+                <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Import results</DialogTitle>
+              </div>
             </DialogHeader>
             {importResults && (
               <div className="space-y-3 pt-1">
-                <div className="flex items-center gap-3 text-sm">
-                  <span className="flex items-center gap-1.5 text-green-600">
-                    <Check size={14} />
-                    {
-                      importResults.filter((r) => r.status === "success").length
-                    }{" "}
-                    succeeded
-                  </span>
+                <div className="flex items-center gap-4 flex-wrap">
+                  <SheetMark text={`${importResults.filter((r) => r.status === "success").length} imported`} tone="done" />
                   {importResults.some((r) => r.status === "error") && (
-                    <span className="flex items-center gap-1.5 text-destructive">
-                      <X size={14} />
-                      {
-                        importResults.filter((r) => r.status === "error").length
-                      }{" "}
-                      failed
-                    </span>
+                    <SheetMark text={`${importResults.filter((r) => r.status === "error").length} failed`} tone="stopped" />
                   )}
                 </div>
-                <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                <div className="max-h-72 overflow-y-auto" style={{ border: RULE }}>
                   {importResults.map((r, i) => (
-                    <div
-                      key={i}
-                      className={`flex items-start gap-2 px-3 py-2 text-sm ${r.status === "error" ? "bg-destructive/5" : ""}`}
-                    >
-                      {r.status === "success" ? (
-                        <Check
-                          size={14}
-                          className="text-green-600 shrink-0 mt-0.5"
-                        />
-                      ) : (
-                        <X
-                          size={14}
-                          className="text-destructive shrink-0 mt-0.5"
-                        />
-                      )}
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">
-                          Row {r.row} — {r.name}
-                        </p>
-                        {r.message && (
-                          <p className="text-xs text-destructive">
-                            {r.message}
-                          </p>
-                        )}
+                    <div key={i} className="flex items-start gap-3 px-3 py-2 text-sm" style={i ? { borderTop: "1px solid hsl(var(--border) / 0.7)" } : undefined}>
+                      <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0 mt-1 w-12">Row {r.row}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate text-foreground">{r.name}</p>
+                        {r.message && <p className="text-xs text-destructive mt-0.5">{r.message}</p>}
                       </div>
+                      {r.status === "success" ? <Check size={14} className="text-foreground shrink-0 mt-0.5" /> : <X size={14} className="text-destructive shrink-0 mt-0.5" />}
                     </div>
                   ))}
                 </div>
               </div>
             )}
-            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
-              <button
-                onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
-              >
+            <div className="flex justify-end gap-2 pt-3 mt-2" style={{ borderTop: RULE }}>
+              <button onClick={() => setImportResults(null)} className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}>
                 Close
               </button>
             </div>
           </DialogContent>
         </Dialog>
-      </FinanceShell>
+      </SheetShell>
     </>
   );
 };

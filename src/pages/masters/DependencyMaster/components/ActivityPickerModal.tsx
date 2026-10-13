@@ -7,9 +7,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Tag } from "lucide-react";
+import { Search } from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -66,27 +65,30 @@ export function ActivityPickerModal({ open, onClose, onPick, excludeIds }: Props
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sheet-frame sm:max-w-md" style={{ margin: 0 }}>
         <DialogHeader>
-          <DialogTitle>Add Activities to Chain</DialogTitle>
+          <div className="pb-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Dependency</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Add activities to the chain</DialogTitle>
+          </div>
         </DialogHeader>
 
         <div className="relative mb-2">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <input
             autoFocus
             placeholder="Search activities…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 h-9"
+            className="w-full h-9 pl-8 pr-3 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
           />
         </div>
 
-        <div className="max-h-80 overflow-y-auto divide-y divide-border/40 -mx-1">
+        <div className="max-h-80 overflow-y-auto divide-y divide-border/70" style={{ border: "1px solid hsl(var(--foreground))" }}>
           {isLoading ? (
             <div className="py-8 text-center text-xs text-muted-foreground">Loading activities…</div>
           ) : filtered.length === 0 ? (
-            <div className="py-8 text-center text-xs text-muted-foreground italic">
+            <div className="py-8 text-center text-xs text-muted-foreground">
               No activities match your search
             </div>
           ) : (
@@ -103,15 +105,14 @@ export function ActivityPickerModal({ open, onClose, onPick, excludeIds }: Props
                     already
                       ? "opacity-40 cursor-not-allowed"
                       : checked
-                        ? "bg-primary/10"
-                        : "hover:bg-primary/8 cursor-pointer"
+                        ? "bg-primary/10 font-medium"
+                        : "hover:bg-primary/10 cursor-pointer"
                   }`}
                 >
                   {!already && <Checkbox checked={checked} onCheckedChange={() => toggle(a)} className="shrink-0" />}
-                  <Tag size={12} className="text-teal-400 shrink-0" />
                   <span className="flex-1 truncate">{a.activity_name}</span>
                   {already && (
-                    <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground shrink-0">
+                    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground shrink-0">
                       Already added
                     </span>
                   )}
@@ -121,7 +122,7 @@ export function ActivityPickerModal({ open, onClose, onPick, excludeIds }: Props
           )}
         </div>
 
-        <div className="flex items-center justify-between pt-3 mt-1 border-t border-border/40">
+        <div className="flex items-center justify-between gap-3 pt-3 mt-1">
           <span className="text-xs text-muted-foreground">
             {selected.length > 0 ? `${selected.length} selected` : "Select one or more activities"}
           </span>
@@ -129,11 +130,11 @@ export function ActivityPickerModal({ open, onClose, onPick, excludeIds }: Props
             type="button"
             onClick={confirm}
             disabled={selected.length === 0}
-            className="px-3 py-1.5 rounded-md text-xs font-medium btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 bg-foreground text-card border border-foreground"
           >
             {selected.length > 0
-              ? `Add ${selected.length} Activit${selected.length === 1 ? "y" : "ies"}`
-              : "Add Activities"}
+              ? `Add ${selected.length} activit${selected.length === 1 ? "y" : "ies"}`
+              : "Add activities"}
           </button>
         </div>
       </DialogContent>

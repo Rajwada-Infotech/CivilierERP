@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, GitBranch } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityRung } from "./ActivityRung";
 
@@ -47,7 +47,7 @@ export function ActivityLadder({ active, rungs, onAdd, onRemove, onMove, readOnl
   const rail = (
     <>
       {rungs.length === 0 ? (
-        <div className="py-6 text-center text-xs text-muted-foreground italic">
+        <div className="py-6 text-center text-xs text-muted-foreground">
           {readOnly ? "No activities in this chain." : 'No activities added yet — click "Add Activity" below to start the chain.'}
         </div>
       ) : (
@@ -75,9 +75,9 @@ export function ActivityLadder({ active, rungs, onAdd, onRemove, onMove, readOnl
         <button
           type="button"
           onClick={onAdd}
-          className="w-full mt-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-primary/40 text-primary text-xs font-heading font-semibold hover:bg-primary/5 transition-colors"
+          className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed w-full mt-1 py-2.5 border border-dashed border-foreground text-foreground hover:bg-primary/10"
         >
-          <Plus size={13} /> Add Activity
+          <Plus size={13} /> Add activity
         </button>
       )}
     </>
@@ -86,19 +86,13 @@ export function ActivityLadder({ active, rungs, onAdd, onRemove, onMove, readOnl
   if (bare) return rail;
 
   return (
-    <div className={`rounded-xl border p-4 transition-opacity ${active ? "border-border" : "border-dashed border-border/60 opacity-50"}`}>
-      <div className="flex items-center gap-2 mb-3">
-        <GitBranch size={13} className="text-primary" />
-        <h3 className="text-xs font-heading font-semibold uppercase tracking-widest text-foreground">
-          Activity Chain
-        </h3>
-        <span className="text-[0.625rem] text-muted-foreground/60 ml-1">
-          strictly linear — each activity must finish before the next starts
-        </span>
-      </div>
+    <div className={`p-4 border transition-opacity ${active ? "border-foreground/40" : "border-dashed border-foreground/30 opacity-60"}`}>
+      <p className="text-[0.6875rem] text-muted-foreground mb-3">
+        Strictly in order: each activity must finish before the next one starts. Drag a step to move it.
+      </p>
 
       {!active ? (
-        <p className="text-xs text-muted-foreground italic py-4 text-center">
+        <p className="text-xs text-muted-foreground py-4 text-center">
           Complete the scope and alias above to start building the chain.
         </p>
       ) : (

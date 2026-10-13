@@ -1,9 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
-import { GitBranch, Loader2, Search } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { SheetShell } from "@/components/sheet/Sheet";
+import { Loader2, Search } from "lucide-react";
 import { getDependencyMasters } from "@/api/dependencyMasterApi";
 import { DependencyMasterList } from "@/pages/masters/DependencyMaster/components/DependencyMasterList";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -31,24 +30,34 @@ const DependencyTracker: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Dependency"]} />
-      <CivilWorkDprShell title="Dependency Management" icon={GitBranch}>
-        <div className="flex justify-end">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search alias or path…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 h-9 w-64"
-            />
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Dependency management"
+        subtitle="The activity chains set for each room, in the order the work has to be done. Open a room to see its chains."
+      >
+        <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+            <p className="flex items-baseline gap-2.5">
+              <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Dependency chains</span>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{activeChains.length}</span>
+            </p>
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                placeholder="Search alias or path…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full h-9 pl-8 pr-3 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+              />
+            </div>
           </div>
-        </div>
+          <div className="p-2 sm:p-4">
         {isLoading ? (
           <div className="flex items-center gap-2 p-8 text-muted-foreground text-sm">
             <Loader2 size={16} className="animate-spin" /> Loading dependency chains…
           </div>
         ) : activeChains.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground text-sm">
+          <div className="p-10 text-center text-muted-foreground text-sm">
             {search ? "No dependency chains match your search." : "No dependency chains defined yet."}
           </div>
         ) : (
@@ -61,7 +70,9 @@ const DependencyTracker: React.FC = () => {
             forceExpand={!!search.trim()}
           />
         )}
-      </CivilWorkDprShell>
+          </div>
+        </div>
+      </SheetShell>
     </>
   );
 };

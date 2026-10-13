@@ -10,28 +10,17 @@ interface Props {
 export function ScopeToggle({ active, value, onChange }: Props) {
   if (!active) return null;
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60">
-        Work Type
-      </span>
-      <div className="inline-flex rounded-lg border border-border overflow-hidden">
+    <div className="flex items-center gap-3 flex-wrap">
+      <div className="seg">
         {(["INTERNAL", "EXTERNAL"] as WorkType[]).map((opt) => (
-          <button
-            key={opt}
-            type="button"
-            onClick={() => onChange(opt)}
-            className={`px-3 py-1.5 text-xs font-heading font-semibold tracking-wide transition-colors ${
-              value === opt
-                ? opt === "INTERNAL"
-                  ? "bg-cyan-600 text-white"
-                  : "bg-violet-500 text-white"
-                : "bg-background text-muted-foreground hover:bg-muted"
-            }`}
-          >
+          <button key={opt} type="button" onClick={() => onChange(opt)} aria-pressed={value === opt} className={value === opt ? "on" : undefined}>
             {opt === "INTERNAL" ? "Internal" : "External"}
           </button>
         ))}
       </div>
+      <span className="text-[0.6875rem] text-muted-foreground">
+        {value === "INTERNAL" ? "Work inside the unit." : "Work outside the unit."}
+      </span>
     </div>
   );
 }

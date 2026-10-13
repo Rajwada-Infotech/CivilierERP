@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { useInSheet } from "@/components/sheet/useInSheet";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Search, Check } from "lucide-react";
 
@@ -22,6 +23,9 @@ export const GLAccountMultiSelect: React.FC<{
   const [options, setOptions] = useState<GLOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // On a drawing-sheet page the control is squared and inked to match; elsewhere it is drawn as before.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sheet = useInSheet(rootRef);
 
   useEffect(() => {
     fetchWithAuth("/api/general-ledger/options")
@@ -48,8 +52,8 @@ export const GLAccountMultiSelect: React.FC<{
   );
 
   return (
-    <div className="rounded-lg border border-border bg-muted/20 overflow-hidden">
-      <div className="relative p-2 border-b border-border">
+    <div ref={rootRef} className={sheet ? "border border-foreground/40 bg-card overflow-hidden" : "rounded-lg border border-border bg-muted/20 overflow-hidden"}>
+      <div className={`relative p-2 border-b ${sheet ? "border-foreground/40" : "border-border"}`}>
         <Search
           size={13}
           className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -59,7 +63,9 @@ export const GLAccountMultiSelect: React.FC<{
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search GL accounts…"
-          className="w-full pl-7 pr-2 py-1.5 text-xs rounded-md bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary/30"
+          className={sheet
+            ? "w-full pl-7 pr-2 py-1.5 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none"
+            : "w-full pl-7 pr-2 py-1.5 text-xs rounded-md bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary/30"}
         />
       </div>
       <div className="max-h-48 overflow-y-auto p-2">
@@ -80,7 +86,12 @@ export const GLAccountMultiSelect: React.FC<{
                   key={o.id}
                   type="button"
                   onClick={() => toggle(o.id)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.6875rem] font-heading border transition-all ${
+                  aria-pressed={isSelected}
+                  className={sheet
+                    ? `flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] border transition-colors ${
+                        isSelected ? "bg-foreground text-card border-foreground" : "text-foreground border-foreground/40 hover:border-foreground"
+                      }`
+                    : `flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.6875rem] font-heading border transition-all ${
                     isSelected
                       ? "btn-module text-white border-primary"
                       : "bg-background text-muted-foreground border-border hover:border-primary/50"
@@ -96,7 +107,7 @@ export const GLAccountMultiSelect: React.FC<{
         )}
       </div>
       {selected.length > 0 && (
-        <p className="px-3 py-1.5 text-[0.6875rem] text-muted-foreground border-t border-border bg-muted/30">
+        <p className={sheet ? "px-3 py-1.5 text-[0.6875rem] text-foreground font-medium border-t border-foreground/40" : "px-3 py-1.5 text-[0.6875rem] text-muted-foreground border-t border-border bg-muted/30"}>
           {selected.length} GL account{selected.length === 1 ? "" : "s"} tagged
         </p>
       )}

@@ -11,7 +11,6 @@ import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
 import { ALL_MODULES, hexToHsl } from "./moduleDefs";
 import {
-  Settings,
   ChevronDown,
   Megaphone,
 } from "lucide-react";
@@ -168,165 +167,42 @@ const SetupDropdown = ({
         </button>
       }
     >
-      {/* ── Gradient header ── */}
-      <div
-        className="relative px-4 pt-4 pb-3.5 overflow-hidden rounded-none"
-        style={{
-          background: `linear-gradient(135deg,
-            hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.18) 0%,
-            hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.06) 60%,
-            transparent 100%)`,
-          borderBottom: `1px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.18)`,
-        }}
-      >
-        {/* radial bloom */}
-        <div
-          className="absolute -top-6 -left-4 w-32 h-32 rounded-full pointer-events-none"
-          style={{
-            background: `radial-gradient(circle, hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.22) 0%, transparent 70%)`,
-            filter: "blur(16px)",
-          }}
-        />
-        <div className="relative flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-none flex items-center justify-center shadow-lg shrink-0"
-              style={{
-                background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)`,
-                border: `1.5px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.4)`,
-                boxShadow: `0 4px 14px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.3), inset 0 1px 0 hsl(0 0% 100% / 0.1)`,
-                color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))`,
-              }}
-            >
-              <Settings size={15} strokeWidth={2} />
-            </div>
-            <div>
-              <p className="text-[0.6875rem] font-heading font-bold text-foreground uppercase tracking-widest leading-none">
-                Setup
-              </p>
-              <p
-                className="text-[0.625rem] font-heading mt-0.5 leading-none"
-                style={{
-                  color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
-                }}
-              >
-                Configure {moduleLabel}
-              </p>
-            </div>
-          </div>
-          <span
-            className="text-[0.625rem] font-heading font-semibold px-2.5 py-1 rounded-full border tracking-wide"
-            style={{
-              color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))`,
-              borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)`,
-              background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)`,
-            }}
-          >
+      {/* ── Title block ── */}
+      <div className="flex items-end justify-between gap-4 px-4 pt-3.5 pb-3 border-b border-foreground">
+        <div className="min-w-0">
+          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground leading-none">
             {moduleLabel}
-          </span>
-        </div>
-      </div>
-
-      {/* ── Items grid ── */}
-      <div className="p-3">
-        <div
-          className={`grid grid-cols-3 sm:grid-cols-4 gap-2 ${open ? "setup-grid-open" : ""}`}
-        >
-          {items.map(({ icon: Icon, label, path, color }, i) => {
-            const isActivePath = location.pathname === path;
-            return (
-              <button
-                key={path}
-                onClick={() => {
-                  navigate(path);
-                  onClose();
-                }}
-                className={`setup-item group flex flex-col items-center gap-1.5 p-2.5 rounded-none border transition-all duration-200 active:scale-[0.93] cursor-pointer
-                  ${isActivePath ? "shadow-sm" : "border-transparent hover:border-border hover:bg-muted/50"}`}
-                style={{
-                  animationDelay: `${i * 35}ms`,
-                  ...(isActivePath
-                    ? {
-                        borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.45)`,
-                        background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.08)`,
-                      }
-                    : {}),
-                }}
-              >
-                <div className="relative w-9 h-9 flex items-center justify-center">
-                  <div
-                    className={`absolute inset-0 rounded-none transition-all duration-200 ${isActivePath ? "" : "bg-muted/60 group-hover:bg-muted"}`}
-                    style={
-                      isActivePath
-                        ? {
-                            background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.16)`,
-                          }
-                        : undefined
-                    }
-                  />
-                  <div
-                    className="absolute inset-0 rounded-none opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                    style={{
-                      boxShadow: `0 0 0 1.5px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35), 0 4px 12px hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.2)`,
-                    }}
-                  />
-                  <div
-                    className="setup-icon-shimmer absolute inset-0 rounded-none pointer-events-none opacity-0 group-hover:opacity-100"
-                    style={{
-                      background: `linear-gradient(105deg, transparent 30%, hsl(0 0% 100% / 0.12) 50%, transparent 70%)`,
-                      backgroundSize: "200% 100%",
-                    }}
-                  />
-                  <Icon
-                    size={16}
-                    className={`relative z-10 ${color} transition-transform duration-200 group-hover:scale-110`}
-                    strokeWidth={isActivePath ? 2.5 : 2}
-                  />
-                </div>
-                <span
-                  className={`text-[0.5625rem] font-heading text-center leading-tight line-clamp-2 transition-colors duration-150
-                    ${isActivePath ? "font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
-                  style={
-                    isActivePath
-                      ? { color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))` }
-                      : undefined
-                  }
-                >
-                  {label.replace(/ Master$/, "")}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Footer ── */}
-      <div
-        className="px-4 py-2.5 rounded-none flex items-center justify-between"
-        style={{
-          borderTop: `1px solid hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)`,
-          background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.04)`,
-        }}
-      >
-        <p className="text-[0.5625rem] text-muted-foreground font-heading">
-          {items.length} configuration{items.length !== 1 ? "s" : ""}
-        </p>
-        <div className="flex items-center gap-1">
-          <div
-            className="w-1.5 h-1.5 rounded-full"
-            style={{
-              background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.7)`,
-            }}
-          />
-          <p
-            className="text-[0.5625rem] font-heading font-medium"
-            style={{
-              color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
-            }}
-          >
-            {moduleLabel} Module
           </p>
+          <p className="font-heading text-base font-bold tracking-tight text-foreground leading-none mt-1.5">Setup</p>
         </div>
+        <p className="font-heading text-[0.625rem] tabular-nums text-muted-foreground leading-none shrink-0">
+          {items.length} page{items.length !== 1 ? "s" : ""}
+        </p>
+      </div>
+
+      {/* ── Index of setup pages: two ruled columns ── */}
+      <div className={`grid grid-cols-2 max-h-[min(26rem,70vh)] overflow-y-auto`}>
+        {items.map(({ icon: Icon, label, path }, i) => {
+          const isActivePath = location.pathname === path;
+          return (
+            <button
+              key={path}
+              onClick={() => {
+                navigate(path);
+                onClose();
+              }}
+              aria-current={isActivePath ? "page" : undefined}
+              className={`flex items-center gap-2.5 px-4 py-2.5 text-left border-b border-border/70 transition-colors cursor-pointer
+                ${i % 2 === 0 ? "border-r" : ""}
+                ${isActivePath ? "bg-foreground text-card" : "text-foreground hover:bg-primary/10"}`}
+            >
+              <Icon size={14} strokeWidth={1.75} className={`shrink-0 ${isActivePath ? "" : "text-muted-foreground"}`} />
+              <span className={`text-xs leading-tight min-w-0 ${isActivePath ? "font-semibold" : "font-medium"}`}>
+                {label.replace(/ Master$/, "")}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </Dropdown>
   );

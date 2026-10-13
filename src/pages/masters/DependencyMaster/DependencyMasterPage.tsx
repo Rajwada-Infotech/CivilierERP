@@ -10,8 +10,7 @@ import {
   type WorkType,
 } from "@/api/dependencyMasterApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
-import { Input } from "@/components/ui/input";
+import { SheetShell } from "@/components/sheet/Sheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Search, RefreshCw, GitBranch, Boxes, Home, Waypoints } from "lucide-react";
+import { Plus, Search, RefreshCw } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { DependencyMasterList } from "./components/DependencyMasterList";
 import { AutoNameResults } from "@/components/civilworkdpr/AutoNameFinder";
@@ -30,33 +29,6 @@ import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
 import { dependencyAutoName, matchesAutoNameSearch } from "@/lib/dependencyAutoName";
 
 type TypeFilter = "ALL" | WorkType;
-
-function StatTile({
-  label,
-  value,
-  icon: Icon,
-  accent,
-}: {
-  label: string;
-  value: number;
-  icon: React.ElementType;
-  accent: string;
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-border px-4 py-3 bg-card">
-      <div
-        className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-        style={{ background: `${accent}18` }}
-      >
-        <Icon size={16} style={{ color: accent }} />
-      </div>
-      <div>
-        <p className="text-lg font-heading font-bold text-foreground leading-none">{value}</p>
-        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mt-1">{label}</p>
-      </div>
-    </div>
-  );
-}
 
 // Page shell: list of existing Dependency Master records, each row
 // expandable inline for its activity chain. "+" and row-edit both navigate
@@ -115,69 +87,71 @@ export default function DependencyMasterPage() {
     <>
       <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Dependency Master"]} />
 
-      <CivilWorkDprShell
-        title="Dependency Master"
-        subtitle="Room-level activity chains — task scope, alias, and a strictly linear dependency sequence"
-        icon={GitBranch}
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Dependency master"
+        subtitle="Activity chains set room by room: where the work is, what it is called, and the strict order its activities follow."
         action={
-          <div className="flex items-center gap-2">
-            {rights.canCreate && (
-              <button
-                onClick={() => navigate("/masters/dependency/new")}
-                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-civilworkdpr transition-all"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                New Dependency
-              </button>
-            )}
-          </div>
+          rights.canCreate ? (
+            <button onClick={() => navigate("/masters/dependency/new")} className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0 px-4 py-2 bg-foreground text-card border border-foreground">
+              <Plus className="h-3.5 w-3.5" />
+              New dependency
+            </button>
+          ) : undefined
         }
       >
-        {/* Stat strip */}
-        <div className="grid grid-cols-3 gap-3">
-          <StatTile label="Total Entries" value={rows.length} icon={Boxes} accent="#0891b2" />
-          <StatTile label="Internal" value={internalCount} icon={Home} accent="#0891b2" />
-          <StatTile label="External" value={externalCount} icon={Waypoints} accent="#8b5cf6" />
+        {/* Figures */}
+        <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Chains", value: rows.length, note: "in all" },
+              { label: "Internal", value: internalCount, note: "work inside the unit" },
+              { label: "External", value: externalCount, note: "work outside the unit" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
+        <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
         {/* Toolbar */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex rounded-lg border border-border overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <div className="seg">
             {([
               ["ALL", "All"],
               ["INTERNAL", "Internal"],
               ["EXTERNAL", "External"],
             ] as [TypeFilter, string][]).map(([val, label]) => (
-              <button
-                key={val}
-                onClick={() => setTypeFilter(val)}
-                className={`px-3 py-1.5 text-xs font-heading font-semibold tracking-wide transition-colors ${
-                  typeFilter === val ? "gradient-civilworkdpr text-white" : "bg-background text-muted-foreground hover:bg-muted"
-                }`}
-              >
+              <button key={val} onClick={() => setTypeFilter(val)} aria-pressed={typeFilter === val} className={typeFilter === val ? "on" : undefined}>
                 {label}
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search Auto Name, alias or path…"
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="relative flex-1 sm:w-72">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                placeholder="Search auto name, alias or path…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 h-9 w-72"
+                className="w-full h-9 pl-8 pr-3 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
               />
             </div>
             <button
               onClick={() => refetch()}
-              className="h-9 w-9 inline-flex items-center justify-center rounded-lg border border-border bg-background hover:bg-muted text-foreground transition-colors"
+              className="h-9 w-9 shrink-0 inline-flex items-center justify-center border border-foreground/40 hover:border-foreground text-foreground transition-colors"
               title="Refresh"
+              aria-label="Refresh"
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
+        <div className="p-2 sm:p-4 space-y-3">
 
         {/* Auto Name matches — pick one to open that activity */}
         <AutoNameResults chains={rows} query={search} onPick={(rung, chain) => setActiveAssignment({ rung, chain })} />
@@ -188,15 +162,14 @@ export default function DependencyMasterPage() {
             Loading dependencies…
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground rounded-xl border border-dashed border-border">
-            <GitBranch className="h-9 w-9 opacity-25" />
+          <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
             <span className="text-sm">
               {search || typeFilter !== "ALL" ? "No dependencies match your filters" : "No dependencies yet"}
             </span>
             {rights.canCreate && !search && typeFilter === "ALL" && (
               <button
                 onClick={() => navigate("/masters/dependency/new")}
-                className="inline-flex items-center gap-1.5 mt-1 font-heading font-semibold text-white shadow-sm text-xs px-4 py-1.5 rounded-lg gradient-civilworkdpr transition-all"
+                className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed mt-1 px-4 py-2 bg-foreground text-card border border-foreground"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Create your first Dependency
@@ -213,7 +186,9 @@ export default function DependencyMasterPage() {
             forceExpand={!!search.trim()}
           />
         )}
-      </CivilWorkDprShell>
+        </div>
+        </div>
+      </SheetShell>
 
 
       {activeAssignment && (
@@ -221,7 +196,7 @@ export default function DependencyMasterPage() {
       )}
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sheet-frame" style={{ margin: 0 }}>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete dependency?</AlertDialogTitle>
             <AlertDialogDescription>

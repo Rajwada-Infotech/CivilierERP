@@ -8,7 +8,6 @@ interface Props {
 
 function Field({
   label,
-  icon: Icon,
   value,
   onChange,
   options,
@@ -17,7 +16,7 @@ function Field({
   placeholder,
 }: {
   label: string;
-  icon: React.ElementType;
+  icon?: React.ElementType;
   value: string;
   onChange: (v: string) => void;
   options: { id: string | number; label: string; linkedAlias?: string | null }[];
@@ -27,17 +26,17 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-0.5 flex-1 min-w-[130px]">
-      <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
-        <Icon size={9} /> {label}
-      </span>
+      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">{label}</span>
       <select
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className={`h-9 px-2.5 rounded-lg text-xs border focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none ${
+        className={`h-9 px-2.5 text-xs border bg-card focus:outline-none appearance-none ${
           disabled
-            ? "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60"
-            : "border-border bg-background text-foreground"
+            ? "border-dashed border-foreground/30 text-muted-foreground cursor-not-allowed"
+            : value
+              ? "border-foreground text-foreground font-semibold"
+              : "border-foreground/40 focus:border-foreground text-foreground"
         }`}
       >
         <option value="">{loading ? "Loading…" : disabled ? "—" : placeholder}</option>

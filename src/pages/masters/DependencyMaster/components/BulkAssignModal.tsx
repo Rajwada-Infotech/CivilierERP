@@ -15,8 +15,8 @@ import { ApprovalLevelsEditor, UserMultiSelect } from "@/pages/civilworkdpr/Rung
 import { useDebouncedValue } from "@/components/docfinder/useDocFinder";
 
 const selectCls =
-  "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
-const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1.5";
+  "w-full px-3 py-2.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none";
+const labelCls = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1.5 mb-1.5";
 
 function CountLine({ label, c }: { label: string; c: BulkAssignSummary["engineers"] }) {
   if (!c.requested) return null;
@@ -126,10 +126,11 @@ export function BulkAssignModal({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !apply.isPending && onClose()}>
-      <DialogContent className="max-h-[90vh] gap-0 overflow-y-auto p-0 sm:max-w-2xl thin-scroll">
-        <div className="border-b border-border px-5 py-4">
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Layers size={16} className="text-cyan-500" /> Bulk assign
+      <DialogContent className="sheet-frame max-h-[90vh] gap-0 overflow-y-auto p-0 sm:max-w-2xl thin-scroll" style={{ margin: 0 }}>
+        <div className="px-5 py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Work allocation</p>
+          <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">
+            Bulk assign
           </DialogTitle>
           <DialogDescription className="mt-0.5 text-xs">
             Set engineers, quality check and approvers on every activity of a project or block. By default activities that
@@ -179,12 +180,12 @@ export function BulkAssignModal({
 
           <ApprovalLevelsEditor levels={levels} onChange={setLevels} users={users} />
 
-          <label className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/30 p-3 text-sm cursor-pointer">
+          <label className="flex items-start gap-2.5 border border-foreground/40 p-3 text-sm cursor-pointer">
             <input
               type="checkbox"
               checked={overwrite}
               onChange={(e) => setOverwrite(e.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-cyan-600"
+              className="mt-0.5 h-4 w-4 accent-foreground"
             />
             <span>
               <span className="font-semibold text-foreground">Overwrite existing</span>
@@ -196,8 +197,8 @@ export function BulkAssignModal({
           </label>
 
           {/* Preview */}
-          <div className="rounded-lg border border-border bg-muted/30 p-3.5">
-            <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+          <div className="p-3.5" style={{ border: "1px solid hsl(var(--foreground))" }}>
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2">
               What will happen{scopeLabel ? ` — ${scopeLabel}` : ""}
             </p>
             {!projectId ? (
@@ -227,12 +228,12 @@ export function BulkAssignModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
+        <div className="flex items-center justify-end gap-2 px-5 py-3" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
           <button
             type="button"
             onClick={onClose}
             disabled={apply.isPending}
-            className="h-9 rounded-lg border border-border bg-background px-4 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+            className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 border border-foreground text-foreground hover:bg-primary/10"
           >
             Cancel
           </button>
@@ -240,7 +241,7 @@ export function BulkAssignModal({
             type="button"
             onClick={() => apply.mutate()}
             disabled={!canApply}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-4 text-xs font-heading font-semibold text-white gradient-civilworkdpr shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-50"
+            className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-5 bg-foreground text-card border border-foreground"
           >
             {apply.isPending && <Loader2 size={13} className="animate-spin" />}
             {summary && summary.willChange > 0 ? `Assign ${summary.willChange} ${summary.willChange === 1 ? "activity" : "activities"}` : "Assign"}

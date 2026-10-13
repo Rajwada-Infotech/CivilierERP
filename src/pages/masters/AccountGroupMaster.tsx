@@ -2,8 +2,7 @@ import React, { useState, useMemo } from "react";
 import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
-import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -19,25 +18,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
-import {
-  ChevronRight,
-  ChevronDown,
-  Pencil,
-  Trash2,
-  X,
-  Check,
-  FolderOpen,
-  Folder,
-  Hash,
-  RotateCcw,
-  Plus,
-  Search,
-  Layers,
-  Eye,
-  XCircle,
-  AlertCircle,
-  History,
-} from "lucide-react";
+import { ChevronRight, ChevronDown, Pencil, Trash2, X, Check, RotateCcw, Plus, Search, Eye, History } from "lucide-react";
 import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -102,6 +83,62 @@ function getBelongsTo(id: string, items: AccountGroup[]): string {
 
 const EMPTY_FORM = { name: "", code: "", parentId: "" };
 
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+
+// ─── Row actions (shared by the tree and the search results) ─────────────────
+
+function RowActions({
+  group, onView, onEdit, onDelete, deleteConfirm, setDeleteConfirm, canEdit, canDelete,
+}: {
+  group: AccountGroup;
+  onView: (g: AccountGroup) => void;
+  onEdit: (g: AccountGroup) => void;
+  onDelete: (id: string) => void;
+  deleteConfirm: string | null;
+  setDeleteConfirm: (id: string | null) => void;
+  canEdit: boolean;
+  canDelete: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <button data-row-view onClick={() => onView(group)} className={ACT} title="View details" aria-label="View details">
+        <Eye size={13} />
+      </button>
+      {canEdit && (
+        <button onClick={() => onEdit(group)} className={ACT} title="Edit" aria-label="Edit">
+          <Pencil size={13} />
+        </button>
+      )}
+      {deleteConfirm === group._id ? (
+        <>
+          <button
+            onClick={() => onDelete(group._id)}
+            className="h-7 px-2 flex items-center gap-1 border border-destructive bg-destructive text-destructive-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]"
+            title="Confirm delete"
+          >
+            <Check size={12} /> Delete
+          </button>
+          <button onClick={() => setDeleteConfirm(null)} className={ACT} title="Keep" aria-label="Keep">
+            <X size={13} />
+          </button>
+        </>
+      ) : canDelete ? (
+        <button
+          onClick={() => setDeleteConfirm(group._id)}
+          className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
+          title="Delete"
+          aria-label="Delete"
+        >
+          <Trash2 size={13} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 // ─── TreeRow Component ────────────────────────────────────────────────────────
 
 function TreeRow({
@@ -136,13 +173,17 @@ function TreeRow({
   const hasChildren = node.children.length > 0;
   const isExpanded = expanded.has(node._id);
   const belongsTo = getBelongsTo(node._id, allGroups);
+  // A top-level group opens on an ink rule; the group being edited carries a rule on its left.
+  const shadows = [
+    depth === 0 ? "inset 0 1px 0 hsl(var(--foreground))" : null,
+    activeEditId === node._id ? "inset 3px 0 0 hsl(var(--primary))" : null,
+  ].filter(Boolean).join(", ");
 
   return (
     <>
       <tr
-        className={`group border-b border-border transition-colors cursor-pointer ${
-          activeEditId === node._id ? "bg-primary/5" : "hover:bg-muted/30"
-        }`}
+        className="cursor-pointer"
+        style={shadows ? { boxShadow: shadows } : undefined}
         onClick={() => {
           if (hasChildren) onToggle(node._id);
           else onEdit(node);
@@ -150,110 +191,48 @@ function TreeRow({
       >
         {/* Group Name */}
         <td className="py-2.5 px-4">
-          <div
-            className="flex items-center gap-2"
-            style={{ paddingLeft: depth * 28 }}
-          >
-            <div
-              className={`w-5 h-5 flex items-center justify-center rounded text-muted-foreground transition-colors ${
-                hasChildren
-                  ? "hover:text-foreground hover:bg-muted"
-                  : "opacity-0 pointer-events-none"
-              }`}
-            >
-              {isExpanded ? (
-                <ChevronDown size={14} />
-              ) : (
-                <ChevronRight size={14} />
-              )}
-            </div>
-            {depth > 0 && (
-              <span className="text-muted-foreground/30 text-xs">└</span>
-            )}
-            {hasChildren ? (
-              <FolderOpen size={15} className="text-amber-500 shrink-0" />
-            ) : depth === 0 ? (
-              <Layers size={14} className="text-primary/60 shrink-0" />
-            ) : (
-              <Folder size={14} className="text-muted-foreground/40 shrink-0" />
-            )}
+          <div className="flex items-center gap-2" style={{ paddingLeft: depth * 22 }}>
+            <span className={`w-4 h-4 flex items-center justify-center text-foreground shrink-0 ${hasChildren ? "" : "opacity-0"}`}>
+              {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            </span>
             <span
-              className={`text-sm ${
+              className={
                 depth === 0
-                  ? "font-semibold text-foreground"
-                  : "font-medium text-foreground/80"
-              }`}
+                  ? "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-foreground"
+                  : hasChildren
+                    ? "text-[0.8125rem] font-semibold text-foreground"
+                    : "text-[0.8125rem] text-foreground"
+              }
             >
               {node.name}
             </span>
             {hasChildren && (
-              <span className="text-[0.625rem] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-medium">
-                {node.children.length}
-              </span>
+              <span className="font-heading text-[0.625rem] tabular-nums text-muted-foreground">{node.children.length}</span>
             )}
           </div>
         </td>
 
         {/* Code */}
         <td className="py-2.5 px-4">
-          <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-            <Hash size={10} />
-            {node.code || "—"}
-          </span>
+          <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{node.code || "—"}</span>
         </td>
 
         {/* Belongs To */}
         <td className="py-2.5 px-4">
-          {belongsTo ? (
-            <span className="text-xs text-muted-foreground font-medium">
-              {belongsTo}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground/30">—</span>
-          )}
+          <span className={`text-xs ${belongsTo ? "text-muted-foreground" : "text-muted-foreground/40"}`}>{belongsTo || "—"}</span>
         </td>
 
-        <td className="py-2.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={() => onView(node)}
-              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
-              title="View details"
-            >
-              <Eye size={13} />
-            </button>
-            {canEdit && (
-              <button
-                onClick={() => onEdit(node)}
-                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              >
-                <Pencil size={13} />
-              </button>
-            )}
-            {deleteConfirm === node._id ? (
-              <>
-                <button
-                  onClick={() => onDelete(node._id)}
-                  className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50 transition-colors"
-                >
-                  <Check size={13} />
-                </button>
-                <button
-                  onClick={() => setDeleteConfirm(null)}
-                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted transition-colors"
-                >
-                  <X size={13} />
-                </button>
-              </>
-            ) : canDelete ? (
-              <button
-                onClick={() => setDeleteConfirm(node._id)}
-                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
-              >
-                <Trash2 size={13} />
-              </button>
-            ) : null}
-          </div>
+        <td className="py-1.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+          <RowActions
+            group={node}
+            onView={onView}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            deleteConfirm={deleteConfirm}
+            setDeleteConfirm={setDeleteConfirm}
+            canEdit={canEdit}
+            canDelete={canDelete}
+          />
         </td>
       </tr>
 
@@ -285,8 +264,6 @@ function TreeRow({
 const AccountGroupMaster: React.FC = () => {
   const rights = usePageRights("account-head");
   const queryClient = useQueryClient();
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
   const [auditTrailOpen, setAuditTrailOpen] = useState(false);
 
   const {
@@ -497,263 +474,202 @@ const AccountGroupMaster: React.FC = () => {
     return ancestry ? `${ancestry} / ${parent.name}` : parent.name;
   }, [form.parentId, allGroups]);
 
+  const inputCls = (bad?: boolean) =>
+    `w-full h-10 text-sm px-3 bg-card text-foreground placeholder:text-muted-foreground/50 focus:outline-none border ${
+      bad ? "border-destructive" : "border-foreground/40 focus:border-foreground"
+    }`;
+
   return (
     <>
       <Breadcrumbs items={["Masters", "Account Group"]} />
 
-      <FinanceShell
-        title="Account Group Master"
-        subtitle="Organise accounts into parent groups and sub-groups"
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Account groups"
+        subtitle="The tree every account sits in: parent groups, and the sub-groups under them."
         action={
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setAuditTrailOpen(true)}
-              className="inline-flex items-center gap-1.5 text-xs font-heading px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground border border-border hover:border-border/80 transition-colors"
-            >
-              <History size={13} /> Audit Trail
-            </button>
-            <span
-              className="text-xs font-heading px-3 py-1.5 rounded-lg"
-              style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
-            >
-              {rootCount} Parent · {subCount} Sub
-            </span>
-          </div>
+          <button
+            type="button"
+            onClick={() => setAuditTrailOpen(true)}
+            className={`${KEY} px-3 py-2 text-foreground border border-foreground hover:bg-primary/10`}
+          >
+            <History size={13} /> Audit trail
+          </button>
         }
       >
+        {/* ── Figures ── */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Groups", value: allGroups.length, note: "in all" },
+              { label: "Top-level", value: rootCount, note: "parent groups" },
+              { label: "Sub-groups", value: subCount, note: "nested under a parent" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
 
-        {/* ── Form card ── */}
-        {(rights.canCreate || rights.canEdit) && <div
-          className="rounded-xl overflow-visible relative"
-          onKeyDown={preventEnterSubmit}
-          style={{
-            background: isDark ? "rgba(12,14,22,0.55)" : "rgba(255,255,255,0.82)",
-            border: isDark ? "1px solid rgba(99,102,241,0.20)" : "1px solid rgba(99,102,241,0.16)",
-            backdropFilter: "blur(18px) saturate(150%)",
-            WebkitBackdropFilter: "blur(18px) saturate(150%)",
-            boxShadow: isDark
-              ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
-              : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
-            zIndex: 10,
-          }}
-        >
-          {/* Card header — title only */}
-          <div
-            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden rounded-t-xl"
-            style={{
-              background: isDark ? "rgba(99,102,241,0.09)" : "rgba(99,102,241,0.05)",
-              borderBottom: isDark ? "1px solid rgba(99,102,241,0.18)" : "1px solid rgba(99,102,241,0.13)",
-            }}
-          >
-            <div>
-              <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? "Edit Account Group" : "Add Account Group"}
+        {/* ── Form ── */}
+        {(rights.canCreate || rights.canEdit) && (
+          <div className="bg-card relative" onKeyDown={preventEnterSubmit} style={{ border: RULE, zIndex: 10 }}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+              <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
+                {editingId ? "Edit account group" : "Add account group"}
               </h2>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 Fields marked <span className="text-destructive">*</span> are required
               </p>
             </div>
-          </div>
 
-          {/* Form body */}
-          <div className="px-5 sm:px-6 py-6 space-y-7">
-            <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <Layers size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Group Details
+            <div className="px-4 py-5 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
+              {/* Group Name */}
+              <div>
+                <label className={`${LBL} block mb-1.5`}>
+                  Group name <span className="text-destructive">*</span>
+                </label>
+                <input
+                  value={form.name}
+                  onChange={(e) => {
+                    setForm((p) => ({ ...p, name: e.target.value }));
+                    setErrors((p) => ({ ...p, name: false }));
+                  }}
+                  placeholder="e.g. Office Expenses"
+                  className={inputCls(errors.name)}
+                />
+                {errors.name && <p className="text-xs text-destructive mt-1">Required</p>}
+              </div>
+
+              {/* Code */}
+              <div>
+                <label className={`${LBL} block mb-1.5`}>
+                  Code <span className="text-destructive">*</span>
+                </label>
+                <input
+                  value={form.code}
+                  onChange={(e) => {
+                    setForm((p) => ({
+                      ...p,
+                      code: e.target.value.toUpperCase(),
+                    }));
+                    setErrors((p) => ({ ...p, code: false }));
+                  }}
+                  placeholder="e.g. EXP-OFF"
+                  className={`${inputCls(errors.code)} font-heading font-semibold tabular-nums tracking-wide`}
+                />
+                {errors.code && <p className="text-xs text-destructive mt-1">Required</p>}
+              </div>
+
+              {/* Parent Group */}
+              <div className="sm:col-span-2">
+                <label className={`${LBL} block mb-1.5`}>Parent group</label>
+                <GroupTreePicker
+                  value={form.parentId}
+                  onChange={(id) => setForm((p) => ({ ...p, parentId: id }))}
+                  tree={filteredTree}
+                  allGroups={allGroups}
+                  invalidParents={invalidParents}
+                />
+                <p className="text-[0.6875rem] text-muted-foreground mt-1.5">
+                  {selectedParentPath ? (
+                    <>
+                      Will sit under <span className="font-semibold text-foreground">{selectedParentPath}</span>
+                    </>
+                  ) : (
+                    "Leave blank to create a top-level group"
+                  )}
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-5">
-                {/* Group Name */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Group Name <span className="text-destructive">*</span>
-                  </label>
-                  <input
-                    value={form.name}
-                    onChange={(e) => {
-                      setForm((p) => ({ ...p, name: e.target.value }));
-                      setErrors((p) => ({ ...p, name: false }));
-                    }}
-                    placeholder="e.g. Office Expenses"
-                    className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                      errors.name ? "border-red-400" : "border-border"
-                    }`}
-                  />
-                  {errors.name && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> Required
-                    </p>
-                  )}
-                </div>
+            </div>
 
-                {/* Code */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Code <span className="text-destructive">*</span>
-                  </label>
-                  <input
-                    value={form.code}
-                    onChange={(e) => {
-                      setForm((p) => ({
-                        ...p,
-                        code: e.target.value.toUpperCase(),
-                      }));
-                      setErrors((p) => ({ ...p, code: false }));
-                    }}
-                    placeholder="e.g. EXP-OFF"
-                    className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                      errors.code ? "border-red-400" : "border-border"
-                    }`}
-                  />
-                  {errors.code && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> Required
-                    </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3" style={{ borderTop: RULE }}>
+              <div className="hidden sm:block">
+                {canSave ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-[0.6875rem] text-muted-foreground">Fill in the required fields to save</span>}
+              </div>
+              <div className="flex items-center gap-2 sm:ml-auto">
+                <button
+                  onClick={resetForm}
+                  disabled={!isDirty && !editingId}
+                  className={`${KEY} flex-1 sm:flex-none h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}
+                >
+                  <RotateCcw size={12} />
+                  {editingId ? "Cancel" : "Reset"}
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !canSave}
+                  className={`${KEY} flex-1 sm:flex-none h-9 px-5 bg-foreground text-card border border-foreground whitespace-nowrap`}
+                >
+                  {saving ? (
+                    <span className="w-3.5 h-3.5 border-2 border-card/30 border-t-card rounded-full animate-spin" />
+                  ) : editingId ? (
+                    <Check size={13} />
+                  ) : (
+                    <Plus size={13} />
                   )}
-                </div>
-
-                {/* Parent Group */}
-                <div className="space-y-1.5 col-span-2">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Parent Group
-                  </label>
-                  <GroupTreePicker
-                    value={form.parentId}
-                    onChange={(id) => setForm((p) => ({ ...p, parentId: id }))}
-                    tree={filteredTree}
-                    allGroups={allGroups}
-                    invalidParents={invalidParents}
-                  />
-                  <p className="text-[0.6875rem] text-muted-foreground mt-1">
-                    {selectedParentPath ? (
-                      <>
-                        Will nest under:{" "}
-                        <span className="font-medium text-foreground">
-                          {selectedParentPath}
-                        </span>
-                      </>
-                    ) : (
-                      "Leave blank to create a top-level group"
-                    )}
-                  </p>
-                </div>
+                  {saving ? "Saving…" : editingId ? "Update group" : "Save group"}
+                </button>
               </div>
             </div>
           </div>
+        )}
 
-          {/* Card footer — actions */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
-              {canSave
-                ? <span className="text-emerald-500 font-medium">Ready to save</span>
-                : "Fill in the required fields to save"}
-            </p>
-            <div className="flex items-center gap-2 sm:ml-auto">
-              <button
-                onClick={resetForm}
-                disabled={!isDirty && !editingId}
-                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-              >
-                <RotateCcw size={12} />
-                {editingId ? "Cancel" : "Reset"}
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving || !canSave}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
-              >
-                {saving ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : editingId ? (
-                  <Check size={14} />
-                ) : (
-                  <Plus size={14} />
-                )}
-                {saving ? "Saving…" : editingId ? "Update Group" : "Save Group"}
-              </button>
-            </div>
-          </div>
-        </div>}
-
-        {/* ── Table ── */}
-        <div>
-          <div className="mb-3 flex items-center gap-3">
-            <div className="relative flex-1 max-w-xs">
-              <Search
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
+        {/* ── The tree ── */}
+        <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+          <div className="px-4 py-3 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+            <div className="relative flex-1 min-w-[180px] max-w-xs">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name or code…"
-                className="w-full text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                className="w-full h-9 text-sm border border-foreground/40 focus:border-foreground pl-9 pr-3 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
               />
             </div>
             {!search && (
-              <div className="flex gap-2">
-                <button
-                  onClick={expandAll}
-                  className="text-xs font-heading text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
-                >
-                  Expand All
-                </button>
-                <button
-                  onClick={collapseAll}
-                  className="text-xs font-heading text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
-                >
-                  Collapse All
-                </button>
+              <div className="seg">
+                <button onClick={expandAll}>Expand all</button>
+                <button onClick={collapseAll}>Collapse</button>
               </div>
             )}
-            <ExportMenu
-              data={allGroups as unknown as Record<string, unknown>[]}
-              columns={accountGroupExportColumns}
-              title="Account Group Master"
-              filename="account-group-master"
-              disabled={!rights.canExport || allGroups.length === 0}
-            />
+            <div className="ml-auto">
+              <ExportMenu
+                data={allGroups as unknown as Record<string, unknown>[]}
+                columns={accountGroupExportColumns}
+                title="Account Group Master"
+                filename="account-group-master"
+                disabled={!rights.canExport || allGroups.length === 0}
+              />
+            </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            {isLoading ? (
-              <div className="text-center py-16 text-muted-foreground text-sm">
-                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                Loading groups…
-              </div>
-            ) : error ? (
-              <div className="text-center py-16 text-destructive text-sm">
-                Failed to load. Check backend connection.
-              </div>
-            ) : (
-              <table className="w-full text-left text-sm">
+          {isLoading ? (
+            <div className="text-center py-16 text-muted-foreground text-sm">
+              <div className="w-5 h-5 border-2 border-foreground border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              Loading groups…
+            </div>
+          ) : error ? (
+            <div className="text-center py-16 text-destructive text-sm">Failed to load. Check backend connection.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm min-w-[560px]">
                 <thead>
-                  <tr className="bg-muted/30 border-b border-border">
-                    <th className="px-4 py-3 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
-                      Group Name
-                    </th>
-                    <th className="px-4 py-3 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
-                      Code
-                    </th>
-                    <th className="px-4 py-3 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
-                      Belongs To
-                    </th>
-                    <th className="px-4 py-3 w-24" />
+                  <tr>
+                    <th className="px-4 py-2.5 text-left">Group</th>
+                    <th className="px-4 py-2.5 text-left w-40">Code</th>
+                    <th className="px-4 py-2.5 text-left">Belongs to</th>
+                    <th className="px-4 py-2.5 w-36" />
                   </tr>
                 </thead>
                 <tbody>
                   {filteredFlat ? (
                     filteredFlat.length === 0 ? (
                       <tr>
-                        <td
-                          colSpan={4}
-                          className="py-10 text-center text-muted-foreground text-sm"
-                        >
+                        <td colSpan={4} className="py-10 text-center text-muted-foreground text-sm">
                           No results for "{search}"
                         </td>
                       </tr>
@@ -761,86 +677,30 @@ const AccountGroupMaster: React.FC = () => {
                       filteredFlat.map((g) => {
                         const belongsTo = getBelongsTo(g._id, allGroups);
                         return (
-                          <tr
-                            key={g._id}
-                            className={`group border-b border-border hover:bg-muted/30 transition-colors ${
-                              editingId === g._id ? "bg-primary/5" : ""
-                            }`}
-                          >
+                          <tr key={g._id} style={editingId === g._id ? { boxShadow: "inset 3px 0 0 hsl(var(--primary))" } : undefined}>
                             <td className="py-2.5 px-4">
-                              <div className="flex items-center gap-2">
-                                <Folder
-                                  size={14}
-                                  className="text-muted-foreground/40 shrink-0"
-                                />
-                                <span className="text-sm font-medium text-foreground">
-                                  {g.name}
-                                </span>
-                                {g.parentId && (
-                                  <span className="text-[0.625rem] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
-                                    sub
-                                  </span>
-                                )}
+                              <div className="flex items-baseline gap-2.5">
+                                <span className="text-[0.8125rem] font-medium text-foreground">{g.name}</span>
+                                <span className={LBL}>{g.parentId ? "Sub-group" : "Top-level"}</span>
                               </div>
                             </td>
                             <td className="py-2.5 px-4">
-                              <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-                                <Hash size={10} />
-                                {g.code || "—"}
-                              </span>
+                              <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{g.code || "—"}</span>
                             </td>
                             <td className="py-2.5 px-4">
-                              {belongsTo ? (
-                                <span className="text-xs text-muted-foreground font-medium">
-                                  {belongsTo}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground/30">
-                                  —
-                                </span>
-                              )}
+                              <span className={`text-xs ${belongsTo ? "text-muted-foreground" : "text-muted-foreground/40"}`}>{belongsTo || "—"}</span>
                             </td>
-                            <td className="py-2.5 px-4 text-right">
-                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button data-row-view
-                                  onClick={() => setViewRecord(g)}
-                                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
-                                  title="View details"
-                                >
-                                  <Eye size={13} />
-                                </button>
-                                {rights.canEdit && (
-                                  <button
-                                    onClick={() => startEdit(g)}
-                                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                                  >
-                                    <Pencil size={13} />
-                                  </button>
-                                )}
-                                {deleteConfirm === g._id ? (
-                                  <>
-                                    <button
-                                      onClick={() => handleDelete(g._id)}
-                                      className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50"
-                                    >
-                                      <Check size={13} />
-                                    </button>
-                                    <button
-                                      onClick={() => setDeleteConfirm(null)}
-                                      className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
-                                    >
-                                      <X size={13} />
-                                    </button>
-                                  </>
-                                ) : rights.canDelete ? (
-                                  <button
-                                    onClick={() => setDeleteConfirm(g._id)}
-                                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
-                                ) : null}
-                              </div>
+                            <td className="py-1.5 px-4 text-right">
+                              <RowActions
+                                group={g}
+                                onView={setViewRecord}
+                                onEdit={startEdit}
+                                onDelete={handleDelete}
+                                deleteConfirm={deleteConfirm}
+                                setDeleteConfirm={setDeleteConfirm}
+                                canEdit={rights.canEdit}
+                                canDelete={rights.canDelete}
+                              />
                             </td>
                           </tr>
                         );
@@ -848,13 +708,8 @@ const AccountGroupMaster: React.FC = () => {
                     )
                   ) : tree.length === 0 ? (
                     <tr>
-                      <td
-                        colSpan={4}
-                        className="text-center py-14 text-muted-foreground text-sm"
-                      >
-                        <Layers size={18} className="mx-auto mb-2 opacity-30" />
-                        No account groups yet. Use the form above to create your
-                        first group.
+                      <td colSpan={4} className="text-center py-14 text-muted-foreground text-sm">
+                        No account groups yet. Use the form above to create your first group.
                       </td>
                     </tr>
                   ) : (
@@ -879,154 +734,75 @@ const AccountGroupMaster: React.FC = () => {
                   )}
                 </tbody>
               </table>
-            )}
-          </div>
-        </div>
-      </FinanceShell>
-      {/* ── View Detail Drawer ── */}
-      {viewRecord && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
-          <div
-            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
-            onClick={() => setViewRecord(null)}
-          />
-          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-2">
-                {allGroups.some((g) => g.parentId === viewRecord._id) ? (
-                  <FolderOpen size={15} className="text-amber-500" />
-                ) : viewRecord.parentId ? (
-                  <Folder size={15} className="text-muted-foreground" />
-                ) : (
-                  <Layers size={15} className="text-primary/60" />
-                )}
-                <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Account Group Details
-                </h3>
-              </div>
-              <button
-                onClick={() => setViewRecord(null)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
-              >
-                <XCircle size={15} />
-              </button>
             </div>
-            <div className="p-5 space-y-4 overflow-y-auto flex-1">
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Group Name
-                </p>
-                <p className="text-sm font-medium text-foreground">
-                  {viewRecord.name}
-                </p>
+          )}
+        </div>
+      </SheetShell>
+
+      {/* ── View Detail Drawer ── */}
+      {viewRecord && (() => {
+        const children = allGroups.filter((g) => g.parentId === viewRecord._id);
+        const path = getBelongsTo(viewRecord._id, allGroups);
+        const kind = children.length > 0 ? "Parent group" : viewRecord.parentId ? "Sub-group" : "Top-level group";
+        return (
+          <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
+            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setViewRecord(null)} />
+            <div
+              className="sheet-frame relative w-full max-w-sm bg-card flex flex-col animate-in slide-in-from-right duration-200"
+              style={{ margin: 0, borderLeft: RULE }}
+            >
+              <div className="flex items-end justify-between gap-3 px-5 py-4" style={{ borderBottom: RULE }}>
+                <div className="min-w-0">
+                  <p className={LBL}>Account group · {kind}</p>
+                  <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{viewRecord.name}</h3>
+                </div>
+                <button onClick={() => setViewRecord(null)} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors" aria-label="Close">
+                  <X size={16} />
+                </button>
               </div>
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Code
-                </p>
-                <p className="font-mono text-sm font-semibold text-primary flex items-center gap-1">
-                  <Hash size={11} />
-                  {viewRecord.code || "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Belongs To
-                </p>
-                {(() => {
-                  const path = getBelongsTo(viewRecord._id, allGroups);
-                  return path ? (
-                    <p className="text-sm text-foreground">{path}</p>
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic">
-                      Top-level group
-                    </p>
-                  );
-                })()}
-              </div>
-              <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Type
-                </p>
-                {(() => {
-                  const hasChildren = allGroups.some(
-                    (g) => g.parentId === viewRecord._id,
-                  );
-                  const isRoot = !viewRecord.parentId;
-                  return (
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${isRoot ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
-                    >
-                      {hasChildren ? (
-                        <>
-                          <FolderOpen size={10} /> Parent Group
-                        </>
-                      ) : isRoot ? (
-                        <>
-                          <Layers size={10} /> Root Group
-                        </>
-                      ) : (
-                        <>
-                          <Folder size={10} /> Sub-Group
-                        </>
-                      )}
-                    </span>
-                  );
-                })()}
-              </div>
-              {(() => {
-                const children = allGroups.filter(
-                  (g) => g.parentId === viewRecord._id,
-                );
-                if (children.length === 0) return null;
-                return (
+              <div className="p-5 space-y-5 overflow-y-auto flex-1">
+                <div>
+                  <p className={LBL}>Code</p>
+                  <p className="font-heading text-sm font-semibold tabular-nums text-foreground mt-1">{viewRecord.code || "—"}</p>
+                </div>
+                <div>
+                  <p className={LBL}>Belongs to</p>
+                  <p className={`text-sm mt-1 ${path ? "text-foreground" : "text-muted-foreground"}`}>{path || "Nothing: this is a top-level group"}</p>
+                </div>
+                {children.length > 0 && (
                   <div>
-                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-2">
-                      Sub-Groups ({children.length})
-                    </p>
-                    <div className="space-y-1">
+                    <p className={LBL}>Sub-groups · {children.length}</p>
+                    <div className="mt-2" style={{ borderTop: RULE }}>
                       {children.map((c) => (
-                        <div
-                          key={c._id}
-                          className="flex items-center gap-2 px-2 py-1 rounded-lg bg-muted/40"
-                        >
-                          <Folder
-                            size={11}
-                            className="text-muted-foreground/60 shrink-0"
-                          />
-                          <span className="text-xs text-foreground flex-1">
-                            {c.name}
-                          </span>
-                          <span className="font-mono text-[0.625rem] text-muted-foreground">
-                            {c.code}
-                          </span>
+                        <div key={c._id} className="flex items-baseline gap-3 py-2" style={{ borderBottom: "1px solid hsl(var(--border) / 0.7)" }}>
+                          <span className="text-xs text-foreground flex-1 min-w-0 break-words">{c.name}</span>
+                          <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0">{c.code}</span>
                         </div>
                       ))}
                     </div>
                   </div>
-                );
-              })()}
+                )}
+              </div>
+              <div className="px-5 py-3 flex justify-end gap-2" style={{ borderTop: RULE }}>
+                <button onClick={() => setViewRecord(null)} className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}>
+                  Close
+                </button>
+                {rights.canEdit && (
+                  <button
+                    onClick={() => {
+                      startEdit(viewRecord);
+                      setViewRecord(null);
+                    }}
+                    className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}
+                  >
+                    <Pencil size={12} /> Edit group
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="px-5 py-3 border-t border-border flex justify-end gap-2 bg-muted/20">
-              <button
-                onClick={() => setViewRecord(null)}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => {
-                  startEdit(viewRecord);
-                  setViewRecord(null);
-                }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm flex items-center gap-1.5"
-              >
-                <Pencil size={13} /> Edit Group
-              </button>
-            </div>
-          </div>
-        </div></BodyPortal>
-      )}
+          </div></BodyPortal>
+        );
+      })()}
 
       <AccountGroupAuditTrailModal open={auditTrailOpen} onClose={() => setAuditTrailOpen(false)} />
     </>

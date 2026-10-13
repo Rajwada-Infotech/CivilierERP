@@ -76,7 +76,6 @@ import {
   type AttendanceStatus,
 } from "@/api/workerAttendanceApi";
 import { AddWorkerDialog, inputCls, STATUS_LABEL, STATUS_CLS, todayIso } from "@/pages/civilworkdpr/WorkerAttendance";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { TimelineHint } from "@/components/civilworkdpr/TimelineHint";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
@@ -231,7 +230,7 @@ function PhotoLightbox({ rungId, photo, onClose }: { rungId: number; photo: Acti
           <img src={`data:${data.mimeType};base64,${data.dataBase64}`} alt={photo.fileName} className="max-w-full max-h-[75vh] rounded-xl shadow-2xl object-contain" />
         )}
         <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-white/70">
-          <span className="flex items-center gap-1.5 font-semibold" style={{ color: meta.color }}>
+          <span className="flex items-center gap-1.5 font-semibold text-white">
             <Icon size={12} /> {meta.label}
           </span>
           <span>{fmtDateTime(photo.capturedAt)}</span>
@@ -322,31 +321,23 @@ function PhotosTab({ rungId }: { rungId: number }) {
   return (
     <div className="flex flex-col gap-4">
       {/* Tag picker — applies to whatever gets captured next. */}
-      <div className="flex items-center gap-1.5">
-        {TAG_ORDER.map((tag) => {
-          const meta = TAG_META[tag];
-          const Icon = meta.icon;
-          const active = activeTag === tag;
-          return (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => setActiveTag(tag)}
-              className="flex items-center gap-1 px-2 py-1 rounded-full text-[0.6875rem] font-medium border transition-colors"
-              style={
-                active
-                  ? { background: `${meta.color}1A`, borderColor: `${meta.color}60`, color: meta.color }
-                  : { borderColor: "var(--border)", color: "var(--muted-foreground)" }
-              }
-            >
-              <Icon size={11} /> {meta.label}
-            </button>
-          );
-        })}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">File the next photo under</span>
+        <div className="seg">
+          {TAG_ORDER.map((tag) => {
+            const meta = TAG_META[tag];
+            const active = activeTag === tag;
+            return (
+              <button key={tag} type="button" onClick={() => setActiveTag(tag)} aria-pressed={active} className={active ? "on" : undefined}>
+                {meta.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Camera panel */}
-      <div className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+      <div className="overflow-hidden" style={{ border: "1px dashed hsl(var(--foreground) / 0.5)" }}>
         {camera.isActive ? (
           <div className="relative bg-black">
             <video ref={camera.videoRef} playsInline muted className="w-full max-h-72 object-contain" />
@@ -370,11 +361,11 @@ function PhotosTab({ rungId }: { rungId: number }) {
             <button
               type="button"
               onClick={openCamera}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white transition-colors"
-              style={{ background: TAG_META[activeTag].color }}
+              className="inline-flex items-center gap-1.5 h-9 px-4 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground"
             >
               <CameraIcon size={13} /> Open camera
             </button>
+            <p className="text-[0.6875rem] text-muted-foreground">The photo will be filed under {TAG_META[activeTag].label.toLowerCase()}.</p>
           </div>
         )}
       </div>
@@ -385,18 +376,18 @@ function PhotosTab({ rungId }: { rungId: number }) {
           <Loader2 size={18} className="animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
           {TAG_ORDER.map((tag) => {
             const meta = TAG_META[tag];
-            const Icon = meta.icon;
             const photos = data?.[tag] ?? [];
             const carriedCount = photos.filter((p) => p.note === CARRIED_FORWARD_NOTE).length;
             return (
-              <div key={tag} className="pl-3 border-l-2" style={{ borderColor: `${meta.color}45` }}>
-                <p className="flex items-center gap-1 text-[0.625rem] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
-                  <Icon size={10} /> {meta.label} · {photos.length}
+              <div key={tag}>
+                <p className="flex items-baseline gap-2 font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2 mb-2.5" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                  {meta.label}
+                  <span className="font-semibold tabular-nums text-muted-foreground">{photos.length}</span>
                   {carriedCount > 0 && (
-                    <span className="normal-case font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
+                    <span className="normal-case tracking-normal font-body font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
                       (<RotateCcw size={9} /> {carriedCount} carried forward)
                     </span>
                   )}
@@ -622,7 +613,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
                   <button
                     onClick={() => handleRemoveWorker(row.workerId)}
                     title="Remove from activity"
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
+                    className="p-1.5 text-muted-foreground hover:text-destructive"
                   >
                     <UserX size={13} />
                   </button>
@@ -636,14 +627,14 @@ function AttendanceTab({ rungId }: { rungId: number }) {
       <div className="flex items-center justify-between gap-3">
         <button
           onClick={() => setAddWorkerOpen(true)}
-          className="flex items-center gap-1.5 text-sm text-cyan-600 hover:text-cyan-500 font-medium"
+          className="flex items-center gap-1.5 text-sm text-foreground hover:text-foreground font-medium"
         >
           <Plus size={14} /> Add Worker
         </button>
         <button
           onClick={handleSave}
           disabled={saving || attendanceRows.length === 0}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-40"
+          className="flex items-center gap-2 px-4 py-2 bg-foreground text-card text-sm font-medium disabled:opacity-40"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           Save Attendance
@@ -771,34 +762,34 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
                   cp.needsRework ? "cp-rework-blink " : ""
                 }${
                   cp.isChecked
-                    ? "bg-emerald-500 border-emerald-500 text-white"
+                    ? "bg-foreground border-foreground text-card"
                     : gate.locked
-                      ? "bg-background border-amber-500/40 text-transparent"
-                      : "bg-background border-border text-transparent hover:border-cyan-500/50"
+                      ? "bg-background border-foreground text-transparent"
+                      : "bg-background border-border text-transparent hover:border-foreground"
                 }`}
                 title={cp.isChecked ? "Mark incomplete" : gate.locked ? "Not eligible yet" : "Mark complete"}
               >
                 {saving === i ? <Loader2 size={10} className="animate-spin text-muted-foreground" /> : <Check size={11} strokeWidth={3} />}
               </button>
               {i < checkpoints.length - 1 && (
-                <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-emerald-500/40" : "bg-border"}`} />
+                <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-foreground" : "bg-border"}`} />
               )}
             </div>
             <div className="flex-1 min-w-0 pb-3 pt-0.5">
               <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
                 {cp.fieldName}
                 {cp.needsRework && (
-                  <span className="cp-rework-blink inline-flex items-center gap-1 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/15 border border-amber-500/40 px-1.5 py-0.5 rounded-full">
+                  <span className="cp-rework-blink inline-flex items-center gap-1 text-[0.625rem] font-semibold text-foreground bg-primary/10 border border-foreground px-1.5 py-0.5 rounded-full">
                     <RotateCcw size={9} /> Redo — rated Poor
                   </span>
                 )}
                 {cp.isDaily && (
-                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-foreground bg-primary/10 px-1.5 py-0.5 rounded-full">
                     <CalendarDays size={9} /> Daily
                   </span>
                 )}
                 {gate.locked && (
-                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-foreground bg-primary/10 px-1.5 py-0.5 rounded-full">
                     <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
                   </span>
                 )}
@@ -895,7 +886,7 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
               type="button"
               disabled={tagMutation.isPending || tag.trim() === (row.tagName ?? "")}
               onClick={() => tagMutation.mutate(tag.trim())}
-              className="shrink-0 px-3 py-2.5 rounded-lg text-xs font-semibold btn-module text-white hover:opacity-90 disabled:opacity-40 transition-opacity"
+              className="shrink-0 px-3 py-2.5 rounded-lg text-xs font-semibold bg-foreground text-card hover:opacity-90 disabled:opacity-40 transition-opacity"
             >
               {tagMutation.isPending ? "Saving…" : "Save tag"}
             </button>
@@ -921,8 +912,8 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
               <span
                 className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                   delay.tone === "on-time"
-                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
+                    ? "bg-primary/10 text-foreground"
+                    : "bg-primary/10 text-foreground"
                 }`}
               >
                 {delay.label}
@@ -967,7 +958,7 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
           onChange={(e) => setRemarks(e.target.value)}
           rows={3}
           placeholder="Add a note about this activity…"
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground resize-none"
         />
         <div className="flex items-center justify-end gap-2 mt-1.5">
           {remarksMutation.isPending && <Loader2 size={11} className="animate-spin text-muted-foreground" />}
@@ -975,7 +966,7 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
             type="button"
             onClick={() => remarksMutation.mutate(remarks)}
             disabled={!remarks.trim() || remarksMutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[0.6875rem] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1 bg-foreground text-card text-[0.6875rem] font-heading font-semibold disabled:opacity-50 transition-colors"
           >
             <Save size={11} /> Add remark
           </button>
@@ -1107,11 +1098,11 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
         className={`relative h-3 rounded-full bg-muted touch-none select-none ${locked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
       >
         <div
-          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500"
+          className="absolute inset-y-0 left-0 bg-foreground"
           style={{ width: `${percent}%`, transition: dragging ? "none" : "width 150ms ease-out" }}
         />
         <div
-          className="absolute top-1/2 w-4 h-4 rounded-full bg-white border-2 border-cyan-500 shadow-md -translate-y-1/2 -translate-x-1/2"
+          className="absolute top-1/2 w-4 h-4 rounded-full bg-card border-2 border-foreground -translate-y-1/2 -translate-x-1/2"
           style={{ left: `${percent}%`, transition: dragging ? "none" : "left 150ms ease-out" }}
         />
       </div>
@@ -1129,7 +1120,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
             type="button"
             onClick={() => commit(percent)}
             disabled={mutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[0.6875rem] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-60 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1 bg-foreground text-card text-[0.6875rem] font-heading font-semibold disabled:opacity-60 transition-colors"
           >
             {mutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
             Save
@@ -1201,7 +1192,7 @@ function HistoryTab({ rungId }: { rungId: number }) {
           <div className="flex flex-col items-center shrink-0">
             <div
               className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                a.isCurrent ? "bg-cyan-500 border-cyan-500 text-white" : "bg-background border-border text-transparent"
+                a.isCurrent ? "bg-foreground border-foreground text-card" : "bg-background border-border text-transparent"
               }`}
             >
               {a.isCurrent && <Check size={11} strokeWidth={3} />}
@@ -1212,7 +1203,7 @@ function HistoryTab({ rungId }: { rungId: number }) {
             <span className="text-sm flex items-center gap-1.5 flex-wrap text-foreground font-medium">
               Attempt {a.attemptNo}
               {a.isCurrent && (
-                <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-foreground bg-primary/10 px-1.5 py-0.5 rounded-full">
                   Current
                 </span>
               )}
@@ -1225,7 +1216,7 @@ function HistoryTab({ rungId }: { rungId: number }) {
               {a.startDate ? ` · Started ${new Date(a.startDate).toLocaleDateString("en-IN")}` : ""}
             </p>
             {a.reworkReason && (
-              <p className="text-xs mt-1.5 flex items-start gap-1.5 text-fuchsia-700 dark:text-fuchsia-400">
+              <p className="text-xs mt-1.5 flex items-start gap-1.5 text-foreground">
                 <RotateCcw size={11} className="shrink-0 mt-0.5" />
                 <span>
                   Sent back for rework via {REWORK_SOURCE_LABEL[a.reworkSource || ""] || "unknown"}: {a.reworkReason}
@@ -1383,7 +1374,7 @@ function DailyLogTab({ rungId }: { rungId: number }) {
           {entries.length} day{entries.length === 1 ? "" : "s"} logged
         </p>
         <div className="flex items-center gap-3 text-[0.6875rem] font-medium">
-          <button type="button" className="text-cyan-700 dark:text-cyan-300 hover:underline" onClick={() => setOpenSet(new Set(entries.map(keyOf)))}>
+          <button type="button" className="text-foreground hover:underline" onClick={() => setOpenSet(new Set(entries.map(keyOf)))}>
             Expand all
           </button>
           <button type="button" className="text-muted-foreground hover:text-foreground hover:underline" onClick={() => setOpenSet(new Set())}>
@@ -1407,7 +1398,7 @@ function DailyLogTab({ rungId }: { rungId: number }) {
                 <div className="flex flex-col items-start shrink-0">
                   <span className="text-sm font-heading font-semibold text-foreground">{fmtLongDate(key)}</span>
                   {isToday && (
-                    <span className="text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full mt-0.5">Today</span>
+                    <span className="text-[0.625rem] font-medium text-foreground bg-primary/10 px-1.5 py-0.5 rounded-full mt-0.5">Today</span>
                   )}
                 </div>
                 <div className="flex-1 min-w-0 flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 text-[0.6875rem] text-muted-foreground">
@@ -1416,7 +1407,7 @@ function DailyLogTab({ rungId }: { rungId: number }) {
                       <TrendingUp size={11} />
                       {moved ? `${before}% → ${after}%` : `${after}%`}
                       {moved ? (
-                        <span className={moved > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600"}>({moved > 0 ? "+" : ""}{moved})</span>
+                        <span className={moved > 0 ? "text-foreground" : "text-foreground"}>({moved > 0 ? "+" : ""}{moved})</span>
                       ) : (
                         <span className="font-normal text-muted-foreground">no change</span>
                       )}
@@ -1513,7 +1504,7 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
       <button
         type="button"
         onClick={() => setConfirmOpen(true)}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-heading font-bold uppercase tracking-wide border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-[#ffe2021a] transition-colors"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-heading font-bold uppercase tracking-wide border border-foreground text-foreground hover:bg-primary/10 transition-colors"
         title="Restore this Cancelled activity"
       >
         <ShieldQuestion size={12} /> Restore
@@ -1523,12 +1514,13 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
         createPortal(
           <div className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-4" onClick={() => setConfirmOpen(false)}>
             <div
-              className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl p-5 space-y-4"
+              className="sheet-frame w-full max-w-sm bg-card p-5 space-y-4"
+              style={{ margin: 0, border: "1.5px solid hsl(var(--foreground))" }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-[#ffe2021a] flex items-center justify-center shrink-0">
-                  <ShieldQuestion size={16} className="text-amber-600 dark:text-amber-400" />
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                  <ShieldQuestion size={16} className="text-foreground" />
                 </div>
                 <div>
                   <p className="text-sm font-heading font-semibold text-foreground">Restore this activity?</p>
@@ -1552,7 +1544,7 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
                   type="button"
                   disabled={restore.isPending}
                   onClick={() => restore.mutate()}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-foreground text-card disabled:opacity-50 transition-colors"
                 >
                   {restore.isPending && <Loader2 size={14} className="animate-spin" />}
                   Restore
@@ -1622,25 +1614,28 @@ export default function ActivityDetailModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4 overscroll-contain">
-      <div className="w-full max-w-3xl max-h-[92dvh] rounded-2xl overflow-hidden flex flex-col [&>*]:min-h-0 [&>*]:h-auto">
-        <CivilWorkDprShell
-          fillHeight
-          title={row.activityName}
-          subtitle={row.scopePath}
-          icon={ActivityIcon}
-          action={
-            <div className="flex items-center gap-2.5">
-              <QcBadge qcStatus={row.qcStatus} />
-              <AttemptBadge attemptNo={row.attemptNo} />
-              {canRestore && <RestoreCancelledButton row={row} onClose={onClose} />}
-              <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
-              <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
-                <X size={18} />
-              </button>
-            </div>
-          }
-        >
-          <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
+      <div
+        className="sheet-frame w-full max-w-3xl max-h-[92dvh] overflow-hidden flex flex-col bg-card"
+        style={{ margin: 0, border: "1.5px solid hsl(var(--foreground))", boxShadow: "6px 6px 0 hsl(var(--foreground) / 0.12)" }}
+      >
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 px-4 py-3.5 shrink-0" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <div className="min-w-0">
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Activity</p>
+            <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{row.activityName}</h3>
+            {row.scopePath && <p className="text-xs text-muted-foreground mt-0.5 break-words">{row.scopePath}</p>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <QcBadge qcStatus={row.qcStatus} />
+            <AttemptBadge attemptNo={row.attemptNo} />
+            {canRestore && <RestoreCancelledButton row={row} onClose={onClose} />}
+            <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
+            <button onClick={onClose} aria-label="Close" className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="overflow-hidden flex flex-col flex-1 min-h-0">
             {/* Six tabs' worth of icon+label never fit a phone's width — this
                 used to just overflow the flex row silently (no scrollbar, no
                 affordance), clipping "Daily Log"/"History" off-screen with
@@ -1656,14 +1651,14 @@ export default function ActivityDetailModal({
                     key={t.id}
                     type="button"
                     onClick={() => setTab(t.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors shrink-0 whitespace-nowrap ${
-                      active ? "border-cyan-500 text-cyan-600 dark:text-cyan-400" : "border-transparent text-muted-foreground hover:text-foreground"
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors shrink-0 whitespace-nowrap focus:outline-none focus-visible:bg-primary/10 ${
+                      active ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <Icon size={13} />
                     {t.label}
                     {t.id === "photos" && photoCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[0.5625rem] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400">
+                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 font-heading text-[0.5625rem] font-bold tabular-nums bg-foreground text-card">
                         {photoCount}
                       </span>
                     )}
@@ -1685,7 +1680,7 @@ export default function ActivityDetailModal({
 
             <ProgressDragBar row={row} />
           </div>
-        </CivilWorkDprShell>
+        </div>
       </div>
     </div>,
     document.body,

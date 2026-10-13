@@ -32,11 +32,11 @@ interface TreeNode<T> {
 }
 
 const LEVELS = [
-  { icon: FolderTree, color: "text-violet-500" },
-  { icon: Building, color: "text-sky-500" },
-  { icon: Layers, color: "text-amber-500" },
-  { icon: Home, color: "text-emerald-500" },
-  { icon: DoorOpen, color: "text-orange-500" },
+  { icon: FolderTree, color: "text-foreground" },
+  { icon: Building, color: "text-muted-foreground" },
+  { icon: Layers, color: "text-muted-foreground" },
+  { icon: Home, color: "text-muted-foreground" },
+  { icon: DoorOpen, color: "text-foreground" },
 ] as const;
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -145,22 +145,22 @@ export function ScopeLocationTree<T extends ScopeLocatable>({
     const Level = LEVELS[node.level] ?? LEVELS[LEVELS.length - 1];
     const expanded = isOpen(node.key);
     return (
-      <div key={node.key} className={`min-w-0 ${depth === 0 ? "rounded-xl border border-border/60 bg-card" : ""}`}>
+      <div key={node.key} className={`min-w-0 ${depth === 0 ? "border border-foreground/40 bg-card" : ""}`}>
         <button
           type="button"
           onClick={() => toggle(node.key)}
-          className="w-full min-w-0 flex items-center gap-2 py-2 pr-3 text-left hover:bg-muted/40 rounded-lg transition-colors"
+          className="w-full min-w-0 flex items-center gap-2 py-2 pr-3 text-left hover:bg-primary/10 transition-colors"
           style={{ paddingLeft: indentFor(depth) }}
         >
           <ChevronRight
             size={14}
-            className={`text-muted-foreground/60 shrink-0 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+            className={`text-foreground shrink-0 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
           />
           <Level.icon size={14} className={`${Level.color} shrink-0`} />
-          <span className={`min-w-0 truncate ${depth === 0 ? "text-sm font-heading font-semibold" : "text-sm"} text-foreground`}>
+          <span className={`min-w-0 truncate ${depth === 0 ? "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em]" : "text-sm"} text-foreground`}>
             {node.label}
           </span>
-          <span className="ml-auto text-[0.625rem] font-mono text-muted-foreground shrink-0">
+          <span className="ml-auto font-heading text-[0.625rem] tabular-nums text-muted-foreground shrink-0">
             {node.count} {node.count === 1 ? countLabel : countLabelPlural}
           </span>
         </button>
@@ -185,14 +185,14 @@ export function ScopeLocationTree<T extends ScopeLocatable>({
         <button
           type="button"
           onClick={() => setOpen(new Set(allKeys(tree)))}
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-xs text-muted-foreground hover:bg-muted transition-colors"
+          className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed px-2.5 py-1.5 border border-foreground/40 text-foreground hover:border-foreground hover:bg-primary/10"
         >
           <ChevronsUpDown size={12} /> Expand all
         </button>
         <button
           type="button"
           onClick={() => setOpen(new Set())}
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-xs text-muted-foreground hover:bg-muted transition-colors"
+          className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed px-2.5 py-1.5 border border-foreground/40 text-foreground hover:border-foreground hover:bg-primary/10"
         >
           <ChevronsDownUp size={12} /> Collapse all
         </button>
