@@ -31,6 +31,8 @@ function withAppId(path: string, applicationId: number) {
 // ── Routes that don't need applicationId ──────────────────────────────────────
 export const fetchMe          = () => get("/me");
 export const fetchApplications = () => get("/applications");
+// Every live transfer deed the customer is a party to (not tied to one application).
+export const fetchTransferDeeds = () => get("/transfer-deeds").catch(() => []);
 
 // ── Routes that require applicationId ────────────────────────────────────────
 export const fetchTimeline          = (applicationId: number) => get(withAppId("/timeline", applicationId));

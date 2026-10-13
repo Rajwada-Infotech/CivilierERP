@@ -6,7 +6,7 @@ import {
   LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers,
   FileSignature,
 } from "lucide-react";
-import { fetchMe, fetchApplications, fetchTimeline } from "./portalApi";
+import { fetchMe, fetchApplications, fetchTimeline, fetchTransferDeeds } from "./portalApi";
 import {
   INK, VIOLET_DEEP, VIOLET, VIOLET_LIGHT, GOLD, GOLD_SOFT, PORCELAIN, SURFACE, SURFACE_ALT, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
   applyPortalAccent, getStoredPortalAccent, applyPortalMode, getStoredPortalMode, StatusPill,
@@ -166,6 +166,9 @@ const PortalLayout: React.FC = () => {
     }
   }, [applications, selectedApplicationId]);
 
+  // Same cache as the Transfer Deed page, so an answer given there clears the badge at once.
+  const { data: deeds } = useQuery<any[]>({ queryKey: ["portal-transfer-deeds"], queryFn: fetchTransferDeeds, staleTime: 60_000 });
+
   const { data: timeline, error: tlError } = useQuery({
     queryKey: ["portal-timeline", selectedApplicationId],
     queryFn: () => fetchTimeline(selectedApplicationId!),
@@ -205,13 +208,17 @@ const PortalLayout: React.FC = () => {
     if (timeline?.queryPayment?.Status === "InfoSent") b.agreement = (b.agreement || 0) + 1;
     const pendingMilestones = (timeline?.paymentMilestones || []).filter((m: any) => m.Status === "Pending").length;
     if (pendingMilestones) b.payments = pendingMilestones;
+    // Transfer deeds belong to the customer, not one application.
+    const deedTodo = (deeds || []).reduce((n: number, v: any) => n + Number(v.todo || 0), 0);
+    if (deedTodo) b.deeds = deedTodo;
     return b;
-  }, [timeline]);
+  }, [timeline, deeds]);
   const totalAlerts = Object.values(badges).reduce((a, b) => a + b, 0);
 
   const badgeKeyFor = (to: string) => {
     if (to.endsWith("/agreement")) return "agreement";
     if (to.endsWith("/payments")) return "payments";
+    if (to.endsWith("/transfer-deed")) return "deeds";
     return null;
   };
 

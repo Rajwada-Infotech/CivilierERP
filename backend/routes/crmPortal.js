@@ -1540,8 +1540,15 @@ function portalView(st, role) {
   const mine = (x) => x.Party === role || x.DocumentType === "DeedDraft" || x.DocumentType === "RegisteredDeed";
   const pay = st.payment;
   const payer = !!pay && (pay.PayableBy === role || pay.PayableBy === "Shared");
+  // What is waiting on this customer right now (the portal's menu badge).
+  const papersOpen = ["Draft", "UnderReview"].includes(d.Status);
+  const todo = st.documents.filter((x) => x.Party === role && papersOpen && ["Requested", "Rejected"].includes(x.Status)).length
+    + (d.Status === "WithParties" && d[`${role}Approval`] === "Pending" ? 1 : 0)
+    + (d.Status === "PartiesApproved" && (!d.ProposedDate || !d[`${role}DateAccepted`]) ? 1 : 0)
+    + (payer && pay.Status === "InfoSent" ? 1 : 0);
   return {
     role,
+    todo,
     deed: {
       Id: d.Id, DeedNo: d.DeedNo, DeedType: d.DeedType, Property: d.Property, BookingNo: d.BookingNo, Status: d.Status, StatusLabel: d.StatusLabel,
       SellerName: d.SellerName, BuyerName: d.DeedType === "Assignment" ? d.BuyerName : null, VersionNo: d.VersionNo,
