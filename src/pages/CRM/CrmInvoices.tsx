@@ -1,6 +1,6 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -28,6 +28,16 @@ const API = "/api/crm/invoices";
 const BKG_API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
 
+/** "−₹x credited · CRN-…" under an invoice's amount, opening its credit note. */
+function CreditedChip({ inv }: { inv: { CreditedAmount?: number; CreditNoteId?: number | null; CreditNoteNos?: string | null } }) {
+  if (!(Number(inv.CreditedAmount) > 0)) return null;
+  return (
+    <Link to={`/crm/credit-notes?id=${inv.CreditNoteId}`} className="block text-[0.6875rem] font-normal text-orange-700 dark:text-orange-300 hover:underline" title="Credit notes against this invoice">
+      −{fmtMoney(inv.CreditedAmount)} credited{inv.CreditNoteNos ? ` · ${inv.CreditNoteNos}` : ""}
+    </Link>
+  );
+}
+
 interface InvoiceRow {
   Id: number;
   InvoiceNo: string;
@@ -37,6 +47,10 @@ interface InvoiceRow {
   Status: string;
   VoidReason: string | null;
   CreatedAt: string;
+  // Credit notes against it (Finance -> Credit Notes).
+  CreditedAmount?: number;
+  CreditNoteId?: number | null;
+  CreditNoteNos?: string | null;
   BookingId: number;
   MilestoneId?: number | null;
   BookingNo: string;
@@ -210,6 +224,7 @@ function InvoicePreviewDialog({ invoice, onClose }: { invoice: InvoiceRow; onClo
             : <iframe src={blobUrl} title={invoice.InvoiceNo} className="w-full h-[60vh] border-0" />}
         </div>
         <div className="text-xs text-muted-foreground pt-1">{invoice.InvoiceType} · {fmtMoney(invoice.Amount)} · {invoice.BookingNo}</div>
+        <CreditedChip inv={invoice} />
         {invoice.Status === "Void" && (
           <p className="text-[0.6875rem] text-red-600 dark:text-red-400">Voided{invoice.VoidReason ? ` — ${invoice.VoidReason}` : ""}</p>
         )}
@@ -1211,7 +1226,7 @@ const CrmInvoices: React.FC = () => {
                                   )}
                                 </td>
                                 <td className="px-3 py-1.5"><span className="text-xs px-2 py-0.5 rounded-md bg-muted font-medium">{inv.InvoiceType}</span></td>
-                                <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}</td>
+                                <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}<CreditedChip inv={inv} /></td>
                                 <td className="px-3 py-1.5 text-xs text-muted-foreground">{fmtDate(inv.InvoiceDate)}</td>
                                 <td className="px-3 py-1.5 text-xs text-muted-foreground">{inv.CreatedByName || "—"}</td>
                                 <td className="px-3 py-1.5">
@@ -1285,7 +1300,7 @@ const CrmInvoices: React.FC = () => {
                         <td className="px-3 py-1.5 text-xs truncate max-w-[160px]"><ApplicantNames name={inv.ApplicantName} bookingId={inv.BookingId} /></td>
                         <td className="px-3 py-1.5 text-xs text-muted-foreground truncate max-w-[160px]">{inv.ProjectName || "—"} {inv.UnitNo}</td>
                         <td className="px-3 py-1.5"><span className="text-xs px-2 py-0.5 rounded-md bg-muted font-medium">{inv.InvoiceType}</span></td>
-                        <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}</td>
+                        <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}<CreditedChip inv={inv} /></td>
                         <td className="px-3 py-1.5 text-xs text-muted-foreground">{fmtDate(inv.InvoiceDate)}</td>
                         <td className="px-3 py-1.5">
                           <div className="flex items-center gap-1.5">

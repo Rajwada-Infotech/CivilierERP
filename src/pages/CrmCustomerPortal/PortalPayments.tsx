@@ -3,7 +3,7 @@ import { useOutletContext } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices } from "./portalApi";
+import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices, fetchCreditNotes, creditNotesSeenKey, writeSeen } from "./portalApi";
 import {
   PageHeader, Card, CardHeader, StatusPill, GOLD, HAIRLINE, TEXT, TEXT_FAINT, TEXT_MUTED, SURFACE_ALT, serif,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
@@ -55,7 +55,7 @@ function InvoicePdfDialog({ invoice, applicationId, onClose }: { invoice: any; a
 }
 
 const PortalPayments: React.FC = () => {
-  const { timeline, applicationId } = useOutletContext<Ctx>();
+  const { timeline, applicationId, me } = useOutletContext<Ctx>();
   const milestones = timeline.paymentMilestones || [];
   const { data: invoices = [] } = useQuery({ queryKey: ["portal-invoices", applicationId], queryFn: () => fetchInvoices(applicationId), staleTime: 30_000 });
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
@@ -154,7 +154,7 @@ const PortalPayments: React.FC = () => {
         </Card>
       )}
 
-      <RefundDocuments />
+      <RefundDocuments customerId={me?.Id} />
 
       {previewInvoice && (
         <InvoicePdfDialog invoice={previewInvoice} applicationId={applicationId} onClose={() => setPreviewInvoice(null)} />
@@ -164,11 +164,12 @@ const PortalPayments: React.FC = () => {
 };
 
 /** Refund vouchers / credit notes for money given back to this customer (all their bookings). */
-function RefundDocuments() {
-  const { data: notes = [] } = useQuery<any[]>({
-    queryKey: ["portal-gst-notes"],
-    queryFn: () => fetch(`${API}/gst-notes`, { headers: authHeaders() }).then((r) => (r.ok ? r.json() : [])),
-  });
+function RefundDocuments({ customerId }: { customerId: any }) {
+  const { data: notes = [] } = useQuery<any[]>({ queryKey: ["portal-gst-notes"], queryFn: fetchCreditNotes });
+  // Seen here: the "new credit note" badge on Payments clears.
+  useEffect(() => {
+    if (notes.length && customerId != null) writeSeen(creditNotesSeenKey(customerId), Math.max(...notes.map((n: any) => Number(n.Id))));
+  }, [notes, customerId]);
   if (!notes.length) return null;
   const open = async (id: number) => {
     const r = await fetch(`${API}/gst-notes/${id}/pdf`, { headers: authHeaders() });

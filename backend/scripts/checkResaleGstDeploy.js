@@ -24,7 +24,7 @@ const line = (ok, msg) => console.log(`${ok ? "OK  " : "FIX "} ${msg}`);
   }
 
   console.log("\n== Approval workflows (Approval Setup) ==");
-  for (const m of ["crm-transfer-deeds", "crm-transfer-deed-date", "crm-ownership-changes", "crm-resales"]) {
+  for (const m of ["crm-transfer-deeds", "crm-transfer-deed-date", "crm-ownership-changes", "crm-resales", "crm-credit-notes", "crm-credit-note-cancel"]) {
     const w = await q(`SELECT TOP 1 Name, active, LevelsData FROM dbo.ApprovalWorkflows WHERE modules LIKE N'%"${m}"%'`);
     line(!!w.length && w[0].active, w.length ? `${m}: "${w[0].Name}"${w[0].active ? "" : " (inactive)"}${w[0].LevelsData ? "" : " — no levels set"}` : `${m}: no workflow — set it up in Approval Setup`);
   }

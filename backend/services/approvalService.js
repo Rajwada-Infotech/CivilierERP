@@ -42,6 +42,10 @@ const MAKER_COLUMNS = {
   "crm-transfer-deeds": "CreatedBy",
   // Whoever recorded a new owner can't approve the record too.
   "crm-ownership-changes": "CreatedBy",
+  // A credit note reduces what a customer owes and our GST: whoever raised it
+  // (or asked to cancel one) can't approve it too.
+  "crm-credit-notes": "RequestedById",
+  "crm-credit-note-cancel": "CancelRequestedById",
 };
 
 // Map module slug → { table, pkCol, statusCol }
@@ -149,6 +153,10 @@ const MODULE_MAP = {
   "crm-resales": { table: "dbo.CrmUnitResale", pk: "Id", status: "Status" },
   // A new owner after conveyance (migration 562), from their registered sale deed.
   "crm-ownership-changes": { table: "dbo.CrmOwnershipChange", pk: "Id", status: "Status" },
+  // Credit notes (migrations 565-567): one raised without a refund, and the
+  // cancellation of any credit note — two gates on the same row.
+  "crm-credit-notes": { table: "dbo.CrmGstNote", pk: "Id", status: "ApprovalStatus" },
+  "crm-credit-note-cancel": { table: "dbo.CrmGstNote", pk: "Id", status: "CancelApprovalStatus" },
   // A resale / buy-back's transfer deed (migration 560): the Legal Head's
   // sign-off on its papers, and — a second gate on the same row, same
   // single-level ApprovalAuditLog caveat as crm-agreement-date — the

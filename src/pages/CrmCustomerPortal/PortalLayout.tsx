@@ -6,7 +6,7 @@ import {
   LogOut, Menu, X, Bell, ChevronRight, Radio, ChevronLeft, Layers,
   FileSignature,
 } from "lucide-react";
-import { fetchMe, fetchApplications, fetchTimeline, fetchTransferDeeds } from "./portalApi";
+import { fetchMe, fetchApplications, fetchTimeline, fetchTransferDeeds, fetchCreditNotes, creditNotesSeenKey, readSeen } from "./portalApi";
 import {
   INK, VIOLET_DEEP, VIOLET, VIOLET_LIGHT, GOLD, GOLD_SOFT, PORCELAIN, SURFACE, SURFACE_ALT, HAIRLINE, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
   applyPortalAccent, getStoredPortalAccent, applyPortalMode, getStoredPortalMode, StatusPill,
@@ -168,6 +168,8 @@ const PortalLayout: React.FC = () => {
 
   // Same cache as the Transfer Deed page, so an answer given there clears the badge at once.
   const { data: deeds } = useQuery<any[]>({ queryKey: ["portal-transfer-deeds"], queryFn: fetchTransferDeeds, staleTime: 60_000 });
+  // Same cache as Payments' credit notes; new ones (not yet seen there) show on Payments.
+  const { data: creditNotes } = useQuery<any[]>({ queryKey: ["portal-gst-notes"], queryFn: fetchCreditNotes, staleTime: 60_000 });
 
   const { data: timeline, error: tlError } = useQuery({
     queryKey: ["portal-timeline", selectedApplicationId],
@@ -211,8 +213,11 @@ const PortalLayout: React.FC = () => {
     // Transfer deeds belong to the customer, not one application.
     const deedTodo = (deeds || []).reduce((n: number, v: any) => n + Number(v.todo || 0), 0);
     if (deedTodo) b.deeds = deedTodo;
+    const seen = readSeen(creditNotesSeenKey(me?.Id));
+    const newNotes = (creditNotes || []).filter((n: any) => Number(n.Id) > seen).length;
+    if (newNotes) b.payments = (b.payments || 0) + newNotes;
     return b;
-  }, [timeline, deeds]);
+  }, [timeline, deeds, creditNotes, me, location.pathname]);
   const totalAlerts = Object.values(badges).reduce((a, b) => a + b, 0);
 
   const badgeKeyFor = (to: string) => {

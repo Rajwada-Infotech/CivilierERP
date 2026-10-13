@@ -33,6 +33,12 @@ export const fetchMe          = () => get("/me");
 export const fetchApplications = () => get("/applications");
 // Every live transfer deed the customer is a party to (not tied to one application).
 export const fetchTransferDeeds = () => get("/transfer-deeds").catch(() => []);
+// The customer's credit notes (money given back / invoices reduced).
+export const fetchCreditNotes = () => get("/gst-notes").catch(() => []);
+/** Highest credit note id this customer has seen on Payments (per browser). */
+export const creditNotesSeenKey = (customerId: any) => `portal-credit-notes-seen-${customerId}`;
+export function readSeen(key: string) { try { return Number(localStorage.getItem(key) || 0); } catch { return 0; } }
+export function writeSeen(key: string, v: number) { try { localStorage.setItem(key, String(v)); } catch { /* private mode */ } }
 
 // ── Routes that require applicationId ────────────────────────────────────────
 export const fetchTimeline          = (applicationId: number) => get(withAppId("/timeline", applicationId));

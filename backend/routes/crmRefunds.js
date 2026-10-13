@@ -312,6 +312,26 @@ const gstFail = (res, e, where) => {
   console.error(`[crm-refunds] ${where}:`, e.message);
   res.status(500).json({ error: "Something went wrong with the credit note — please try again" });
 };
+const gstUser = (req) => ({ email: req.user?.email || req.user?.name || String(actorId(req)), role: req.user?.role, userId: req.user?.userId ?? actorId(req) });
+const gstNote = (req) => req.body?.note ?? req.body?.remarks ?? req.body?.reason ?? null;
+const withNote = (fn, where) => async (req, res) => {
+  const id = parseId(req.params.noteId);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try { res.json(await fn(require("../services/crmGstNotes"), getPool(), id, req)); } catch (e) { gstFail(res, e, where); }
+};
+// Invoices that can still take a credit note (not void, value left, before the deadline).
+router.get("/gst-notes/creditable-invoices", requirePageRight("crm-refunds", "view"), async (req, res) => {
+  try { res.json(await require("../services/crmGstNotes").creditableInvoices(getPool(), { search: req.query.search || "", projectScope: req.projectScope })); }
+  catch (e) { gstFail(res, e, "GET creditable invoices"); }
+});
+router.post("/gst-notes", requirePageRight("crm-refunds", "create"), async (req, res) => {
+  try {
+    const gst = require("../services/crmGstNotes");
+    const inv = await gst.invoiceCreditable(getPool(), parseInt(req.body?.InvoiceId, 10));
+    if (req.projectScope && !req.projectScope.map(Number).includes(Number(inv.ProjectId))) return res.status(403).json({ error: "You don't have access to this project" });
+    res.status(201).json(await gst.createAdjustment(getPool(), req.body || {}, gstUser(req)));
+  } catch (e) { gstFail(res, e, "POST credit note"); }
+});
 // Paid refunds that carried GST but have no live credit note yet.
 router.get("/gst-notes/pending", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try { res.json(await require("../services/crmGstNotes").pending(getPool(), { projectScope: req.projectScope })); }
@@ -331,15 +351,22 @@ router.get("/gst-notes/:noteId", requirePageRight("crm-refunds", "view"), async 
     res.json({ ...rest, siblings });
   } catch (e) { gstFail(res, e, "GET /gst-notes/:noteId"); }
 });
-router.put("/gst-notes/:noteId/cancel", requirePageRight("crm-refunds", "edit"), async (req, res) => {
-  const id = parseId(req.params.noteId);
-  if (id === null) return res.status(400).json({ error: "Invalid id" });
-  try {
-    const gst = require("../services/crmGstNotes");
-    const n = await gst.cancel(getPool(), id, req.body?.reason, req.user?.email || null);
-    res.json({ Id: n.Id, Status: n.Status });
-  } catch (e) { gstFail(res, e, "PUT cancel credit note"); }
-});
+// Cancelling: a request a second person approves (workflow crm-credit-note-cancel).
+router.put("/gst-notes/:noteId/cancel", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.requestCancel(db, id, req.body?.reason, gstUser(req)), "request cancel"));
+router.put("/gst-notes/cancel-requests/:noteId/approve", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.decideCancel(db, id, true, gstNote(req), gstUser(req)), "approve cancel"));
+router.put("/gst-notes/cancel-requests/:noteId/reject", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.decideCancel(db, id, false, gstNote(req), gstUser(req)), "reject cancel"));
+// Credit note without a refund: an invoice reduced (workflow crm-credit-notes).
+router.put("/gst-notes/:noteId", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.updateAdjustment(db, id, req.body || {}, gstUser(req)), "update credit note"));
+router.put("/gst-notes/:noteId/submit", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.submitAdjustment(db, id, gstUser(req)), "submit credit note"));
+router.put("/gst-notes/:noteId/approve", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.decideAdjustment(db, id, true, gstNote(req), gstUser(req)), "approve credit note"));
+router.put("/gst-notes/:noteId/reject", requirePageRight("crm-refunds", "edit"),
+  withNote((g, db, id, req) => g.decideAdjustment(db, id, false, gstNote(req), gstUser(req)), "reject credit note"));
 router.get("/gst-notes/:noteId/pdf", requirePageRight("crm-refunds", "view"), async (req, res) => {
   const id = parseId(req.params.noteId);
   if (id === null) return res.status(400).json({ error: "Invalid id" });

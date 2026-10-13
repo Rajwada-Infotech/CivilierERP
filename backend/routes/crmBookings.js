@@ -2259,6 +2259,12 @@ router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "ed
     const row = cur.recordset[0];
     if (!row) return res.status(404).json({ error: "Invoice not found" });
     if (row.Status === "Void") return res.status(400).json({ error: `"${row.InvoiceNo}" is already void` });
+    // A credit note reduces this invoice: voiding it would leave the credit
+    // note pointing at nothing (and the GST return out of step).
+    const cn = (await pool.request().input("iid", sql.Int, invoiceId).query(`
+      SELECT TOP 1 ISNULL(DocNo, N'a credit note being approved') AS No FROM dbo.CrmGstNote
+      WHERE InvoiceId = @iid AND Status IN (N'Issued', N'TimeBarred', N'Draft', N'Pending', N'Rejected')`)).recordset[0];
+    if (cn) return res.status(409).json({ error: `"${row.InvoiceNo}" has ${cn.No} against it — cancel that first (Finance → Credit Notes)` });
 
     await pool.request()
       .input("iid", sql.Int, invoiceId)

@@ -46,7 +46,7 @@ test("cancelled after invoicing: voucher for the uninvoiced part, credit notes l
   mockDb = {
     refund: refund(70000),
     sums: { Received: 110000, Invoiced: 100000, PriorVouchers: 0, PriorKept: 0 },
-    invoices: [{ Id: 2, InvoiceNo: "INV-2", InvoiceDate: "2026-06-01", Open: 40000 }, { Id: 1, InvoiceNo: "INV-1", InvoiceDate: "2026-05-01", Open: 60000 }],
+    invoices: [{ Id: 2, InvoiceNo: "INV-2", InvoiceDate: "2026-06-01", OpenAmount: 40000 }, { Id: 1, InvoiceNo: "INV-1", InvoiceDate: "2026-05-01", OpenAmount: 60000 }],
     inserted: [],
   };
   await gst.issueForRefund(pool, 7, "f@x");
@@ -62,7 +62,7 @@ test("invoice from an old year, past 30 November: time-barred, no credit note nu
   mockDb = {
     refund: refund(21000, "2026-12-15"),
     sums: { Received: 100000, Invoiced: 100000, PriorVouchers: 0, PriorKept: 0 },
-    invoices: [{ Id: 1, InvoiceNo: "INV-1", InvoiceDate: "2025-03-20", Open: 100000 }],
+    invoices: [{ Id: 1, InvoiceNo: "INV-1", InvoiceDate: "2025-03-20", OpenAmount: 100000 }],
     inserted: [],
   };
   await gst.issueForRefund(pool, 7, "f@x");

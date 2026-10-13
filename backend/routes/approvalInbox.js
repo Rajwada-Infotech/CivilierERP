@@ -1364,6 +1364,39 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
+    // Credit notes: one raised without a refund (an invoice reduced), and the
+    // cancellation of any credit note.
+    for (const [mod, label, col, ref] of [
+      ["crm-credit-notes", "Credit Note (invoice reduced)", "ApprovalStatus", "CONCAT('Credit note on ', n.AgainstRef, ' · ', ISNULL(b.UnitNo, b.BookingNo))"],
+      ["crm-credit-note-cancel", "Credit Note — Cancellation", "CancelApprovalStatus", "CONCAT('Cancel ', ISNULL(n.DocNo, 'certificate'), ' · ', ISNULL(b.UnitNo, b.BookingNo))"],
+    ]) {
+      if (module && module !== mod) continue;
+      queries.push(`
+        SELECT
+          '${mod}'                               AS Module,
+          '${label}'                             AS ModuleLabel,
+          CAST(n.Id AS NVARCHAR)                 AS RecordId,
+          ${ref} AS Reference,
+          n.CreatedAt                            AS RecordDate,
+          n.${col}                               AS Status,
+          CAST(c.CustomerName AS NVARCHAR(255))  AS ContractorName,
+          CAST(n.ReasonType AS NVARCHAR(255))    AS SupplierName,
+          n.TotalAmount                          AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(n.CreatedBy AS NVARCHAR(255))) AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ISNULL(CAST(n.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          n.CreatedAt                            AS LastModified
+        FROM dbo.CrmGstNote n
+        JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+        LEFT JOIN dbo.CrmCustomer c ON c.Id = n.CustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = ${mod === "crm-credit-notes" ? "n.RequestedById" : "n.CancelRequestedById"}
+        WHERE n.${col} = 'Pending'${pp("b.ProjectId")}
+      `);
+    }
+
     // A new owner of a conveyed property, recorded from their registered sale deed.
     if (!module || module === "crm-ownership-changes") {
       queries.push(`

@@ -278,6 +278,18 @@ const MODULE_OPTIONS = [
     desc: "A new owner after the sale deed is registered, recorded from their own registered sale deed",
   },
   {
+    id: "crm-credit-notes",
+    label: "Credit Note (invoice reduced)",
+    icon: "🧾",
+    desc: "An invoice reduced without a refund — discount, area change, price correction",
+  },
+  {
+    id: "crm-credit-note-cancel",
+    label: "Credit Note — Cancellation",
+    icon: "🚫",
+    desc: "Cancelling an issued credit note (a GST document)",
+  },
+  {
     id: "crm-refunds",
     label: "CRM Refund",
     icon: "💸",
@@ -345,6 +357,8 @@ const MODULE_GROUPS = [
       "crm-transfer-deeds",
       "crm-transfer-deed-date",
       "crm-ownership-changes",
+      "crm-credit-notes",
+      "crm-credit-note-cancel",
       "crm-cancellations",
     ],
   },
