@@ -1,6 +1,7 @@
 import React from "react";
 import {
   IconArchive,
+  IconBell,
   IconBuildingBank,
   IconChartBar,
   IconChecklist,
@@ -19,6 +20,7 @@ import {
   IconMenu2,
   IconLayoutSidebarLeftExpand,
   IconPackage,
+  IconPalette,
   IconSettings,
   IconShieldCheck,
   IconShoppingCart,
@@ -73,6 +75,9 @@ export const ChromeIcons = {
   sidebarCollapse: adapt(IconLayoutSidebarLeftCollapse),
   sidebarExpand: adapt(IconLayoutSidebarLeftExpand),
   menu: adapt(IconMenu2),
+  bell: adapt(IconBell),
+  announce: adapt(IconSpeakerphone),
+  theme: adapt(IconPalette),
   left: adapt(IconChevronLeft),
   right: adapt(IconChevronRight),
   down: adapt(IconChevronDown),

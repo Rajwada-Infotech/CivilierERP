@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { Notification } from "iconsax-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { CheckCheck, Megaphone } from "lucide-react";
 import { useSaNotifications } from "@/hooks/useSaNotifications";
 import { useAuth } from "@/contexts/AuthContext";
@@ -47,19 +47,13 @@ export const SaNotificationBell: React.FC = () => {
           apart at a glance. */}
       <button
         onClick={() => setOpen((p) => !p)}
-        className="relative p-2.5 hover:bg-muted rounded-full transition-all active:scale-95"
-        title="Notifications"
+        className="relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+        title="Sales notifications"
       >
-        <Notification
-          size={20}
-          variant={unreadCount > 0 ? "Bold" : "Outline"}
-          color={unreadCount > 0 ? "#f97316" : "hsl(var(--muted-foreground))"}
-        />
+        <ChromeIcons.announce size={18} style={{ color: unreadCount > 0 ? "hsl(var(--foreground))" : undefined }} />
         {unreadCount > 0 && (
-          <span className="absolute top-1.5 right-1.5 flex h-4 min-w-[16px]">
-            <span className="relative inline-flex rounded-full h-4 min-w-[16px] px-0.5 bg-orange-600 text-[0.625rem] font-bold text-white items-center justify-center border-2 border-background">
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
+          <span className="absolute -top-0.5 -right-1 min-w-[15px] h-[15px] px-0.5 flex items-center justify-center bg-foreground text-card font-heading text-[0.5625rem] font-semibold tabular-nums leading-none">
+            {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
       </button>
