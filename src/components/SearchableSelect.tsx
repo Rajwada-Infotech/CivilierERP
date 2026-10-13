@@ -199,11 +199,11 @@ export function SearchableSelect({
                 onMouseEnter={() => setActive(i)}
                 onClick={() => pick(o)}
                 className={`w-full flex items-center gap-2 text-left px-2.5 py-1.5 rounded-md text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  i === active ? "bg-primary/10 text-foreground" : "text-foreground"
+                  i === active ? "ss-opt-active text-foreground" : "text-foreground"
                 } ${o.value === value ? "font-medium" : ""}`}
               >
                 <span className="flex-1 truncate">{o.label}</span>
-                {o.value === value && <Check size={13} className="text-primary shrink-0" />}
+                {o.value === value && <Check size={13} className="mod-text shrink-0" />}
               </button>
             ))
           )}

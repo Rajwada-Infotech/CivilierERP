@@ -73,107 +73,107 @@ const MODULE_HEADER: Record<
   finance: {
     label: "Finance",
     icon: ModuleIcons.finance,
-    color: "#6366f1",
-    from: "from-indigo-500/30",
-    to: "to-indigo-500/0",
+    color: "#2419e6",
+    from: "from-[#2419e6]/30",
+    to: "to-[#2419e6]/0",
   },
   material: {
     label: "Material",
     icon: ModuleIcons.material,
-    color: "#10b981",
-    from: "from-emerald-500/30",
-    to: "to-emerald-500/0",
+    color: "#14b84b",
+    from: "from-[#14b84b]/30",
+    to: "to-[#14b84b]/0",
   },
   followup: {
     label: "Follow-Up",
     icon: ModuleIcons.followup,
-    color: "#0d9488",
-    from: "from-teal-600/30",
-    to: "to-teal-600/0",
+    color: "#14b88c",
+    from: "from-[#14b88c]/30",
+    to: "to-[#14b88c]/0",
   },
   engineering: {
     label: "Engineering",
     icon: ModuleIcons.engineering,
-    color: "#f97316",
-    from: "from-orange-500/30",
-    to: "to-orange-500/0",
+    color: "#e66b19",
+    from: "from-[#e66b19]/30",
+    to: "to-[#e66b19]/0",
   },
   ticket: {
     label: "Ticket",
     icon: ModuleIcons.ticket,
-    color: "#ec4899",
-    from: "from-pink-500/30",
-    to: "to-pink-500/0",
+    color: "#e619a8",
+    from: "from-[#e619a8]/30",
+    to: "to-[#e619a8]/0",
   },
   sales: {
     label: "Sales",
     icon: ModuleIcons.sales,
-    color: "#a855f7",
-    from: "from-purple-500/30",
-    to: "to-purple-500/0",
+    color: "#6e19e6",
+    from: "from-[#6e19e6]/30",
+    to: "to-[#6e19e6]/0",
   },
   records: {
     label: "Records",
     icon: ModuleIcons.records,
-    color: "#e11d48",
-    from: "from-rose-600/30",
-    to: "to-rose-600/0",
+    color: "#e61919",
+    from: "from-[#e61919]/30",
+    to: "to-[#e61919]/0",
   },
   civilworkdpr: {
     label: "Civil Work DPR",
     icon: ModuleIcons.civilWorkDpr,
-    color: "#0891b2",
-    from: "from-cyan-600/30",
-    to: "to-cyan-600/0",
+    color: "#14a2b8",
+    from: "from-[#14a2b8]/30",
+    to: "to-[#14a2b8]/0",
   },
   "sales-automation": {
     label: "Sales Automation",
     icon: ModuleIcons.salesAutomation,
-    color: "#f59e0b",
-    from: "from-amber-500/30",
-    to: "to-amber-500/0",
+    color: "#e6195d",
+    from: "from-[#e6195d]/30",
+    to: "to-[#e6195d]/0",
   },
   crm: {
     label: "CRM",
     icon: ModuleIcons.crm,
-    color: "#0ea5e9",
-    from: "from-sky-500/30",
-    to: "to-sky-500/0",
+    color: "#1990e6",
+    from: "from-[#1990e6]/30",
+    to: "to-[#1990e6]/0",
   },
   loan: {
     label: "Loan",
     icon: ModuleIcons.loan,
-    color: "#22c55e",
-    from: "from-green-500/30",
-    to: "to-green-500/0",
+    color: "#43a512",
+    from: "from-[#43a512]/30",
+    to: "to-[#43a512]/0",
   },
   "fixed-asset": {
     label: "Fixed Asset",
     icon: ModuleIcons.fixedAsset,
-    color: "#eab308",
-    from: "from-yellow-500/30",
-    to: "to-yellow-500/0",
+    color: "#a57e12",
+    from: "from-[#a57e12]/30",
+    to: "to-[#a57e12]/0",
   },
   maintenance: {
     label: "Maintenance",
     icon: ModuleIcons.maintenance,
-    color: "#65a30d",
-    from: "from-lime-500/30",
-    to: "to-lime-500/0",
+    color: "#88a512",
+    from: "from-[#88a512]/30",
+    to: "to-[#88a512]/0",
   },
   "hr-payroll": {
     label: "HR and Payroll",
     icon: ModuleIcons.hrPayroll,
-    color: "#eab308",
-    from: "from-yellow-500/30",
-    to: "to-yellow-500/0",
+    color: "#ca19e6",
+    from: "from-[#ca19e6]/30",
+    to: "to-[#ca19e6]/0",
   },
   admin: {
     label: "Admin",
     icon: ModuleIcons.admin,
-    color: "#3b82f6",
-    from: "from-blue-500/30",
-    to: "to-blue-500/0",
+    color: "#1957e6",
+    from: "from-[#1957e6]/30",
+    to: "to-[#1957e6]/0",
   },
   super_admin: {
     label: "Super Admin",
@@ -478,7 +478,7 @@ export const AppSidebar = () => {
       {/* A ruled sheet margin: square, ink border, faint grid. The module's own hue stays - as a bar across the top,
           a tint behind the header, and the marker on the active item. */}
       <aside
-        className="relative flex-1 flex flex-col"
+        className="app-sidebar relative flex-1 flex flex-col"
         style={{
           backgroundColor: "hsl(var(--card))",
           backgroundImage:
@@ -499,19 +499,19 @@ export const AppSidebar = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
-              className="relative z-20 flex items-center gap-3 px-4 pt-4 pb-3 overflow-hidden"
+              className="sb-head relative z-20 flex items-center gap-3 px-4 pt-4 pb-3 overflow-hidden"
               style={{ background: `${accentColor}1F`, borderBottom: "1px solid hsl(var(--foreground))" }}
             >
               {/* Icon tile */}
               <div
-                className="relative z-10 w-7 h-7 flex items-center justify-center shrink-0"
+                className="sb-head-icon relative z-10 w-7 h-7 flex items-center justify-center shrink-0"
                 style={{ color: accentColor, border: `1.5px solid ${accentColor}`, background: "hsl(var(--card))" }}
               >
                 <header.icon size={14} strokeWidth={2.2} />
               </div>
               {/* Label */}
               <span
-                className="relative z-10 font-heading text-[0.6875rem] font-bold tracking-[0.16em] uppercase"
+                className="sb-head-label relative z-10 font-heading text-[0.6875rem] font-bold tracking-[0.16em] uppercase"
                 style={{ color: accentColor }}
               >
                 {header.label}

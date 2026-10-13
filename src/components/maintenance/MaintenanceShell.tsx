@@ -5,7 +5,7 @@ import { GlassShell } from "@/components/dashboard/GlassShell";
 // Single source of truth for the Maintenance module's accent — change this
 // one value (and its HSL twin in TopNavbar.tsx's MODULE_COLORS, and the
 // ModuleStrip/AppSidebar entries) to re-theme the whole module.
-export const MAINTENANCE_ACCENT = "#65a30d"; // lime-600
+export const MAINTENANCE_ACCENT = "#88a512"; // maintenance — see the module palette in index.css
 
 interface MaintenanceShellProps {
   title: string;

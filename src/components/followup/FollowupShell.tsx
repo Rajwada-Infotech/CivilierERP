@@ -16,7 +16,7 @@ interface FollowupShellProps {
 // Teal (#0d9488) accent — matches the Follow-Up module's own sidebar/top-nav
 // color (see MODULE_COLORS.followup in TopNavbar.tsx and MODULE_HEADER in
 // AppSidebar.tsx), so the module reads the same everywhere.
-const ACCENT = "#0d9488";
+const ACCENT = "#14b88c"; // followup — see the module palette in index.css
 const ACCENT_SOFT = "#2dd4bf";
 
 // Several Follow-Up setup masters are also served under /crm/setup/*; opened

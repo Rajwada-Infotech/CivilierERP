@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { DocumentText1, Printer } from "iconsax-react";
+import { DocumentText1, Printer, UserTick, Edit2 } from "iconsax-react";
 import { Pencil, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell, HR_PAYROLL_ACCENT } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell, HR_PAYROLL_ACCENT, HR_GRADIENT } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton, HrStatStrip } from "@/components/hrpayroll/HrUi";
 import { ExportMenu } from "@/components/ExportMenu";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { safeHtml, escapeHtml, raw } from "@/utils/escapeHtml";
@@ -383,18 +384,36 @@ const OfferLetterJoining: React.FC = () => {
     remarks: r.Remarks || "",
   }));
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading offer letters...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load offer letters.</div>;
+  if (isLoading) return <HrSkeleton rows={2} />;
+  if (error) return <HrError text="Failed to load offer letters." />;
+  const joinedCount = rows.filter((r) => r.JoiningConfirmed).length;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "HR and Payroll", "Offer Letter & Joining"]} />
       <HrPayrollShell title="Offer Letter & Joining" subtitle="Generate offers for selected candidates and confirm joining" icon={DocumentText1}>
+        <div className="mb-5">
+          <HrStatStrip items={[
+            { label: "Offer letters", value: rows.length, tone: HR_PAYROLL_ACCENT },
+            { label: "Joined", value: joinedCount, tone: "#059669" },
+            { label: "Awaiting joining", value: rows.length - joinedCount, tone: "#d97706" },
+          ]} />
+        </div>
         <Tabs defaultValue="offer">
-          <TabsList>
-            <TabsTrigger value="offer">Offer Letter</TabsTrigger>
-            <TabsTrigger value="joining">Joining</TabsTrigger>
-            <TabsTrigger value="body">Letter Body</TabsTrigger>
+          <TabsList className="!h-auto !bg-transparent !p-0 grid w-full grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+            {([
+              ["offer", "Offer Letter", "Generate offers for selected candidates", DocumentText1],
+              ["joining", "Joining", "Confirm each candidate's joining date", UserTick],
+              ["body", "Letter Body", "The template text used for offers", Edit2],
+            ] as const).map(([v, label, hint, Icon]) => (
+              <TabsTrigger key={v} value={v} className="group !justify-start gap-3 rounded-2xl border border-border bg-card/80 px-4 py-3.5 text-left shadow-sm transition-all data-[state=active]:border-transparent hr-tab-card">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: HR_GRADIENT }}><Icon size={18} /></span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-heading font-semibold text-foreground">{label}</span>
+                  <span className="block text-[0.6875rem] text-muted-foreground truncate">{hint}</span>
+                </span>
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           {/* ── Offer Letter tab ── */}

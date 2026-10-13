@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Megaphone } from "lucide-react";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
-const ACCENT = "#f59e0b";
+const ACCENT = "#e6195d"; // sales-automation — see the module palette in index.css
 const ACCENT_DARK_BG = "rgba(15, 12, 3, 0.45)";
 const ACCENT_LIGHT_BG = "rgba(255,255,255,0.72)";
 

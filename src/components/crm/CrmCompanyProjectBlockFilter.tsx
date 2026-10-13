@@ -32,11 +32,13 @@ export interface CrmCompanyProjectBlockValue {
 }
 
 export function CrmCompanyProjectBlockFilter({
-  value, onChange, className = "",
+  value, onChange, className = "", stacked = false,
 }: {
   value: CrmCompanyProjectBlockValue;
   onChange: (next: CrmCompanyProjectBlockValue) => void;
   className?: string;
+  /** Narrow side panels: two columns with the block picker on its own row, so nothing spills over. */
+  stacked?: boolean;
 }) {
   const { data: dropdown } = useQuery({
     queryKey: ["crm-business-dropdown"],
@@ -70,7 +72,7 @@ export function CrmCompanyProjectBlockFilter({
   });
 
   return (
-    <div className={`flex gap-2 flex-wrap sm:flex-nowrap ${className}`}>
+    <div className={`${stacked ? "grid grid-cols-2 gap-2 [&>*]:!min-w-0 [&>*]:w-full [&>*:last-child]:col-span-2" : "flex gap-2 flex-wrap sm:flex-nowrap"} ${className}`}>
       <Select
         value={value.companyId || "__all__"}
         onValueChange={(v) => onChange({ companyId: v === "__all__" ? "" : v, projectId: "", blockId: "" })}
