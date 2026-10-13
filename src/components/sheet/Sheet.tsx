@@ -142,7 +142,29 @@ export const SHEET_FRAME_CSS =
 .sheet-frame [class*="rounded-"]:not(.rounded-full), .sheet-frame input, .sheet-frame select, .sheet-frame textarea, .sheet-frame button:not(.rounded-full) { border-radius: 0 !important; }
 .sheet-frame .glass { background: hsl(var(--card)) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important; }
 .sheet-frame .shadow-sm, .sheet-frame .shadow, .sheet-frame .shadow-md, .sheet-frame .shadow-lg { box-shadow: none !important; }
-.sheet-frame thead th { font-family: "Sora", sans-serif; letter-spacing: 0.1em; }
+/* Every table on a working page reads as a schedule: an ink rule under capital headings, hairlines between rows,
+   no header tint and no zebra striping. Covers the shared DataTable as well as tables written on the page. */
+.sheet-frame table { border-collapse: collapse; }
+.sheet-frame thead tr { background: transparent !important; border-bottom: 1px solid var(--ink) !important; }
+.sheet-frame thead th { font-family: "Sora", sans-serif; font-weight: 600; font-size: 0.625rem !important; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--graphite); background: transparent !important; }
+.sheet-frame tbody { border: 0; }
+.sheet-frame tbody tr { background: transparent !important; border-top: 0 !important; border-bottom: 1px solid var(--rule-soft) !important; transition: background-color .15s; }
+.sheet-frame tbody tr:hover { background: var(--blue-wash) !important; }
+.sheet-frame tbody tr:last-child { border-bottom: 0 !important; }
+.sheet-frame .dt-toolbar { background: transparent !important; border-bottom: 1px solid var(--rule) !important; }
+.sheet-frame .dt-toolbar input { background: hsl(var(--card)) !important; border-color: var(--ink) !important; }
+.sheet-frame tfoot tr, .sheet-frame tfoot td { background: transparent !important; border-top: 1px solid var(--ink); }
+
+/* Dialogs, menus and pop-ups open outside the page, so they are matched by role instead of by the frame. This style
+   block is only on the page while a sheet page is showing, so other pages keep their own look. */
+[role="dialog"], [role="alertdialog"] { border-radius: 0 !important; border: 1.5px solid hsl(var(--foreground)) !important; box-shadow: 6px 6px 0 hsl(var(--foreground) / 0.14) !important; }
+[role="dialog"] [class*="rounded-"]:not(.rounded-full), [role="alertdialog"] [class*="rounded-"]:not(.rounded-full),
+[role="dialog"] input, [role="dialog"] select, [role="dialog"] textarea, [role="dialog"] button:not(.rounded-full),
+[role="alertdialog"] button:not(.rounded-full) { border-radius: 0 !important; }
+[role="dialog"] h2, [role="alertdialog"] h2 { font-family: "Sora", sans-serif; letter-spacing: -0.01em; }
+[role="menu"], [role="listbox"], [data-radix-popper-content-wrapper] > * { border-radius: 0 !important; border-color: hsl(var(--foreground)) !important; box-shadow: 4px 4px 0 hsl(var(--foreground) / 0.12) !important; }
+[role="menu"] [class*="rounded-"], [role="listbox"] [class*="rounded-"], [role="menuitem"], [role="option"] { border-radius: 0 !important; }
 .sheet-frame .statrow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .sheet-frame .statrow.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .sheet-frame .statrow > div { padding: 0 18px; min-width: 0; }
