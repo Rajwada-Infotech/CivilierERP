@@ -217,18 +217,32 @@ function NewCreditNoteDialog({
   onCreated: (id: number) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
   const { data: invoices = [], isLoading } = useQuery<any[]>({
-    queryKey: ["crm-creditable-invoices", search],
-    queryFn: () => getJson(`${API}/gst-notes/creditable-invoices?search=${encodeURIComponent(search)}`),
+    queryKey: ["crm-creditable-invoices", q],
+    queryFn: () => getJson(`${API}/gst-notes/creditable-invoices?search=${encodeURIComponent(q)}`),
   });
-  const [invoiceId, setInvoiceId] = useState("");
+  const [invoiceId, setInvoiceId] = useState<number | null>(null);
   const [amount, setAmount] = useState("");
   const [reasonType, setReasonType] = useState("Discount");
   const [remarks, setRemarks] = useState("");
   const [busy, setBusy] = useState(false);
-  const inv = invoices.find((x) => String(x.Id) === invoiceId);
-  const amt = Number(amount || 0);
-  const tooMuch = !!inv && amt > Number(inv.Open) + 0.005;
+  const inv = invoices.find((x) => x.Id === invoiceId);
+  const amt = Math.round(Number(amount || 0) * 100) / 100;
+  const open = Number(inv?.Open || 0);
+  const tooMuch = !!inv && amt > open + 0.005;
+  // Same split the server uses: the booking's GST share of its total.
+  const ratio = inv && Number(inv.BookingTotal) > 0 ? Number(inv.BookingGst) / Number(inv.BookingTotal) : 0;
+  const gst = Math.round(amt * ratio * 100) / 100;
+  const paid = Number(inv?.MilestonePaid || 0);
+  const newDue = inv?.MilestoneDue != null ? Math.max(0, Number(inv.MilestoneDue) - amt) : null;
+  const toAccount = newDue != null ? Math.max(0, paid - newDue) : 0;
+  const daysLeft = inv ? Math.ceil((new Date(inv.Deadline).getTime() - Date.now()) / 864e5) : 0;
+  const ready = !!inv && amt > 0 && !tooMuch && !!remarks.trim();
 
   const save = async () => {
     setBusy(true);
@@ -236,12 +250,7 @@ function NewCreditNoteDialog({
       const r = await getJson(`${API}/gst-notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          InvoiceId: Number(invoiceId),
-          Amount: amt,
-          ReasonType: reasonType,
-          Remarks: remarks,
-        }),
+        body: JSON.stringify({ InvoiceId: invoiceId, Amount: amt, ReasonType: reasonType, Remarks: remarks }),
       });
       toast.success("Credit note prepared — check it, then send it for approval");
       onCreated(r.Id);
@@ -252,101 +261,181 @@ function NewCreditNoteDialog({
     }
   };
 
-  const label = "block text-xs font-medium text-muted-foreground mb-1";
+  const label = "block text-xs font-medium text-muted-foreground mb-1.5";
   const input =
-    "w-full h-9 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30";
+    "w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30";
+  const row = (k: string, v: React.ReactNode, strong = false) => (
+    <div className={`flex items-baseline justify-between gap-3 ${strong ? "font-semibold" : ""}`}>
+      <span className="text-muted-foreground min-w-0">{k}</span>
+      <span className="tabular-nums text-right shrink-0">{v}</span>
+    </div>
+  );
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
+      <DialogContent className="w-[96vw] max-w-5xl p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-6 pt-5 pb-3 border-b border-border">
           <DialogTitle>New credit note — invoice reduced</DialogTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            A discount, area change or price correction where the money stays with us. Money paid back is a refund — its
+            credit note comes with the refund.
+          </p>
         </DialogHeader>
-        <div className="space-y-4 text-sm">
-          <p className="text-xs text-muted-foreground">
-            For a discount, area change or price correction where the money stays with us. Money paid back is a refund —
-            its credit note comes automatically with the refund.
-          </p>
-          <div>
-            <label className={label}>Invoice</label>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search invoice no., booking, unit or customer…"
-              className={`${input} mb-2`}
-            />
-            <SearchableSelect
-              value={invoiceId}
-              onChange={(v) => {
-                setInvoiceId(v);
-                setAmount("");
-              }}
-              placeholder={
-                isLoading
-                  ? "Loading…"
-                  : invoices.length
-                  ? "Choose the invoice"
-                  : "No invoice can take a credit note"
-              }
-              searchPlaceholder="Filter…"
-              options={invoices.map((x) => ({
-                value: String(x.Id),
-                label: `${x.InvoiceNo} · ${x.Property} · ${x.CustomerName} · ${inr(x.Open)} left`,
-              }))}
-            />
-            {inv && (
-              <p className="mt-1 text-[0.6875rem] text-muted-foreground">
-                Invoice {inr(inv.Amount)} on {day(inv.InvoiceDate)} · up to {inr(inv.Open)} can be credited · declare by{" "}
-                {day(inv.Deadline)}
-              </p>
+
+        <div className="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] max-h-[70vh] overflow-y-auto md:overflow-hidden">
+          {/* 1 — the invoice */}
+          <section className="min-w-0 border-b md:border-b-0 md:border-r border-border flex flex-col md:max-h-[70vh]">
+            <div className="p-4 pb-3">
+              <label className={label}>1 · Invoice</label>
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  autoFocus
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Invoice no., booking, unit or customer…"
+                  className={`${input} pl-9`}
+                />
+              </div>
+            </div>
+            <div className="px-4 pb-4 space-y-2 overflow-y-auto md:flex-1">
+              {isLoading ? (
+                <p className="text-xs text-muted-foreground p-3">Loading…</p>
+              ) : !invoices.length ? (
+                <p className="text-xs text-muted-foreground p-4 rounded-lg border border-dashed border-border">
+                  {q ? `Nothing matches "${q}".` : "No invoice can take a credit note — they need value left and to be before their declare-by date, on a live booking."}
+                </p>
+              ) : (
+                invoices.map((x) => {
+                  const on = x.Id === invoiceId;
+                  return (
+                    <button
+                      key={x.Id}
+                      onClick={() => {
+                        setInvoiceId(x.Id);
+                        setAmount("");
+                      }}
+                      className={`w-full text-left rounded-xl border p-3 transition-colors ${on ? "border-primary bg-primary/5 ring-1 ring-primary/40" : "border-border hover:bg-muted/40"}`}
+                    >
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <span className="font-mono text-sm font-semibold truncate">{x.InvoiceNo}</span>
+                        <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border border-border text-muted-foreground shrink-0">{x.InvoiceType}</span>
+                      </div>
+                      <div className="text-xs mt-1 truncate">{x.CustomerName}</div>
+                      <div className="text-[0.6875rem] text-muted-foreground truncate">
+                        {x.Property}{x.ProjectName ? ` · ${x.ProjectName}` : ""} · {day(x.InvoiceDate)}
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1.5 text-[0.6875rem]">
+                        <span className="text-muted-foreground">Invoice {inr(x.Amount)}</span>
+                        <span className="font-medium tabular-nums">{inr(x.Open)} left</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </section>
+
+          {/* 2 — what changes */}
+          <section className="min-w-0 p-4 space-y-4 md:overflow-y-auto md:max-h-[70vh]">
+            {!inv ? (
+              <div className="h-full min-h-[240px] rounded-xl border border-dashed border-border flex items-center justify-center text-sm text-muted-foreground text-center p-6">
+                Choose the invoice on the left.
+              </div>
+            ) : (
+              <>
+                <div className="rounded-xl border border-border bg-muted/30 p-3 text-xs space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono font-semibold text-sm">{inv.InvoiceNo}</span>
+                    <span className={daysLeft <= 30 ? "text-amber-600" : "text-muted-foreground"}>
+                      declare by {day(inv.Deadline)} · {daysLeft} day{daysLeft === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="truncate">{inv.CustomerName} · {inv.Property} · {inv.BookingNo}</div>
+                  {inv.MilestoneName && (
+                    <div className="text-muted-foreground truncate">
+                      {inv.MilestoneName}: due {inr(inv.MilestoneDue)} · paid {inr(inv.MilestonePaid)}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className={label}>2 · Why</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(REASON_LABEL).map(([k, v]) => (
+                      <button
+                        key={k}
+                        onClick={() => setReasonType(k)}
+                        className={`h-8 px-3 rounded-lg text-xs font-medium border ${reasonType === k ? "btn-module text-white border-transparent" : "border-border hover:bg-muted"}`}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className={label}>3 · Amount to credit (incl. GST)</label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative flex-1 min-w-[160px]">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">₹</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        className={`${input} pl-7 tabular-nums ${tooMuch ? "border-red-500 focus:ring-red-500/30" : ""}`}
+                      />
+                    </div>
+                    {[5, 10].map((p) => (
+                      <button key={p} onClick={() => setAmount(String(Math.round(open * p) / 100))} className="h-10 px-3 rounded-lg border border-border text-xs hover:bg-muted">{p}%</button>
+                    ))}
+                    <button onClick={() => setAmount(String(open))} className="h-10 px-3 rounded-lg border border-border text-xs hover:bg-muted">All left</button>
+                  </div>
+                  <p className={`mt-1 text-[0.6875rem] ${tooMuch ? "text-red-600" : "text-muted-foreground"}`}>
+                    {tooMuch ? `More than can be credited — at most ${inr(open)}` : `Up to ${inr(open)} can be credited on this invoice`}
+                  </p>
+                </div>
+
+                <div>
+                  <label className={label}>4 · What changed (printed on the credit note)</label>
+                  <textarea
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    rows={3}
+                    maxLength={500}
+                    placeholder="e.g. Festive discount agreed on 12 Oct · super built-up area revised from 1,250 to 1,232 sq ft"
+                    className={`${input} h-auto py-2 resize-none`}
+                  />
+                </div>
+
+                <div className="rounded-xl border border-border p-3 text-xs space-y-1.5">
+                  <div className="text-sm font-semibold mb-1">On approval</div>
+                  {row("Taxable value", inr(amt - gst))}
+                  {row(`GST${inv.GstRate ? ` @ ${Number(inv.GstRate)}%` : ""}`, inr(gst))}
+                  {row("Credit note total", inr(amt), true)}
+                  <div className="border-t border-border my-1.5" />
+                  {row(open < Number(inv.Amount) ? "Invoice value (after earlier credit notes)" : "Invoice value", <>{inr(open)} → <b>{inr(Math.max(0, open - amt))}</b></>)}
+                  {row("Booking value", <>{inr(inv.BookingTotal)} → <b>{inr(Number(inv.BookingTotal) - amt)}</b></>)}
+                  {newDue != null && row("Milestone due", <>{inr(inv.MilestoneDue)} → <b>{inr(newDue)}</b></>)}
+                  {row("Moves to the customer's account", <b className={toAccount > 0 ? "text-sky-600" : ""}>{inr(toAccount)}</b>)}
+                  <p className="text-[0.6875rem] text-muted-foreground pt-1">
+                    GST on money we keep stays paid as an advance; it is given back only if that money is refunded.
+                  </p>
+                </div>
+              </>
             )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={label}>Amount (incl. GST)</label>
-              <input
-                type="number"
-                min={0}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className={`${input} ${tooMuch ? "border-red-500" : ""}`}
-              />
-              {tooMuch && <p className="mt-1 text-[0.6875rem] text-red-600">At most {inr(inv?.Open)}</p>}
-            </div>
-            <div>
-              <label className={label}>Why</label>
-              <select value={reasonType} onChange={(e) => setReasonType(e.target.value)} className={input}>
-                {Object.entries(REASON_LABEL).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className={label}>What changed (printed on the credit note)</label>
-            <textarea
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              rows={2}
-              placeholder="e.g. Festive discount agreed on 12 Oct; super built-up area revised from 1,250 to 1,232 sq ft"
-              className={`${input} h-auto py-2`}
-            />
-          </div>
-          <p className="text-[0.6875rem] text-muted-foreground">
-            On approval: the booking's value and this invoice's milestone come down by the amount; whatever the customer
-            already paid above the new amount moves to their account as credit.
-          </p>
-          <div className="flex justify-end gap-2">
-            <button onClick={onClose} className="h-9 px-4 rounded-lg border border-border hover:bg-muted">
-              Close
-            </button>
-            <button
-              onClick={save}
-              disabled={busy || !inv || !(amt > 0) || tooMuch || !remarks.trim()}
-              className="h-9 px-4 rounded-lg btn-module text-white disabled:opacity-40"
-            >
+          </section>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-t border-border bg-muted/30">
+          <span className="text-xs text-muted-foreground min-w-0">
+            {!inv ? "Step 1 of 4 — choose the invoice" : !amt ? "Enter the amount" : tooMuch ? "The amount is too high" : !remarks.trim() ? "Describe what changed" : `Ready: ${inr(amt)} on ${inv.InvoiceNo} — it goes for approval next`}
+          </span>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={onClose} className="h-9 px-4 rounded-lg border border-border hover:bg-muted text-sm">Close</button>
+            <button onClick={save} disabled={busy || !ready} className="h-9 px-4 rounded-lg btn-module text-white text-sm disabled:opacity-40">
               {busy ? "Saving…" : "Prepare credit note"}
             </button>
           </div>

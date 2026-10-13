@@ -743,9 +743,14 @@ async function creditableInvoices(pool, { search = "", projectScope = null } = {
   const scope = projectScope ? ` AND ${require("./projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim()}` : "";
   const rows = (await req.query(`
     SELECT TOP 60 i.Id, i.InvoiceNo, i.InvoiceDate, i.InvoiceType, i.Amount, b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, c.CustomerName,
-           i.Amount - ISNULL((SELECT SUM(n.TotalAmount) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Status IN (N'Issued', N'TimeBarred')), 0) AS OpenAmount
+           i.Amount - ISNULL((SELECT SUM(n.TotalAmount) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Status IN (N'Issued', N'TimeBarred')), 0) AS OpenAmount,
+           -- For the raise form's preview: the booking's value and GST share, and the milestone's paid figure.
+           b.GrandTotal AS BookingTotal, ISNULL(b.TotalGstAmount, 0) AS BookingGst, ISNULL(b.UnitParkingGstRate, 0) AS GstRate,
+           m.MilestoneName, m.AmountDue AS MilestoneDue, m.AmountPaid AS MilestonePaid, proj.name AS ProjectName
     FROM dbo.CrmInvoice i JOIN dbo.CrmBooking b ON b.Id = i.BookingId
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+    LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = i.MilestoneId
+    LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
     WHERE i.Status <> N'Void' AND i.InvoiceType IN (N'Milestone', N'Booking', N'Final') AND b.IsActive = 1
       AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired', N'Transferred')${scope}
       ${t ? "AND (i.InvoiceNo LIKE @q OR b.BookingNo LIKE @q OR b.UnitNo LIKE @q OR c.CustomerName LIKE @q)" : ""}
