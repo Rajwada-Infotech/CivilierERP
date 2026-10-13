@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { readChainLink } from "@/lib/civilWorkDprLinks";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { Checkbox } from "@/components/ui/checkbox";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -21,7 +21,7 @@ import { ArrowRightLeft, Loader2, Search } from "lucide-react";
 const fmtDate = (d: string | null) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
-const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block";
+const labelCls = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5 block";
 
 // Move activities from one engineer to another — pick the engineer to take
 // work away from, tick the activities (one, several, or all of them), pick
@@ -191,18 +191,18 @@ export default function WorkTransfer() {
           { label: "Work Transfer" },
         ]}
       />
-      <CivilWorkDprShell
-        title="Work Transfer"
-        subtitle="Move activities from one engineer to another — one at a time or in bulk"
-        icon={ArrowRightLeft}
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Work transfer"
+        subtitle="Move activities from one engineer to another, one at a time or many together."
       >
         {!rights.canView ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          <div className="bg-card p-8 text-center text-sm text-muted-foreground" style={{ border: "1px dashed hsl(var(--border))" }}>
             You don't have access to this page.
           </div>
         ) : (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-card p-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-5">
+            <div className="bg-card px-4 py-4 grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3" style={{ border: "1px solid hsl(var(--foreground))" }}>
               <div>
                 <label className={labelCls}>Transfer from</label>
                 <SearchableNativeSelect
@@ -237,18 +237,18 @@ export default function WorkTransfer() {
                   onChange={(e) => setRemarks(e.target.value)}
                   maxLength={500}
                   placeholder="e.g. on leave, moved to another site"
-                  className="w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  className="w-full px-3 py-2.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
                 />
               </div>
             </div>
 
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 border-b border-border bg-muted/30">
-                <span className="text-sm font-heading font-semibold text-foreground">
+            <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+              <div className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
                   {fromName ? `${fromName}'s activities` : "Activities"}
                 </span>
                 {fromId && (
-                  <span className="text-[0.6875rem] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                  <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">
                     {selected.size} of {totalAll} selected
                   </span>
                 )}
@@ -260,7 +260,7 @@ export default function WorkTransfer() {
                         setFocusRung(null);
                         setSelected(new Set());
                       }}
-                      className="px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-xs font-medium text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/20 transition-colors"
+                      className="px-3 py-2 border border-dashed border-foreground text-xs font-medium text-foreground hover:bg-primary/10 transition-colors text-left"
                     >
                       Showing only the activity you opened - show all of {fromName ? `${fromName}'s` : "their"} work
                     </button>
@@ -269,7 +269,7 @@ export default function WorkTransfer() {
                     <select
                       value={projectFilter}
                       onChange={(e) => setProjectFilter(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                      className="h-9 px-3 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground focus:outline-none"
                     >
                       <option value="">All projects</option>
                       {projects.map((p) => (
@@ -283,7 +283,7 @@ export default function WorkTransfer() {
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Search activity, location…"
-                      className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                      className="w-full h-9 pl-8 pr-3 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -291,7 +291,7 @@ export default function WorkTransfer() {
 
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/30 text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
+                  <thead>
                     <tr>
                       <th className="px-4 py-2 w-10">
                         <Checkbox
@@ -309,7 +309,7 @@ export default function WorkTransfer() {
                       <th className="px-4 py-2 text-left">End Date</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border/50">
+                  <tbody>
                     {!fromId ? (
                       <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">Pick the engineer to transfer work from.</td></tr>
                     ) : isLoading ? (
@@ -328,8 +328,8 @@ export default function WorkTransfer() {
                         return (
                           <React.Fragment key={c.assignmentId}>
                           {newProject && (
-                            <tr className="bg-muted/40">
-                              <td colSpan={7} className="px-4 py-1.5 text-[0.6875rem] font-heading font-semibold uppercase tracking-wider text-foreground">
+                            <tr style={{ boxShadow: "inset 0 1px 0 hsl(var(--foreground))" }}>
+                              <td colSpan={7} className="px-4 py-2 font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-foreground">
                                 {c.projectName || "No project"}
                                 <span className="ml-2 font-normal normal-case tracking-normal text-muted-foreground">
                                   {visible.filter((v) => v.projectId === c.projectId).length} loaded
@@ -337,7 +337,7 @@ export default function WorkTransfer() {
                               </td>
                             </tr>
                           )}
-                          <tr className="hover:bg-muted/20">
+                          <tr>
                             <td className="px-4 py-3">
                               <Checkbox
                                 checked={selected.has(c.assignmentId)}
@@ -352,12 +352,13 @@ export default function WorkTransfer() {
                             </td>
                             <td className="px-4 py-3 text-xs">{c.engineerNames || "—"}</td>
                             <td className="px-4 py-3">
-                              <span className={`inline-flex px-2 py-0.5 rounded-full text-[0.6875rem] font-medium ${meta?.className ?? ""}`}>
-                                {meta?.label ?? c.status}
-                              </span>
+                              <SheetMark
+                                text={meta?.label ?? c.status}
+                                tone={c.status === "COMPLETED" || c.status === "APPROVED" ? "done" : c.status === "CANCELLED" ? "stopped" : "waiting"}
+                              />
                             </td>
-                            <td className="px-4 py-3 text-xs">{Math.round(c.progressPercent ?? 0)}%</td>
-                            <td className="px-4 py-3 text-xs whitespace-nowrap">{fmtDate(c.endDate)}</td>
+                            <td className="px-4 py-3 font-heading text-xs font-semibold tabular-nums text-foreground">{Math.round(c.progressPercent ?? 0)}%</td>
+                            <td className="px-4 py-3 text-xs whitespace-nowrap tabular-nums">{fmtDate(c.endDate)}</td>
                           </tr>
                           </React.Fragment>
                         );
@@ -368,14 +369,14 @@ export default function WorkTransfer() {
               </div>
 
               {fromId && visible.length > 0 && (
-                <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-border/60 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-border text-xs text-muted-foreground">
                   <span>Showing {visible.length} of {totalMatching}</span>
                   {candQ.hasNextPage && (
                     <button
                       type="button"
                       onClick={() => candQ.fetchNextPage()}
                       disabled={candQ.isFetchingNextPage}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-foreground disabled:opacity-50"
+                      className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed px-3 py-2 border border-foreground text-foreground hover:bg-primary/10"
                     >
                       {candQ.isFetchingNextPage && <Loader2 size={12} className="animate-spin" />}
                       Load more
@@ -385,15 +386,17 @@ export default function WorkTransfer() {
               )}
 
               {rights.canEdit && (
-                <div className="flex items-center justify-end gap-3 px-5 py-3.5 border-t border-border bg-muted/20">
-                  <span className="text-xs text-muted-foreground">
-                    {selected.size > 0 && toName ? `${selected.size} → ${toName}` : "Select activities and a receiving engineer"}
+                <div className="flex flex-wrap items-center justify-end gap-3 px-4 py-3" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
+                  <span className={`text-xs ${selected.size > 0 && toName ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                    {selected.size > 0 && toName
+                      ? `${selected.size} activit${selected.size === 1 ? "y" : "ies"}${fromName ? ` from ${fromName}` : ""} to ${toName}`
+                      : "Select activities and a receiving engineer"}
                   </span>
                   <button
                     type="button"
                     onClick={handleTransfer}
                     disabled={!canSubmit}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-cyan-500 to-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-5 bg-foreground text-card border border-foreground"
                   >
                     {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <ArrowRightLeft size={14} />}
                     Transfer{selected.size > 0 ? ` ${selected.size}` : ""}
@@ -403,7 +406,7 @@ export default function WorkTransfer() {
             </div>
           </div>
         )}
-      </CivilWorkDprShell>
+      </SheetShell>
     </>
   );
 }
