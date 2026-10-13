@@ -291,9 +291,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               >
                 <div
                   className={
-                    !effectiveIsHome && !isMobile
-                      ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background min-w-0 overflow-x-clip"
-                      : "p-4 md:p-6 transition-opacity duration-300 min-w-0 overflow-x-clip"
+                    isHome
+                      ? "transition-opacity duration-300 min-w-0 overflow-x-clip"
+                      : !effectiveIsHome && !isMobile
+                        ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background min-w-0 overflow-x-clip"
+                        : "p-4 md:p-6 transition-opacity duration-300 min-w-0 overflow-x-clip"
                   }
                   style={{ opacity: moduleSwitching ? 0 : 1 }}
                 >

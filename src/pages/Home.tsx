@@ -1325,7 +1325,7 @@ export default function HomePage() {
   const today = new Date();
 
   return (
-    <div className="font-body flex flex-col -m-4 md:-m-6" /* cancels the layout's page padding: the sheet's border runs right round the screen */ style={{ minHeight: "calc(100vh - 3.5rem)" }}>
+    <div className="font-body flex flex-col" /* the layout gives Home no page padding, so the sheet's border runs right round the screen */ style={{ minHeight: "calc(100vh - 3.5rem)" }}>
       <style>{SHEET_CSS}</style>
       <div className="crm-sheet sheet-in" style={{ flex: 1, margin: 6 }}>
         {/* Title block */}
