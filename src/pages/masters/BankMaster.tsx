@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,8 +22,6 @@ import {
   Eye,
   Printer,
   Search,
-  AlertCircle,
-  XCircle,
   RotateCcw,
   Download,
   Upload,
@@ -211,17 +208,14 @@ const BANK_TYPES = [
   "Regional Rural",
 ];
 
-// ─── Shared input class (ContractorMaster style) ─────────────────────────────
+// ─── Shared classes ──────────────────────────────────────────────────────────
 const inputCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
-// ─── Bank Type Badges ───────────────────────────────────────────────────────
-const bankTypeBadge: Record<string, string> = {
-  Nationalized: "bg-blue-500/10 border-blue-500/20 text-blue-600",
-  Private: "bg-violet-500/10 border-violet-500/20 text-violet-600",
-  "Co-operative": "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
-  Foreign: "bg-cyan-500/10 border-cyan-500/20 text-cyan-600",
-  "Regional Rural": "bg-green-500/10 border-green-500/20 text-green-600",
-};
+  "w-full text-sm border border-foreground/40 focus:border-foreground px-3 py-2.5 bg-card text-foreground placeholder:text-muted-foreground/50 focus:outline-none";
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+const FIG = "font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground";
 
 // ─── Column Builder ─────────────────────────────────────────────────────────
 function buildColumns(
@@ -242,53 +236,33 @@ function buildColumns(
       id: "company",
       accessorKey: "BCompanyName",
       header: "Company",
-      cell: ({ getValue }) => (
-        <span className="text-foreground font-body text-xs">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="text-foreground text-xs">{(getValue() as string) || "—"}</span>,
     },
     {
       id: "bankName",
       accessorKey: "BName",
       header: "Bank Name",
-      cell: ({ getValue }) => (
-        <span className="font-heading font-medium text-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="font-medium text-foreground">{(getValue() as string) || "—"}</span>,
     },
     {
       id: "branch",
       accessorKey: "BBranch",
       header: "Branch",
-      cell: ({ getValue }) => (
-        <span className="text-muted-foreground text-xs">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className="text-muted-foreground text-xs">{(getValue() as string) || "—"}</span>,
     },
     {
       id: "accountNo",
       accessorKey: "BAccountNumber",
       header: "Account No.",
       enableSorting: false,
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className={`${FIG} tracking-wide`}>{(getValue() as string) || "—"}</span>,
     },
     {
       id: "ifsc",
       accessorKey: "BIfscCode",
       header: "IFSC",
       enableSorting: false,
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded tracking-widest">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className={`${FIG} tracking-wide`}>{(getValue() as string) || "—"}</span>,
     },
     {
       id: "bankType",
@@ -296,27 +270,14 @@ function buildColumns(
       header: "Type",
       cell: ({ getValue }) => {
         const v = getValue() as string | null;
-        if (!v) return <span className="text-muted-foreground">—</span>;
-        const cls =
-          bankTypeBadge[v] ?? "bg-muted border-border text-muted-foreground";
-        return (
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${cls}`}
-          >
-            {v}
-          </span>
-        );
+        return v ? <span className={LBL}>{v}</span> : <span className="text-muted-foreground/50">—</span>;
       },
     },
     {
       id: "openingBalance",
       accessorKey: "BOpeningBalance",
       header: "Opening Bal.",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-foreground">
-          ₹ {Number(getValue() || 0).toLocaleString("en-IN")}
-        </span>
-      ),
+      cell: ({ getValue }) => <span className={FIG}>₹ {Number(getValue() || 0).toLocaleString("en-IN")}</span>,
     },
     {
       id: "status",
@@ -324,17 +285,7 @@ function buildColumns(
       header: "Status",
       cell: ({ getValue }) => {
         const active = Boolean(getValue());
-        return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-              active
-                ? "bg-emerald-500/10 text-emerald-600"
-                : "bg-muted text-muted-foreground"
-            }`}
-          >
-            {active ? "Active" : "Inactive"}
-          </span>
-        );
+        return <SheetMark text={active ? "Active" : "Inactive"} tone={active ? "done" : "none"} />;
       },
     },
     {
@@ -345,59 +296,43 @@ function buildColumns(
         const bank = row.original;
         const id = String(bank.BId);
         return (
-          <div className="flex items-center justify-start gap-2 w-full min-w-[120px]">
+          <div className="flex items-center justify-start gap-1 w-full min-w-[120px]">
             {deleteId === id ? (
               <>
-                <span className="text-[0.6875rem] text-muted-foreground mr-1">
-                  Confirm?
-                </span>
                 <button
                   onClick={() => onDeleteConfirm(id)}
-                  className="p-1 rounded text-destructive hover:bg-destructive/10"
+                  className="h-7 px-2 flex items-center gap-1 border border-destructive bg-destructive text-destructive-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]"
+                  title="Confirm delete"
                 >
-                  <Check size={12} />
+                  <Check size={12} /> Delete
                 </button>
-                <button
-                  onClick={onDeleteCancel}
-                  className="p-1 rounded text-muted-foreground hover:bg-muted"
-                >
-                  <X size={12} />
+                <button onClick={onDeleteCancel} className={ACT} title="Keep" aria-label="Keep">
+                  <X size={13} />
                 </button>
               </>
             ) : (
               <>
-                <button data-row-view
-                  onClick={() => onView(bank)}
-                  className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
-                  title="View details"
-                >
-                  <Eye size={15} />
+                <button data-row-view onClick={() => onView(bank)} className={ACT} title="View details" aria-label="View details">
+                  <Eye size={13} />
                 </button>
                 {canPrint && (
-                  <button
-                    onClick={() => onPrint(bank)}
-                    className="p-1 rounded text-amber-500 hover:bg-[#ffe2021a] transition-colors"
-                    title="Print"
-                  >
-                    <Printer size={15} />
+                  <button onClick={() => onPrint(bank)} className={ACT} title="Print" aria-label="Print">
+                    <Printer size={13} />
                   </button>
                 )}
                 {canEdit && (
-                  <button
-                    onClick={() => onEdit(bank)}
-                    className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
-                    title="Edit"
-                  >
-                    <Edit2 size={15} />
+                  <button onClick={() => onEdit(bank)} className={ACT} title="Edit" aria-label="Edit">
+                    <Edit2 size={13} />
                   </button>
                 )}
                 {canDelete && (
                   <button
                     onClick={() => onDeleteRequest(id)}
-                    className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                    className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
                     title="Delete"
+                    aria-label="Delete"
                   >
-                    <Trash2 size={15} />
+                    <Trash2 size={13} />
                   </button>
                 )}
               </>
@@ -412,8 +347,6 @@ function buildColumns(
 // ─── Main Component ─────────────────────────────────────────────────────────
 const BankMaster: React.FC = () => {
   const queryClient = useQueryClient();
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
   const rights = usePageRights("bank-master");
 
   const {
@@ -906,27 +839,18 @@ const BankMaster: React.FC = () => {
   );
 
   if (error)
-    return <div className="p-6 text-red-500">Failed to load banks.</div>;
+    return <div className="p-6 text-destructive">Failed to load banks.</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Bank Master"]} />
 
-      <FinanceShell
-        title="Bank Master"
-        subtitle="Manage bank accounts with branch, IFSC and balance details"
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Banks"
+        subtitle="The company's bank accounts: branch, account number, IFSC, opening balance and the projects each is tagged to."
         action={
-          <div className="flex items-center gap-2">
-            <span
-              className="text-xs font-heading px-3 py-1.5 rounded-lg"
-              style={{
-                background: "rgba(99,102,241,0.12)",
-                border: "1px solid rgba(99,102,241,0.25)",
-                color: "#818cf8",
-              }}
-            >
-              {dbBanks.length} Banks
-            </span>
+          <div className="flex items-center gap-2 flex-wrap">
             <input
               ref={importFileInputRef}
               type="file"
@@ -938,10 +862,10 @@ const BankMaster: React.FC = () => {
               <button
                 onClick={handleDownloadTemplate}
                 title="Download a blank CSV with all bank fields"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                className={`${KEY} px-3 py-2 border border-foreground text-foreground hover:bg-primary/10`}
               >
                 <Download size={13} />
-                <span className="hidden sm:inline">Download Template</span>
+                <span className="hidden sm:inline">Template</span>
               </button>
             )}
             {rights.canCreate && (
@@ -949,77 +873,54 @@ const BankMaster: React.FC = () => {
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import banks from a filled-in CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className={`${KEY} px-3 py-2 border border-foreground bg-foreground text-card`}
               >
-                {importing ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <Upload size={13} />
-                )}
-                <span className="hidden sm:inline">
-                  {importing ? "Importing..." : "Import CSV"}
-                </span>
+                {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span className="hidden sm:inline">{importing ? "Importing…" : "Import CSV"}</span>
               </button>
             )}
           </div>
         }
       >
-        {/* ── Form Card ── */}
-        {(rights.canCreate || rights.canEdit) && <div
-          className="rounded-xl overflow-hidden"
-          onKeyDown={preventEnterSubmit}
-          style={{
-            background: isDark
-              ? "rgba(12,14,22,0.55)"
-              : "rgba(255,255,255,0.82)",
-            border: isDark
-              ? "1px solid rgba(99,102,241,0.20)"
-              : "1px solid rgba(99,102,241,0.16)",
-            backdropFilter: "blur(18px) saturate(150%)",
-            WebkitBackdropFilter: "blur(18px) saturate(150%)",
-            boxShadow: isDark
-              ? "0 8px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)"
-              : "0 8px 32px rgba(99,102,241,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
-          }}
-        >
-          {/* Card header — title only */}
-          <div
-            className="flex items-center gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
-            style={{
-              background: isDark
-                ? "rgba(99,102,241,0.09)"
-                : "rgba(99,102,241,0.05)",
-              borderBottom: isDark
-                ? "1px solid rgba(99,102,241,0.18)"
-                : "1px solid rgba(99,102,241,0.13)",
-            }}
-          >
-            <div>
-              <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? "Edit Bank" : "Add Bank"}
-              </h2>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                Fields marked <span className="text-destructive">*</span> are
-                required
-              </p>
-            </div>
+        {/* ── Figures ── */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Bank accounts", value: dbBanks.length.toLocaleString("en-IN"), note: "in all" },
+              { label: "Active", value: dbBanks.filter((b) => b.BStatus).length.toLocaleString("en-IN"), note: "open for payments" },
+              { label: "Tagged to projects", value: dbBanks.filter((b) => b.ProjectNames).length.toLocaleString("en-IN"), note: "the rest are shared" },
+              { label: "Opening balance", value: `₹ ${dbBanks.reduce((sum, b) => sum + Number(b.BOpeningBalance || 0), 0).toLocaleString("en-IN")}`, note: "across all accounts" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Form ── */}
+        {(rights.canCreate || rights.canEdit) && <div className="bg-card relative" onKeyDown={preventEnterSubmit} style={{ border: RULE, zIndex: 10 }}>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+            <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
+              {editingId ? "Edit bank account" : "Add bank account"}
+            </h2>
+            <p className="text-[0.6875rem] text-muted-foreground">
+              Fields marked <span className="text-destructive">*</span> are required
+            </p>
           </div>
 
-          <div className="px-5 sm:px-6 py-6 space-y-7">
+          <div className="px-4 py-5 space-y-7">
             {/* ── Section: Basic Information ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <Landmark size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Basic Information
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Basic Information
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
                 {/* Bank Name */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     Bank Name <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1031,19 +932,18 @@ const BankMaster: React.FC = () => {
                       type="text"
                       {...register("bankName")}
                       placeholder="e.g. State Bank of India"
-                      className={`${inputCls} pl-8 ${errors.bankName ? "border-red-400" : ""}`}
+                      className={`${inputCls} pl-8 ${errors.bankName ? "border-destructive" : ""}`}
                     />
                   </div>
                   {errors.bankName && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> {errors.bankName.message}
+                    <p className="text-xs text-destructive mt-1">{errors.bankName.message}
                     </p>
                   )}
                 </div>
 
                 {/* Branch */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Branch Name
                   </label>
                   <input
@@ -1058,18 +958,13 @@ const BankMaster: React.FC = () => {
 
             {/* ── Section: Account Details ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <CreditCard size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Account Details
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Account Details
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
                 {/* Account Number */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     Account Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1081,19 +976,18 @@ const BankMaster: React.FC = () => {
                       type="text"
                       {...register("accountNo")}
                       placeholder="Bank account number"
-                      className={`${inputCls} pl-8 font-mono tracking-widest ${errors.accountNo ? "border-red-400" : ""}`}
+                      className={`${inputCls} pl-8 font-heading tabular-nums tracking-wide ${errors.accountNo ? "border-destructive" : ""}`}
                     />
                   </div>
                   {errors.accountNo && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> {errors.accountNo.message}
+                    <p className="text-xs text-destructive mt-1">{errors.accountNo.message}
                     </p>
                   )}
                 </div>
 
                 {/* IFSC Code */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <label className={`${LBL} flex items-center gap-1`}>
                     IFSC Code <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1114,24 +1008,21 @@ const BankMaster: React.FC = () => {
                       }
                       placeholder="e.g. SBIN0001234"
                       maxLength={11}
-                      className={`${inputCls} pl-8 font-mono tracking-widest uppercase ${errors.ifsc ? "border-red-400" : ""}`}
+                      className={`${inputCls} pl-8 font-heading tabular-nums tracking-wide uppercase ${errors.ifsc ? "border-destructive" : ""}`}
                     />
                     {form.ifsc.length === 11 && IFSC_REGEX.test(form.ifsc) && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded">
-                        ✓
-                      </span>
+                      <Check size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground" aria-label="Valid IFSC" />
                     )}
                   </div>
                   {errors.ifsc && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> {errors.ifsc.message}
+                    <p className="text-xs text-destructive mt-1">{errors.ifsc.message}
                     </p>
                   )}
                 </div>
 
                 {/* Account Holder Name */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Account Holder Name
                   </label>
                   <div className="relative">
@@ -1150,7 +1041,7 @@ const BankMaster: React.FC = () => {
 
                 {/* Account Type */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Account Type
                   </label>
                   <TreeDropdown
@@ -1166,7 +1057,7 @@ const BankMaster: React.FC = () => {
 
                 {/* Bank Type */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Bank Type
                   </label>
                   <TreeDropdown
@@ -1185,17 +1076,17 @@ const BankMaster: React.FC = () => {
                     getBanksGroupId, applied server-side on every
                     create/update regardless of what's sent here). */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Account Group
                   </label>
-                  <div className="h-9 px-3 flex items-center rounded-lg border border-border/60 bg-muted/30 text-sm text-muted-foreground">
+                  <div className="h-[42px] px-3 flex items-center border border-dashed border-foreground/40 text-sm text-muted-foreground">
                     Banks
                   </div>
                 </div>
 
                 {/* Opening Balance */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                  <label className={`${LBL} block`}>
                     Opening Balance (₹)
                   </label>
                   <div className="relative">
@@ -1209,12 +1100,11 @@ const BankMaster: React.FC = () => {
                       step="0.01"
                       {...register("openingBalance")}
                       placeholder="0.00"
-                      className={`${inputCls} pl-8 font-mono ${errors.openingBalance ? "border-red-400" : ""}`}
+                      className={`${inputCls} pl-8 font-heading tabular-nums ${errors.openingBalance ? "border-destructive" : ""}`}
                     />
                   </div>
                   {errors.openingBalance && (
-                    <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
-                      <AlertCircle size={11} /> {errors.openingBalance.message}
+                    <p className="text-xs text-destructive mt-1">{errors.openingBalance.message}
                     </p>
                   )}
                 </div>
@@ -1223,14 +1113,9 @@ const BankMaster: React.FC = () => {
 
             {/* ── Section: Address ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <MapPin size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Address
-                </p>
-              </div>
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Address
+              </p>
               <div className="relative">
                 <MapPin
                   size={13}
@@ -1247,15 +1132,10 @@ const BankMaster: React.FC = () => {
 
             {/* ── Section: Tag Project(s) ── */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-                  <Building2 size={12} className="text-primary" />
-                </div>
-                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
-                  Tag Project(s)
-                </p>
-              </div>
-              <p className="text-[0.6875rem] text-muted-foreground -mt-1">
+              <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
+                Tag Project(s)
+              </p>
+              <p className="text-[0.6875rem] text-muted-foreground leading-relaxed max-w-[110ch]">
                 Optional — leave empty and this bank stays in the shared pool every untagged Project draws from.
                 Tag it to one or more Projects and it becomes the ONLY bank offered for those Projects' work — it
                 disappears from every other Project's bank selection, including ones with no tags of their own.
@@ -1264,9 +1144,9 @@ const BankMaster: React.FC = () => {
                 under a different Company than the one shown here.
               </p>
 
-              <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+              <div className="border border-foreground/40 p-3 space-y-3">
                 <div>
-                  <label className="text-[0.6875rem] text-muted-foreground block mb-1">Company</label>
+                  <label className={`${LBL} block mb-1.5`}>Company</label>
                   <TreeDropdown
                     variant="flat"
                     value={form.companyName}
@@ -1278,7 +1158,7 @@ const BankMaster: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
                   <div>
-                    <label className="text-[0.6875rem] text-muted-foreground block mb-1">Project</label>
+                    <label className={`${LBL} block mb-1.5`}>Project</label>
                     <select
                       value={tagProjectId}
                       onChange={(e) => {
@@ -1309,7 +1189,7 @@ const BankMaster: React.FC = () => {
                     type="button"
                     onClick={handleAddTaggedProject}
                     disabled={!tagProjectId}
-                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed h-[34px]"
+                    className={`${KEY} px-4 h-[42px] bg-foreground text-card border border-foreground`}
                   >
                     <Plus size={13} /> Add
                   </button>
@@ -1321,7 +1201,7 @@ const BankMaster: React.FC = () => {
                   {selectedTaggedProjects.map((p) => (
                     <span
                       key={p.id}
-                      className="inline-flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full text-xs font-heading bg-primary/10 text-foreground border border-primary/30"
+                      className="inline-flex items-center gap-2 pl-2.5 pr-1 py-1 text-xs text-foreground border border-foreground"
                     >
                       <span>
                         {p.name}
@@ -1331,7 +1211,7 @@ const BankMaster: React.FC = () => {
                         type="button"
                         onClick={() => setProjectIds((prev) => prev.filter((x) => x !== p.id))}
                         title={`Remove ${p.name}`}
-                        className="p-0.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        className="p-0.5 text-muted-foreground hover:text-destructive transition-colors"
                       >
                         <X size={11} />
                       </button>
@@ -1346,46 +1226,35 @@ const BankMaster: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setValue("status", !form.status)}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
-                  form.status ? "bg-emerald-500" : "bg-muted-foreground/30"
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+                  form.status ? "bg-foreground" : "bg-muted-foreground/30"
                 }`}
               >
                 <span
-                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${
                     form.status ? "translate-x-4" : "translate-x-0.5"
                   }`}
                 />
               </button>
-              <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+              <span className={LBL}>
                 Status —{" "}
-                <span
-                  className={
-                    form.status ? "text-emerald-600" : "text-foreground"
-                  }
-                >
+                <span className="text-foreground">
                   {form.status ? "Active" : "Inactive"}
                 </span>
               </span>
             </div>
           </div>
 
-          {/* Card footer — actions */}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
-              {canSave ? (
-                <span className="text-emerald-500 font-medium">
-                  Ready to save
-                </span>
-              ) : (
-                "Fill in the required fields to save"
-              )}
-            </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3" style={{ borderTop: RULE }}>
+            <div className="hidden sm:block">
+              {canSave ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-[0.6875rem] text-muted-foreground">Fill in the required fields to save</span>}
+            </div>
             <div className="flex items-center gap-2 sm:ml-auto">
               <button
                 type="button"
                 onClick={handleReset}
                 disabled={!isDirty && !editingId}
-                className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                className={`${KEY} flex-1 sm:flex-none h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}
               >
                 <RotateCcw size={12} />
                 {editingId ? "Cancel" : "Reset"}
@@ -1394,19 +1263,19 @@ const BankMaster: React.FC = () => {
                 type="button"
                 onClick={handleSubmit(handleSave)}
                 disabled={!canSave}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                className={`${KEY} flex-1 sm:flex-none h-9 px-5 bg-foreground text-card border border-foreground whitespace-nowrap`}
               >
-                {editingId ? <Check size={14} /> : <Plus size={14} />}
-                {editingId ? "Update Bank" : "Save Bank"}
+                {editingId ? <Check size={13} /> : <Plus size={13} />}
+                {editingId ? "Update bank" : "Save bank"}
               </button>
             </div>
           </div>
         </div>}
 
         {/* ── Table Section ── */}
-        <div>
+        <div className="bg-card" style={{ border: RULE }}>
           {/* Toolbar */}
-          <div className="mb-3 flex items-center gap-3 flex-wrap">
+          <div className="px-4 py-3 flex items-center gap-3 flex-wrap" style={{ borderBottom: RULE }}>
             <div className="relative flex-1 sm:flex-none">
               <Search
                 size={13}
@@ -1416,7 +1285,7 @@ const BankMaster: React.FC = () => {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name, account, IFSC…"
-                className="w-full sm:w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                className="w-full sm:w-56 h-9 text-sm border border-foreground/40 focus:border-foreground pl-9 pr-3 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
               />
             </div>
 
@@ -1446,7 +1315,7 @@ const BankMaster: React.FC = () => {
                   setFilterBankType("");
                   setFilterStatus("");
                 }}
-                className="text-xs font-heading text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
+                className={`${KEY} h-9 px-3 border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground`}
               >
                 <X size={11} /> Clear
               </button>
@@ -1454,7 +1323,7 @@ const BankMaster: React.FC = () => {
           </div>
 
           {/* Table */}
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden [&_th:last-child]:text-left [&_td:last-child]:text-left">
+          <div className="[&_th:last-child]:text-left [&_td:last-child]:text-left">
             <DataTable
               key={`${search}-${filterBankType}-${filterStatus}`}
               data={filtered}
@@ -1468,12 +1337,12 @@ const BankMaster: React.FC = () => {
                 columns: buildExportColumns(accountGroups),
               } : undefined}
               rowClassName={(row) =>
-                editingId === String(row.original.BId) ? "bg-primary/5" : ""
+                editingId === String(row.original.BId) ? "shadow-[inset_3px_0_0_hsl(var(--primary))]" : ""
               }
             />
           </div>
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {/* ── Import Results Modal ── */}
       {importResults && (
@@ -1481,51 +1350,33 @@ const BankMaster: React.FC = () => {
           open={!!importResults}
           onOpenChange={() => setImportResults(null)}
         >
-          <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogContent className="sheet-frame max-w-lg max-h-[80vh] flex flex-col" style={{ margin: 0 }}>
             <DialogHeader>
-              <DialogTitle className="font-heading text-base">
-                Import Results
-              </DialogTitle>
+              <div className="pb-3" style={{ borderBottom: RULE }}>
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Banks · CSV import</p>
+                <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Import results</DialogTitle>
+              </div>
             </DialogHeader>
-            <div className="flex gap-3 text-sm mb-2">
-              <span className="text-emerald-600 font-medium">
-                ✓ {importResults.filter((r) => r.status === "success").length}{" "}
-                imported
-              </span>
-              <span className="text-destructive font-medium">
-                ✗ {importResults.filter((r) => r.status === "error").length}{" "}
-                failed
-              </span>
+            <div className="flex items-center gap-4 flex-wrap mb-3">
+              <SheetMark text={`${importResults.filter((r) => r.status === "success").length} imported`} tone="done" />
+              {importResults.some((r) => r.status === "error") && (
+                <SheetMark text={`${importResults.filter((r) => r.status === "error").length} failed`} tone="stopped" />
+              )}
             </div>
-            <div className="overflow-y-auto flex-1 space-y-1.5 pr-1">
-              {importResults.map((r) => (
-                <div
-                  key={r.row}
-                  className={`flex items-start gap-2.5 rounded-lg px-3 py-2 text-xs ${
-                    r.status === "success"
-                      ? "bg-emerald-500/8 text-emerald-700"
-                      : "bg-destructive/8 text-destructive"
-                  }`}
-                >
-                  <span className="font-mono shrink-0 text-muted-foreground">
-                    Row {r.row}
-                  </span>
-                  <span className="font-medium shrink-0">{r.name}</span>
-                  {r.status === "success" ? (
-                    <span className="ml-auto text-emerald-600">✓</span>
-                  ) : (
-                    <span className="ml-2 text-destructive/80">
-                      {r.message}
-                    </span>
-                  )}
+            <div className="overflow-y-auto flex-1" style={{ border: RULE }}>
+              {importResults.map((r, i) => (
+                <div key={r.row} className="flex items-start gap-3 px-3 py-2 text-sm" style={i ? { borderTop: "1px solid hsl(var(--border) / 0.7)" } : undefined}>
+                  <span className="font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground shrink-0 mt-1 w-12">Row {r.row}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate text-foreground">{r.name}</p>
+                    {r.status !== "success" && r.message && <p className="text-xs text-destructive mt-0.5">{r.message}</p>}
+                  </div>
+                  {r.status === "success" ? <Check size={14} className="text-foreground shrink-0 mt-0.5" /> : <X size={14} className="text-destructive shrink-0 mt-0.5" />}
                 </div>
               ))}
             </div>
             <div className="pt-3 flex justify-end">
-              <button
-                onClick={() => setImportResults(null)}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
+              <button onClick={() => setImportResults(null)} className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}>
                 Close
               </button>
             </div>
@@ -1540,25 +1391,22 @@ const BankMaster: React.FC = () => {
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRow(null)}
           />
-          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-2">
-                <Landmark size={15} className="text-primary" />
-                <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Bank Details
-                </h3>
+          <div
+            className="sheet-frame relative w-full max-w-sm bg-card flex flex-col animate-in slide-in-from-right duration-200"
+            style={{ margin: 0, borderLeft: RULE }}
+          >
+            <div className="flex items-end justify-between gap-3 px-5 py-4" style={{ borderBottom: RULE }}>
+              <div className="min-w-0">
+                <p className={LBL}>Bank account{viewRow.BBankType ? ` · ${viewRow.BBankType}` : ""}</p>
+                <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{viewRow.BName}</h3>
               </div>
-              <button
-                onClick={() => setViewRow(null)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
-              >
-                <XCircle size={15} />
+              <button onClick={() => setViewRow(null)} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors" aria-label="Close">
+                <X size={16} />
               </button>
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               {[
                 { label: "Company", value: viewRow.BCompanyName },
-                { label: "Bank Name", value: viewRow.BName },
                 { label: "Branch", value: viewRow.BBranch },
                 {
                   label: "Account Number",
@@ -1590,49 +1438,37 @@ const BankMaster: React.FC = () => {
                 },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                    {label}
-                  </p>
-                  <p
-                    className={`text-sm text-foreground ${mono ? "font-mono font-semibold text-primary" : ""}`}
-                  >
+                  <p className={`${LBL} mb-1`}>{label}</p>
+                  <p className={`text-sm text-foreground break-words ${mono ? "font-heading tabular-nums font-semibold" : ""}`}>
                     {value || "—"}
                   </p>
                 </div>
               ))}
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
-                  Status
-                </p>
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${viewRow.BStatus ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-                >
-                  {viewRow.BStatus ? "Active" : "Inactive"}
-                </span>
+                <p className={`${LBL} mb-1.5`}>Status</p>
+                <SheetMark text={viewRow.BStatus ? "Active" : "Inactive"} tone={viewRow.BStatus ? "done" : "none"} />
               </div>
             </div>
-            <div className="px-5 py-3 border-t border-border flex justify-end gap-2 bg-muted/20">
-              <button
-                onClick={() => handlePrint(viewRow)}
-                className="px-3 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-              >
-                <Printer size={13} /> Print
-              </button>
-              <button
-                onClick={() => setViewRow(null)}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
+            <div className="px-5 py-3 flex justify-end gap-2 flex-wrap" style={{ borderTop: RULE }}>
+              {rights.canPrint && (
+                <button onClick={() => handlePrint(viewRow)} className={`${KEY} h-9 px-3 border border-foreground text-foreground hover:bg-primary/10`}>
+                  <Printer size={12} /> Print
+                </button>
+              )}
+              <button onClick={() => setViewRow(null)} className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}>
                 Close
               </button>
-              <button
-                onClick={() => {
-                  handleEdit(viewRow);
-                  setViewRow(null);
-                }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm flex items-center gap-1.5"
-              >
-                <Edit2 size={13} /> Edit Bank
-              </button>
+              {rights.canEdit && (
+                <button
+                  onClick={() => {
+                    handleEdit(viewRow);
+                    setViewRow(null);
+                  }}
+                  className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}
+                >
+                  <Edit2 size={12} /> Edit
+                </button>
+              )}
             </div>
           </div>
         </div></BodyPortal>
