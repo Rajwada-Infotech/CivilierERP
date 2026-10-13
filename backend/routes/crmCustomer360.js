@@ -283,11 +283,19 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
     // Customer-level summary rolls up every non-Cancelled/Rejected booking's
     // figures — same exclusion rule as the per-booking TotalOutstanding above,
     // so the top-of-page tiles and the drill-down numbers always agree.
+    // Credit notes on each booking (refunds and invoice reductions), newest first.
+    if (bookingIds.length) {
+      const cn = (await pool.request().query(`
+        SELECT n.Id, n.BookingId, n.DocNo, n.DocType, n.Status, n.Source, n.ReasonType, n.AgainstRef, n.DocDate, n.TotalAmount, n.GstAmount, n.MovedToAccount
+        FROM dbo.CrmGstNote n WHERE n.BookingId IN (${bookingIds.join(",")}) ORDER BY n.DocDate DESC, n.Id DESC`)).recordset;
+      for (const b of enrichedBookings) b.creditNotes = cn.filter((n) => n.BookingId === b.Id);
+    }
     const liveBookings = enrichedBookings.filter((b) => ![CrmStatus.CANCELLED, CrmStatus.REJECTED].includes(b.Status));
     const summary = {
       totalInvoiced: liveBookings.reduce((s, b) => s + b.invoices.reduce((si, i) => si + Number(i.Amount || 0), 0), 0),
       totalPaid: liveBookings.reduce((s, b) => s + Number(b.TotalPaid || 0), 0),
       totalOutstanding: liveBookings.reduce((s, b) => s + Number(b.TotalOutstanding || 0), 0),
+      totalCredited: liveBookings.reduce((s, b) => s + (b.creditNotes || []).filter((n) => n.Status === "Issued" || n.Status === "TimeBarred").reduce((si, n) => si + Number(n.TotalAmount || 0), 0), 0),
       totalOnAccountBalance: liveBookings.reduce((s, b) => s + b.onAccount.reduce((si, oa) => si + (Number(oa.Amount || 0) - Number(oa.AppliedAmount || 0)), 0), 0),
       totalBrokeragePaid: liveBookings.reduce((s, b) => s + b.brokerage.reduce((si, br) => si + Number(br.TotalPaid || 0), 0), 0),
       totalBrokerageDue: liveBookings.reduce((s, b) => s + b.brokerage.reduce((si, br) => si + Math.max(0, Number(br.ComputedAmount || 0) - Number(br.TotalPaid || 0)), 0), 0),

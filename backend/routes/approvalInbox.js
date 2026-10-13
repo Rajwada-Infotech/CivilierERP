@@ -1052,6 +1052,41 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
+    // A resale / buy-back's transfer deed: the Legal Head's sign-off and its
+    // signing date (services/crmTransferDeed.js).
+    if (!module || module === "crm-transfer-deeds" || module === "crm-transfer-deed-date") {
+      for (const [mod, label, col] of [["crm-transfer-deeds", "Transfer Deed (Legal Head)", "SeniorApprovalStatus"], ["crm-transfer-deed-date", "Transfer Deed (Date Approval)", "DateApprovalStatus"]]) {
+        if (module && module !== mod) continue;
+        queries.push(`
+          SELECT
+            '${mod}'                              AS Module,
+            '${label}'                            AS ModuleLabel,
+            CAST(d.Id AS NVARCHAR)                AS RecordId,
+            CONCAT(d.DeedNo, ' · ', COALESCE(b.UnitNo, b.BookingNo)) AS Reference,
+            d.CreatedAt                           AS RecordDate,
+            d.${col}                              AS Status,
+            CAST(NULL AS NVARCHAR)                AS ContractorName,
+            CONCAT(fc.CustomerName, CASE WHEN d.DeedType = N'Assignment' THEN CONCAT(' → ', tc.CustomerName) ELSE ' → us' END) AS SupplierName,
+            r.AgreedValue                         AS Amount,
+            ${withProjectName(NULL_EXTRA, "pr_td.name")}
+            ISNULL(CAST(cu.name AS NVARCHAR(255)), '') AS CreatedBy,
+            ''                                    AS ApprovedBy,
+            ''                                    AS ApprovedAt,
+            ''                                    AS RejectedBy,
+            ${col === "DateApprovalStatus" ? "CONCAT('Signing date: ', CONVERT(NVARCHAR(10), d.ProposedDate, 23))" : "CAST(ISNULL(d.SeniorRemarks, '') AS NVARCHAR(MAX))"} AS RejectionNote,
+            ISNULL(d.UpdatedAt, d.CreatedAt)      AS LastModified
+          FROM dbo.CrmTransferDeed d
+          JOIN dbo.CrmUnitResale r ON r.Id = d.ResaleId
+          JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+          LEFT JOIN dbo.CrmCustomer fc ON fc.Id = r.FromCustomerId
+          LEFT JOIN dbo.CrmCustomer tc ON tc.Id = r.ToCustomerId
+          LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy
+          LEFT JOIN dbo.enterprise pr_td ON pr_td.id = b.ProjectId
+          WHERE d.IsActive = 1 AND d.${col} = 'Pending'${pp("b.ProjectId")}
+        `);
+      }
+    }
+
     if (!module || module === "crm-sales-deed-director") {
       queries.push(`
         SELECT
@@ -1283,8 +1318,8 @@ function buildInboxQueries(module, projectScope = null) {
           r.Status,
           CAST(NULL AS NVARCHAR)                 AS ContractorName,
           cu.CustomerName                        AS SupplierName,
-          r.GrossAmount                          AS Amount,
-          ${NULL_EXTRA}
+          r.NetAmount                            AS Amount,
+          ${withProjectName(NULL_EXTRA, "pr_rf.name")}
           ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
           ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
           ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
@@ -1295,6 +1330,7 @@ function buildInboxQueries(module, projectScope = null) {
         JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
         LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
         LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
+        LEFT JOIN dbo.enterprise pr_rf ON pr_rf.id = r.ProjectId
         WHERE r.Status = 'Pending'${pp("COALESCE(r.ProjectId, (SELECT b2.ProjectId FROM dbo.CrmBooking b2 WHERE b2.Id = r.BookingId))")}
       `);
     }
@@ -1325,6 +1361,68 @@ function buildInboxQueries(module, projectScope = null) {
         LEFT JOIN dbo.CrmCustomer tc ON tc.Id = r.ToCustomerId
         LEFT JOIN dbo.Users rq ON rq.id = r.CreatedBy
         WHERE r.IsActive = 1 AND r.Status = 'Pending' AND r.BookingIds IS NOT NULL${pp("b.ProjectId")}
+      `);
+    }
+
+    // Credit notes: one raised without a refund (an invoice reduced), and the
+    // cancellation of any credit note.
+    for (const [mod, label, col, ref] of [
+      ["crm-credit-notes", "Credit Note (invoice reduced)", "ApprovalStatus", "CONCAT('Credit note on ', n.AgainstRef, ' · ', ISNULL(b.UnitNo, b.BookingNo))"],
+      ["crm-credit-note-cancel", "Credit Note — Cancellation", "CancelApprovalStatus", "CONCAT('Cancel ', ISNULL(n.DocNo, 'certificate'), ' · ', ISNULL(b.UnitNo, b.BookingNo))"],
+    ]) {
+      if (module && module !== mod) continue;
+      queries.push(`
+        SELECT
+          '${mod}'                               AS Module,
+          '${label}'                             AS ModuleLabel,
+          CAST(n.Id AS NVARCHAR)                 AS RecordId,
+          ${ref} AS Reference,
+          n.CreatedAt                            AS RecordDate,
+          n.${col}                               AS Status,
+          CAST(c.CustomerName AS NVARCHAR(255))  AS ContractorName,
+          CAST(n.ReasonType AS NVARCHAR(255))    AS SupplierName,
+          n.TotalAmount                          AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(n.CreatedBy AS NVARCHAR(255))) AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ISNULL(CAST(n.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          n.CreatedAt                            AS LastModified
+        FROM dbo.CrmGstNote n
+        JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+        LEFT JOIN dbo.CrmCustomer c ON c.Id = n.CustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = ${mod === "crm-credit-notes" ? "n.RequestedById" : "n.CancelRequestedById"}
+        WHERE n.${col} = 'Pending'${pp("b.ProjectId")}
+      `);
+    }
+
+    // A new owner of a conveyed property, recorded from their registered sale deed.
+    if (!module || module === "crm-ownership-changes") {
+      queries.push(`
+        SELECT
+          'crm-ownership-changes'                AS Module,
+          'Ownership Change'                     AS ModuleLabel,
+          CAST(o.Id AS NVARCHAR)                 AS RecordId,
+          CONCAT(o.ChangeNo, ' · ', ISNULL(b.UnitNo, b.BookingNo)) AS Reference,
+          o.CreatedAt                            AS RecordDate,
+          o.Status,
+          CAST(tc.CustomerName AS NVARCHAR(255)) AS ContractorName,
+          fc.CustomerName                        AS SupplierName,
+          o.ConsiderationValue                   AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(o.CreatedBy AS NVARCHAR(255))) AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ISNULL(CAST(o.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(o.UpdatedAt, o.CreatedAt)       AS LastModified
+        FROM dbo.CrmOwnershipChange o
+        LEFT JOIN dbo.CrmBooking b  ON b.Id = o.BookingId
+        LEFT JOIN dbo.CrmCustomer fc ON fc.Id = o.FromCustomerId
+        LEFT JOIN dbo.CrmCustomer tc ON tc.Id = o.ToCustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = o.CreatedBy
+        WHERE o.IsActive = 1 AND o.Status = 'Pending'${pp("b.ProjectId")}
       `);
     }
 

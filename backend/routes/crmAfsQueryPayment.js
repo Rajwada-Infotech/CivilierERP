@@ -255,7 +255,7 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
       return res.status(400).json({ error: "Enter the Stamp Duty or Registration Fee amount before sending the details to the customer." });
     }
 
-    const rawFiles = Array.isArray(req.body.files) ? req.body.files : [];
+    const rawFiles = Array.isArray(req.body?.files) ? req.body.files : [];
     if (!rawFiles.length) return res.status(400).json({ error: "At least one file is required" });
     let files;
     try {
@@ -324,7 +324,7 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId, Status FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
+      .query("SELECT BookingId, Status, StampDuty, RegistrationFee FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
     const row = cur.recordset[0];
     if (row.Status === "Confirmed") return res.status(400).json({ error: "Already confirmed" });
@@ -334,6 +334,16 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
+    // Confirming is staff attesting the customer paid the government, so it
+    // needs the receipt and the amount; an amount different from stamp duty +
+    // registration fee (e.g. a revised valuation) must be explained.
+    if (!b.proof) return res.status(400).json({ error: "Attach the payment proof (challan / receipt) the customer paid to the Sub-Registrar" });
+    const confirmed = b.ConfirmedAmount != null && b.ConfirmedAmount !== "" ? parseFloat(b.ConfirmedAmount) : NaN;
+    if (!(confirmed > 0)) return res.status(400).json({ error: "Enter the amount the customer paid" });
+    const expected = Number(row.StampDuty || 0) + Number(row.RegistrationFee || 0);
+    if (expected > 0 && Math.abs(confirmed - expected) > 0.5 && !String(b.Remarks || "").trim()) {
+      return res.status(400).json({ error: `The amount paid (₹${confirmed.toLocaleString("en-IN")}) differs from stamp duty + registration fee (₹${expected.toLocaleString("en-IN")}) — add a remark explaining why` });
+    }
     let proof = null;
     if (b.proof) {
       try {

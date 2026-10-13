@@ -290,11 +290,19 @@ async function autoApplyOnAccount(pool, bookingId, actorUserId, actorEmail) {
     if (!deposit.recordset.length) break;
 
     const milestone = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone
+      SELECT TOP 1 Id, DemandStatus FROM dbo.CrmPaymentMilestone
       WHERE BookingId = @bid AND Status NOT IN ('${CrmStatus.PAID}', 'Waived') AND AmountDue > ISNULL(AmountPaid, 0)
       ORDER BY MilestoneNo ASC
     `);
     if (!milestone.recordset.length) break;
+    // Only reached once the full price is in (autoApplyOnAccountIfFullyFunded).
+    // A milestone whose demand was never raised would stall the settlement
+    // forever, so raise it now — the trail stays Payment -> Demand ->
+    // Adjustment -> Invoice. Internal only: staff are notified, not the customer.
+    if (milestone.recordset[0].DemandStatus === CrmStatus.PENDING) {
+      try { await raiseDemandForMilestone(pool, milestone.recordset[0].Id, "Auto-raised — full booking amount received"); }
+      catch (e) { console.error("[crm-payments] autoApplyOnAccount: demand auto-raise failed —", e.message, `| milestoneId=${milestone.recordset[0].Id}`); break; }
+    }
 
     const outcome = await applyOnAccountToMilestone(pool, {
       onAccountId: deposit.recordset[0].Id, milestoneId: milestone.recordset[0].Id,
@@ -606,7 +614,7 @@ router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (re
       conds.push("m.MilestoneName = @mname");
     }
     const rows = await req0.query(`
-      SELECT m.Id
+      SELECT m.Id, m.BookingId
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -629,6 +637,9 @@ router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (re
         else { errors.push({ id, message: e.message }); console.error("[crm-payments] bulk demand error for milestone", id, e.message); }
       }
     }
+    // Same as a single demand: a booking already paid in full settles now.
+    const bookingIds = [...new Set(rows.recordset.map((r) => r.BookingId).filter((x) => x != null))];
+    for (const b of bookingIds) await autoApplyOnAccountIfFullyFunded(pool, b, actorId(req), req.user?.email || req.user?.name || null);
     res.json({ raised, skipped, errors });
   } catch (e) {
     console.error("[crm-payments] POST /demands/bulk error:", e.message);
@@ -646,7 +657,11 @@ router.post("/:id/demand", requirePageRight("crm-payments", "edit"), async (req,
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await raiseDemandForMilestone(pool, id, req.body?.Notes);
-    res.json({ success: true, ...result });
+    // If the full price is already on account, settle now (the sweep is
+    // otherwise only triggered by a newly approved payment).
+    const bk = (await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmPaymentMilestone WHERE Id = @id")).recordset[0];
+    const settled = bk ? await autoApplyOnAccountIfFullyFunded(pool, bk.BookingId, actorId(req), req.user?.email || req.user?.name || null) : [];
+    res.json({ success: true, ...result, settled: settled.length });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
     console.error("[crm-payments] POST /:id/demand error:", e.message);
@@ -1727,3 +1742,4 @@ module.exports.applyCrmOnAccountPaymentApproval = applyCrmOnAccountPaymentApprov
 module.exports.autoApplyOnAccount = autoApplyOnAccount;
 module.exports.ReceiptError = ReceiptError;
 module.exports.raiseDemandForMilestone = raiseDemandForMilestone;
+module.exports.autoApplyOnAccountIfFullyFunded = autoApplyOnAccountIfFullyFunded;

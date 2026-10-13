@@ -243,11 +243,16 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
     ok: true,
     stage: STAGE_MARKETING,
     label: stageLabel(STAGE_MARKETING),
-    remarque: null,
+    remark: null,
   };
 }
 
 async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, userId) {
+  if (stage === STAGE_CONFIRMED) {
+    const e = new Error("This booking is already confirmed — there is nothing left to approve");
+    e.status = 409;
+    throw e;
+  }
   const row = await requireActiveStage(pool, bookingId, stage);
   if (!(await canApproveStage(userRole, stage, userId))) {
     const e = new Error(`You are not authorized to approve at the '${stageLabel(stage)}' stage`);
@@ -405,6 +410,11 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
 // LevelData remains untouched (the stage never clears), so a re-approve
 // after correction works cleanly.
 async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, userId, remark) {
+  if (stage === STAGE_CONFIRMED) {
+    const e = new Error("This booking is already confirmed — it can't be sent back; cancel or amend it instead");
+    e.status = 409;
+    throw e;
+  }
   const row = await requireActiveStage(pool, bookingId, stage);
   if (!row) throw Object.assign(new Error("Booking not found"), { status: 404 });
   if (!remark || !String(remark).trim()) {

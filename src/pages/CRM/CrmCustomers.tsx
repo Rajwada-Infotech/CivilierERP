@@ -12,6 +12,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, Search, ChevronRight, IdCard, IndianRupee, Lock, Pencil, BookUser,
   User, MapPin, Briefcase, FileText, UserPlus, AlertTriangle, Trash2, Check, X,
+  Upload,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -20,13 +21,14 @@ import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import { CrmCustomerImportDialog } from "./CrmCustomerImportDialog";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
 
 const EMPTY_FORM = {
   LeadId: "", CustomerName: "", Mobile: "", AltMobile: "", Email: "",
-  PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", DateOfBirth: "",
+  PanNo: "", GstNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", DateOfBirth: "",
   PermanentAddress: "", PermanentCity: "", PermanentState: "", PermanentPincode: "",
   IsCurrentSameAsPermanent: true,
   CurrentAddress: "", CurrentCity: "", CurrentState: "", CurrentPincode: "",
@@ -145,7 +147,7 @@ function EditCustomerDialog({ customer, canDelete = false, startEditing = false,
   const [form, setForm] = useState({
     CustomerName: customer.CustomerName || "", Mobile: customer.Mobile || "",
     AltMobile: customer.AltMobile || "", Email: customer.Email || "",
-    PanNo: customer.PanNo || "", AadhaarNo: customer.AadhaarNo || "",
+    PanNo: customer.PanNo || "", GstNo: customer.GstNo || "", AadhaarNo: customer.AadhaarNo || "",
     Occupation: customer.Occupation || "", AnnualIncome: customer.AnnualIncome != null ? String(customer.AnnualIncome) : "",
     PermanentAddress: customer.PermanentAddress || "",
     PermanentCity: customer.PermanentCity || "", PermanentState: customer.PermanentState || "", PermanentPincode: customer.PermanentPincode || "",
@@ -202,6 +204,9 @@ function EditCustomerDialog({ customer, canDelete = false, startEditing = false,
     }
     if (form.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
       toast.error("PAN must be in format ABCDE1234F"); return;
+    }
+    if (String(form.GstNo || "").trim() && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][A-Z][0-9A-Z]$/.test(String(form.GstNo).replace(/\s+/g, "").toUpperCase())) {
+      toast.error("GSTIN must be 15 characters, like 27AAPFU0939F1ZV"); return;
     }
     if (form.AadhaarNo?.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
       toast.error("Aadhaar must be exactly 12 digits"); return;
@@ -270,7 +275,7 @@ function EditCustomerDialog({ customer, canDelete = false, startEditing = false,
                 { key: "Mobile", label: "Mobile", type: "text" },
                 { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                 { key: "Email", label: "Email", type: "email" },
-                { key: "PanNo", label: "PAN (Permanent Account Number)", type: "text" },
+                { key: "PanNo", label: "PAN (Permanent Account Number)", type: "text" }, { key: "GstNo", label: "GSTIN (only if the buyer is GST-registered)", type: "text" },
                 { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                 { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                 { key: "Occupation", label: "Occupation", type: "text" },
@@ -388,6 +393,7 @@ const CrmCustomers: React.FC = () => {
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   // Actions column: open the dialog in edit mode / inline delete confirmation.
   const [startEditing, setStartEditing] = useState(false);
@@ -448,6 +454,9 @@ const CrmCustomers: React.FC = () => {
     }
     if (form.PanNo.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
       toast.error("PAN must be in format ABCDE1234F"); return;
+    }
+    if (String(form.GstNo || "").trim() && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][A-Z][0-9A-Z]$/.test(String(form.GstNo).replace(/\s+/g, "").toUpperCase())) {
+      toast.error("GSTIN must be 15 characters, like 27AAPFU0939F1ZV"); return;
     }
     if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
       toast.error("Aadhaar must be exactly 12 digits"); return;
@@ -582,7 +591,7 @@ const CrmCustomers: React.FC = () => {
   // Every column's cell is wrapped with the same row-click handler so the
   // whole row stays clickable to open the edit dialog, matching the old
   // hand-rolled <tr onClick={...}> behavior.
-  const { canEdit, canDelete } = usePageRights("crm-customers");
+  const { canCreate, canEdit, canDelete } = usePageRights("crm-customers");
   const customerColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "CustomerNo", header: "Customer No", size: 110,
       cell: (i) => (
@@ -706,15 +715,21 @@ const CrmCustomers: React.FC = () => {
             filename="crm-customers"
           />
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          {canCreate && (
+            <button onClick={() => setImportOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+              <Upload size={14} /> Import
+            </button>
+          )}
           <button onClick={() => navigate("/masters/customers")}
             title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
             <BookUser size={14} /> Customer Ledger (Master)
           </button>
-          <button onClick={() => setDialogOpen(true)}
+          {canCreate && <button onClick={() => setDialogOpen(true)}
             className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
             <Plus size={14} /> New Customer
-          </button>
+          </button>}
         </div>
       }
     >
@@ -779,7 +794,7 @@ const CrmCustomers: React.FC = () => {
                   { key: "Mobile", label: "Mobile", type: "text" },
                   { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                   { key: "Email", label: "Email", type: "email" },
-                  { key: "PanNo", label: "PAN (Permanent Account Number)", type: "text" },
+                  { key: "PanNo", label: "PAN (Permanent Account Number)", type: "text" }, { key: "GstNo", label: "GSTIN (only if the buyer is GST-registered)", type: "text" },
                   { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                   { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                   { key: "Occupation", label: "Occupation", type: "text" },
@@ -908,6 +923,15 @@ const CrmCustomers: React.FC = () => {
           onClose={closeCustomer}
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-customers"] })}
           onDeleted={() => { qc.invalidateQueries({ queryKey: ["crm-customers"] }); closeCustomer(); }}
+        />
+      )}
+      {importOpen && (
+        <CrmCustomerImportDialog
+          onClose={() => setImportOpen(false)}
+          onImported={() => {
+            qc.invalidateQueries({ queryKey: ["crm-customers"] });
+            refetch();
+          }}
         />
       )}
     </CrmShell>

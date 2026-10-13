@@ -7,6 +7,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import { formatINR } from "@/utils/formatCurrency";
@@ -67,15 +68,6 @@ function fmtDate(d?: string | null) {
 
 // ─── Fetchers ──────────────────────────────────────────────────────────────
 
-async function fetchAll(type?: string, status?: string): Promise<any[]> {
-  try {
-    const params = new URLSearchParams();
-    if (type && type !== "All") params.set("type", type);
-    if (status && status !== "All") params.set("status", status);
-    const r = await fetchWithAuth(`${API}?${params}`);
-    return r.ok ? r.json() : [];
-  } catch { return []; }
-}
 
 const PAGE_SIZE = 20;
 interface NocListFilters {
@@ -117,6 +109,19 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
   if (!bookingId) return null;
   try {
     const r = await fetchWithAuth(`${API}/booking/${bookingId}/context`);
+    return r.ok ? r.json() : null;
+  } catch { return null; }
+}
+
+// Deep-link lookup — fetches the NOC row for a specific booking directly from
+// the server so the deep-link works even when the NOC is on page 2+ of the
+// paginated list. Mirrors the same pattern used in CrmLegalMilestones and
+// CrmHandover to fix the same class of pagination/deep-link bug.
+async function fetchNocByBooking(bookingId: string, nocType?: string): Promise<any | null> {
+  try {
+    const params = new URLSearchParams({ bookingId });
+    if (nocType) params.set("nocType", nocType);
+    const r = await fetchWithAuth(`${API}/by-booking?${params}`);
     return r.ok ? r.json() : null;
   } catch { return null; }
 }
@@ -253,23 +258,27 @@ const CrmNoc: React.FC = () => {
   const canRequest = !!form.BookingId && agreementRegistered && !contextLoading && !saving;
 
   // Deep-link: ?bookingId=X&nocType=Bank|Organisation
-  // If booking already has a NOC of the requested type → open its detail.
-  // If not → open create dialog pre-filled with the requested type.
+  // BUG FIX: the old implementation scanned `nocs` (the paginated first page)
+  // which meant a NOC on page 2+ was never found — the code then fell through
+  // to opening the Create dialog, making it look like the NOC didn't exist.
+  // Fix: resolve via a dedicated server lookup (same fix already applied in
+  // CrmLegalMilestones and CrmHandover for the same class of bug).
+  const [deepLinkResolved, setDeepLinkResolved] = useState(false);
   useEffect(() => {
-    if (!deepLinkBookingId || !(nocs as any[]).length) return;
+    if (!deepLinkBookingId || deepLinkResolved) return;
+    setDeepLinkResolved(true);
     setSp({}, { replace: true }); // clear params so this only fires once
     const type = deepLinkNocType || "Organisation";
-    const existing = (nocs as any[]).find(
-      (n: any) => String(n.BookingId) === deepLinkBookingId && n.NocType === type,
-    );
-    if (existing) {
-      setDetailId(existing.Id);
-    } else if (rights.canCreate) {
-      setForm((f) => ({ ...f, BookingId: deepLinkBookingId, NocType: type }));
-      setDialogOpen(true);
-    }
+    fetchNocByBooking(deepLinkBookingId, type).then((existing) => {
+      if (existing) {
+        setDetailId(existing.Id);
+      } else if (rights.canCreate) {
+        setForm((f) => ({ ...f, BookingId: deepLinkBookingId, NocType: type }));
+        setDialogOpen(true);
+      }
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, nocs]);
+  }, [deepLinkBookingId]);
 
   // Auto-fill Bank NOC from loan tracking record
   useEffect(() => {
@@ -368,7 +377,7 @@ const CrmNoc: React.FC = () => {
       accessorKey: "ApplicantName", header: "Customer", size: 200,
       cell: (i) => (
         <div>
-          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
         </div>
       ),
@@ -514,7 +523,7 @@ const CrmNoc: React.FC = () => {
               {form.BookingId && !contextLoading && context && (
                 <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-[0.6875rem] space-y-1">
                   <div className="font-semibold text-foreground text-xs">
-                    {context.booking.ApplicantName}
+                    <ApplicantNames name={context.booking.ApplicantName} bookingId={context.booking.Id} applicationId={context.booking.ApplicationId} />
                     <span className="text-muted-foreground font-normal"> · {context.booking.UnitNo}</span>
                   </div>
                   {context.agreement ? (
@@ -606,7 +615,7 @@ const CrmNoc: React.FC = () => {
                 <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto">
                   {/* Customer summary */}
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
-                    <p className="text-sm font-semibold text-foreground">{detail.ApplicantName}</p>
+                    <p className="text-sm font-semibold text-foreground"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></p>
                     <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} · {detail.UnitNo} · {detail.Mobile}</p>
                   </div>
 

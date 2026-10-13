@@ -131,7 +131,7 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
       LEFT JOIN dbo.Users cu ON cu.id = p.CreatedBy
       ${where}
       UNION ALL
-      SELECT np.PPaymentID AS Id, br.Id AS BrokerageId, np.PAmount AS Amount, np.PDate AS PaidDate, np.PMode AS PaymentMode,
+      SELECT np.PPaymentID AS Id, br.Id AS BrokerageId, np.PAmount - ISNULL(np.TDSAmount, 0) AS Amount, np.PDate AS PaidDate, np.PMode AS PaymentMode,
              COALESCE(np.PNeftNumber, np.PUpiTransactionId, np.PRtgsReference, np.PImpsReference, np.PCardReference, np.PChequeNo, np.DocNo) AS TransactionRef,
              np.PRemarks AS Notes, np.PCreatedAt AS CreatedAt,
              np.PPaymentID AS FinancePaymentId, np.DocNo AS FinancePaymentDocNo, np.Status AS FinancePaymentStatus,
@@ -144,7 +144,10 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn2 ON bn2.BookingId = b.Id
-      WHERE np.Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}') ${status ? "AND br.Status = @st" : ""}
+      -- A voucher already recorded as a broker payment (approved) is listed
+      -- once, by that payment row above — not twice.
+      WHERE np.Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}')
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmBrokerPayment bp WHERE bp.SourceNewPaymentId = np.PPaymentID) ${status ? "AND br.Status = @st" : ""}
       ORDER BY PaidDate DESC, CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -198,6 +201,10 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   // only pays out what's legally due to the broker.
   const amount = Number(row.NetPayable ?? row.ComputedAmount) || 0;
   if (amount <= 0) throw new Error("Approved brokerage net payable amount must be greater than 0");
+  // The voucher carries the GROSS with its TDS, like every TDS payment: the
+  // payment posting then pays the bank the net and credits TDS Payable.
+  // (Carrying the net here had the TDS deducted a second time.)
+  const voucherAmount = Math.round((amount + (Number(row.TDSAmount) || 0)) * 100) / 100;
 
   const actorEmail = req.user?.email || req.user?.name || null;
   const docTypeId = await resolveDocTypeId(pool, sql, "PAY");
@@ -223,7 +230,7 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
   const result = await pool.request()
     .input("name", sql.VarChar, "Brokerage Payment")
     .input("remarks", sql.NVarChar(1000), `Approved brokerage for ${row.BookingNo} (${milestoneText}) — gross ₹${Number(row.ComputedAmount).toLocaleString("en-IN")}, TDS ${row.TDSPercentage ?? 0}% (₹${Number(row.TDSAmount ?? 0).toLocaleString("en-IN")}), net payable ₹${amount.toLocaleString("en-IN")} — finance to complete payment details`)
-    .input("amt", sql.Decimal(18,2), amount)
+    .input("amt", sql.Decimal(18,2), voucherAmount)
     .input("dt", sql.Date, today)
     .input("project", sql.VarChar, row.ProjectId != null ? String(row.ProjectId) : "")
     .input("company", sql.VarChar, row.CompanyId != null ? String(row.CompanyId) : "")
@@ -579,6 +586,16 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
     // and let PUT /:id/retry-finance-handoff pick up exactly this case.
     let financePayment = null;
     if (result.newStatus === CrmStatus.APPROVED) {
+      await pool.request().input("id", sql.Int, id).input("by", sql.Int, req.user?.userId ?? null)
+        .query("UPDATE dbo.CrmBrokerageMaster SET ApprovedBy = ISNULL(ApprovedBy, @by), ApprovedAt = ISNULL(ApprovedAt, SYSDATETIME()) WHERE Id = @id");
+      // What is owed to the broker goes to the books now; a ledger failure is
+      // recorded and reported, never allowed to undo the approval.
+      try {
+        const outcome = await require("../services/crmLedger").postCrmBrokerageAccrualToGL(pool, id, userEmail);
+        await require("../services/approvalService").recordGLPosting("crm-brokerage", id, outcome, userEmail);
+      } catch (glErr) {
+        await require("../services/approvalService").recordGLPosting("crm-brokerage", id, { failed: true, reason: glErr.message }, userEmail).catch(() => {});
+      }
       try {
         financePayment = await createFinancePaymentForBrokerage(pool, id, req);
         await Promise.all([bumpCacheVersion("crm-brokerage"), bumpCacheVersion("new-payment")]);

@@ -87,7 +87,7 @@ const LM_SELECT = `
       WHEN orgNoc.Id  IS NOT NULL AND orgNoc.Status  <> 'Rejected' THEN 'Organisation'
       WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
         SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
-          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+          AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected', 'Closed')
       ) THEN 'Bank'
       ELSE 'Organisation'
     END AS NocResolvedType

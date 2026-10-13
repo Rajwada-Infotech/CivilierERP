@@ -1,6 +1,6 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -17,6 +17,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 // Same approver set the backend's INVOICE_VOID_ROLES enforces
 // (crmBookings.js PUT /:id/invoices/:invoiceId/void) — this only controls
@@ -27,6 +28,16 @@ const API = "/api/crm/invoices";
 const BKG_API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
 
+/** "−₹x credited · CRN-…" under an invoice's amount, opening its credit note. */
+function CreditedChip({ inv }: { inv: { CreditedAmount?: number; CreditNoteId?: number | null; CreditNoteNos?: string | null } }) {
+  if (!(Number(inv.CreditedAmount) > 0)) return null;
+  return (
+    <Link to={`/crm/credit-notes?id=${inv.CreditNoteId}`} className="block text-[0.6875rem] font-normal text-orange-700 dark:text-orange-300 hover:underline" title="Credit notes against this invoice">
+      −{fmtMoney(inv.CreditedAmount)} credited{inv.CreditNoteNos ? ` · ${inv.CreditNoteNos}` : ""}
+    </Link>
+  );
+}
+
 interface InvoiceRow {
   Id: number;
   InvoiceNo: string;
@@ -36,6 +47,10 @@ interface InvoiceRow {
   Status: string;
   VoidReason: string | null;
   CreatedAt: string;
+  // Credit notes against it (Finance -> Credit Notes).
+  CreditedAmount?: number;
+  CreditNoteId?: number | null;
+  CreditNoteNos?: string | null;
   BookingId: number;
   MilestoneId?: number | null;
   BookingNo: string;
@@ -209,6 +224,7 @@ function InvoicePreviewDialog({ invoice, onClose }: { invoice: InvoiceRow; onClo
             : <iframe src={blobUrl} title={invoice.InvoiceNo} className="w-full h-[60vh] border-0" />}
         </div>
         <div className="text-xs text-muted-foreground pt-1">{invoice.InvoiceType} · {fmtMoney(invoice.Amount)} · {invoice.BookingNo}</div>
+        <CreditedChip inv={invoice} />
         {invoice.Status === "Void" && (
           <p className="text-[0.6875rem] text-red-600 dark:text-red-400">Voided{invoice.VoidReason ? ` — ${invoice.VoidReason}` : ""}</p>
         )}
@@ -363,6 +379,23 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
     (m) => m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)) > 0
   );
   const outstandingTotal = outstandingMilestones.reduce((s, m) => s + (Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)), 0);
+  // Non-Invoice customers get ONE final invoice for the grand total once
+  // everything is paid, instead of milestone invoices.
+  const isNonInvoice = bookingDetail?.customer?.InvoiceMode === "NonInvoice";
+  const finalInvoice = (existingInvoices as any[]).find((inv) => inv.InvoiceType === "Final" && inv.Status !== "Void");
+  const [finalBusy, setFinalBusy] = useState(false);
+  const generateFinal = async () => {
+    if (bookingId == null) return;
+    setFinalBusy(true);
+    try {
+      const r = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices/final`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Could not generate the final invoice");
+      toast.success(d.message || "Final invoice generated");
+      await refetchExisting();
+      onGenerated(bookingId as number);
+    } catch (e: any) { toast.error(translateError(e.message)); } finally { setFinalBusy(false); }
+  };
   const showUnlinkedWarning = (form.InvoiceType === "Maintenance" || form.InvoiceType === "Other") && outstandingMilestones.length > 0;
 
   // Once this booking's eligibility is known, land on whichever type
@@ -565,7 +598,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                             : "text-sky-700 bg-sky-50 border-sky-200"
                         }`}>{b.Status}</span>
                       </div>
-                      <div className="text-sm font-medium truncate">{b.ApplicantName}</div>
+                      <div className="text-sm font-medium truncate"><ApplicantNames name={b.ApplicantName} bookingId={b.BookingId} applicationId={b.ApplicationId} /></div>
                       <div className="text-xs text-muted-foreground truncate">
                         {b.ProjectName || "—"} · Unit {b.UnitNo || "—"}{b.Mobile ? ` · ${b.Mobile}` : ""}
                       </div>
@@ -598,12 +631,31 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                 )}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                <div><span className="text-muted-foreground">Customer</span><div className="font-medium truncate">{booking.ApplicantName}</div></div>
+                <div><span className="text-muted-foreground">Customer</span><div className="font-medium truncate"><ApplicantNames name={booking.ApplicantName} bookingId={booking.BookingId} applicationId={booking.ApplicationId} /></div></div>
                 <div><span className="text-muted-foreground">Company</span><div className="font-medium truncate">{booking.CompanyName || "—"}</div></div>
                 <div><span className="text-muted-foreground">Project</span><div className="font-medium truncate">{booking.ProjectName || "—"}</div></div>
                 <div><span className="text-muted-foreground">Block / Unit</span><div className="font-medium truncate">{[booking.BlockName, booking.UnitNo].filter(Boolean).join(" / ") || booking.UnitNo || "—"}</div></div>
               </div>
             </div>
+
+            {isNonInvoice && (
+              <div className="rounded-lg border border-amber-300/60 bg-amber-50/50 dark:bg-amber-950/20 px-3 py-2.5 space-y-2">
+                <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">Non-Invoice customer — one final invoice</p>
+                <p className="text-xs text-muted-foreground">
+                  No milestone invoices for this customer. One final invoice for the grand total ({fmtMoney(Number(booking?.GrandTotal || 0))}) is generated once everything is paid.
+                </p>
+                {finalInvoice ? (
+                  <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Final invoice {finalInvoice.InvoiceNo} generated.</p>
+                ) : outstandingMilestones.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">{fmtMoney(outstandingTotal)} still outstanding — the final invoice becomes available when it is paid.</p>
+                ) : (
+                  <button type="button" onClick={generateFinal} disabled={finalBusy}
+                    className="h-8 px-3 text-xs font-semibold rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                    {finalBusy ? "Generating…" : "Generate final invoice"}
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Payment Plan, right here — the whole point is seeing real
                 status before picking what to invoice, not guessing from a
@@ -1124,7 +1176,7 @@ const CrmInvoices: React.FC = () => {
                       {isCollapsed ? <ChevronRight size={14} className="text-muted-foreground shrink-0" /> : <ChevronDown size={14} className="text-muted-foreground shrink-0" />}
                       <Building2 size={14} className="text-primary shrink-0" />
                       <span className="font-mono text-sm font-semibold">{g.BookingNo}</span>
-                      <span className="text-sm text-muted-foreground truncate">{g.ApplicantName}</span>
+                      <span className="text-sm text-muted-foreground truncate"><ApplicantNames name={g.ApplicantName} bookingId={g.BookingId} /></span>
                       {g.ProjectName && <span className="text-xs text-muted-foreground truncate hidden sm:inline">· {g.ProjectName} {g.UnitNo}</span>}
                     </div>
                     <div className="flex items-center gap-3 shrink-0 text-xs">
@@ -1174,7 +1226,7 @@ const CrmInvoices: React.FC = () => {
                                   )}
                                 </td>
                                 <td className="px-3 py-1.5"><span className="text-xs px-2 py-0.5 rounded-md bg-muted font-medium">{inv.InvoiceType}</span></td>
-                                <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}</td>
+                                <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}<CreditedChip inv={inv} /></td>
                                 <td className="px-3 py-1.5 text-xs text-muted-foreground">{fmtDate(inv.InvoiceDate)}</td>
                                 <td className="px-3 py-1.5 text-xs text-muted-foreground">{inv.CreatedByName || "—"}</td>
                                 <td className="px-3 py-1.5">
@@ -1245,10 +1297,10 @@ const CrmInvoices: React.FC = () => {
                           {isVoid && <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800 no-underline inline-block">Void</span>}
                         </td>
                         <td className="px-3 py-1.5 font-mono text-xs">{inv.BookingNo}</td>
-                        <td className="px-3 py-1.5 text-xs truncate max-w-[160px]">{inv.ApplicantName}</td>
+                        <td className="px-3 py-1.5 text-xs truncate max-w-[160px]"><ApplicantNames name={inv.ApplicantName} bookingId={inv.BookingId} /></td>
                         <td className="px-3 py-1.5 text-xs text-muted-foreground truncate max-w-[160px]">{inv.ProjectName || "—"} {inv.UnitNo}</td>
                         <td className="px-3 py-1.5"><span className="text-xs px-2 py-0.5 rounded-md bg-muted font-medium">{inv.InvoiceType}</span></td>
-                        <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}</td>
+                        <td className={`px-3 py-1.5 font-medium ${isVoid ? "line-through" : ""}`}>{fmtMoney(inv.Amount)}<CreditedChip inv={inv} /></td>
                         <td className="px-3 py-1.5 text-xs text-muted-foreground">{fmtDate(inv.InvoiceDate)}</td>
                         <td className="px-3 py-1.5">
                           <div className="flex items-center gap-1.5">

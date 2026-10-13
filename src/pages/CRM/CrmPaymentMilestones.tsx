@@ -18,6 +18,7 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -745,7 +746,7 @@ const CrmPaymentMilestones: React.FC = () => {
                   {/* Header row */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="font-semibold text-foreground">{booking.ApplicantName}</div>
+                      <div className="font-semibold text-foreground"><ApplicantNames name={booking.ApplicantName} bookingId={booking.BookingId} applicationId={booking.ApplicationId} /></div>
                       <div className="text-xs text-muted-foreground mt-0.5">
                         {booking.BookingNo} · {booking.UnitNo}{booking.ProjectName ? ` · ${booking.ProjectName}` : ""}
                       </div>

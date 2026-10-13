@@ -29,6 +29,7 @@ import {
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const API = "/api/crm/afs-query-payment";
 const BKG_API = "/api/crm/bookings";
@@ -659,7 +660,7 @@ const CrmAfsQueryPayment: React.FC<{
     { accessorKey: "ApplicantName", header: "Customer", size: 170,
       cell: (i) => (
         <div onClick={() => setSelectedId(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium">{i.row.original.ApplicantName}</div>
+          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
         </div>
       ) },
@@ -752,7 +753,7 @@ const CrmAfsQueryPayment: React.FC<{
               <span className="font-mono text-sm font-bold">{detail.AfsQPNo}</span>
               <StatusBadge status={detail.Status} />
             </div>
-            <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{detail.ApplicantName} · {detail.BookingNo} · {detail.UnitNo}</p>
+            <p className="text-[0.6875rem] text-muted-foreground mt-0.5"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /> · {detail.BookingNo} · {detail.UnitNo}</p>
           </div>
           <div className="w-full sm:w-auto sm:ml-auto"><Timeline detail={detail} /></div>
         </div>
@@ -1026,7 +1027,7 @@ const CrmAfsQueryPayment: React.FC<{
               <div className="rounded-xl border border-border bg-card overflow-hidden">
                 <div className="px-5 py-3 flex items-center gap-3">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold">{deepLinkedBooking.ApplicantName}</p>
+                    <p className="text-sm font-semibold"><ApplicantNames name={deepLinkedBooking.ApplicantName} bookingId={deepLinkedBooking.BookingId} applicationId={deepLinkedBooking.ApplicationId} /></p>
                     <p className="text-xs text-muted-foreground">{deepLinkedBooking.BookingNo} · {deepLinkedBooking.UnitNo} · Agreement {deepLinkedBooking.AgreementStatus}</p>
                   </div>
                   <span className={`shrink-0 text-[0.6875rem] px-2.5 py-1 rounded-lg border font-semibold ${
@@ -1253,7 +1254,7 @@ const CrmAfsQueryPayment: React.FC<{
                               <Copy size={11} />
                             </button>
                           </div>
-                          <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate">{detail.ApplicantName} · {detail.BookingNo}</p>
+                          <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /> · {detail.BookingNo}</p>
                         </div>
                         <DialogClose asChild>
                           <button className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
